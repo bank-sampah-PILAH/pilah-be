@@ -1,0 +1,803 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PILAH API E2E Test Runner</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --line: #d9dee7;
+      --text: #18202f;
+      --muted: #617085;
+      --green: #047857;
+      --red: #b91c1c;
+      --amber: #a16207;
+      --blue: #1d4ed8;
+      --code: #111827;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      padding: 18px 24px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+    main {
+      display: grid;
+      grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+      gap: 18px;
+      padding: 18px;
+      max-width: 1440px;
+      margin: 0 auto;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    h2 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+    .content { padding: 16px; }
+    label {
+      display: block;
+      color: var(--muted);
+      font-weight: 650;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    input, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px 11px;
+      color: var(--text);
+      font: inherit;
+      background: #fff;
+      outline: none;
+    }
+    input:focus, textarea:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.12);
+    }
+    textarea {
+      min-height: 96px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+    .field { margin-bottom: 14px; }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 9px 12px;
+      background: #fff;
+      color: var(--text);
+      font-weight: 700;
+      cursor: pointer;
+      min-height: 38px;
+    }
+    button.primary {
+      border-color: var(--green);
+      background: var(--green);
+      color: #fff;
+    }
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcfe;
+    }
+    .metric .value {
+      font-size: 22px;
+      font-weight: 800;
+      margin-top: 3px;
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 58px;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .pending { color: var(--muted); background: #eef2f7; }
+    .running { color: var(--amber); background: #fef3c7; }
+    .passed { color: var(--green); background: #dcfce7; }
+    .failed { color: var(--red); background: #fee2e2; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+    }
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      background: #fbfcfe;
+    }
+    th:nth-child(1) { width: 56px; }
+    th:nth-child(2) { width: 82px; }
+    th:nth-child(4) { width: 110px; }
+    th:nth-child(5) { width: 96px; }
+    .details {
+      margin-top: 18px;
+    }
+    pre {
+      margin: 0;
+      padding: 14px;
+      overflow: auto;
+      color: #d1d5db;
+      background: var(--code);
+      border-radius: 8px;
+      max-height: 440px;
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .muted { color: var(--muted); }
+    .small { font-size: 12px; }
+    @media (max-width: 980px) {
+      main { grid-template-columns: 1fr; }
+      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>PILAH API E2E Test Runner</h1>
+    <div class="muted small">Runs the documented API flow end to end and produces a downloadable report.</div>
+  </header>
+
+  <main>
+    <section>
+      <div class="section-head">
+        <h2>Run Settings</h2>
+        <span id="run-state" class="status pending">IDLE</span>
+      </div>
+      <div class="content">
+        <div class="field">
+          <label for="base-url">API Base URL</label>
+          <input id="base-url" value="/api/v1">
+        </div>
+        <div class="field">
+          <label for="email">Dev Auth Email</label>
+          <input id="email">
+        </div>
+        <div class="field">
+          <label for="name">Dev Auth Name</label>
+          <input id="name" value="E2E Runner">
+        </div>
+        <div class="field">
+          <label for="notes">Report Notes</label>
+          <textarea id="notes" placeholder="Optional notes for this run"></textarea>
+        </div>
+        <div class="actions">
+          <button id="run-all" class="primary" type="button">Run Full Flow</button>
+          <button id="clear" type="button">Clear Report</button>
+          <button id="download" type="button" disabled>Download JSON</button>
+        </div>
+        <p class="muted small">The runner creates unique test data every run. It uses local dev auth tokens in the form <code>dev:email:name</code>.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Report Summary</h2>
+        <span id="duration" class="muted small">No run yet</span>
+      </div>
+      <div class="content">
+        <div class="summary">
+          <div class="metric">
+            <div class="muted small">Total Steps</div>
+            <div id="total" class="value">0</div>
+          </div>
+          <div class="metric">
+            <div class="muted small">Passed</div>
+            <div id="passed" class="value">0</div>
+          </div>
+          <div class="metric">
+            <div class="muted small">Failed</div>
+            <div id="failed" class="value">0</div>
+          </div>
+          <div class="metric">
+            <div class="muted small">Created IDs</div>
+            <div id="created-count" class="value">0</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section style="grid-column: 1 / -1;">
+      <div class="section-head">
+        <h2>Step Results</h2>
+        <span class="muted small">HTTP status, duration, and assertions</span>
+      </div>
+      <div style="overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Status</th>
+              <th>Step</th>
+              <th>HTTP</th>
+              <th>Time</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody id="steps"></tbody>
+        </table>
+      </div>
+      <div class="content details">
+        <label for="detail-output">Detailed Report</label>
+        <pre id="detail-output">{}</pre>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const state = {
+      token: null,
+      refresh: null,
+      ids: {},
+      report: null,
+      abort: false
+    };
+
+    const els = {
+      runState: document.getElementById("run-state"),
+      baseUrl: document.getElementById("base-url"),
+      email: document.getElementById("email"),
+      name: document.getElementById("name"),
+      notes: document.getElementById("notes"),
+      runAll: document.getElementById("run-all"),
+      clear: document.getElementById("clear"),
+      download: document.getElementById("download"),
+      duration: document.getElementById("duration"),
+      total: document.getElementById("total"),
+      passed: document.getElementById("passed"),
+      failed: document.getElementById("failed"),
+      createdCount: document.getElementById("created-count"),
+      steps: document.getElementById("steps"),
+      detail: document.getElementById("detail-output")
+    };
+
+    function nowStamp() {
+      return new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+    }
+
+    function setDefaultEmail() {
+      els.email.value = `e2e-page-${nowStamp()}@example.com`;
+    }
+
+    function setRunState(value, className) {
+      els.runState.textContent = value;
+      els.runState.className = `status ${className}`;
+    }
+
+    function resetReport() {
+      state.token = null;
+      state.refresh = null;
+      state.ids = {};
+      state.report = {
+        started_at: null,
+        finished_at: null,
+        duration_ms: 0,
+        base_url: els.baseUrl.value,
+        email: els.email.value,
+        notes: els.notes.value,
+        status: "idle",
+        created: {},
+        steps: []
+      };
+      renderReport();
+    }
+
+    function normalizeBaseUrl() {
+      return els.baseUrl.value.replace(/\/+$/, "");
+    }
+
+    function money(value) {
+      return Number.parseFloat(String(value)).toFixed(2);
+    }
+
+    function assert(condition, message) {
+      if (!condition) {
+        throw new Error(message);
+      }
+    }
+
+    async function call(stepName, method, path, expectedStatus, body, assertion) {
+      const started = performance.now();
+      const headers = { "Accept": "application/json" };
+      const options = { method, headers };
+      if (state.token) {
+        headers.Authorization = `Bearer ${state.token}`;
+      }
+      if (body !== undefined) {
+        if (body instanceof FormData) {
+          options.body = body;
+        } else {
+          headers["Content-Type"] = "application/json";
+          options.body = JSON.stringify(body);
+        }
+      }
+
+      const step = {
+        name: stepName,
+        method,
+        path,
+        expected_status: expectedStatus,
+        http_status: null,
+        duration_ms: 0,
+        passed: false,
+        request: body === undefined ? null : body,
+        response: null,
+        error: null
+      };
+      state.report.steps.push(step);
+      renderReport();
+
+      try {
+        const response = await fetch(`${normalizeBaseUrl()}${path}`, options);
+        const text = await response.text();
+        let data;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch (_error) {
+          data = text;
+        }
+        step.http_status = response.status;
+        step.response = data;
+        const expected = Array.isArray(expectedStatus) ? expectedStatus : [expectedStatus];
+        assert(expected.includes(response.status), `Expected HTTP ${expected.join(" or ")}, got ${response.status}`);
+        if (assertion) {
+          await assertion(data, response);
+        }
+        step.passed = true;
+        return data;
+      } catch (error) {
+        step.error = error.message;
+        state.report.status = "failed";
+        throw error;
+      } finally {
+        step.duration_ms = Math.round(performance.now() - started);
+        renderReport();
+      }
+    }
+
+    async function runFullFlow() {
+      resetReport();
+      const runStart = performance.now();
+      const unique = nowStamp();
+      const email = els.email.value || `e2e-page-${unique}@example.com`;
+      const superEmail = `super-${unique}@example.com`;
+      const invitedEmail = `invited-${unique}@example.com`;
+      const name = els.name.value || "E2E Runner";
+      state.report.started_at = new Date().toISOString();
+      state.report.email = email;
+      state.report.base_url = normalizeBaseUrl();
+      state.report.notes = els.notes.value;
+      state.report.status = "running";
+      setRunState("RUNNING", "running");
+      els.runAll.disabled = true;
+      els.download.disabled = true;
+      renderReport();
+
+      try {
+        const auth = await call("Pengelola Google dev auth", "POST", "/auth/google", 200, {
+          id_token: `dev:${email}:${name}`
+        }, data => {
+          assert(data.token_type === "Bearer", "Missing Bearer token type");
+          assert(data.user.role === "pengelola", "Unexpected user role");
+          assert(data.next_step === "complete_profile", "New pengelola should complete profile first");
+          state.token = data.access_token;
+          state.refresh = data.refresh_token;
+          state.ids.user = data.user.id;
+        });
+
+        await call("Block dashboard before profile", "GET", "/dashboard/stats", 403, undefined, data => {
+          assert(Boolean(data.error), "Expected profile/bank status gate");
+        });
+
+        await call("Complete pengelola profile", "PUT", "/onboarding/profile", 200, {
+          nama: name,
+          jenis_kelamin: "laki-laki",
+          tanggal_lahir: "1990-01-01",
+          no_hp: "081234567892"
+        }, data => {
+          assert(data.is_profile_complete === true, "Profile should be complete");
+          assert(data.next_step === "register_bank_sampah", "Expected bank registration next");
+        });
+
+        const registrationForm = new FormData();
+        registrationForm.append("nama", `Bank Sampah E2E ${unique}`);
+        registrationForm.append("alamat", "Kelurahan Kukusan, Kecamatan Beji, Kota Depok");
+        registrationForm.append("kota", "Depok");
+        registrationForm.append("no_hp_pic", "081234567890");
+        registrationForm.append("foto_kegiatan", new Blob(["pilah-e2e-image"], { type: "image/png" }), `kegiatan-${unique}.png`);
+        await call("Register bank sampah pending", "POST", "/onboarding/bank-sampah", 201, registrationForm, data => {
+          assert(data.status === "pending", "New bank registration should be pending");
+          assert(data.next_step === "approval_pending", "Expected pending approval next step");
+          assert(data.no_hp_pic === "+6281234567890", "PIC phone was not normalized");
+          state.ids.bank_sampah = data.id;
+        });
+
+        await call("Block nasabah while pending", "GET", "/nasabah", 403, undefined, data => {
+          assert(Boolean(data.error), "Expected pending bank access gate");
+        });
+
+        const superAuth = await call("SuperAdmin dev auth", "POST", "/auth/google", 200, {
+          id_token: `dev-superadmin:${superEmail}:Super Admin`
+        }, data => {
+          assert(data.user.role === "superadmin", "Expected superadmin role");
+          assert(data.next_step === "superadmin_dashboard", "Expected superadmin dashboard state");
+          state.token = data.access_token;
+          state.ids.superadmin = data.user.id;
+        });
+
+        await call("SuperAdmin sees pending queue", "GET", "/superadmin/bank-sampah?status=pending", 200, undefined, data => {
+          assert(data.count >= 1, "Expected pending bank registrations");
+          assert(data.results.some(item => item.id === state.ids.bank_sampah), "Created bank missing from pending queue");
+        });
+
+        await call("SuperAdmin approves bank", "POST", `/superadmin/bank-sampah/${state.ids.bank_sampah}/approve`, 200, {
+          catatan: "Approved by browser E2E runner"
+        }, data => {
+          assert(data.bank_sampah.status === "active", "Bank should be active after approval");
+          assert(data.approval_log.status === "approved", "Approval log should be approved");
+        });
+
+        await call("Block SuperAdmin from pengelola dashboard", "GET", "/dashboard/stats", 403, undefined, data => {
+          assert(Boolean(data.error), "Expected superadmin role gate");
+        });
+
+        await call("Refresh pengelola access token", "POST", "/auth/refresh", 200, {
+          refresh_token: auth.refresh_token
+        }, data => {
+          assert(Boolean(data.access_token), "Missing refreshed access token");
+          state.token = data.access_token;
+        });
+
+        await call("Get active auth state", "GET", "/auth/me", 200, undefined, data => {
+          assert(data.state === "dashboard", "Pengelola should reach dashboard after approval");
+          assert(data.is_primary_pengelola === true, "Original registrant should be primary pengelola");
+        });
+
+        await call("Get bank profile", "GET", "/bank-sampah/me", 200, undefined, data => {
+          assert(data.pengelola.email === email, "Unexpected pengelola email");
+          assert(data.status === "active", "Bank should be active");
+        });
+
+        await call("Generate invite link", "POST", "/team/invite", 201, undefined, data => {
+          assert(Boolean(data.token), "Invite token missing");
+          state.ids.invite_token = data.token;
+        });
+
+        const invitedAuth = await call("Invited pengelola auth", "POST", "/auth/google", 200, {
+          id_token: `dev:${invitedEmail}:Invited Runner`
+        }, data => {
+          assert(data.next_step === "complete_profile", "Invited user starts at profile completion");
+          state.token = data.access_token;
+          state.ids.invited_user = data.user.id;
+          state.ids.invited_refresh = data.refresh_token;
+        });
+
+        await call("Complete invited profile", "PUT", "/onboarding/profile", 200, {
+          nama: "Invited Runner",
+          jenis_kelamin: "perempuan",
+          tanggal_lahir: "1992-02-02",
+          no_hp: "081234567894"
+        }, data => assert(data.next_step === "register_bank_sampah", "Invite not accepted yet"));
+
+        await call("Accept invite", "POST", "/invites/accept", 200, {
+          token: state.ids.invite_token
+        }, data => {
+          assert(data.next_step === "dashboard", "Invite should bypass bank registration after profile");
+          assert(data.status === "active", "Invited user should join active bank");
+        });
+
+        await call("List team members", "GET", "/team", 200, undefined, data => {
+          assert(data.members.length >= 2, "Expected primary and invited pengelola");
+          assert(data.members.some(member => member.is_primary_pengelola), "Primary pengelola missing");
+          assert(data.members.some(member => member.email === invitedEmail), "Invited member missing");
+        });
+
+        await call("Forbid invite from non-primary", "POST", "/team/invite", 403, undefined, data => {
+          assert(Boolean(data.error), "Expected primary-only invite gate");
+        });
+
+        await call("Invited pengelola updates bank profile", "PUT", "/bank-sampah/me", 200, {
+          nama: `Bank Sampah E2E Active ${unique}`,
+          alamat: "Kelurahan Kukusan, Kecamatan Beji, Kota Depok",
+          kota: "Depok",
+          no_hp_pic: "081234567890"
+        }, data => {
+          assert(data.nama.includes("Active"), "Bank profile update failed");
+          assert(data.no_hp_pic === "+6281234567890", "PIC phone was not normalized");
+        });
+
+        await call("Reject invalid nasabah", "POST", "/nasabah", 422, {
+          nama: "Bo",
+          no_hp: "123",
+          alamat: "short"
+        }, data => assert(Boolean(data.errors), "Expected validation errors"));
+
+        await call("Create nasabah", "POST", "/nasabah", 201, {
+          kode: `NAS-${unique.slice(-6)}`,
+          nama: `Budi Santoso ${unique}`,
+          jenis_kelamin: "laki-laki",
+          tanggal_lahir: "1990-01-01",
+          no_hp: "081234567891",
+          alamat: "Jl. Anggrek No. 3, RT 05/02, Kukusan"
+        }, data => {
+          assert(data.kode.startsWith("NAS-"), "Missing nasabah code");
+          assert(money(data.total_saldo) === "0.00", "Initial saldo must be zero");
+          state.ids.nasabah = data.id;
+        });
+
+        await call("List nasabah", "GET", `/nasabah?status=aktif&search=Budi`, 200, undefined, data => {
+          assert(data.count >= 1, "Expected at least one nasabah");
+        });
+
+        await call("Get nasabah detail", "GET", `/nasabah/${state.ids.nasabah}`, 200, undefined, data => {
+          assert(data.ringkasan_transaksi.jumlah_transaksi === 0, "New nasabah should have no transactions");
+        });
+
+        await call("Update nasabah", "PUT", `/nasabah/${state.ids.nasabah}`, 200, {
+          kode: `NAS-${unique.slice(-6)}`,
+          nama: `Budi Santoso Updated ${unique}`,
+          jenis_kelamin: "laki-laki",
+          tanggal_lahir: "1990-01-01",
+          no_hp: "081234567891",
+          alamat: "Jl. Anggrek No. 3, RT 05/02, Kukusan, Depok"
+        }, data => assert(data.nama.includes("Updated"), "Nasabah name was not updated"));
+
+        await call("Reject invalid jenis sampah", "POST", "/jenis-sampah", 422, {
+          nama_sampah: "A",
+          kategori: "anorganik",
+          harga_per_kg: 0
+        }, data => assert(Boolean(data.errors), "Expected validation errors"));
+
+        await call("Create jenis sampah", "POST", "/jenis-sampah", 201, {
+          kode: `PLS-${unique.slice(-6)}`,
+          nama_sampah: `Plastik PET ${unique}`,
+          kategori: "plastik",
+          deskripsi: "Botol bening dan kemasan plastik",
+          harga_per_kg: 3500
+        }, data => {
+          assert(data.satuan === "kg", "Satuan must be kg");
+          state.ids.jenis_sampah = data.id;
+        });
+
+        await call("List jenis sampah", "GET", "/jenis-sampah?status=aktif&kategori=plastik&search=Plastik", 200, undefined, data => {
+          assert(data.count >= 1, "Expected at least one jenis sampah");
+        });
+
+        await call("Update jenis sampah", "PUT", `/jenis-sampah/${state.ids.jenis_sampah}`, 200, {
+          kode: `PLS-${unique.slice(-6)}`,
+          nama_sampah: `Plastik PET Bening ${unique}`,
+          kategori: "plastik",
+          deskripsi: "Botol bening, kemasan plastik",
+          harga_per_kg: 3600
+        }, data => assert(money(data.harga_per_kg) === "3600.00", "Harga was not updated"));
+
+        await call("Reject empty transaction", "POST", "/transaksi", 422, {
+          nasabah_id: state.ids.nasabah,
+          items: []
+        }, data => assert(Boolean(data.errors), "Expected validation errors"));
+
+        await call("Create transaction", "POST", "/transaksi", 201, {
+          nasabah_id: state.ids.nasabah,
+          items: [
+            { jenis_sampah_id: state.ids.jenis_sampah, berat: "2.500" },
+            { jenis_sampah_id: state.ids.jenis_sampah, berat: "1.200", harga_per_kg: "4000" }
+          ],
+          catatan: "Setoran from browser E2E runner"
+        }, data => {
+          assert(money(data.total_nilai) === "13800.00", "Unexpected total nilai");
+          assert(money(data.saldo_setelah_transaksi) === "13800.00", "Unexpected saldo after transaction");
+          assert(data.items.length === 2, "Expected two transaction items");
+          state.ids.transaksi = data.id;
+        });
+
+        await call("List transactions", "GET", "/transaksi?periode=bulan_ini&search=Budi", 200, undefined, data => {
+          assert(data.count >= 1, "Expected at least one transaction");
+        });
+
+        await call("Export transaction Excel", "GET", "/transaksi/export?periode=bulan_ini", 200, undefined, (_data, response) => {
+          assert(response.headers.get("content-type").includes("spreadsheet"), "Expected xlsx content type");
+        });
+
+        await call("List transactions bulan_lalu", "GET", "/transaksi?periode=bulan_lalu", 200, undefined, data => {
+          assert(typeof data.count === "number", "Expected paginated response for bulan_lalu");
+        });
+
+        await call("Get transaction detail", "GET", `/transaksi/${state.ids.transaksi}`, 200, undefined, data => {
+          assert(data.status_wa === "belum_dikirim", "WA status should start as belum_dikirim");
+        });
+
+        await call("Get nasabah saldo", "GET", `/nasabah/${state.ids.nasabah}/saldo`, 200, undefined, data => {
+          assert(money(data.total_saldo) === "13800.00", "Saldo endpoint did not match transaction total");
+        });
+
+        await call("Get dashboard stats", "GET", "/dashboard/stats", 200, undefined, data => {
+          assert(data.nasabah_aktif >= 1, "Expected active nasabah");
+          assert(data.transaksi_bulan_ini >= 1, "Expected monthly transaction count");
+        });
+
+        await call("Get recent transactions", "GET", "/dashboard/recent-transactions", 200, undefined, data => {
+          assert(data.transactions.length >= 1, "Expected recent transactions");
+        });
+
+        await call("Get WA template", "GET", "/pengaturan/wa-template", 200, undefined, data => {
+          assert(data.variabel_tersedia.includes("{Nama}"), "Expected {Nama} variable");
+        });
+
+        await call("Update WA template", "PUT", "/pengaturan/wa-template", 200, {
+          template: "Halo {Nama}, saldo terbaru {Saldo}"
+        }, data => assert(data.message === "Template berhasil disimpan", "Unexpected template update message"));
+
+        await call("Send WA notification", "POST", `/transaksi/${state.ids.transaksi}/notify-wa`, 200, undefined, data => {
+          assert(data.status_wa === "terkirim", "WA status should be terkirim");
+        });
+
+        await call("Deactivate nasabah", "PATCH", `/nasabah/${state.ids.nasabah}/status`, 200, {
+          is_active: false
+        }, data => assert(data.is_active === false, "Nasabah should be inactive"));
+
+        await call("Forbid inactive nasabah edit", "PUT", `/nasabah/${state.ids.nasabah}`, 403, {
+          kode: `NAS-${unique.slice(-6)}`,
+          nama: "Should Fail",
+          jenis_kelamin: "laki-laki",
+          tanggal_lahir: "1990-01-01",
+          no_hp: "081234567891",
+          alamat: "Jl. Anggrek No. 3, RT 05/02, Kukusan, Depok"
+        }, data => assert(Boolean(data.error), "Expected forbidden error"));
+
+        await call("Deactivate jenis sampah", "PATCH", `/jenis-sampah/${state.ids.jenis_sampah}/status`, 200, {
+          is_active: false
+        }, data => assert(data.is_active === false, "Jenis sampah should be inactive"));
+
+        await call("Reject invalid custom period", "GET", "/transaksi?periode=custom&dari_tanggal=2026-06-30&sampai_tanggal=2026-06-01", 400, undefined, data => {
+          assert(data.error === "Tanggal akhir tidak boleh lebih awal dari tanggal awal", "Unexpected custom period error");
+        });
+
+        await call("Logout", "POST", "/auth/logout", 200, {
+          refresh_token: invitedAuth.refresh_token
+        }, data => assert(data.message === "Logout berhasil", "Unexpected logout message"));
+
+        state.token = superAuth.access_token;
+        await call("Logout SuperAdmin", "POST", "/auth/logout", 200, {
+          refresh_token: superAuth.refresh_token
+        }, data => assert(data.message === "Logout berhasil", "Unexpected superadmin logout message"));
+
+        state.report.status = "passed";
+        setRunState("PASSED", "passed");
+      } catch (error) {
+        state.report.status = "failed";
+        state.report.failure = error.message;
+        setRunState("FAILED", "failed");
+      } finally {
+        state.report.finished_at = new Date().toISOString();
+        state.report.duration_ms = Math.round(performance.now() - runStart);
+        state.report.created = { ...state.ids };
+        els.runAll.disabled = false;
+        els.download.disabled = false;
+        renderReport();
+      }
+    }
+
+    function renderReport() {
+      const report = state.report || { steps: [], created: {} };
+      const passed = report.steps.filter(step => step.passed).length;
+      const failed = report.steps.filter(step => step.error).length;
+      els.total.textContent = String(report.steps.length);
+      els.passed.textContent = String(passed);
+      els.failed.textContent = String(failed);
+      els.createdCount.textContent = String(Object.keys(report.created || state.ids || {}).length);
+      els.duration.textContent = report.duration_ms ? `${report.duration_ms} ms` : "No run yet";
+      els.steps.innerHTML = report.steps.map((step, index) => {
+        const statusClass = step.error ? "failed" : step.passed ? "passed" : "running";
+        const statusText = step.error ? "FAIL" : step.passed ? "PASS" : "RUN";
+        const result = step.error || "OK";
+        return `
+          <tr>
+            <td>${index + 1}</td>
+            <td><span class="status ${statusClass}">${statusText}</span></td>
+            <td><strong>${escapeHtml(step.name)}</strong><br><span class="muted small">${step.method} ${escapeHtml(step.path)}</span></td>
+            <td>${step.http_status ?? ""}</td>
+            <td>${step.duration_ms || ""} ms</td>
+            <td>${escapeHtml(result)}</td>
+          </tr>
+        `;
+      }).join("");
+      els.detail.textContent = JSON.stringify(report, null, 2);
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, char => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#039;"
+      }[char]));
+    }
+
+    function downloadReport() {
+      if (!state.report) return;
+      const blob = new Blob([JSON.stringify(state.report, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `pilah-api-e2e-report-${nowStamp()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    els.runAll.addEventListener("click", runFullFlow);
+    els.clear.addEventListener("click", () => {
+      setDefaultEmail();
+      resetReport();
+      setRunState("IDLE", "pending");
+      els.download.disabled = true;
+    });
+    els.download.addEventListener("click", downloadReport);
+
+    setDefaultEmail();
+    resetReport();
+  </script>
+</body>
+</html>

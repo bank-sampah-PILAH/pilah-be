@@ -1,0 +1,2691 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PILAH – Prototype Interaktif</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { font-family: 'Plus Jakarta Sans', sans-serif; }
+  html, body { background: #e5e7eb; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+
+  #app-shell {
+    width: 360px; height: 720px; background: #f9fafb; border-radius: 40px;
+    overflow: hidden; position: relative;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.25), 0 0 0 8px #1f2937;
+  }
+  .screen { position: absolute; inset: 0; display: none; flex-direction: column; overflow: hidden;
+    opacity: 0; transform: translateX(20px); transition: opacity 0.25s ease, transform 0.25s ease; }
+  .screen.active { display: flex; opacity: 1; transform: translateX(0); }
+  .scroll-area { flex: 1; overflow-y: auto; overflow-x: hidden; }
+  .scroll-area::-webkit-scrollbar { display: none; }
+
+  .spinner { width: 20px; height: 20px; border: 2px solid rgba(255,255,255,0.4);
+    border-top-color: white; border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes popIn { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  @keyframes loadBar { from { width: 0; } to { width: 100%; } }
+
+  .tx-item { transition: background 0.15s; }
+  .tx-item:active { background: #f3f4f6; }
+  input[type=number]::-webkit-outer-spin-button,
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type=number] { -moz-appearance: textfield; }
+  .customer-pill { border: 1.5px dashed #d1d5db; border-radius: 12px; cursor: pointer; transition: border-color 0.2s; }
+  .customer-pill:hover { border-color: #059669; }
+  .customer-pill.selected { border: 1.5px solid #059669; background: #ecfdf5; }
+
+  /* FAB */
+  .fab {
+    position: absolute; bottom: 72px; right: 16px; width: 56px; height: 56px;
+    background: linear-gradient(135deg, #059669, #047857);
+    border-radius: 50%; border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 6px 20px rgba(5,150,105,0.45), 0 2px 6px rgba(0,0,0,0.15);
+    z-index: 20; transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .fab:active { transform: scale(0.93); box-shadow: 0 3px 10px rgba(5,150,105,0.35); }
+
+  /* Clickable card */
+  .clickable-card {
+    background: #fff; border-radius: 16px; margin-bottom: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+    cursor: pointer; transition: background 0.15s, box-shadow 0.15s, transform 0.12s;
+  }
+  .clickable-card:hover { background: #f9fafb; box-shadow: 0 3px 10px rgba(0,0,0,0.09); }
+  .clickable-card:active { transform: scale(0.985); background: #f3f4f6; }
+
+  /* Filter tabs */
+  .tab-btn { padding: 6px 18px; border-radius: 20px; font-size: 12px; font-weight: 600;
+    border: none; cursor: pointer; transition: all 0.2s; }
+  .tab-btn.active { background: #059669; color: #fff; }
+  .tab-btn.inactive { background: #f3f4f6; color: #6b7280; }
+
+  /* All overlays share these */
+  .overlay-base {
+    position: absolute; inset: 0; background: rgba(0,0,0,0.5);
+    display: none; align-items: flex-end;
+  }
+  .overlay-base.open { display: flex; }
+  .sheet-panel {
+    background: #fff; width: 100%; border-radius: 24px 24px 0 0;
+    padding: 20px 16px 32px; max-height: 600px;
+    transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
+    overflow-y: auto;
+  }
+  .overlay-base.open .sheet-panel { transform: translateY(0); }
+
+  /* Centre modal */
+  .modal-base {
+    position: absolute; inset: 0; background: rgba(0,0,0,0.5);
+    display: none; align-items: center; justify-content: center;
+  }
+  .modal-base.open { display: flex; }
+  .modal-box {
+    background: #fff; border-radius: 24px; padding: 28px 24px;
+    width: 300px; text-align: center;
+    animation: popIn 0.3s cubic-bezier(0.175,0.885,0.32,1.275);
+  }
+
+  /* Form */
+  .form-field { margin-bottom: 16px; }
+  .form-label { font-size: 11px; font-weight: 700; color: #6b7280;
+    text-transform: uppercase; letter-spacing: 0.06em; display: block; margin-bottom: 6px; }
+  .form-input {
+    width: 100%; background: #f9fafb; border: 1.5px solid #e5e7eb;
+    border-radius: 12px; padding: 11px 13px; font-size: 13px; color: #111827;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    outline: none; box-sizing: border-box; transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .form-input:focus { border-color: #059669; box-shadow: 0 0 0 3px rgba(5,150,105,0.12); }
+  .form-select {
+    width: 100%; background: #f9fafb; border: 1.5px solid #e5e7eb;
+    border-radius: 12px; padding: 11px 13px; font-size: 13px; color: #111827;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    outline: none; appearance: none; -webkit-appearance: none; cursor: pointer;
+    box-sizing: border-box; transition: border-color 0.2s;
+  }
+  .form-select:focus { border-color: #059669; box-shadow: 0 0 0 3px rgba(5,150,105,0.12); }
+
+  /* Z-index layers */
+  #overlay-pick-customer  { z-index: 50; }
+  #overlay-customer-detail{ z-index: 55; }
+  #overlay-form-customer  { z-index: 58; }
+  #overlay-form-price     { z-index: 58; }
+  #modal-tx-success       { z-index: 62; }
+  #modal-confirm          { z-index: 68; }
+  #overlay-tx-detail      { z-index: 72; }
+  #modal-logout           { z-index: 75; }
+
+  /* Splash screen */
+  #splash {
+    position: absolute; inset: 0; background: linear-gradient(160deg,#059669,#047857);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 200; transition: opacity 0.5s ease;
+  }
+  #splash.fade-out { opacity: 0; pointer-events: none; }
+
+  /* Bottom nav */
+  .bottom-nav { position: absolute; bottom: 0; left: 0; right: 0; display: flex;
+    background: #fff; border-top: 1px solid #f3f4f6; padding: 8px 0 12px; }
+  .bottom-nav button { flex: 1; display: flex; flex-direction: column; align-items: center;
+    gap: 3px; background: none; border: none; cursor: pointer; padding: 4px; }
+
+  /* Inline error text */
+  .field-error { font-size: 10px; color: #ef4444; font-weight: 600; margin-top: 4px; display: none; }
+  .field-error.visible { display: block; }
+</style>
+</head>
+<body>
+<div style="position:relative;">
+  <div style="text-align:center;margin-bottom:12px;color:#6b7280;font-size:12px;font-weight:500;letter-spacing:0.05em;">
+    PILAH — Prototipe Interaktif v1.0
+  </div>
+  <div id="app-shell">
+
+    <!-- ══════════════════════════════════════
+         SPLASH SCREEN
+    ══════════════════════════════════════ -->
+    <div id="splash">
+      <div style="animation: popIn 0.5s ease 0.2s both;">
+        <div style="width:80px;height:80px;background:rgba(255,255,255,0.18);border-radius:24px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;border:2px solid rgba(255,255,255,0.25);">
+          <svg width="40" height="40" viewBox="0 0 36 36" fill="none"><path d="M18 4C10.268 4 4 10.268 4 18s6.268 14 14 14 14-6.268 14-14S25.732 4 18 4z" fill="rgba(255,255,255,0.2)"/><path d="M13 20l3 3 7-8" stroke="white" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 14c0-4.418 3.582-8 8-8" stroke="rgba(255,255,255,0.55)" stroke-width="2.2" stroke-linecap="round"/><path d="M26 22c0 4.418-3.582 8-8 8" stroke="rgba(255,255,255,0.55)" stroke-width="2.2" stroke-linecap="round"/></svg>
+        </div>
+        <p style="font-size:32px;font-weight:800;color:#fff;text-align:center;letter-spacing:-0.5px;margin-bottom:6px;">PILAH</p>
+        <p style="font-size:13px;color:rgba(255,255,255,0.75);text-align:center;font-weight:500;">Sistem Manajemen Bank Sampah</p>
+      </div>
+      <div style="position:absolute;bottom:40px;display:flex;flex-direction:column;align-items:center;gap:8px;">
+        <div style="width:28px;height:3px;background:rgba(255,255,255,0.3);border-radius:4px;overflow:hidden;">
+          <div style="height:100%;background:#fff;border-radius:4px;animation:loadBar 1.3s ease forwards;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════
+         S1: LOGIN
+    ══════════════════════════════════════ -->
+    <div id="screen-login" class="screen active" style="background:#fff;justify-content:center;align-items:center;padding:32px 28px;">
+      <div style="position:absolute;top:-60px;right:-60px;width:180px;height:180px;background:#d1fae5;border-radius:50%;opacity:0.6;"></div>
+      <div style="position:absolute;bottom:-40px;left:-40px;width:130px;height:130px;background:#a7f3d0;border-radius:50%;opacity:0.4;"></div>
+      <div style="position:relative;z-index:1;width:100%;text-align:center;">
+        <div style="margin-bottom:8px;">
+          <div style="width:72px;height:72px;background:linear-gradient(135deg,#059669,#047857);border-radius:20px;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(5,150,105,0.3);">
+            <svg width="36" height="36" viewBox="0 0 36 36" fill="none"><path d="M18 4C10.268 4 4 10.268 4 18s6.268 14 14 14 14-6.268 14-14S25.732 4 18 4z" fill="rgba(255,255,255,0.2)"/><path d="M13 20l3 3 7-8" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 14c0-4.418 3.582-8 8-8" stroke="rgba(255,255,255,0.6)" stroke-width="2" stroke-linecap="round"/><path d="M26 22c0 4.418-3.582 8-8 8" stroke="rgba(255,255,255,0.6)" stroke-width="2" stroke-linecap="round"/></svg>
+          </div>
+        </div>
+        <h1 style="font-size:28px;font-weight:800;color:#111827;margin-bottom:4px;letter-spacing:-0.5px;">PILAH</h1>
+        <p style="font-size:13px;color:#6b7280;font-weight:500;margin-bottom:8px;">Sistem Manajemen Bank Sampah</p>
+        <div style="background:#f9fafb;border-radius:16px;padding:20px;margin-bottom:20px;text-align:left;">
+          <p style="font-size:13px;font-weight:700;color:#111827;margin-bottom:4px;">Selamat datang 👋</p>
+          <p style="font-size:12px;color:#6b7280;line-height:1.5;">Masuk untuk mengelola transaksi setoran, data nasabah, dan laporan bank sampah Anda.</p>
+        </div>
+        <button id="btn-google-login" onclick="doLogin()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:10px;background:#fff;border:1.5px solid #e5e7eb;border-radius:14px;padding:14px 20px;font-size:14px;font-weight:600;color:#374151;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.07);transition:all 0.2s;">
+          <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.35-8.16 2.35-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+          <span id="login-btn-text">Masuk dengan Google</span>
+          <span id="login-spinner" style="display:none;"><span class="spinner" style="border-top-color:#374151;border-color:rgba(0,0,0,0.2);"></span></span>
+        </button>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:20px;">
+          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <p style="font-size:11px;color:#9ca3af;">Hanya untuk Pengelola & Admin terdaftar · Aman & Terenkripsi</p>
+        </div>
+
+        <!-- TOMBOL TEST — hapus setelah selesai -->
+        <div style="margin-top: 32px; padding-top: 20px; border-top: 1px dashed #e5e7eb;">
+          <p style="font-size: 11px; color: #9ca3af; margin-bottom: 12px;">--- Simulasi Role (Developer Only) ---</p>
+          <button onclick="showSuperAdminScreen()" style="width:100%; background:none; border:1.5px dashed #e5e7eb; border-radius:14px; padding:12px; font-size:12px; font-weight:600; color:#9ca3af; cursor:pointer;">
+            Masuk sebagai SuperAdmin
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════
+     S1b: ISI PROFIL PRIBADI (Onboarding)
+══════════════════════════════════════ -->
+<div id="screen-profil" class="screen" style="background:#f9fafb;">
+
+  <!-- Header hijau -->
+  <div style="background:linear-gradient(135deg,#059669,#047857);padding:20px 16px 28px;flex-shrink:0;">
+    <h2 style="font-size:20px;font-weight:800;color:#fff;margin:0 0 4px;letter-spacing:-0.3px;">Lengkapi Profil Anda</h2>
+    <p style="font-size:12px;color:rgba(255,255,255,0.72);margin:0;font-weight:500;">Data ini digunakan untuk verifikasi akun Anda.</p>
+  </div>
+
+  <!-- Stepper -->
+  <div style="background:#fff; padding:16px 0 12px; border-bottom:1px solid #f3f4f6; display:flex; justify-content:center;">
+    
+    <div style="display:flex; justify-content:space-between; width: 220px; position:relative;">
+      
+      <div style="position:absolute; top:12px; left:40px; right:40px; height:2px; background:#e5e7eb; z-index:0;"></div>
+
+      <div style="display:flex; flex-direction:column; align-items:center; position:relative; z-index:1; width:80px;">
+        <div style="width:26px;height:26px;border-radius:50%;background:#059669;display:flex;align-items:center;justify-content:center;margin-bottom:6px;">
+          <span style="font-size:11px;font-weight:800;color:#fff;">1</span>
+        </div>
+        <span style="font-size:10px;font-weight:700;color:#059669;text-align:center;white-space:nowrap;">Profil Diri</span>
+      </div>
+
+      <div style="display:flex; flex-direction:column; align-items:center; position:relative; z-index:1; width:80px;">
+        <div style="width:26px;height:26px;border-radius:50%;background:#e5e7eb;display:flex;align-items:center;justify-content:center;margin-bottom:6px;">
+          <span style="font-size:11px;font-weight:700;color:#9ca3af;">2</span>
+        </div>
+        <span style="font-size:10px;font-weight:700;color:#9ca3af;text-align:center;white-space:nowrap;">Data Bank Sampah</span>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- Form scroll area -->
+  <div class="scroll-area" style="padding:16px;padding-bottom:32px;">
+    <div style="background:#fff;border-radius:18px;padding:18px 16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+
+      <!-- Nama Lengkap -->
+      <div class="form-field">
+        <label class="form-label">Nama Lengkap <span style="color:#ef4444;">*</span></label>
+        <input id="profil-nama" type="text" class="form-input" placeholder="Contoh: Siti Rahayu">
+        <p id="err-profil-nama" class="field-error">Nama lengkap wajib diisi.</p>
+      </div>
+
+      <!-- Jenis Kelamin -->
+      <div class="form-field" style="position:relative;">
+        <label class="form-label">Jenis Kelamin <span style="color:#ef4444;">*</span></label>
+        <div style="position:relative;">
+          <select id="profil-gender" class="form-select">
+            <option value="">Pilih jenis kelamin</option>
+            <option value="Laki-laki">♂ Laki-laki</option>
+            <option value="Perempuan">♀ Perempuan</option>
+          </select>
+          <!-- Custom chevron -->
+          <svg style="position:absolute;right:13px;top:50%;transform:translateY(-50%);pointer-events:none;" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2.5">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </div>
+        <p id="err-profil-gender" class="field-error">Jenis kelamin wajib dipilih.</p>
+      </div>
+
+      <!-- Tanggal Lahir -->
+      <div class="form-field">
+        <label class="form-label">Tanggal Lahir <span style="color:#ef4444;">*</span></label>
+        <input id="profil-dob" type="date" class="form-input">
+        <p id="err-profil-dob" class="field-error">Tanggal lahir wajib diisi.</p>
+      </div>
+
+      <!-- Nomor HP -->
+      <div class="form-field" style="margin-bottom:4px;">
+        <label class="form-label">Nomor HP / WhatsApp <span style="color:#ef4444;">*</span></label>
+        <input id="profil-hp" type="tel" class="form-input" placeholder="Contoh: 0812-3456-7890">
+        <p id="err-profil-hp" class="field-error">Nomor HP wajib diisi.</p>
+      </div>
+
+    </div>
+
+    <!-- Tombol Simpan -->
+    <div style="margin-top:16px;">
+      <button onclick="submitProfil()" style="width:100%;background:linear-gradient(135deg,#059669,#047857);color:#fff;border:none;border-radius:14px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(5,150,105,0.3);display:flex;align-items:center;justify-content:center;gap:8px;">
+        <span id="profil-btn-text">Simpan Profil &amp; Lanjut</span>
+        <span id="profil-spinner" style="display:none;"><span class="spinner"></span></span>
+        <svg id="profil-btn-icon" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="white" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </button>
+    </div>
+
+    <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:12px;line-height:1.6;">
+      Data Anda aman dan hanya digunakan untuk keperluan verifikasi bank sampah.
+    </p>
+  </div>
+
+</div>
+
+  <!-- ══════════════════════════════════════
+     S1c: REGISTRASI BANK SAMPAH (Onboarding)
+══════════════════════════════════════ -->
+<div id="screen-registrasi" class="screen" style="background:#f9fafb;">
+
+  <!-- Header hijau — konsisten dengan screen-profil -->
+  <div style="background:linear-gradient(135deg,#059669,#047857);padding:20px 16px 28px;flex-shrink:0;">
+    <h2 style="font-size:20px;font-weight:800;color:#fff;margin:0 0 4px;letter-spacing:-0.3px;">Daftarkan Bank Sampah</h2>
+    <p style="font-size:12px;color:rgba(255,255,255,0.72);margin:0;font-weight:500;">Lengkapi data institusi bank sampah Anda.</p>
+  </div>
+
+  <!-- Stepper — step 2 aktif -->
+<div style="background:#fff; padding:16px 0 12px; border-bottom:1px solid #f3f4f6; display:flex; justify-content:center; flex-shrink:0;">
+    
+    <div style="display:flex; justify-content:space-between; width: 220px; position:relative;">
+      
+      <div style="position:absolute; top:12px; left:40px; right:40px; height:2px; background:#059669; z-index:0;"></div>
+
+      <div style="display:flex; flex-direction:column; align-items:center; position:relative; z-index:1; width:80px;">
+        <div style="width:26px;height:26px;border-radius:50%;background:#059669;display:flex;align-items:center;justify-content:center;margin-bottom:6px;">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="white" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>
+        </div>
+        <span style="font-size:10px;font-weight:700;color:#059669;text-align:center;white-space:nowrap;">Profil Diri</span>
+      </div>
+
+      <div style="display:flex; flex-direction:column; align-items:center; position:relative; z-index:1; width:80px;">
+        <div style="width:26px;height:26px;border-radius:50%;background:#059669;display:flex;align-items:center;justify-content:center;margin-bottom:6px;">
+          <span style="font-size:11px;font-weight:800;color:#fff;">2</span>
+        </div>
+        <span style="font-size:10px;font-weight:700;color:#059669;text-align:center;white-space:nowrap;">Data Bank Sampah</span>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- Form scroll area -->
+  <div class="scroll-area" style="padding:16px;padding-bottom:32px;">
+    <div style="background:#fff;border-radius:18px;padding:18px 16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+
+      <!-- Nama Bank Sampah -->
+      <div class="form-field">
+        <label class="form-label">Nama Bank Sampah <span style="color:#ef4444;">*</span></label>
+        <input id="reg-nama-bs" type="text" class="form-input" placeholder="Contoh: Bank Sampah Mekar Jaya">
+        <p id="err-reg-nama-bs" class="field-error">Nama bank sampah wajib diisi.</p>
+      </div>
+
+      <!-- Alamat Lengkap (textarea) -->
+      <div class="form-field">
+        <label class="form-label">Alamat Lengkap <span style="color:#ef4444;">*</span></label>
+        <textarea
+          id="reg-alamat"
+          rows="3"
+          class="form-input"
+          placeholder="Jl. Nama Jalan, RT/RW, Kelurahan, Kecamatan, Kota"
+          style="resize:none;line-height:1.55;"
+        ></textarea>
+        <p id="err-reg-alamat" class="field-error">Alamat lengkap wajib diisi.</p>
+      </div>
+
+      <!-- Nomor Telepon Institusi -->
+      <div class="form-field">
+        <label class="form-label">Nomor Telepon Penanggung Jawab <span style="color:#ef4444;">*</span></label>
+        <div style="display:flex;align-items:center;background:#f9fafb;border:1.5px solid #e5e7eb;border-radius:12px;overflow:hidden;transition:border-color 0.2s,box-shadow 0.2s;"
+             onfocusin="this.style.borderColor='#059669';this.style.boxShadow='0 0 0 3px rgba(5,150,105,0.12)'"
+             onfocusout="this.style.borderColor='#e5e7eb';this.style.boxShadow='none'">
+          <span style="padding:0 10px 0 13px;font-size:12px;font-weight:600;color:#6b7280;white-space:nowrap;">+62</span>
+          <div style="width:1px;height:18px;background:#e5e7eb;flex-shrink:0;"></div>
+          <input id="reg-telp" type="tel" placeholder="812-3456-7890"
+                 style="flex:1;background:transparent;border:none;outline:none;padding:11px 13px;font-size:13px;color:#111827;font-family:'Plus Jakarta Sans',sans-serif;">
+        </div>
+        <p id="err-reg-telp" class="field-error">Nomor telepon wajib diisi.</p>
+      </div>
+
+      <!-- Foto Kegiatan — custom dashed upload box -->
+      <div class="form-field" style="margin-bottom:4px;">
+        <label class="form-label">Foto Kegiatan <span style="color:#ef4444;">*</span></label>
+
+        <!-- Drop zone — klik untuk buka file picker -->
+        <label id="reg-foto-label" for="reg-foto-input"
+               style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:1.5px dashed #d1d5db;border-radius:14px;padding:22px 16px;cursor:pointer;background:#fafafa;transition:border-color 0.2s,background 0.2s;"
+               onmouseover="this.style.borderColor='#059669';this.style.background='#f0fdf4';"
+               onmouseout="if(!window._fotoUploaded){this.style.borderColor='#d1d5db';this.style.background='#fafafa';}">
+
+          <!-- Icon state: belum upload -->
+          <div id="reg-foto-idle" style="display:flex;flex-direction:column;align-items:center;gap:6px;">
+            <div style="width:40px;height:40px;background:#f0fdf4;border-radius:11px;display:flex;align-items:center;justify-content:center;">
+              <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#059669" stroke-width="1.8">
+                <rect x="3" y="3" width="18" height="18" rx="3"/>
+                <circle cx="8.5" cy="8.5" r="1.5"/>
+                <path d="M21 15l-5-5L5 21"/>
+              </svg>
+            </div>
+            <p style="font-size:12px;font-weight:700;color:#374151;margin:0;">Pilih atau seret foto ke sini</p>
+            <p style="font-size:10px;color:#9ca3af;margin:0;">JPG / PNG · Maks. 5 MB</p>
+          </div>
+
+          <!-- Icon state: sudah upload (hidden by default) -->
+          <div id="reg-foto-done" style="display:none;flex-direction:column;align-items:center;gap:6px;">
+            <div style="width:40px;height:40px;background:#d1fae5;border-radius:11px;display:flex;align-items:center;justify-content:center;">
+              <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#059669" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+            </div>
+            <p id="reg-foto-name" style="font-size:12px;font-weight:700;color:#059669;margin:0;word-break:break-all;text-align:center;">—</p>
+            <p style="font-size:10px;color:#6b7280;margin:0;">Ketuk untuk ganti foto</p>
+          </div>
+        </label>
+
+        <!-- Input file tersembunyi -->
+        <input id="reg-foto-input" type="file" accept="image/*" style="display:none;" onchange="handleFotoUpload(event)">
+        <p id="err-reg-foto" class="field-error">Foto kegiatan wajib diunggah.</p>
+      </div>
+
+    </div><!-- end card -->
+
+    <!-- Tombol Ajukan -->
+    <div style="margin-top:16px;">
+      <button id="btn-ajukan" onclick="submitRegistrasi()"
+              style="width:100%;background:linear-gradient(135deg,#059669,#047857);color:#fff;border:none;border-radius:14px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(5,150,105,0.3);display:flex;align-items:center;justify-content:center;gap:8px;">
+        <span id="reg-btn-text">Ajukan Pendaftaran</span>
+        <span id="reg-spinner" style="display:none;"><span class="spinner"></span></span>
+        <svg id="reg-btn-icon" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="white" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </button>
+
+      <button onclick="goToScreen('screen-profil')"
+              style="width:100%;background:#fff;color:#4b5563;border:1.5px solid #e5e7eb;border-radius:14px;padding:13px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:all 0.2s;"
+              onmouseover="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#d1d5db'" 
+              onmouseout="this.style.backgroundColor='#fff'; this.style.borderColor='#e5e7eb'">
+        Kembali
+      </button>
+
+      <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:10px;line-height:1.6;">
+        Pengajuan akan ditinjau oleh Admin PILAH.
+      </p>
+    </div>
+
+  </div><!-- end scroll-area -->
+</div>
+
+  <!-- ══════════════════════════════════════
+     SCREEN PENDING
+══════════════════════════════════════ -->
+<div id="screen-pending" class="screen" style="background:#f9fafb;">
+    
+    <div style="background:linear-gradient(135deg,#059669,#047857);padding:20px 16px 28px;flex-shrink:0;">
+      <h2 style="font-size:20px;font-weight:800;color:#fff;margin:0 0 4px;letter-spacing:-0.3px;">Pendaftaran Terkirim!</h2>
+      <p style="font-size:12px;color:rgba(255,255,255,0.72);margin:0;font-weight:500;">Menunggu tinjauan dari Admin.</p>
+    </div>
+
+    <div class="scroll-area" style="padding:32px 20px 40px; display:flex; flex-direction:column; align-items:center;">
+      
+      <div style="margin-bottom:20px;">
+        <svg width="56" height="56" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+      </div>
+
+      <h3 style="font-size:18px;font-weight:800;color:#111827;margin:0 0 8px;text-align:center;">Sedang Diproses</h3>
+      <p style="font-size:13px;color:#6b7280;text-align:center;line-height:1.6;margin:0 0 32px;">
+        Admin sedang meninjau data institusi Anda.
+      </p>
+
+      <div style="width:100%;background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:20px;margin-bottom:24px;">
+        
+        <div style="display:flex;align-items:flex-start;gap:16px;position:relative;">
+          <div style="position:absolute;top:24px;bottom:-10px;left:11px;width:2px;background:#059669;z-index:0;"></div>
+
+          <div style="width:24px;height:24px;border-radius:50%;background:#059669;display:flex;align-items:center;justify-content:center;flex-shrink:0;z-index:1;position:relative;">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="white" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
+          </div>
+          <div style="padding-bottom:24px;">
+            <p style="font-size:13px;font-weight:700;color:#111827;margin:0 0 2px;">Profil diri dilengkapi</p>
+            <p style="font-size:12px;color:#6b7280;margin:0;">Data personal PIC sudah tersimpan</p>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:flex-start;gap:16px;position:relative;">
+          <div style="position:absolute;top:24px;bottom:-10px;left:11px;width:2px;background:#e5e7eb;z-index:0;"></div>
+
+          <div style="width:24px;height:24px;border-radius:50%;background:#059669;display:flex;align-items:center;justify-content:center;flex-shrink:0;z-index:1;position:relative;">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="white" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
+          </div>
+          <div style="padding-bottom:24px;">
+            <p style="font-size:13px;font-weight:700;color:#111827;margin:0 0 2px;">Data institusi dikirim</p>
+            <p style="font-size:12px;color:#6b7280;margin:0;">Formulir registrasi bank sampah diterima</p>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:flex-start;gap:16px;position:relative;">
+          <div style="width:24px;height:24px;border-radius:50%;background:#fff;border:2px solid #9ca3af;display:flex;align-items:center;justify-content:center;flex-shrink:0;z-index:1;position:relative;box-sizing:border-box;">
+            <div style="width:8px;height:8px;background:#9ca3af;border-radius:50%;"></div>
+          </div>
+          <div>
+            <p style="font-size:13px;font-weight:700;color:#374151;margin:0 0 2px;">Ditinjau Admin</p>
+            <p style="font-size:12px;color:#6b7280;margin:0;">Tahap saat ini</p>
+          </div>
+        </div>
+
+      </div>
+
+      <div style="width:100%;background:#f3f4f6;border-radius:12px;padding:16px;">
+        <div style="display:flex;gap:12px;align-items:flex-start;">
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#6b7280" stroke-width="2" style="flex-shrink:0;margin-top:2px;"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4m0-4h.01"/></svg>
+          <p style="font-size:12px;color:#4b5563;line-height:1.55;margin:0;">
+            Silakan periksa halaman ini secara berkala. Status pendaftaran Anda akan otomatis diperbarui di layar ini.
+          </p>
+        </div>
+      </div>
+
+      <button onclick="window.location.reload()" 
+              style="margin-top:24px;width:100%;background:#fff;color:#4b5563;border:1.5px solid #e5e7eb;font-size:13px;font-weight:700;cursor:pointer;padding:14px;border-radius:14px;transition:all 0.2s;"
+              onmouseover="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#d1d5db'" 
+              onmouseout="this.style.backgroundColor='#fff'; this.style.borderColor='#e5e7eb'">
+        Kembali ke Halaman Login
+      </button>
+
+      <div style="margin-top:24px; padding-top:20px; border-top:1px dashed #e5e7eb; width:100%;">
+        <p style="font-size:11px; color:#9ca3af; text-align:center; margin:0 0 12px;">--- Dev Mode: Simulasi Approval ---</p>
+        
+        <button onclick="goToScreen('screen-dashboard')" 
+                style="width:100%; background:#f0fdf4; color:#059669; border:1.5px dashed #34d399; font-size:12px; font-weight:700; cursor:pointer; padding:12px; border-radius:12px; transition:opacity 0.2s;"
+                onmouseover="this.style.opacity='0.7'" onmouseout="this.style.opacity='1'">
+          ✨ Skip & Masuk ke Dashboard Pengelola
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════
+     S-ADMIN: DASHBOARD SUPERADMIN
+══════════════════════════════════════ -->
+<div id="screen-superadmin" class="screen" style="background:#f9fafb;">
+
+  <!-- Header -->
+  <div style="background:linear-gradient(135deg,#059669,#047857);padding:20px 16px 16px;flex-shrink:0;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      
+      <div>
+        <p style="font-size:11px;color:rgba(255,255,255,0.7);margin:0 0 2px;font-weight:600;">SuperAdmin PILAH</p>
+        <h2 style="font-size:16px;font-weight:800;color:#fff;margin:0;letter-spacing:-0.2px;">Manajemen Bank Sampah</h2>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px;">
+        
+        <button onclick="window.location.reload()" 
+        style="background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25); border-radius:12px; width:40px; height:40px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.2s ease;" 
+        onmouseover="this.style.background='rgba(255,255,255,0.25)'; this.style.borderColor='rgba(255,255,255,0.4)'; this.style.transform='scale(1.05)'" 
+        onmouseout="this.style.background='rgba(255,255,255,0.12)'; this.style.borderColor='rgba(255,255,255,0.25)'; this.style.transform='scale(1)'" 
+        title="Keluar">
+  <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 2px;">
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+    <polyline points="16 17 21 12 16 7"></polyline>
+    <line x1="21" y1="12" x2="9" y2="12"></line>
+  </svg>
+</button>
+      </div>
+
+    </div>
+
+    <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;">
+      <button id="sa-tab-btn-menunggu"
+              onclick="switchAdminTab('menunggu')"
+              style="flex-shrink:0;background:#fff;color:#059669;border:none;border-radius:20px;padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer;transition:all 0.2s;box-shadow:0 2px 6px rgba(0,0,0,0.1);">
+        Menunggu
+      </button>
+      <button id="sa-tab-btn-disetujui"
+              onclick="switchAdminTab('disetujui')"
+              style="flex-shrink:0;background:rgba(255,255,255,0.2);color:rgba(255,255,255,0.8);border:none;border-radius:20px;padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer;transition:all 0.2s;">
+        Disetujui
+      </button>
+      <button id="sa-tab-btn-ditolak"
+              onclick="switchAdminTab('ditolak')"
+              style="flex-shrink:0;background:rgba(255,255,255,0.2);color:rgba(255,255,255,0.8);border:none;border-radius:20px;padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer;transition:all 0.2s;">
+        Ditolak
+      </button>
+    </div>
+  </div>
+
+  <!-- ── TAB: MENUNGGU ── -->
+  <div id="sa-content-menunggu" class="scroll-area" style="padding:14px;padding-bottom:32px;">
+
+    <!-- Dummy card 1 -->
+    <div style="background:#fff;border-radius:18px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);margin-bottom:10px;border-left:3px solid #f59e0b;">
+      <!-- Baris atas: nama + badge -->
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px;">
+        <div style="flex:1;min-width:0;">
+          <p style="font-size:14px;font-weight:800;color:#111827;margin:0 0 2px;line-height:1.3;">Bank Sampah Mekar Jaya</p>
+          <p style="font-size:11px;color:#6b7280;margin:0;">REG-001</p>
+        </div>
+        <span style="flex-shrink:0;font-size:10px;font-weight:700;color:#d97706;background:#fef3c7;padding:3px 9px;border-radius:10px;white-space:nowrap;">PENDING</span>
+      </div>
+      <!-- Detail info -->
+      <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2" style="flex-shrink:0;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <p style="font-size:12px;color:#374151;margin:0;font-weight:600;">Siti Rahayu <span style="font-weight:400;color:#9ca3af;">(Ketua)</span></p>
+        </div>
+        <div style="display:flex;align-items:flex-start;gap:6px;">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2" style="flex-shrink:0;margin-top:2px;"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          <p style="font-size:12px;color:#6b7280;margin:0;line-height:1.45;">Jl. Cempaka No.12, Kukusan, Beji, Depok</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2" style="flex-shrink:0;"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <p style="font-size:11px;color:#9ca3af;margin:0;">Diajukan: 20 Jun 2026</p>
+        </div>
+      </div>
+      <!-- 3 Tombol aksi -->
+      <div style="display:flex;gap:6px;">
+        <button onclick="adminLihatBukti('REG-001')"
+                style="flex:1;background:#f0fdf4;color:#059669;border:1px solid #bbf7d0;border-radius:10px;padding:8px 0;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;transition:opacity 0.15s;"
+                onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">
+          🖼️ Lihat Bukti
+        </button>
+        <button onclick="adminSetujui('REG-001', 'Bank Sampah Mekar Jaya')"
+                style="flex:1;background:linear-gradient(135deg,#059669,#047857);color:#fff;border:none;border-radius:10px;padding:8px 0;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;box-shadow:0 2px 8px rgba(5,150,105,0.3);transition:opacity 0.15s;"
+                onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+          ✓ Setujui
+        </button>
+        <button onclick="adminTolak('REG-001', 'Bank Sampah Mekar Jaya')"
+                style="flex:1;background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:10px;padding:8px 0;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;transition:opacity 0.15s;"
+                onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">
+          ✕ Tolak
+        </button>
+      </div>
+    </div>
+
+    <!-- Dummy card 2 -->
+    <div style="background:#fff;border-radius:18px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);margin-bottom:10px;border-left:3px solid #f59e0b;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px;">
+        <div style="flex:1;min-width:0;">
+          <p style="font-size:14px;font-weight:800;color:#111827;margin:0 0 2px;line-height:1.3;">Bank Sampah Bersih Bersama</p>
+          <p style="font-size:11px;color:#6b7280;margin:0;">REG-002</p>
+        </div>
+        <span style="flex-shrink:0;font-size:10px;font-weight:700;color:#d97706;background:#fef3c7;padding:3px 9px;border-radius:10px;white-space:nowrap;">PENDING</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2" style="flex-shrink:0;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <p style="font-size:12px;color:#374151;margin:0;font-weight:600;">Hendra Gunawan <span style="font-weight:400;color:#9ca3af;">(Ketua)</span></p>
+        </div>
+        <div style="display:flex;align-items:flex-start;gap:6px;">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2" style="flex-shrink:0;margin-top:2px;"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          <p style="font-size:12px;color:#6b7280;margin:0;line-height:1.45;">Jl. Anggrek Blok B3, Sawangan, Depok</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2" style="flex-shrink:0;"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <p style="font-size:11px;color:#9ca3af;margin:0;">Diajukan: 21 Jun 2026</p>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button onclick="adminLihatBukti('REG-002')"
+                style="flex:1;background:#f0fdf4;color:#059669;border:1px solid #bbf7d0;border-radius:10px;padding:8px 0;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;transition:opacity 0.15s;"
+                onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">
+          🖼️ Lihat Bukti
+        </button>
+        <button onclick="adminSetujui('REG-002', 'Bank Sampah Bersih Bersama')"
+                style="flex:1;background:linear-gradient(135deg,#059669,#047857);color:#fff;border:none;border-radius:10px;padding:8px 0;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;box-shadow:0 2px 8px rgba(5,150,105,0.3);transition:opacity 0.15s;"
+                onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+          ✓ Setujui
+        </button>
+        <button onclick="adminTolak('REG-002', 'Bank Sampah Bersih Bersama')"
+                style="flex:1;background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:10px;padding:8px 0;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px;transition:opacity 0.15s;"
+                onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">
+          ✕ Tolak
+        </button>
+      </div>
+    </div>
+
+  </div><!-- end sa-content-menunggu -->
+
+  <!-- ── TAB: DISETUJUI ── -->
+  <div id="sa-content-disetujui" class="scroll-area" style="display:none;padding:14px;padding-bottom:32px;">
+    <div style="background:#fff;border-radius:18px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);margin-bottom:10px;border-left:3px solid #059669;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px;">
+        <div style="flex:1;min-width:0;">
+          <p style="font-size:14px;font-weight:800;color:#111827;margin:0 0 2px;">Bank Sampah BTH</p>
+          <p style="font-size:11px;color:#6b7280;margin:0;">REG-000</p>
+        </div>
+        <span style="flex-shrink:0;font-size:10px;font-weight:700;color:#059669;background:#d1fae5;padding:3px 9px;border-radius:10px;white-space:nowrap;">✅ AKTIF</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2" style="flex-shrink:0;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <p style="font-size:12px;color:#374151;margin:0;font-weight:600;">Ahmad Fadil <span style="font-weight:400;color:#9ca3af;">(Ketua)</span></p>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2" style="flex-shrink:0;"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <p style="font-size:11px;color:#9ca3af;margin:0;">Disetujui: 10 Jan 2026</p>
+        </div>
+      </div>
+    </div>
+    <!-- Empty hint -->
+    <p style="font-size:11px;color:#d1d5db;text-align:center;margin-top:12px;">
+      BS yang disetujui akan muncul di sini secara otomatis.
+    </p>
+  </div><!-- end sa-content-disetujui -->
+
+  <!-- ── TAB: DITOLAK ── -->
+  <div id="sa-content-ditolak" class="scroll-area" style="display:none;padding:48px 24px;text-align:center;">
+    <div style="width:60px;height:60px;background:#fee2e2;border-radius:18px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;">
+      <svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="#dc2626" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+    </div>
+    <p style="font-size:13px;font-weight:700;color:#9ca3af;margin:0 0 6px;">Belum Ada Penolakan</p>
+    <p style="font-size:11px;color:#d1d5db;line-height:1.6;margin:0;">Pendaftaran yang ditolak akan tercatat di sini sebagai arsip.</p>
+  </div><!-- end sa-content-ditolak -->
+
+</div><!-- end screen-superadmin -->
+
+    <!-- ══════════════════════════════════════
+         S2: DASHBOARD
+    ══════════════════════════════════════ -->
+    <div id="screen-dashboard" class="screen" style="background:#f9fafb;">
+      <div style="background:#fff;padding:16px 16px 12px;border-bottom:1px solid #f3f4f6;flex-shrink:0;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <p style="font-size:11px;color:#6b7280;font-weight:500;margin-bottom:2px;">Bank Sampah BTH</p>
+            <h2 style="font-size:16px;font-weight:700;color:#111827;">Selamat datang, Pengelola 👋</h2>
+          </div>
+          <div onclick="goToScreen('screen-settings')" style="width:38px;height:38px;background:linear-gradient(135deg,#059669,#047857);border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(5,150,105,0.3);cursor:pointer;flex-shrink:0;transition:transform 0.15s,box-shadow 0.15s;" onmouseover="this.style.transform='scale(1.08)'" onmouseout="this.style.transform='scale(1)'">
+            <span style="font-size:14px;font-weight:700;color:#fff;">NP</span>
+          </div>
+        </div>
+      </div>
+      <div class="scroll-area" style="padding:16px;padding-bottom:80px;">
+        <div style="background:linear-gradient(135deg,#059669,#047857);border-radius:18px;padding:18px;margin-bottom:12px;box-shadow:0 4px 16px rgba(5,150,105,0.3);">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <div>
+              <p style="font-size:11px;color:rgba(255,255,255,0.75);font-weight:500;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em;">Total Kas Bulan Ini</p>
+              <p style="font-size:24px;font-weight:800;color:#fff;letter-spacing:-0.5px;">Rp 12.450.000</p>
+              <p style="font-size:11px;color:rgba(255,255,255,0.65);margin-top:4px;">↑ 18% dari bulan lalu</p>
+            </div>
+            <div style="width:44px;height:44px;background:rgba(255,255,255,0.2);border-radius:12px;display:flex;align-items:center;justify-content:center;">
+              <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="white" stroke-width="1.8"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            </div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px;">
+          <div style="background:#fff;border-radius:14px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+            <div style="width:28px;height:28px;background:#d1fae5;border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:8px;">
+              <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#059669" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </div>
+            <p style="font-size:18px;font-weight:800;color:#111827;line-height:1.1;">128</p>
+            <p style="font-size:10px;color:#6b7280;font-weight:500;margin-top:2px;">Nasabah Aktif</p>
+          </div>
+          <div style="background:#fff;border-radius:14px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+            <div style="width:28px;height:28px;background:#fef3c7;border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:8px;">
+              <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#d97706" stroke-width="2"><path d="M20 7H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+            </div>
+            <p style="font-size:18px;font-weight:800;color:#111827;line-height:1.1;">450 kg</p>
+            <p style="font-size:10px;color:#6b7280;font-weight:500;margin-top:2px;">Total Sampah</p>
+          </div>
+          <div style="background:#fff;border-radius:14px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+            <div style="width:28px;height:28px;background:#ede9fe;border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:8px;">
+              <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#7c3aed" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            </div>
+            <p style="font-size:18px;font-weight:800;color:#111827;line-height:1.1;">45 Trx</p>
+            <p style="font-size:10px;color:#6b7280;font-weight:500;margin-top:2px;">Transaksi Bln Ini</p>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
+          <button onclick="goToScreen('screen-transaction')" style="background:linear-gradient(135deg,#059669,#047857);border-radius:14px;padding:14px 12px;display:flex;align-items:center;gap:8px;border:none;cursor:pointer;box-shadow:0 3px 10px rgba(5,150,105,0.3);">
+            <div style="width:28px;height:28px;background:rgba(255,255,255,0.2);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="white" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+            </div>
+            <span style="font-size:12px;font-weight:700;color:#fff;">Setoran Baru</span>
+          </button>
+          <button onclick="goToScreen('screen-customers')" style="background:#fff;border-radius:14px;padding:14px 12px;display:flex;align-items:center;gap:8px;border:1.5px solid #e5e7eb;cursor:pointer;">
+            <div style="width:28px;height:28px;background:#d1fae5;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#059669" stroke-width="2.5"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M15 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </div>
+            <span style="font-size:12px;font-weight:700;color:#374151;">Tambah Nasabah</span>
+          </button>
+        </div>
+        <div style="background:#fff;border-radius:16px;padding:14px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+            <p style="font-size:13px;font-weight:700;color:#111827;">Aktivitas Terbaru</p>
+            <button onclick="goToScreen('screen-all-tx')" style="font-size:11px;color:#059669;font-weight:600;background:none;border:none;cursor:pointer;">Lihat Semua →</button>
+          </div>
+          <div class="tx-item" style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #f9fafb;">
+            <div style="width:34px;height:34px;background:#d1fae5;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;color:#059669;">BS</div>
+            <div style="flex:1;min-width:0;"><p style="font-size:12px;font-weight:600;color:#111827;">Budi Santoso</p><p style="font-size:11px;color:#9ca3af;">Plastik · 5.2 kg</p></div>
+            <div style="text-align:right;flex-shrink:0;"><p style="font-size:12px;font-weight:700;color:#059669;">+Rp 15.600</p><p style="font-size:11px;color:#9ca3af;">Hari ini, 09:45</p></div>
+          </div>
+          <div class="tx-item" style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #f9fafb;">
+            <div style="width:34px;height:34px;background:#fef3c7;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;color:#d97706;">SA</div>
+            <div style="flex:1;min-width:0;"><p style="font-size:12px;font-weight:600;color:#111827;">Siti Aminah</p><p style="font-size:11px;color:#9ca3af;">Kertas · 12.0 kg</p></div>
+            <div style="text-align:right;flex-shrink:0;"><p style="font-size:12px;font-weight:700;color:#059669;">+Rp 24.000</p><p style="font-size:11px;color:#9ca3af;">Kemarin, 14:20</p></div>
+          </div>
+          <div class="tx-item" style="display:flex;align-items:center;gap:10px;padding:10px 0;">
+            <div style="width:34px;height:34px;background:#ede9fe;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;color:#7c3aed;">AP</div>
+            <div style="flex:1;min-width:0;"><p style="font-size:12px;font-weight:600;color:#111827;">Agus Pratama</p><p style="font-size:11px;color:#9ca3af;">Logam · 2.5 kg</p></div>
+            <div style="text-align:right;flex-shrink:0;"><p style="font-size:12px;font-weight:700;color:#059669;">+Rp 35.000</p><p style="font-size:11px;color:#9ca3af;">Kemarin, 10:15</p></div>
+          </div>
+        </div>
+      </div>
+      <div class="bottom-nav">
+        <button onclick="goToScreen('screen-dashboard')">
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#059669" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span style="font-size:10px;color:#059669;font-weight:600;">Dashboard</span>
+        </button>
+        <button onclick="goToScreen('screen-customers')">
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span style="font-size:10px;color:#9ca3af;font-weight:500;">Nasabah</span>
+        </button>
+        <button onclick="goToScreen('screen-prices')">
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+          <span style="font-size:10px;color:#9ca3af;font-weight:500;">Harga</span>
+        </button>
+        <button onclick="goToScreen('screen-all-tx')">
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          <span style="font-size:10px;color:#9ca3af;font-weight:500;">Laporan</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════
+         S3: TRANSAKSI BARU
+    ══════════════════════════════════════ -->
+    <div id="screen-transaction" class="screen" style="background:#f9fafb;">
+      <div style="background:#fff;padding:14px 16px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;gap:12px;flex-shrink:0;">
+        <button onclick="goToScreen('screen-dashboard')" style="width:34px;height:34px;background:#f3f4f6;border-radius:10px;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;flex-shrink:0;">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#374151" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        </button>
+        <h2 style="font-size:15px;font-weight:700;color:#111827;">Transaksi Baru</h2>
+      </div>
+      <div class="scroll-area" style="padding:16px;padding-bottom:100px;">
+        <p style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:8px;">Pilih Nasabah</p>
+        <div id="customer-pill" class="customer-pill" onclick="openPickCustomerSheet()" style="background:#fff;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div id="customer-avatar" style="width:32px;height:32px;background:#e5e7eb;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            <div>
+              <p id="customer-name-display" style="font-size:13px;font-weight:600;color:#9ca3af;">Tap untuk pilih nasabah</p>
+              <p id="customer-id-display" style="font-size:11px;color:#d1d5db;display:none;">ID: —</p>
+            </div>
+          </div>
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <p style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.07em;">Daftar Setoran</p>
+          <span id="item-count-badge" style="font-size:11px;color:#6b7280;font-weight:500;">0 item</span>
+        </div>
+        <div id="items-container" style="margin-bottom:8px;"></div>
+        <button onclick="addItem()" style="width:100%;background:#fff;border:1.5px dashed #d1d5db;border-radius:14px;padding:13px;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;font-size:13px;font-weight:600;color:#059669;transition:border-color 0.2s;margin-bottom:16px;">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+          Tambah Item Setoran
+        </button>
+        <div style="background:#fff;border-radius:16px;padding:14px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <p style="font-size:12px;color:#6b7280;font-weight:500;">Subtotal item</p>
+            <p id="subtotal-display" style="font-size:12px;color:#374151;font-weight:600;">Rp 0</p>
+          </div>
+          <div style="height:1px;background:#f3f4f6;margin-bottom:8px;"></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <p style="font-size:14px;color:#111827;font-weight:700;">Grand Total</p>
+            <p id="grand-total-display" style="font-size:18px;color:#059669;font-weight:800;">Rp 0</p>
+          </div>
+        </div>
+      </div>
+      <div style="position:absolute;bottom:0;left:0;right:0;padding:12px 16px 20px;background:linear-gradient(to top,#f9fafb 60%,transparent);">
+        <button id="btn-simpan-tx" onclick="submitTransaction()" disabled style="width:100%;background:#d1d5db;border-radius:14px;padding:15px;border:none;cursor:not-allowed;font-size:14px;font-weight:700;color:#fff;transition:all 0.25s;display:flex;align-items:center;justify-content:center;gap:8px;">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="white" stroke-width="2.5"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v14a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Simpan Transaksi
+        </button>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════
+         S4: NASABAH
+    ══════════════════════════════════════ -->
+    <div id="screen-customers" class="screen" style="background:#f9fafb;">
+      <div style="background:#fff;padding:14px 16px 0;border-bottom:1px solid #f3f4f6;flex-shrink:0;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <h2 style="font-size:16px;font-weight:700;color:#111827;">Nasabah</h2>
+          <span id="customer-count-badge" style="background:#ecfdf5;color:#059669;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;background:#f9fafb;border-radius:12px;padding:9px 12px;margin-bottom:10px;">
+          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <input id="customer-search" type="text" oninput="renderCustomerPage()" placeholder="Cari nama atau nomor..." style="background:none;border:none;outline:none;font-size:13px;color:#374151;width:100%;font-family:'Plus Jakarta Sans',sans-serif;">
+        </div>
+        <!-- Filter tabs -->
+        <div style="display:flex;gap:8px;padding-bottom:12px;">
+          <button id="tab-active" class="tab-btn active" onclick="switchCustomerTab('active')">Aktif</button>
+          <button id="tab-inactive" class="tab-btn inactive" onclick="switchCustomerTab('inactive')">Tidak Aktif</button>
+        </div>
+      </div>
+      <div class="scroll-area" style="padding:12px 16px;padding-bottom:88px;">
+        <div id="customer-list"></div>
+      </div>
+      <button class="fab" onclick="openFormCustomer(null)" title="Tambah Nasabah">
+        <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="white" stroke-width="2.8"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <div class="bottom-nav">
+        <button onclick="goToScreen('screen-dashboard')">
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span style="font-size:10px;color:#9ca3af;font-weight:500;">Dashboard</span>
+        </button>
+        <button>
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#059669" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span style="font-size:10px;color:#059669;font-weight:600;">Nasabah</span>
+        </button>
+        <button onclick="goToScreen('screen-prices')">
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+          <span style="font-size:10px;color:#9ca3af;font-weight:500;">Harga</span>
+        </button>
+        <button onclick="goToScreen('screen-all-tx')">
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span style="font-size:10px;color:#9ca3af;font-weight:500;">Laporan</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════
+         S5: HARGA SAMPAH
+    ══════════════════════════════════════ -->
+    <div id="screen-prices" class="screen" style="background:#f9fafb;">
+      <div style="background:#fff;padding:14px 16px 10px;border-bottom:1px solid #f3f4f6;flex-shrink:0;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <h2 style="font-size:16px;font-weight:700;color:#111827;">Jenis Sampah & Harga</h2>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;background:#f9fafb;border-radius:12px;padding:9px 12px;margin-bottom:10px;">
+          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <input type="text" id="price-search" oninput="filterPrices(this.value)" placeholder="Cari jenis sampah..." style="background:none;border:none;outline:none;font-size:13px;color:#374151;width:100%;font-family:'Plus Jakarta Sans',sans-serif;">
+        </div>
+        <!-- Price filter tabs -->
+        <div style="display:flex;gap:8px;padding-bottom:12px;">
+          <button id="price-tab-active"   class="tab-btn active"   onclick="switchPriceTab('active')">Aktif</button>
+          <button id="price-tab-inactive" class="tab-btn inactive" onclick="switchPriceTab('inactive')">Tidak Aktif</button>
+        </div>
+      </div>
+      <div class="scroll-area" style="padding:12px 16px;padding-bottom:88px;" id="price-list"></div>
+      <button class="fab" onclick="openFormPrice(null)" title="Tambah Jenis Sampah">
+        <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="white" stroke-width="2.8"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <div class="bottom-nav">
+        <button onclick="goToScreen('screen-dashboard')">
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span style="font-size:10px;color:#9ca3af;font-weight:500;">Dashboard</span>
+        </button>
+        <button onclick="goToScreen('screen-customers')">
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+          <span style="font-size:10px;color:#9ca3af;font-weight:500;">Nasabah</span>
+        </button>
+        <button>
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#059669" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+          <span style="font-size:10px;color:#059669;font-weight:600;">Harga</span>
+        </button>
+        <button onclick="goToScreen('screen-all-tx')">
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span style="font-size:10px;color:#9ca3af;font-weight:500;">Laporan</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════
+         S6: SEMUA TRANSAKSI
+    ══════════════════════════════════════ -->
+    <div id="screen-all-tx" class="screen" style="background:#f9fafb;">
+      <div style="background:#fff;padding:14px 16px 10px;border-bottom:1px solid #f3f4f6;flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+          <button onclick="goToScreen('screen-dashboard')" style="width:34px;height:34px;background:#f3f4f6;border-radius:10px;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;flex-shrink:0;">
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#374151" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          </button>
+          <h2 style="font-size:15px;font-weight:700;color:#111827;">Semua Transaksi</h2>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;background:#f9fafb;border-radius:12px;padding:9px 12px;margin-bottom:8px;">
+          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <input type="text" placeholder="Cari nama pelanggan..." style="background:none;border:none;outline:none;font-size:13px;color:#374151;width:100%;font-family:'Plus Jakarta Sans',sans-serif;">
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button id="tx-filter-this-month"  onclick="setTxFilter('today',this)"  style="background:#059669;color:#fff;border-radius:20px;padding:5px 12px;font-size:11px;font-weight:600;border:none;cursor:pointer;">Bulan Ini</button>
+          <button id="tx-filter-last-month"   onclick="setTxFilter('week',this)"   style="background:#f3f4f6;color:#6b7280;border-radius:20px;padding:5px 12px;font-size:11px;font-weight:600;border:none;cursor:pointer;">Bulan Lalu</button>
+          <button onclick="openDateSheet()" style="width:32px;height:28px;background:#f3f4f6;border-radius:10px;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;flex-shrink:0;margin-left:auto;">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#6b7280" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          </button>
+          <button onclick="exportXls()" style="height:28px;background:#fff;border:1.5px solid #d1d5db;border-radius:10px;display:flex;align-items:center;gap:5px;padding:0 10px;cursor:pointer;flex-shrink:0;transition:border-color 0.2s;" onmouseover="this.style.borderColor='#059669';this.style.color='#059669'" onmouseout="this.style.borderColor='#d1d5db';this.style.color='#374151'">
+            <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span style="font-size:10px;font-weight:700;color:inherit;">XLS</span>
+          </button>
+        </div>
+      </div>
+      <div class="scroll-area" style="padding:12px 16px;padding-bottom:20px;" id="all-tx-list"></div>
+    </div>
+
+
+    <!-- ══════════════════════════════════════
+         S7: PROFIL & PENGATURAN
+    ══════════════════════════════════════ -->
+    <div id="screen-settings" class="screen" style="background:#f9fafb;">
+      <!-- Header -->
+      <div style="background:#fff;padding:14px 16px 0;border-bottom:1px solid #f3f4f6;flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+          <button onclick="goToScreen('screen-dashboard')" style="width:34px;height:34px;background:#f3f4f6;border-radius:10px;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;flex-shrink:0;">
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#374151" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          </button>
+          <h2 style="font-size:15px;font-weight:700;color:#111827;flex:1;">Profil & Pengaturan</h2>
+        </div>
+        <!-- Tab switcher -->
+        <div style="display:flex;gap:0;border-bottom:2px solid #f3f4f6;">
+          <button id="stab-pribadi" onclick="switchSettingsTab('pribadi')" style="flex:1;background:none;border:none;border-bottom:2px solid #059669;margin-bottom:-2px;padding:8px 0;font-size:12px;font-weight:700;color:#059669;cursor:pointer;transition:all 0.2s;">Pengaturan Umum</button>
+          <button id="stab-tim" onclick="switchSettingsTab('tim')" style="flex:1;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:8px 0;font-size:12px;font-weight:700;color:#9ca3af;cursor:pointer;transition:all 0.2s;">Manajemen Tim</button>
+        </div>
+      </div>
+
+      <!-- TAB: DATA PRIBADI -->
+      <div id="stab-content-pribadi" class="scroll-area" style="padding:16px;padding-bottom:120px;">
+
+        <!-- Section: Profil Bank Sampah -->
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
+          <div style="width:4px;height:16px;background:#059669;border-radius:4px;"></div>
+          <p style="font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.06em;">Profil Bank Sampah</p>
+        </div>
+
+        <div style="background:#fff;border-radius:18px;padding:18px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+          <div style="display:flex;justify-content:center;margin-bottom:20px;">
+            <div style="position:relative;display:inline-block;">
+              <div style="width:72px;height:72px;background:linear-gradient(135deg,#d1fae5,#a7f3d0);border-radius:50%;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 0 0 3px #d1fae5;">
+                <svg width="32" height="32" fill="none" viewBox="0 0 24 24" stroke="#059669" stroke-width="1.6"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+              </div>
+              <div style="position:absolute;bottom:0;right:0;width:22px;height:22px;background:#059669;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid #fff;cursor:pointer;">
+                <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="white" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </div>
+            </div>
+          </div>
+          <div class="form-field">
+            <label class="form-label">Nama Bank Sampah</label>
+            <input id="set-bank-name" type="text" class="form-input" value="Bank Sampah BTH">
+          </div>
+          <div class="form-field">
+            <label class="form-label">Alamat Bank Sampah</label>
+            <input id="set-bank-address" type="text" class="form-input" value="Kel. Kukusan, Beji, Depok">
+          </div>
+          <div class="form-field" style="margin-bottom:0;">
+            <label class="form-label">Nomor HP Penanggung Jawab</label>
+            <div style="display:flex;align-items:center;background:#f9fafb;border:1.5px solid #e5e7eb;border-radius:12px;overflow:hidden;transition:border-color 0.2s,box-shadow 0.2s;" onfocusin="this.style.borderColor='#059669';this.style.boxShadow='0 0 0 3px rgba(5,150,105,0.12)'" onfocusout="this.style.borderColor='#e5e7eb';this.style.boxShadow='none'">
+              <span style="padding:11px 10px 11px 13px;font-size:13px;color:#6b7280;font-weight:600;border-right:1px solid #e5e7eb;background:#f3f4f6;white-space:nowrap;">📞</span>
+              <input id="set-bank-phone" type="tel" style="flex:1;background:none;border:none;outline:none;padding:11px 13px;font-size:13px;color:#111827;font-family:'Plus Jakarta Sans',sans-serif;" value="0812-3456-7890">
+            </div>
+          </div>
+        </div>
+
+        <!-- Section: Template WA -->
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
+          <div style="width:4px;height:16px;background:#059669;border-radius:4px;"></div>
+          <p style="font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.06em;">Template Notifikasi WA</p>
+        </div>
+
+        <div style="background:#fff;border-radius:18px;padding:18px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+          <div style="display:flex;align-items:center;gap:8px;background:#ecfdf5;border-radius:10px;padding:8px 12px;margin-bottom:14px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="#059669"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.553 4.116 1.52 5.845L.057 23.5a.5.5 0 0 0 .613.614l5.733-1.51A11.943 11.943 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22a9.943 9.943 0 0 1-5.09-1.4l-.364-.214-3.772.993.995-3.691-.233-.375A9.957 9.957 0 0 1 2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/></svg>
+            <span style="font-size:11px;font-weight:600;color:#059669;">Pesan otomatis dikirim setelah transaksi</span>
+          </div>
+          <label class="form-label">Isi Pesan</label>
+          <textarea id="set-wa-template" class="form-input" rows="5" style="resize:none;line-height:1.6;">Halo [Nama], setoran sampahmu senilai [Total] sudah kami catat ya. Saldo tabunganmu sekarang adalah [Saldo]. Terima kasih! 🌿</textarea>
+          <p style="font-size:11px;color:#9ca3af;margin-top:8px;line-height:1.6;">Gunakan variabel berikut agar sistem mengisi otomatis:</p>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+            <span onclick="insertVar('[Nama]')"    style="font-size:11px;font-weight:700;color:#059669;background:#ecfdf5;border:1px solid #a7f3d0;padding:3px 10px;border-radius:20px;cursor:pointer;">[Nama]</span>
+            <span onclick="insertVar('[Total]')"   style="font-size:11px;font-weight:700;color:#059669;background:#ecfdf5;border:1px solid #a7f3d0;padding:3px 10px;border-radius:20px;cursor:pointer;">[Total]</span>
+            <span onclick="insertVar('[Saldo]')"   style="font-size:11px;font-weight:700;color:#059669;background:#ecfdf5;border:1px solid #a7f3d0;padding:3px 10px;border-radius:20px;cursor:pointer;">[Saldo]</span>
+            <span onclick="insertVar('[Tanggal]')" style="font-size:11px;font-weight:700;color:#6b7280;background:#f9fafb;border:1px solid #e5e7eb;padding:3px 10px;border-radius:20px;cursor:pointer;">[Tanggal]</span>
+            <span onclick="insertVar('[daftar_item]')" style="font-size:11px;font-weight:700;color:#0891b2;background:#cffafe;border:1px solid #a5f3fc;padding:3px 10px;border-radius:20px;cursor:pointer;">[daftar_item]</span>
+          </div>
+          <div style="margin-top:14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:12px;">
+            <p style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Preview Pesan</p>
+            <p id="wa-preview" style="font-size:12px;color:#374151;line-height:1.6;"></p>
+          </div>
+        </div>
+
+        <!-- Section: Info Aplikasi -->
+        <div style="background:#fff;border-radius:18px;padding:4px 0;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);overflow:hidden;">
+          <div style="padding:14px 16px;display:flex;align-items:center;justify-content:space-between;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="width:32px;height:32px;background:#ede9fe;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="#7c3aed" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              </div>
+              <div><p style="font-size:13px;font-weight:600;color:#111827;">Versi Aplikasi</p><p style="font-size:11px;color:#9ca3af;">PILAH v1.0.0</p></div>
+            </div>
+            <span style="font-size:11px;font-weight:600;color:#059669;background:#ecfdf5;padding:3px 8px;border-radius:10px;">Terbaru</span>
+          </div>
+        </div>
+
+      </div><!-- end stab-content-pribadi -->
+
+      <!-- TAB: MANAJEMEN TIM -->
+      <div id="stab-content-tim" class="scroll-area" style="padding:16px;padding-bottom:120px;display:none;">
+
+        <!-- Invite CTA banner -->
+        <div style="background:linear-gradient(135deg,#059669,#047857);border-radius:18px;padding:18px;margin-bottom:16px;">
+          <p style="font-size:13px;font-weight:700;color:#fff;margin-bottom:4px;">Undang Pengelola Baru</p>
+          <p style="font-size:11px;color:rgba(255,255,255,0.75);line-height:1.5;margin-bottom:14px;">Bagikan link agar pengelola lain bisa bergabung ke Bank Sampah BTH.</p>
+          <button onclick="copyInviteLink()" style="width:100%;background:#fff;color:#059669;border:none;border-radius:12px;padding:12px 16px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:opacity 0.15s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#059669" stroke-width="2.2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Salin Link Undangan
+          </button>
+        </div>
+
+        <!-- Section header -->
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
+          <div style="width:4px;height:16px;background:#059669;border-radius:4px;"></div>
+          <p style="font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.06em;">Pengelola Tergabung</p>
+          <span style="font-size:10px;font-weight:600;color:#059669;background:#ecfdf5;padding:1px 8px;border-radius:10px;margin-left:auto;">3 aktif</span>
+        </div>
+
+        <!-- Team member list -->
+        <div style="background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.06);margin-bottom:12px;">
+          <!-- Member 1 - current user -->
+          <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid #f9fafb;">
+            <div style="width:40px;height:40px;background:linear-gradient(135deg,#059669,#047857);border-radius:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <span style="font-size:14px;font-weight:800;color:#fff;">AF</span>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <p style="font-size:13px;font-weight:700;color:#111827;">Ahmad Fadil</p>
+                <span style="font-size:10px;font-weight:700;color:#fff;background:#059669;padding:2px 7px;border-radius:10px;">Anda</span>
+              </div>
+              <p style="font-size:11px;color:#9ca3af;">ahmad.fadil@banksampahibth.id</p>
+            </div>
+            <span style="font-size:10px;font-weight:700;color:#059669;background:#ecfdf5;padding:3px 9px;border-radius:10px;">Pengelola</span>
+          </div>
+          <!-- Member 2 -->
+          <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid #f9fafb;">
+            <div style="width:40px;height:40px;background:#ede9fe;border-radius:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <span style="font-size:14px;font-weight:800;color:#7c3aed;">RP</span>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <p style="font-size:13px;font-weight:700;color:#111827;">Rina Puspita</p>
+              <p style="font-size:11px;color:#9ca3af;">rina.puspita@banksampahibth.id</p>
+            </div>
+            <span style="font-size:10px;font-weight:700;color:#059669;background:#ecfdf5;padding:3px 9px;border-radius:10px;">Pengelola</span>
+          </div>
+          <!-- Member 3 -->
+          <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;">
+            <div style="width:40px;height:40px;background:#fef3c7;border-radius:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <span style="font-size:14px;font-weight:800;color:#d97706;">DS</span>
+            </div>
+            <div style="flex:1;min-width:0;">
+              <p style="font-size:13px;font-weight:700;color:#111827;">Dimas Saputra</p>
+              <p style="font-size:11px;color:#9ca3af;">dimas.saputra@banksampahibth.id</p>
+            </div>
+            <span style="font-size:10px;font-weight:700;color:#059669;background:#ecfdf5;padding:3px 9px;border-radius:10px;">Pengelola</span>
+          </div>
+        </div>
+
+      </div><!-- end stab-content-tim -->
+
+      <!-- Sticky Bottom Buttons -->
+      <div id="settings-bottom-bar" style="position:absolute;bottom:0;left:0;right:0;padding:12px 16px 20px;background:linear-gradient(to top,#f9fafb 65%,transparent);display:flex;flex-direction:column;gap:8px;">
+        <button onclick="saveSettings()" style="width:100%;background:linear-gradient(135deg,#059669,#047857);color:#fff;border:none;border-radius:14px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(5,150,105,0.3);display:flex;align-items:center;justify-content:center;gap:8px;">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="white" stroke-width="2.5"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v14a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Simpan Pengaturan
+        </button>
+        <button onclick="doLogout()" style="width:100%;background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:14px;padding:13px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:background 0.2s;" onmouseover="this.style.background='#fff7f7'" onmouseout="this.style.background='#fff'">
+          <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="#dc2626" stroke-width="2.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Keluar dari Aplikasi
+        </button>
+      </div>
+    </div>
+
+
+    <!-- ══════════════════════════════════════════
+         OVERLAY: FILTER RENTANG TANGGAL
+    ══════════════════════════════════════════ -->
+    <div id="overlay-date-filter" class="overlay-base" style="z-index:54;" onclick="if(event.target===this)closeOverlay('overlay-date-filter')">
+      <div class="sheet-panel">
+        <div style="width:36px;height:4px;background:#e5e7eb;border-radius:4px;margin:0 auto 16px;"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
+          <p style="font-size:15px;font-weight:800;color:#111827;">Pilih Rentang Waktu</p>
+          <button onclick="closeOverlay('overlay-date-filter')" style="width:30px;height:30px;background:#f3f4f6;border-radius:8px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#6b7280" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Dari Tanggal</label>
+          <input id="date-from" type="date" class="form-input">
+        </div>
+        <div class="form-field" style="margin-bottom:24px;">
+          <label class="form-label">Sampai Tanggal</label>
+          <input id="date-to" type="date" class="form-input">
+        </div>
+        <div style="background:#f0fdf4;border-radius:12px;padding:10px 14px;margin-bottom:18px;display:flex;align-items:center;gap:8px;">
+          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#059669" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <p style="font-size:11px;color:#059669;font-weight:600;">Filter akan diterapkan ke daftar transaksi.</p>
+        </div>
+        <button onclick="applyDateFilter()" style="width:100%;background:linear-gradient(135deg,#059669,#047857);color:#fff;border:none;border-radius:14px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(5,150,105,0.3);">
+          Terapkan Filter
+        </button>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════
+         OVERLAY: PICK CUSTOMER (transaksi)
+    ══════════════════════════════════════════ -->
+    <div id="overlay-pick-customer" class="overlay-base" onclick="if(event.target===this)closeOverlay('overlay-pick-customer')">
+      <div class="sheet-panel">
+        <div style="width:36px;height:4px;background:#e5e7eb;border-radius:4px;margin:0 auto 16px;"></div>
+        <p style="font-size:14px;font-weight:700;color:#111827;margin-bottom:12px;">Pilih Nasabah</p>
+        <div style="display:flex;align-items:center;gap:8px;background:#f9fafb;border-radius:12px;padding:9px 12px;margin-bottom:14px;">
+          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <input type="text" id="pick-customer-search" oninput="renderPickCustomerList(this.value)" placeholder="Cari nama..." style="background:none;border:none;outline:none;font-size:13px;color:#374151;width:100%;font-family:'Plus Jakarta Sans',sans-serif;">
+        </div>
+        <div id="pick-customer-list"></div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════
+         OVERLAY: CUSTOMER DETAIL SHEET
+    ══════════════════════════════════════════ -->
+    <div id="overlay-customer-detail" class="overlay-base" onclick="if(event.target===this)closeOverlay('overlay-customer-detail')">
+      <div class="sheet-panel" id="customer-detail-panel">
+        <!-- filled by JS -->
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════
+         OVERLAY: FORM CUSTOMER (add/edit)
+    ══════════════════════════════════════════ -->
+    <div id="overlay-form-customer" class="overlay-base" onclick="if(event.target===this)closeOverlay('overlay-form-customer')">
+      <div class="sheet-panel">
+        <div style="width:36px;height:4px;background:#e5e7eb;border-radius:4px;margin:0 auto 16px;"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <p id="fc-sheet-title" style="font-size:15px;font-weight:800;color:#111827;">Tambah Nasabah</p>
+          <button onclick="closeOverlay('overlay-form-customer')" style="width:30px;height:30px;background:#f3f4f6;border-radius:8px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#6b7280" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <p style="font-size:12px;color:#9ca3af;margin-bottom:18px;line-height:1.5;">Pastikan nomor WhatsApp aktif untuk menerima notifikasi transaksi.</p>
+        <input type="hidden" id="fc-editing-id">
+        <div class="form-field">
+          <label class="form-label">Nama Lengkap</label>
+          <input id="fc-name" type="text" class="form-input" placeholder="Contoh: Budi Santoso">
+          <p id="fc-name-err" class="field-error">Nama wajib diisi (minimal 3 karakter).</p>
+        </div>
+        <!-- Nomor Nasabah & Jenis Kelamin in a 2-col row -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="form-field">
+            <label class="form-label">ID Nasabah</label>
+            <input id="fc-number" type="text" class="form-input" placeholder="Contoh: NAS-0900">
+          </div>
+          <div class="form-field">
+            <label class="form-label">Jenis Kelamin</label>
+            <div style="position:relative;">
+              <select id="fc-gender" class="form-select">
+                <option value="">— Pilih —</option>
+                <option value="Laki-laki">Laki-laki</option>
+                <option value="Perempuan">Perempuan</option>
+              </select>
+              <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;color:#9ca3af;font-size:12px;">▾</span>
+            </div>
+          </div>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Tanggal Lahir</label>
+          <input id="fc-dob" type="date" class="form-input">
+        </div>
+        <div class="form-field">
+          <label class="form-label">Nomor WhatsApp</label>
+          <div id="fc-phone-wrap" style="display:flex;align-items:center;background:#f9fafb;border:1.5px solid #e5e7eb;border-radius:12px;overflow:hidden;transition:border-color 0.2s,box-shadow 0.2s;" onfocusin="this.style.borderColor='#059669';this.style.boxShadow='0 0 0 3px rgba(5,150,105,0.12)'" onfocusout="this.style.borderColor='#e5e7eb';this.style.boxShadow='none'">
+            <span style="padding:11px 10px 11px 13px;font-size:13px;color:#6b7280;font-weight:600;border-right:1px solid #e5e7eb;background:#f3f4f6;white-space:nowrap;">+62</span>
+            <input id="fc-phone" type="tel" style="flex:1;background:none;border:none;outline:none;padding:11px 13px;font-size:13px;color:#111827;font-family:'Plus Jakarta Sans',sans-serif;" placeholder="812-3456-7890">
+          </div>
+          <p id="fc-phone-err" class="field-error">Nomor WhatsApp wajib diisi.</p>
+        </div>
+        <div class="form-field" style="margin-bottom:24px;">
+          <label class="form-label">Alamat Lengkap</label>
+          <textarea id="fc-address" class="form-input" rows="3" style="resize:none;" placeholder="Nama jalan, RT/RW, Kelurahan..."></textarea>
+          <p id="fc-address-err" class="field-error">Alamat wajib diisi.</p>
+        </div>
+        <button onclick="submitFormCustomer()" style="width:100%;background:linear-gradient(135deg,#059669,#047857);color:#fff;border:none;border-radius:14px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(5,150,105,0.3);">
+          <span id="fc-submit-label">Simpan Nasabah</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════
+         OVERLAY: FORM PRICE (add/edit)
+    ══════════════════════════════════════════ -->
+    <div id="overlay-form-price" class="overlay-base" onclick="if(event.target===this)closeOverlay('overlay-form-price')">
+      <div class="sheet-panel">
+        <div style="width:36px;height:4px;background:#e5e7eb;border-radius:4px;margin:0 auto 16px;"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <p id="fp-sheet-title" style="font-size:15px;font-weight:800;color:#111827;">Tambah Jenis Sampah</p>
+          <button onclick="closeOverlay('overlay-form-price')" style="width:30px;height:30px;background:#f3f4f6;border-radius:8px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#6b7280" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <input type="hidden" id="fp-editing-id">
+        <div class="form-field">
+          <label class="form-label">ID / Kode Sampah</label>
+          <input id="fp-kode" type="text" class="form-input" placeholder="Contoh: PLS-001">
+          <p style="font-size:11px;color:#9ca3af;margin-top:5px;">Kode unik untuk identifikasi jenis sampah ini.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Nama Jenis Sampah</label>
+          <input id="fp-name" type="text" class="form-input" placeholder="Contoh: Plastik PET">
+          <p id="fp-name-err" class="field-error">Nama jenis sampah wajib diisi.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Kategori</label>
+          <div style="position:relative;">
+            <select id="fp-category" class="form-select">
+              <option value="Kertas">📄 Kertas</option>
+              <option value="Plastik">♻️ Plastik</option>
+              <option value="Logam">⚙️ Logam</option>
+              <option value="Kaca">🫙 Kaca</option>
+              <option value="Dll">📦 Dll</option>
+            </select>
+            <span style="position:absolute;right:12px;top:50%;transform:translateY(-50%);pointer-events:none;color:#9ca3af;font-size:13px;">▾</span>
+          </div>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Deskripsi (opsional)</label>
+          <input id="fp-desc" type="text" class="form-input" placeholder="Contoh: Botol bening, kemasan plastik">
+        </div>
+        <div class="form-field" style="margin-bottom:24px;">
+          <label class="form-label">Harga Beli per kg (Rp)</label>
+          <div style="position:relative;">
+            <span style="position:absolute;left:13px;top:50%;transform:translateY(-50%);font-size:13px;font-weight:600;color:#6b7280;">Rp</span>
+            <input id="fp-price" type="number" class="form-input" style="padding-left:34px;" placeholder="0" min="0">
+          </div>
+          <p id="fp-price-err" class="field-error">Harga wajib diisi dan harus lebih dari 0.</p>
+          <p style="font-size:11px;color:#9ca3af;margin-top:5px;">Harga yang akan dibayarkan ke nasabah.</p>
+        </div>
+        <button onclick="submitFormPrice()" style="width:100%;background:linear-gradient(135deg,#059669,#047857);color:#fff;border:none;border-radius:14px;padding:14px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(5,150,105,0.3);">
+          <span id="fp-submit-label">Simpan Jenis Sampah</span>
+        </button>
+        <button id="fp-deactivate-btn" onclick="askDeactivatePrice()" style="display:none;width:100%;background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:14px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;margin-top:8px;">
+          🚫 Nonaktifkan Jenis Sampah
+        </button>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════
+         MODAL: TRANSAKSI SUKSES
+    ══════════════════════════════════════════ -->
+    <div id="modal-tx-success" class="modal-base">
+      <div class="modal-box">
+        <div style="width:60px;height:60px;background:#d1fae5;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
+          <svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="#059669" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+        </div>
+        <h3 style="font-size:17px;font-weight:800;color:#111827;margin-bottom:6px;">Transaksi Berhasil!</h3>
+        <p style="font-size:12px;color:#6b7280;line-height:1.6;margin-bottom:6px;" id="modal-summary">—</p>
+        <div style="background:#f9fafb;border-radius:12px;padding:10px 14px;margin-bottom:18px;text-align:left;">
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+            <span style="font-size:11px;color:#6b7280;">Nasabah</span>
+            <span style="font-size:11px;font-weight:600;color:#111827;" id="modal-customer">—</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+            <span style="font-size:11px;color:#6b7280;">Nilai Setoran</span>
+            <span style="font-size:13px;font-weight:800;color:#059669;" id="modal-total">—</span>
+          </div>
+          <div style="height:1px;background:#e5e7eb;margin-bottom:6px;"></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:11px;color:#6b7280;">Saldo Terbaru</span>
+            <span style="font-size:14px;font-weight:800;color:#047857;" id="modal-new-saldo">—</span>
+          </div>
+        </div>
+        <button onclick="closeModal()" style="width:100%;background:linear-gradient(135deg,#059669,#047857);color:#fff;border:none;border-radius:12px;padding:13px;font-size:13px;font-weight:700;cursor:pointer;">
+          Kirim Notif WhatsApp & Selesai
+        </button>
+        <button onclick="closeModal()" style="width:100%;background:none;color:#6b7280;border:none;padding:10px;font-size:12px;font-weight:600;cursor:pointer;margin-top:4px;">Lewati</button>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════
+         MODAL: KONFIRMASI (nonaktif / aktifkan)
+    ══════════════════════════════════════════ -->
+    <div id="modal-confirm" class="modal-base">
+      <div class="modal-box">
+        <div id="modal-confirm-icon" style="width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;"></div>
+        <h3 id="modal-confirm-title" style="font-size:16px;font-weight:800;color:#111827;margin-bottom:8px;"></h3>
+        <p id="modal-confirm-desc" style="font-size:12px;color:#6b7280;line-height:1.6;margin-bottom:20px;"></p>
+        <div style="display:flex;gap:10px;">
+          <button onclick="closeConfirmModal()" style="flex:1;background:#f3f4f6;color:#374151;border:none;border-radius:12px;padding:13px;font-size:13px;font-weight:700;cursor:pointer;">Batal</button>
+          <button id="modal-confirm-yes" style="flex:1;border:none;border-radius:12px;padding:13px;font-size:13px;font-weight:700;cursor:pointer;"></button>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ══════════════════════════════════════════
+         OVERLAY: DETAIL TRANSAKSI
+    ══════════════════════════════════════════ -->
+    <div id="overlay-tx-detail" class="overlay-base" onclick="if(event.target===this)closeOverlay('overlay-tx-detail')">
+      <div class="sheet-panel" id="tx-detail-panel" style="max-height:640px;">
+        <!-- filled by JS -->
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════
+         MODAL: KONFIRMASI NONAKTIFKAN JENIS SAMPAH
+    ══════════════════════════════════════════ -->
+    <div id="modal-deactivate-price" class="modal-base" style="z-index:72;">
+      <div class="modal-box">
+        <div style="width:56px;height:56px;background:#fef3c7;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;">
+          <span style="font-size:26px;">⚠️</span>
+        </div>
+        <h3 style="font-size:16px;font-weight:800;color:#111827;margin-bottom:8px;">Nonaktifkan Jenis Sampah?</h3>
+        <p id="modal-deactivate-price-desc" style="font-size:12px;color:#6b7280;line-height:1.6;margin-bottom:20px;"></p>
+        <div style="display:flex;gap:10px;">
+          <button onclick="closeDeactivatePriceModal()" style="flex:1;background:#f3f4f6;color:#374151;border:none;border-radius:12px;padding:13px;font-size:13px;font-weight:700;cursor:pointer;">Batal</button>
+          <button id="modal-deactivate-price-yes" style="flex:1;background:linear-gradient(135deg,#dc2626,#b91c1c);color:#fff;border:none;border-radius:12px;padding:13px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(220,38,38,0.3);">Ya, Nonaktifkan</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════
+         MODAL: KONFIRMASI LOGOUT
+    ══════════════════════════════════════════ -->
+    <div id="modal-logout" class="modal-base">
+      <div class="modal-box">
+        <div style="width:56px;height:56px;background:#fee2e2;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;">
+          <svg width="26" height="26" fill="none" viewBox="0 0 24 24" stroke="#dc2626" stroke-width="2.2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </div>
+        <h3 style="font-size:16px;font-weight:800;color:#111827;margin-bottom:8px;">Yakin ingin keluar?</h3>
+        <p style="font-size:12px;color:#6b7280;line-height:1.6;margin-bottom:20px;">Anda akan keluar dari sesi ini dan kembali ke halaman login.</p>
+        <div style="display:flex;gap:10px;">
+          <button onclick="closeLogoutModal()" style="flex:1;background:#f3f4f6;color:#374151;border:none;border-radius:12px;padding:13px;font-size:13px;font-weight:700;cursor:pointer;">Batal</button>
+          <button onclick="confirmLogout()" style="flex:1;background:linear-gradient(135deg,#dc2626,#b91c1c);color:#fff;border:none;border-radius:12px;padding:13px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(220,38,38,0.3);">Ya, Keluar</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end app-shell -->
+</div>
+
+<script>
+// ══════════════════════════════════════════════════
+// DATA
+// ══════════════════════════════════════════════════
+const customers = [
+  { id:'NAS-0891', nasabahId:'NAS-0891', name:'Ahmad Ridwan',  phone:'0812-3456-7890', address:'Jl. Mawar No.12, RT.02/03, Kukusan', saldo:450000,  active:true,  initials:'AR', color:'#059669', bg:'#d1fae5', gender:'Laki-laki',  dob:'1988-04-15', joinDate:'3 Jan 2025' },
+  { id:'NAS-0892', nasabahId:'NAS-0892', name:'Budi Santoso',  phone:'0857-1122-3344', address:'Jl. Melati No.5, RT.04/01, Kukusan',  saldo:125500,  active:true,  initials:'BS', color:'#7c3aed', bg:'#ede9fe', gender:'Laki-laki',  dob:'1992-07-22', joinDate:'10 Mar 2025' },
+  { id:'NAS-0893', nasabahId:'NAS-0893', name:'Citra Wijaya',  phone:'0896-9988-7766', address:'Jl. Kenanga No.8, RT.01/02, Beji',   saldo:890000,  active:true,  initials:'CW', color:'#d97706', bg:'#fef3c7', gender:'Perempuan', dob:'1995-11-03', joinDate:'22 Feb 2025' },
+  { id:'NAS-0894', nasabahId:'NAS-0894', name:'Dewi Putri',    phone:'0811-2223-4455', address:'Jl. Anggrek No.3, RT.05/02, Kukusan',saldo:35000,   active:false, initials:'DP', color:'#dc2626', bg:'#fee2e2', gender:'Perempuan', dob:'1990-02-28', joinDate:'5 Jun 2025' },
+  { id:'NAS-0895', nasabahId:'NAS-0895', name:'Eko Prasetyo',  phone:'0813-5678-9012', address:'Jl. Dahlia No.17, RT.03/04, Kukusan',saldo:215000,  active:true,  initials:'EP', color:'#0891b2', bg:'#cffafe', gender:'Laki-laki',  dob:'1985-09-10', joinDate:'17 Apr 2025' },
+  { id:'NAS-0896', nasabahId:'NAS-0896', name:'Farida Hanum',  phone:'0878-4321-0987', address:'Jl. Flamboyan No.9, RT.06/01, Beji', saldo:75000,   active:false, initials:'FH', color:'#be185d', bg:'#fce7f3', gender:'Perempuan', dob:'1998-06-17', joinDate:'1 Mei 2025' },
+];
+
+const trashTypes = [
+  { id:1, kode:'PLS-001', name:'Plastik PET',  category:'Plastik', desc:'Botol bening, kemasan', price:3500, icon:'♻️' },
+  { id:2, kode:'KRT-001', name:'Kertas HVS',   category:'Kertas',  desc:'Kertas dokumen, buku',  price:1200, icon:'📄' },
+  { id:3, kode:'KRT-002', name:'Kardus',       category:'Kertas',  desc:'Karton tebal, box',     price:1500, icon:'📦' },
+  { id:4, kode:'LGM-001', name:'Logam Besi',   category:'Logam',   desc:'Besi tua, kaleng',      price:4000, icon:'⚙️' },
+  { id:5, kode:'LGM-002', name:'Aluminium',    category:'Logam',   desc:'Kaleng minuman, foil',  price:8000, icon:'🥫' },
+];
+
+const allTransactions = [
+  { id:'TX-001', name:'Budi Santoso',      type:'Plastik',   weight:'5.2 kg',  value:15600, time:'09:45', day:'Hari ini',   initials:'BS', bg:'#d1fae5', color:'#059669', waStatus:'sent',
+    items:[{name:'Plastik PET',weight:5.2,priceSnap:3000,subtotal:15600}], saldoAfter:141100, tanggal:'12 Jun 2026, 09:45' },
+  { id:'TX-002', name:'Warung Bu Siti',    type:'Logam',     weight:'2.1 kg',  value:10500, time:'08:30', day:'Hari ini',   initials:'WS', bg:'#fef3c7', color:'#d97706', waStatus:'failed',
+    items:[{name:'Logam Besi',weight:2.1,priceSnap:5000,subtotal:10500}], saldoAfter:85000, tanggal:'12 Jun 2026, 08:30' },
+  { id:'TX-003', name:'Kantor Desa Mekar', type:'Kertas',    weight:'12.0 kg', value:24000, time:'—',     day:'Kemarin',    initials:'KD', bg:'#dbeafe', color:'#1d4ed8', waStatus:'sent',
+    items:[{name:'Kertas HVS',weight:8,priceSnap:1200,subtotal:9600},{name:'Kardus',weight:4,priceSnap:1500,subtotal:6000},{name:'Kertas HVS',weight:7,priceSnap:1200,subtotal:8400}], saldoAfter:124000, tanggal:'11 Jun 2026, 14:10' },
+  { id:'TX-004', name:'Ahmad Yani',        type:'Plastik',   weight:'3.5 kg',  value:10500, time:'—',     day:'Kemarin',    initials:'AY', bg:'#d1fae5', color:'#059669', waStatus:'sent',
+    items:[{name:'Plastik PET',weight:3.5,priceSnap:3000,subtotal:10500}], saldoAfter:46500, tanggal:'11 Jun 2026, 10:05' },
+  { id:'TX-005', name:'Citra Wijaya',      type:'Aluminium', weight:'1.8 kg',  value:14400, time:'—',     day:'3 hari lalu',initials:'CW', bg:'#fce7f3', color:'#be185d', waStatus:'failed',
+    items:[{name:'Aluminium',weight:1.8,priceSnap:8000,subtotal:14400}], saldoAfter:904400, tanggal:'9 Jun 2026, 15:30' },
+];
+
+// ══════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════
+let selectedCustomer = null;
+let txItems = [];
+let itemCounter = 0;
+let activeCustomerTab = 'active'; // 'active' | 'inactive'
+let confirmCallback = null;
+let trashTypeIdCounter = 10;
+
+// ══════════════════════════════════════════════════
+// NAVIGATION
+// ══════════════════════════════════════════════════
+function goToScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => {
+    s.classList.remove('active');
+    s.style.opacity = '0';
+    s.style.transform = 'translateX(20px)';
+  });
+  const t = document.getElementById(id);
+  if (!t) return;
+  t.classList.add('active');
+  setTimeout(() => { t.style.opacity='1'; t.style.transform='translateX(0)'; }, 10);
+  if (id === 'screen-settings') {
+    setTimeout(() => { updateWaPreview(); switchSettingsTab('pribadi'); }, 60);
+  }
+}
+
+// ══════════════════════════════════════════════════
+// EMPTY STATE HELPER
+// ══════════════════════════════════════════════════
+function emptyState(svgPath, title, desc) {
+  return `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 24px;text-align:center;">
+    <div style="width:72px;height:72px;background:#f3f4f6;border-radius:20px;display:flex;align-items:center;justify-content:center;margin-bottom:16px;">
+      <svg width="36" height="36" fill="none" viewBox="0 0 24 24" stroke="#d1d5db" stroke-width="1.5">${svgPath}</svg>
+    </div>
+    <p style="font-size:14px;font-weight:700;color:#9ca3af;margin-bottom:6px;">${title}</p>
+    <p style="font-size:12px;color:#d1d5db;line-height:1.6;max-width:200px;">${desc}</p>
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════
+// SPLASH
+// ══════════════════════════════════════════════════
+(function initSplash() {
+  const splash = document.getElementById('splash');
+  setTimeout(() => {
+    splash.classList.add('fade-out');
+    setTimeout(() => splash.style.display = 'none', 500);
+  }, 1500);
+})();
+
+// ══════════════════════════════════════════════════
+// OVERLAY HELPERS
+// ══════════════════════════════════════════════════
+function openOverlay(id) {
+  const el = document.getElementById(id);
+  el.style.display = 'flex';
+  setTimeout(() => el.classList.add('open'), 10);
+}
+function closeOverlay(id) {
+  const el = document.getElementById(id);
+  el.classList.remove('open');
+  setTimeout(() => el.style.display='none', 300);
+}
+
+// ══════════════════════════════════════════════════
+// LOGIN
+// ══════════════════════════════════════════════════
+function doLogin() {
+  const btn  = document.getElementById('btn-google-login');
+  const txt  = document.getElementById('login-btn-text');
+  const spin = document.getElementById('login-spinner');
+  btn.disabled = true; btn.style.opacity = '0.8';
+  txt.style.display = 'none'; spin.style.display = 'block';
+  setTimeout(() => {
+    btn.disabled = false; btn.style.opacity = '1';
+    txt.style.display = 'block'; spin.style.display = 'none';
+    goToScreen('screen-profil');
+  }, 1200);
+}
+
+// ══════════════════════════════════════════════════
+// SUBMIT PROFIL PRIBADI
+// ══════════════════════════════════════════════════
+function submitProfil() {
+  // Ambil nilai
+  const nama   = document.getElementById('profil-nama').value.trim();
+  const gender = document.getElementById('profil-gender').value;
+  const dob    = document.getElementById('profil-dob').value;
+  const hp     = document.getElementById('profil-hp').value.trim();
+
+  // Reset error state
+  ['nama','gender','dob','hp'].forEach(k => {
+    document.getElementById('err-profil-' + k).classList.remove('visible');
+    const field = document.getElementById('profil-' + k);
+    if (field) { field.style.borderColor = ''; field.style.boxShadow = ''; }
+  });
+
+  // Validasi
+  let ok = true;
+  function markErr(key) {
+    document.getElementById('err-profil-' + key).classList.add('visible');
+    const field = document.getElementById('profil-' + key);
+    if (field) {
+      field.style.borderColor = '#ef4444';
+      field.style.boxShadow   = '0 0 0 3px rgba(239,68,68,0.12)';
+    }
+    ok = false;
+  }
+  if (!nama)   markErr('nama');
+  if (!gender) markErr('gender');
+  if (!dob)    markErr('dob');
+  if (!hp)     markErr('hp');
+  if (!ok) return;
+
+  // Tampilkan loading
+  const btnText = document.getElementById('profil-btn-text');
+  const spinner = document.getElementById('profil-spinner');
+  const btnIcon = document.getElementById('profil-btn-icon');
+  btnText.textContent = 'Menyimpan...';
+  spinner.style.display = 'inline-block';
+  btnIcon.style.display = 'none';
+
+  // Simulasi simpan → lanjut ke dashboard (atau screen-registrasi-bs jika flow pendaftar)
+  setTimeout(() => {
+    btnText.textContent = 'Simpan Profil & Lanjut';
+    spinner.style.display = 'none';
+    btnIcon.style.display = 'inline-block';
+    showToast('Profil berhasil disimpan ✓');
+    goToScreen('screen-registrasi');
+  }, 1000);
+}
+
+// ══════════════════════════════════════════════════
+// HANDLE UPLOAD FOTO KEGIATAN
+// ══════════════════════════════════════════════════
+function handleFotoUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  window._fotoUploaded = true;
+
+  // Tampilkan state "sudah upload"
+  document.getElementById('reg-foto-idle').style.display = 'none';
+  document.getElementById('reg-foto-done').style.display = 'flex';
+  document.getElementById('reg-foto-name').textContent   = file.name;
+
+  // Ubah warna border drop zone jadi hijau permanen
+  const label = document.getElementById('reg-foto-label');
+  label.style.borderColor = '#059669';
+  label.style.borderStyle = 'solid';
+  label.style.background  = '#f0fdf4';
+
+  // Hapus error jika ada
+  document.getElementById('err-reg-foto').classList.remove('visible');
+}
+
+// ══════════════════════════════════════════════════
+// SUBMIT REGISTRASI BANK SAMPAH
+// ══════════════════════════════════════════════════
+function submitRegistrasi() {
+  // Ambil nilai
+  const namaBS = document.getElementById('reg-nama-bs').value.trim();
+  const alamat = document.getElementById('reg-alamat').value.trim();
+  const telp   = document.getElementById('reg-telp').value.trim();
+  const foto   = document.getElementById('reg-foto-input').files[0];
+
+  // Reset error
+  ['nama-bs', 'alamat', 'telp', 'foto'].forEach(k => {
+    document.getElementById('err-reg-' + k).classList.remove('visible');
+  });
+  ['reg-nama-bs', 'reg-alamat'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.style.borderColor = ''; el.style.boxShadow = ''; }
+  });
+
+  // Validasi
+  let ok = true;
+  function markErr(key, fieldId) {
+    document.getElementById('err-reg-' + key).classList.add('visible');
+    if (fieldId) {
+      const el = document.getElementById(fieldId);
+      if (el) { el.style.borderColor = '#ef4444'; el.style.boxShadow = '0 0 0 3px rgba(239,68,68,0.12)'; }
+    }
+    ok = false;
+  }
+  if (!namaBS) markErr('nama-bs', 'reg-nama-bs');
+  if (!alamat) markErr('alamat',  'reg-alamat');
+  if (!telp)   markErr('telp');
+  if (!foto)   markErr('foto');
+  if (!ok) return;
+
+  // Tampilkan loading
+  document.getElementById('reg-btn-text').textContent   = 'Mengirim Data...';
+  document.getElementById('reg-spinner').style.display  = 'inline-block';
+  document.getElementById('reg-btn-icon').style.display = 'none';
+
+  // Simulasi proses loading ke backend lalu pindah ke layar Pending
+  setTimeout(() => {
+    // Kembalikan state tombol ke semula (untuk jaga-jaga saat user kembali)
+    document.getElementById('reg-btn-text').textContent   = 'Ajukan Pendaftaran';
+    document.getElementById('reg-spinner').style.display  = 'none';
+    document.getElementById('reg-btn-icon').style.display = 'inline-block';
+    
+    // Pindah ke layar Pending
+    goToScreen('screen-pending');
+  }, 1500);
+}
+// ══════════════════════════════════════════════════
+// PICK CUSTOMER SHEET (transaksi)
+// ══════════════════════════════════════════════════
+function openPickCustomerSheet() {
+  document.getElementById('pick-customer-search').value = '';
+  renderPickCustomerList('');
+  openOverlay('overlay-pick-customer');
+}
+function renderPickCustomerList(q) {
+  const list = customers.filter(c => c.active && c.name.toLowerCase().includes(q.toLowerCase()));
+  const el = document.getElementById('pick-customer-list');
+  if (!list.length) { el.innerHTML=emptyState('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>','Nasabah Tidak Ditemukan','Coba kata kunci yang berbeda.'); return; }
+  el.innerHTML = list.map(c=>`
+    <div onclick="selectTxCustomer('${c.id}')" style="display:flex;align-items:center;gap:12px;padding:11px 10px;border-radius:12px;cursor:pointer;transition:background 0.15s;margin-bottom:4px;" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='transparent'">
+      <div style="width:38px;height:38px;background:${c.bg};border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <span style="font-size:13px;font-weight:700;color:${c.color};">${c.initials}</span>
+      </div>
+      <div style="flex:1;min-width:0;">
+        <p style="font-size:13px;font-weight:600;color:#111827;">${c.name}</p>
+        <p style="font-size:11px;color:#9ca3af;">${c.id} · ${c.phone}</p>
+      </div>
+      <div style="text-align:right;flex-shrink:0;">
+        <p style="font-size:11px;color:#6b7280;font-weight:500;">Saldo</p>
+        <p style="font-size:12px;font-weight:700;color:#059669;">Rp ${c.saldo.toLocaleString('id-ID')}</p>
+      </div>
+    </div>`).join('');
+}
+function selectTxCustomer(id) {
+  selectedCustomer = customers.find(c=>c.id===id);
+  if (!selectedCustomer) return;
+  const pill=document.getElementById('customer-pill');
+  pill.classList.add('selected');
+  const av=document.getElementById('customer-avatar');
+  av.style.background=selectedCustomer.bg;
+  av.innerHTML=`<span style="font-size:13px;font-weight:700;color:${selectedCustomer.color};">${selectedCustomer.initials}</span>`;
+  document.getElementById('customer-name-display').style.color='#111827';
+  document.getElementById('customer-name-display').textContent=selectedCustomer.name;
+  const idd=document.getElementById('customer-id-display');
+  idd.style.display='block'; idd.style.color='#6b7280';
+  idd.textContent=`ID: ${selectedCustomer.id} · Saldo: Rp ${selectedCustomer.saldo.toLocaleString('id-ID')}`;
+  closeOverlay('overlay-pick-customer');
+  updateSaveButton();
+}
+
+// ══════════════════════════════════════════════════
+// CUSTOMER PAGE — list & tabs
+// ══════════════════════════════════════════════════
+function switchCustomerTab(tab) {
+  activeCustomerTab = tab;
+  document.getElementById('tab-active').className  = 'tab-btn ' + (tab==='active'  ?'active':'inactive');
+  document.getElementById('tab-inactive').className= 'tab-btn ' + (tab==='inactive'?'active':'inactive');
+  renderCustomerPage();
+}
+
+function renderCustomerPage() {
+  const q = (document.getElementById('customer-search')?.value||'').toLowerCase();
+  const list = customers.filter(c => c.active === (activeCustomerTab==='active') && c.name.toLowerCase().includes(q));
+  const el = document.getElementById('customer-list');
+  const badge = document.getElementById('customer-count-badge');
+  if(badge) badge.textContent = customers.filter(c=>c.active).length + ' aktif';
+
+  if (!list.length) {
+    el.innerHTML = activeCustomerTab==='active'
+      ? emptyState('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>', 'Belum Ada Nasabah', 'Tap tombol + untuk menambahkan nasabah pertama.')
+      : emptyState('<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>','Tidak Ada Nasabah Nonaktif','Semua nasabah masih aktif bertransaksi.');
+    return;
+  }
+  el.innerHTML = list.map(c => {
+    const isInactive = !c.active;
+    return `
+    <div class="clickable-card" onclick="openCustomerDetail('${c.id}')" style="padding:14px;display:flex;align-items:center;gap:12px;">
+      <div style="width:42px;height:42px;background:${c.bg};border-radius:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${isInactive?'opacity:0.5':''}">
+        <span style="font-size:14px;font-weight:700;color:${c.color};">${c.initials}</span>
+      </div>
+      <div style="flex:1;min-width:0;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <p style="font-size:13px;font-weight:700;color:${isInactive?'#9ca3af':'#111827'};">${c.name}</p>
+          ${isInactive?'<span style="font-size:10px;font-weight:600;color:#9ca3af;background:#f3f4f6;padding:2px 7px;border-radius:10px;">Nonaktif</span>':''}
+        </div>
+        <p style="font-size:11px;color:#9ca3af;margin-top:1px;">${c.phone}</p>
+      </div>
+      <div style="text-align:right;flex-shrink:0;">
+        <p style="font-size:12px;font-weight:800;color:${isInactive?'#9ca3af':'#059669'};">Rp ${c.saldo.toLocaleString('id-ID')}</p>
+        <p style="font-size:10px;color:#d1d5db;margin-top:2px;">saldo</p>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════════════
+// CUSTOMER DETAIL SHEET
+// ══════════════════════════════════════════════════
+function openCustomerDetail(id) {
+  const c = customers.find(x=>x.id===id);
+  if (!c) return;
+  const isInactive = !c.active;
+  const joinDate = c.joinDate || '12 Mei 2026';
+  const txSummary = c.txSummary || 'Total: 15 Trx | 120 kg';
+  document.getElementById('customer-detail-panel').innerHTML = `
+    <div style="width:36px;height:4px;background:#e5e7eb;border-radius:4px;margin:0 auto 20px;"></div>
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;">
+      <div style="width:52px;height:52px;background:${c.bg};border-radius:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;${isInactive?'opacity:0.5':''}">
+        <span style="font-size:18px;font-weight:800;color:${c.color};">${c.initials}</span>
+      </div>
+      <div>
+        <p style="font-size:16px;font-weight:800;color:#111827;">${c.name}</p>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:3px;">
+          <span style="font-size:11px;color:#6b7280;">${c.id}</span>
+          ${isInactive?'<span style="font-size:10px;font-weight:700;color:#dc2626;background:#fee2e2;padding:2px 8px;border-radius:10px;">Nonaktif</span>':'<span style="font-size:10px;font-weight:700;color:#059669;background:#d1fae5;padding:2px 8px;border-radius:10px;">Aktif</span>'}
+        </div>
+      </div>
+    </div>
+    <div style="background:#f9fafb;border-radius:16px;padding:14px;margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+        <span style="font-size:12px;color:#6b7280;font-weight:500;">ID Nasabah</span>
+        <span style="font-size:12px;font-weight:700;color:#111827;font-family:monospace;letter-spacing:0.03em;">${c.nasabahId||c.id}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+        <span style="font-size:12px;color:#6b7280;font-weight:500;">Jenis Kelamin</span>
+        <span style="font-size:12px;font-weight:700;color:#374151;">${c.gender==='Laki-laki'?'♂ Laki-laki':c.gender==='Perempuan'?'♀ Perempuan':'—'}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+        <span style="font-size:12px;color:#6b7280;font-weight:500;">Tanggal Lahir</span>
+        <span style="font-size:12px;font-weight:700;color:#374151;">${c.dob?new Date(c.dob).toLocaleDateString('id-ID',{day:'numeric',month:'long',year:'numeric'}):'—'}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+        <span style="font-size:12px;color:#6b7280;font-weight:500;">Nomor WA</span>
+        <span style="font-size:12px;font-weight:700;color:#111827;">${c.phone}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+        <span style="font-size:12px;color:#6b7280;font-weight:500;">Saldo</span>
+        <span style="font-size:14px;font-weight:800;color:#059669;">Rp ${c.saldo.toLocaleString('id-ID')}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+        <span style="font-size:12px;color:#6b7280;font-weight:500;">Tanggal Daftar</span>
+        <span style="font-size:12px;font-weight:700;color:#374151;">📅 ${joinDate}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+        <span style="font-size:12px;color:#6b7280;font-weight:500;">Ringkasan Trx</span>
+        <span style="font-size:12px;font-weight:700;color:#7c3aed;">📊 ${txSummary}</span>
+      </div>
+      <div style="padding:8px 0;">
+        <span style="font-size:12px;color:#6b7280;font-weight:500;display:block;margin-bottom:4px;">Alamat</span>
+        <span style="font-size:12px;font-weight:600;color:#374151;line-height:1.5;">${c.address}</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="onDetailEdit('${c.id}')" ${isInactive?'disabled':''} style="flex:1;background:${isInactive?'#f3f4f6':'#fff'};color:${isInactive?'#d1d5db':'#059669'};border:${isInactive?'1.5px solid #e5e7eb':'1.5px solid #059669'};border-radius:13px;padding:13px;font-size:13px;font-weight:700;cursor:${isInactive?'not-allowed':'pointer'};transition:all 0.2s;">
+        ✏️ Edit Data
+      </button>
+      ${isInactive
+        ? `<button onclick="onDetailToggleActive('${c.id}',true)" style="flex:1;background:linear-gradient(135deg,#059669,#047857);color:#fff;border:none;border-radius:13px;padding:13px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(5,150,105,0.3);">✅ Aktifkan</button>`
+        : `<button onclick="onDetailToggleActive('${c.id}',false)" style="flex:1;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;border:none;border-radius:13px;padding:13px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(220,38,38,0.25);">🚫 Nonaktifkan</button>`
+      }
+    </div>
+  `;
+  openOverlay('overlay-customer-detail');
+}
+
+function onDetailEdit(id) {
+  closeOverlay('overlay-customer-detail');
+  setTimeout(()=>openFormCustomer(id), 320);
+}
+
+function onDetailToggleActive(id, makeActive) {
+  const c = customers.find(x=>x.id===id);
+  if (!c) return;
+  const action = makeActive ? 'mengaktifkan kembali' : 'menonaktifkan';
+  showConfirmModal(
+    makeActive ? '✅' : '⚠️',
+    makeActive ? '#d1fae5' : '#fef3c7',
+    makeActive ? 'Aktifkan Nasabah?' : 'Nonaktifkan Nasabah?',
+    `Yakin ingin ${action} nasabah <b>${c.name}</b>? ${makeActive?'Nasabah dapat bertransaksi kembali.':'Nasabah tidak dapat bertransaksi.'}`,
+    makeActive ? '#059669' : '#dc2626',
+    makeActive ? 'Ya, Aktifkan' : 'Ya, Nonaktifkan',
+    () => {
+      c.active = makeActive;
+      closeOverlay('overlay-customer-detail');
+      if (activeCustomerTab === 'active' && !makeActive) switchCustomerTab('inactive');
+      else if (activeCustomerTab === 'inactive' && makeActive) switchCustomerTab('active');
+      else renderCustomerPage();
+      showToast(makeActive ? `${c.name} diaktifkan kembali` : `${c.name} dinonaktifkan`);
+    }
+  );
+}
+
+// ══════════════════════════════════════════════════
+// FORM CUSTOMER (add / edit)
+// ══════════════════════════════════════════════════
+function openFormCustomer(editId) {
+  const isEdit = !!editId;
+  document.getElementById('fc-editing-id').value = editId || '';
+  document.getElementById('fc-sheet-title').textContent = isEdit ? 'Edit Nasabah' : 'Tambah Nasabah';
+  document.getElementById('fc-submit-label').textContent = isEdit ? 'Simpan Perubahan' : 'Simpan Nasabah';
+  if (isEdit) {
+    const c = customers.find(x=>x.id===editId);
+    if (c) {
+      document.getElementById('fc-name').value    = c.name;
+      document.getElementById('fc-phone').value   = c.phone.replace(/^0/,'');
+      document.getElementById('fc-address').value = c.address;
+      document.getElementById('fc-number').value  = c.nasabahId || c.id || '';
+      document.getElementById('fc-gender').value  = c.gender || '';
+      document.getElementById('fc-dob').value     = c.dob || '';
+    }
+  } else {
+    document.getElementById('fc-name').value    = '';
+    document.getElementById('fc-phone').value   = '';
+    document.getElementById('fc-address').value = '';
+    document.getElementById('fc-number').value  = '';
+    document.getElementById('fc-gender').value  = '';
+    document.getElementById('fc-dob').value     = '';
+  }
+  openOverlay('overlay-form-customer');
+}
+
+function submitFormCustomer() {
+  const name      = document.getElementById('fc-name').value.trim();
+  const phone     = document.getElementById('fc-phone').value.trim();
+  const address   = document.getElementById('fc-address').value.trim();
+  const editId    = document.getElementById('fc-editing-id').value;
+  const nasabahId = document.getElementById('fc-number').value.trim();
+  const gender    = document.getElementById('fc-gender').value;
+  const dob       = document.getElementById('fc-dob').value;
+
+  // Clear previous errors
+  ['fc-name-err','fc-phone-err','fc-address-err'].forEach(id => {
+    document.getElementById(id).classList.remove('visible');
+  });
+  ['fc-name','fc-phone-wrap','fc-address'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.style.borderColor=''; el.style.boxShadow=''; }
+  });
+
+  let ok = true;
+  function markErr(inputId, errId) {
+    const inp = document.getElementById(inputId);
+    if (inp) { inp.style.borderColor='#ef4444'; inp.style.boxShadow='0 0 0 3px rgba(239,68,68,0.12)'; }
+    document.getElementById(errId).classList.add('visible');
+    ok = false;
+  }
+  if (name.length < 3)  markErr('fc-name',     'fc-name-err');
+  if (!phone) {
+    markErr('fc-phone-wrap','fc-phone-err');
+    document.getElementById('fc-phone-err').textContent = 'Nomor WhatsApp wajib diisi.';
+  } else if (!/^(08|628?|62)/.test(phone) && !/^(8)/.test(phone)) {
+    // allow: 08xx, 628xx, 8xx (user omits leading 0)
+    const el = document.getElementById('fc-phone-wrap');
+    if (el) { el.style.borderColor='#ef4444'; el.style.boxShadow='0 0 0 3px rgba(239,68,68,0.12)'; }
+    document.getElementById('fc-phone-err').textContent = 'Format nomor harus diawali 08 atau 62.';
+    document.getElementById('fc-phone-err').classList.add('visible');
+    ok = false;
+  }
+  if (!address)         markErr('fc-address',   'fc-address-err');
+  if (!ok) return;
+
+  if (editId) {
+    const c = customers.find(x=>x.id===editId);
+    if (c) { c.name=name; c.phone=`0${phone}`; c.address=address; c.nasabahId=nasabahId; c.gender=gender; c.dob=dob; }
+    closeOverlay('overlay-form-customer');
+    renderCustomerPage();
+    renderPickCustomerList('');
+    showToast(`Data ${name} berhasil diperbarui`);
+  } else {
+    const initials = name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    const palette = [{c:'#059669',bg:'#d1fae5'},{c:'#7c3aed',bg:'#ede9fe'},{c:'#d97706',bg:'#fef3c7'},{c:'#0891b2',bg:'#cffafe'},{c:'#be185d',bg:'#fce7f3'}];
+    const pick = palette[customers.length % palette.length];
+    const joinDate = new Date().toLocaleDateString('id-ID',{day:'numeric',month:'long',year:'numeric'});
+    customers.push({ id:nasabahId||`NAS-0${900+customers.length}`, name, phone:`0${phone}`, address, saldo:0, active:true, initials, color:pick.c, bg:pick.bg, joinDate, gender, dob });
+    closeOverlay('overlay-form-customer');
+    renderCustomerPage();
+    renderPickCustomerList('');
+    showToast(`Nasabah ${name} berhasil ditambahkan`);
+  }
+}
+
+// ══════════════════════════════════════════════════
+// PRICE PAGE
+// ══════════════════════════════════════════════════
+let activePriceTab = 'active'; // 'active' | 'inactive'
+
+function switchPriceTab(tab) {
+  activePriceTab = tab;
+  const q = document.getElementById('price-search')?.value || '';
+  document.getElementById('price-tab-active').className   = 'tab-btn ' + (tab==='active'  ?'active':'inactive');
+  document.getElementById('price-tab-inactive').className = 'tab-btn ' + (tab==='inactive'?'active':'inactive');
+  filterPrices(q);
+}
+
+function renderPricePage(list) {
+  const isInactiveTab = activePriceTab === 'inactive';
+  const items = list !== undefined ? list
+    : trashTypes.filter(t => isInactiveTab ? t.active===false : t.active!==false);
+  const el = document.getElementById('price-list');
+  if (!items.length) {
+    el.innerHTML = emptyState(
+      isInactiveTab
+        ? `<path d="M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" stroke-linecap="round" stroke-linejoin="round"/>`
+        : `<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>`,
+      isInactiveTab ? 'Tidak Ada Jenis Nonaktif' : 'Belum Ada Jenis Sampah',
+      isInactiveTab ? 'Semua jenis sampah masih aktif.' : 'Tap tombol + untuk menambahkan jenis sampah baru.'
+    );
+    return;
+  }
+
+  // Category config: icon, label, colors
+  const CATEGORY_ORDER = ['Kertas','Plastik','Logam','Kaca','Dll'];
+  const CAT_STYLE = {
+    'Kertas': { icon:'📄', color:'#d97706', bg:'#fef3c7' },
+    'Plastik': { icon:'♻️', color:'#0891b2', bg:'#cffafe' },
+    'Logam':  { icon:'⚙️', color:'#6b7280', bg:'#f3f4f6' },
+    'Kaca':   { icon:'🫙', color:'#7c3aed', bg:'#ede9fe' },
+    'Dll':    { icon:'📦', color:'#059669', bg:'#d1fae5' },
+  };
+
+  // Group items by category
+  const grouped = {};
+  CATEGORY_ORDER.forEach(cat => { grouped[cat] = []; });
+  items.forEach(t => {
+    const cat = CATEGORY_ORDER.includes(t.category) ? t.category : 'Dll';
+    grouped[cat].push(t);
+  });
+
+  let html = '';
+  CATEGORY_ORDER.forEach(cat => {
+    const catItems = grouped[cat];
+    if (!catItems.length) return;
+    const cs = CAT_STYLE[cat];
+    html += `
+    <div style="margin-bottom:6px;">
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 2px 6px;">
+        <div style="width:22px;height:22px;background:${cs.bg};border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;">${cs.icon}</div>
+        <p style="font-size:11px;font-weight:700;color:${cs.color};text-transform:uppercase;letter-spacing:0.06em;">${cat}</p>
+        <span style="font-size:10px;font-weight:600;color:#d1d5db;background:#f9fafb;padding:1px 7px;border-radius:10px;">${catItems.length}</span>
+      </div>
+      ${catItems.map(t => {
+        const isInactive = t.active === false;
+        return `
+        <div class="clickable-card" onclick="openFormPrice(${t.id})" style="padding:14px;display:flex;align-items:center;gap:12px;${isInactive?'opacity:0.7':''}">
+          <div style="width:42px;height:42px;background:${isInactive?'#f3f4f6':cs.bg};border-radius:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:22px;">${t.icon}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <p style="font-size:13px;font-weight:700;color:${isInactive?'#9ca3af':'#111827'};">${t.name}</p>
+              ${isInactive?'<span style="font-size:10px;font-weight:600;color:#9ca3af;background:#f3f4f6;padding:2px 7px;border-radius:10px;">Nonaktif</span>':''}
+            </div>
+            ${t.kode?`<p style="font-size:10px;font-weight:700;color:${isInactive?'#d1d5db':cs.color};font-family:monospace;letter-spacing:0.04em;margin-top:2px;">${t.kode}</p>`:''}
+            <p style="font-size:11px;color:#9ca3af;margin-top:1px;">${t.desc}</p>
+          </div>
+          <div style="text-align:right;flex-shrink:0;">
+            <p style="font-size:11px;color:#6b7280;font-weight:500;">HARGA BELI</p>
+            <p style="font-size:14px;font-weight:800;color:${isInactive?'#9ca3af':'#111827'};">Rp ${t.price.toLocaleString('id-ID')}</p>
+            <p style="font-size:10px;color:#9ca3af;">/ kg</p>
+          </div>
+          <div style="width:28px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  });
+  el.innerHTML = html;
+}
+
+function filterPrices(q) {
+  const isInactiveTab = activePriceTab === 'inactive';
+  const base = trashTypes.filter(t => isInactiveTab ? t.active===false : t.active!==false);
+  const filtered = q
+    ? base.filter(t => t.name.toLowerCase().includes(q.toLowerCase()) || t.desc.toLowerCase().includes(q.toLowerCase()))
+    : base;
+  renderPricePage(filtered);
+}
+
+function openFormPrice(editId) {
+  const isEdit = !!editId;
+  document.getElementById('fp-editing-id').value = editId || '';
+  document.getElementById('fp-sheet-title').textContent = isEdit ? 'Edit Jenis Sampah' : 'Tambah Jenis Sampah';
+  const deactivateBtn = document.getElementById('fp-deactivate-btn');
+  const submitBtn     = document.querySelector('#overlay-form-price button[onclick="submitFormPrice()"]');
+  const submitLabel   = document.getElementById('fp-submit-label');
+  if (isEdit) {
+    const t = trashTypes.find(x=>x.id===editId);
+    if (t) {
+      document.getElementById('fp-kode').value     = t.kode || '';
+      document.getElementById('fp-name').value     = t.name;
+      document.getElementById('fp-category').value = t.category;
+      document.getElementById('fp-desc').value     = t.desc;
+      document.getElementById('fp-price').value    = t.price;
+    }
+    const isInactive = t && t.active === false;
+    // Submit button: disabled for inactive items
+    if (submitBtn) {
+      submitBtn.disabled = isInactive;
+      submitBtn.style.background = isInactive ? '#d1d5db' : 'linear-gradient(135deg,#059669,#047857)';
+      submitBtn.style.cursor     = isInactive ? 'not-allowed' : 'pointer';
+      submitBtn.style.boxShadow  = isInactive ? 'none' : '0 4px 14px rgba(5,150,105,0.3)';
+    }
+    if (submitLabel) submitLabel.textContent = isInactive ? 'Aktifkan dulu untuk mengedit' : 'Simpan Perubahan';
+    // Toggle deactivate / reactivate button
+    if (deactivateBtn) {
+      deactivateBtn.style.display = 'block';
+      if (isInactive) {
+        deactivateBtn.textContent = '✅ Aktifkan Kembali';
+        deactivateBtn.style.background = '#fff';
+        deactivateBtn.style.color      = '#059669';
+        deactivateBtn.style.border     = '1.5px solid #059669';
+        deactivateBtn.setAttribute('onclick','askReactivatePrice()');
+      } else {
+        deactivateBtn.textContent = '🚫 Nonaktifkan Jenis Sampah';
+        deactivateBtn.style.background = '#fff';
+        deactivateBtn.style.color      = '#dc2626';
+        deactivateBtn.style.border     = '1.5px solid #fecaca';
+        deactivateBtn.setAttribute('onclick','askDeactivatePrice()');
+      }
+    }
+  } else {
+    document.getElementById('fp-kode').value='';
+    document.getElementById('fp-name').value='';
+    document.getElementById('fp-desc').value='';
+    document.getElementById('fp-price').value='';
+    if (deactivateBtn) deactivateBtn.style.display='none';
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.style.background = 'linear-gradient(135deg,#059669,#047857)';
+      submitBtn.style.cursor     = 'pointer';
+      submitBtn.style.boxShadow  = '0 4px 14px rgba(5,150,105,0.3)';
+    }
+    if (submitLabel) submitLabel.textContent = 'Simpan Jenis Sampah';
+  }
+  openOverlay('overlay-form-price');
+}
+
+function submitFormPrice() {
+  const name     = document.getElementById('fp-name').value.trim();
+  const category = document.getElementById('fp-category').value;
+  const desc     = document.getElementById('fp-desc').value.trim() || '—';
+  const price    = parseInt(document.getElementById('fp-price').value) || 0;
+  const editId   = parseInt(document.getElementById('fp-editing-id').value) || 0;
+
+  // Clear previous errors
+  ['fp-name-err','fp-price-err'].forEach(id => document.getElementById(id).classList.remove('visible'));
+  ['fp-name','fp-price'].forEach(id => {
+    const el=document.getElementById(id); if(el){el.style.borderColor='';el.style.boxShadow='';}
+  });
+
+  let ok = true;
+  if (!name) {
+    document.getElementById('fp-name').style.borderColor='#ef4444';
+    document.getElementById('fp-name').style.boxShadow='0 0 0 3px rgba(239,68,68,0.12)';
+    document.getElementById('fp-name-err').classList.add('visible');
+    ok = false;
+  }
+  if (price <= 0) {
+    document.getElementById('fp-price').style.borderColor='#ef4444';
+    document.getElementById('fp-price').style.boxShadow='0 0 0 3px rgba(239,68,68,0.12)';
+    document.getElementById('fp-price-err').classList.add('visible');
+    ok = false;
+  }
+  if (!ok) return;
+
+  const icons = {Kertas:'📄',Plastik:'♻️',Logam:'⚙️',Kaca:'🫙',Dll:'📦'};
+  const kode = document.getElementById('fp-kode').value.trim();
+
+  if (editId) {
+    const t = trashTypes.find(x=>x.id===editId);
+    if (t) { t.kode=kode; t.name=name; t.category=category; t.desc=desc; t.price=price; t.icon=icons[category]||'📦'; }
+    closeOverlay('overlay-form-price');
+    switchPriceTab('active');
+    showToast(`${name} berhasil diperbarui`);
+  } else {
+    trashTypeIdCounter++;
+    trashTypes.push({id:trashTypeIdCounter,kode,name,category,desc,price,active:true,icon:icons[category]||'📦'});
+    closeOverlay('overlay-form-price');
+    switchPriceTab('active');
+    showToast(`${name} berhasil ditambahkan`);
+  }
+}
+
+function askDeactivatePrice() {
+  const editId = parseInt(document.getElementById('fp-editing-id').value)||0;
+  const t = trashTypes.find(x=>x.id===editId);
+  if (!t) return;
+  document.getElementById('modal-deactivate-price-desc').innerHTML =
+    `Jenis sampah <b>${t.name}</b> tidak akan muncul di form transaksi baru. Riwayat transaksi lama tetap aman.`;
+  document.getElementById('modal-deactivate-price-yes').onclick = () => {
+    t.active = false;
+    closeDeactivatePriceModal();
+    closeOverlay('overlay-form-price');
+    switchPriceTab('inactive');
+    showToast(`${t.name} dinonaktifkan`);
+  };
+  document.getElementById('modal-deactivate-price').style.display='flex';
+  document.getElementById('modal-deactivate-price').classList.add('open');
+}
+function closeDeactivatePriceModal() {
+  document.getElementById('modal-deactivate-price').classList.remove('open');
+  document.getElementById('modal-deactivate-price').style.display='none';
+}
+
+// ── Reactivate price ──────────────────────────────
+function askReactivatePrice() {
+  const editId = parseInt(document.getElementById('fp-editing-id').value)||0;
+  const t = trashTypes.find(x=>x.id===editId);
+  if (!t) return;
+  showConfirmModal(
+    '✅', '#d1fae5',
+    'Aktifkan Kembali?',
+    `Jenis sampah <b>${t.name}</b> akan aktif kembali dan bisa dipilih di form transaksi.`,
+    '#059669', 'Ya, Aktifkan',
+    () => {
+      t.active = true;
+      closeOverlay('overlay-form-price');
+      switchPriceTab('active');
+      showToast(`${t.name} diaktifkan kembali`);
+    }
+  );
+}
+
+// ── Date filter ────────────────────────────────────
+function exportXls() {
+  showToast('📥 Mengunduh laporan XLS...');
+  setTimeout(() => showToast('✅ Laporan berhasil diunduh'), 1400);
+}
+
+function openDateSheet() {
+  // Set default dates to current month range
+  const now = new Date();
+  const y = now.getFullYear(), m = String(now.getMonth()+1).padStart(2,'0');
+  const lastDay = new Date(y, now.getMonth()+1, 0).getDate();
+  const fromEl = document.getElementById('date-from');
+  const toEl   = document.getElementById('date-to');
+  if (fromEl && !fromEl.value) fromEl.value = `${y}-${m}-01`;
+  if (toEl   && !toEl.value)   toEl.value   = `${y}-${m}-${lastDay}`;
+  openOverlay('overlay-date-filter');
+}
+
+function applyDateFilter() {
+  const from = document.getElementById('date-from').value;
+  const to   = document.getElementById('date-to').value;
+  closeOverlay('overlay-date-filter');
+  if (!from || !to) { showToast('Pilih rentang tanggal terlebih dahulu'); return; }
+  // Format to Indonesian style for toast
+  const fmt = d => { const [y,m,mo] = d.split('-'); const mNames=['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agt','Sep','Okt','Nov','Des']; return `${parseInt(mo)} ${mNames[parseInt(m)-1]} ${y}`; };
+  // Clear quick-filter active state
+  ['tx-filter-this-month','tx-filter-last-month'].forEach(id=>{
+    const el=document.getElementById(id); if(el){el.style.background='#f3f4f6';el.style.color='#6b7280';}
+  });
+  showToast(`📅 Filter: ${fmt(from)} – ${fmt(to)}`);
+}
+
+function setTxFilter(type, btn) {
+  ['tx-filter-this-month','tx-filter-last-month'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el){el.style.background='#f3f4f6';el.style.color='#6b7280';}
+  });
+  if(btn){btn.style.background='#059669';btn.style.color='#fff';}
+  // Clear date inputs
+  const fromEl=document.getElementById('date-from'); if(fromEl) fromEl.value='';
+  const toEl=document.getElementById('date-to');     if(toEl)   toEl.value='';
+}
+
+function hiliError(fieldId) {
+  const el = document.getElementById(fieldId);
+  if (!el) return;
+  el.style.borderColor='#dc2626'; el.style.boxShadow='0 0 0 3px rgba(220,38,38,0.12)';
+  setTimeout(()=>{ el.style.borderColor='#e5e7eb'; el.style.boxShadow='none'; },2000);
+}
+
+// ══════════════════════════════════════════════════
+// CONFIRM MODAL (generic)
+// ══════════════════════════════════════════════════
+function showConfirmModal(emoji, iconBg, title, descHtml, btnColor, btnLabel, onYes) {
+  confirmCallback = onYes;
+  const icon = document.getElementById('modal-confirm-icon');
+  icon.style.background = iconBg;
+  icon.innerHTML = `<span style="font-size:24px;">${emoji}</span>`;
+  document.getElementById('modal-confirm-title').textContent = title;
+  document.getElementById('modal-confirm-desc').innerHTML = descHtml;
+  const yesBtn = document.getElementById('modal-confirm-yes');
+  yesBtn.textContent = btnLabel;
+  yesBtn.style.background = `linear-gradient(135deg,${btnColor},${btnColor}cc)`;
+  yesBtn.style.color = '#fff';
+  yesBtn.style.boxShadow = `0 4px 12px ${btnColor}40`;
+  document.getElementById('modal-confirm').classList.add('open');
+  document.getElementById('modal-confirm').style.display='flex';
+}
+function closeConfirmModal() {
+  document.getElementById('modal-confirm').classList.remove('open');
+  document.getElementById('modal-confirm').style.display='none';
+  confirmCallback = null;
+}
+function confirmYes() {
+  if (confirmCallback) confirmCallback();
+  closeConfirmModal();
+}
+document.getElementById('modal-confirm-yes').onclick = confirmYes;
+
+// ══════════════════════════════════════════════════
+// TRANSACTION LOGIC
+// ══════════════════════════════════════════════════
+function addItem() {
+  itemCounter++;
+  const id = itemCounter;
+  txItems.push({id, trashTypeId:trashTypes[0].id, weight:1.0, price:trashTypes[0].price});
+  renderItems(); updateTotals(); updateSaveButton();
+}
+function removeItem(id) {
+  txItems = txItems.filter(i=>i.id!==id);
+  renderItems(); updateTotals(); updateSaveButton();
+}
+function updateItemWeight(id, val) {
+  const item = txItems.find(i=>i.id===id); if (!item) return;
+  item.weight = Math.max(0, parseFloat(val)||0);
+  updateTotals(); updateSaveButton();
+  const sub = document.getElementById(`sub-${id}`);
+  if (sub) sub.textContent='Rp '+Math.round(item.weight*item.price).toLocaleString('id-ID');
+}
+function stepWeight(id, delta) {
+  const item = txItems.find(i=>i.id===id); if (!item) return;
+  item.weight = Math.max(0, Math.round((item.weight+delta)*10)/10);
+  const inp = document.getElementById(`weight-${id}`);
+  if (inp) inp.value = item.weight;
+  updateItemWeight(id, item.weight);
+}
+function updateItemPrice(id, val) {
+  const item = txItems.find(i=>i.id===id); if (!item) return;
+  const newPrice = Math.max(0, parseInt(val)||0);
+  const master = trashTypes.find(t=>t.id===item.trashTypeId);
+  item.price = newPrice;
+  // Show override badge if differs from master price
+  const badge = document.getElementById(`price-modified-badge-${id}`);
+  if (badge) badge.style.display = (master && newPrice !== master.price) ? 'inline-block' : 'none';
+  updateTotals(); updateSaveButton();
+  const sub = document.getElementById(`sub-${id}`);
+  if (sub) sub.textContent='Rp '+Math.round(item.weight*item.price).toLocaleString('id-ID');
+}
+
+function updateItemType(id, typeId) {
+  const item = txItems.find(i=>i.id===id); if (!item) return;
+  const t = trashTypes.find(t=>t.id===parseInt(typeId));
+  if (t) { item.trashTypeId=t.id; item.price=t.price; }
+  // reset override input
+  const priceInput = document.getElementById(`price-override-${id}`);
+  if (priceInput && t) priceInput.value = t.price;
+  const badge = document.getElementById(`price-modified-badge-${id}`);
+  if (badge) badge.style.display='none';
+  updateItemWeight(id, item.weight);
+}
+function renderItems() {
+  const container = document.getElementById('items-container');
+  document.getElementById('item-count-badge').textContent = txItems.length+' item';
+  if (!txItems.length) {
+    container.innerHTML=`<div style="background:#fff;border-radius:14px;padding:24px 16px;text-align:center;margin-bottom:10px;border:1.5px dashed #e5e7eb;">
+      <div style="width:44px;height:44px;background:#f9fafb;border-radius:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;">
+        <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="#d1d5db" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>
+      </div>
+      <p style="font-size:12px;font-weight:600;color:#9ca3af;margin-bottom:3px;">Belum Ada Item Setoran</p>
+      <p style="font-size:11px;color:#d1d5db;">Tap tombol di bawah untuk menambah item.</p>
+    </div>`;
+    return;
+  }
+  container.innerHTML = txItems.map(item=>{
+    const t = trashTypes.find(t=>t.id===item.trashTypeId)||trashTypes[0];
+    const sub = Math.round(item.weight*item.price);
+    return `<div style="background:#fff;border-radius:14px;padding:14px;margin-bottom:8px;box-shadow:0 1px 4px rgba(0,0,0,0.05);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div style="position:relative;flex:1;margin-right:8px;">
+          <select id="type-${item.id}" onchange="updateItemType(${item.id},this.value)" style="width:100%;background:#f9fafb;border:1.5px solid #e5e7eb;border-radius:10px;padding:8px 28px 8px 10px;font-size:12px;font-weight:600;color:#374151;appearance:none;-webkit-appearance:none;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;outline:none;">
+            ${trashTypes.filter(t2=>t2.active!==false||t2.id===item.trashTypeId).map(t2=>`<option value="${t2.id}" ${t2.id===item.trashTypeId?'selected':''}>${t2.icon} ${t2.name}${t2.active===false?' (nonaktif)':''}</option>`).join('')}
+          </select>
+          <span style="position:absolute;right:9px;top:50%;transform:translateY(-50%);pointer-events:none;color:#9ca3af;font-size:12px;">▾</span>
+        </div>
+        <button onclick="removeItem(${item.id})" style="width:28px;height:28px;background:#fee2e2;border-radius:8px;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;flex-shrink:0;">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="#dc2626" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+        <span style="font-size:11px;color:#6b7280;font-weight:500;">Harga/kg:</span>
+        <div style="display:flex;align-items:center;background:#f9fafb;border:1.5px solid #e5e7eb;border-radius:8px;overflow:hidden;flex:1;max-width:130px;transition:border-color 0.2s;" onfocusin="this.style.borderColor='#059669'" onfocusout="this.style.borderColor='#e5e7eb'">
+          <span style="padding:5px 6px 5px 8px;font-size:11px;color:#6b7280;font-weight:600;white-space:nowrap;">Rp</span>
+          <input id="price-override-${item.id}" type="number" min="0" value="${item.price}" oninput="updateItemPrice(${item.id},this.value)" style="width:80px;background:none;border:none;outline:none;padding:5px 6px;font-size:12px;font-weight:700;color:#111827;font-family:'Plus Jakarta Sans',sans-serif;">
+        </div>
+        <span style="font-size:10px;color:#9ca3af;">/kg</span>
+        <span id="price-modified-badge-${item.id}" style="display:none;font-size:9px;font-weight:700;color:#d97706;background:#fef3c7;padding:2px 6px;border-radius:8px;">OVERRIDE</span>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <div style="display:flex;align-items:center;background:#f9fafb;border:1.5px solid #e5e7eb;border-radius:10px;overflow:hidden;">
+          <button onclick="stepWeight(${item.id},-0.5)" style="width:34px;height:36px;background:none;border:none;border-right:1px solid #e5e7eb;cursor:pointer;font-size:16px;color:#374151;display:flex;align-items:center;justify-content:center;">−</button>
+          <input id="weight-${item.id}" type="number" step="0.1" min="0" value="${item.weight}" oninput="updateItemWeight(${item.id},this.value)" style="width:54px;height:36px;border:none;background:transparent;text-align:center;font-size:13px;font-weight:700;color:#111827;font-family:'Plus Jakarta Sans',sans-serif;outline:none;">
+          <button onclick="stepWeight(${item.id},0.5)" style="width:34px;height:36px;background:none;border:none;border-left:1px solid #e5e7eb;cursor:pointer;font-size:16px;color:#374151;display:flex;align-items:center;justify-content:center;">+</button>
+        </div>
+        <span style="font-size:11px;color:#9ca3af;font-weight:500;">kg</span>
+        <div style="flex:1;text-align:right;">
+          <p style="font-size:11px;color:#9ca3af;margin-bottom:1px;">Subtotal</p>
+          <p id="sub-${item.id}" style="font-size:14px;font-weight:800;color:#059669;">Rp ${sub.toLocaleString('id-ID')}</p>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+function updateTotals() {
+  const total = txItems.reduce((a,i)=>a+Math.round(i.weight*i.price),0);
+  document.getElementById('subtotal-display').textContent='Rp '+total.toLocaleString('id-ID');
+  document.getElementById('grand-total-display').textContent='Rp '+total.toLocaleString('id-ID');
+}
+function updateSaveButton() {
+  const btn=document.getElementById('btn-simpan-tx');
+  const ok = !!selectedCustomer && txItems.length>0 && txItems.reduce((a,i)=>a+i.weight,0)>0;
+  btn.disabled=!ok;
+  btn.style.background=ok?'linear-gradient(135deg,#059669,#047857)':'#d1d5db';
+  btn.style.cursor=ok?'pointer':'not-allowed';
+  btn.style.boxShadow=ok?'0 4px 14px rgba(5,150,105,0.3)':'none';
+}
+function submitTransaction() {
+  if (!selectedCustomer||!txItems.length) return;
+  const total=txItems.reduce((a,i)=>a+Math.round(i.weight*i.price),0);
+  // Update customer saldo in data
+  const c = customers.find(x=>x.id===selectedCustomer.id);
+  if (c) c.saldo += total;
+  const newSaldo = c ? c.saldo : selectedCustomer.saldo + total;
+  document.getElementById('modal-customer').textContent=selectedCustomer.name;
+  document.getElementById('modal-total').textContent='Rp '+total.toLocaleString('id-ID');
+  document.getElementById('modal-new-saldo').textContent='Rp '+newSaldo.toLocaleString('id-ID');
+  document.getElementById('modal-summary').textContent=`${txItems.length} jenis sampah berhasil dicatat.`;
+  document.getElementById('modal-tx-success').style.display='flex';
+  document.getElementById('modal-tx-success').classList.add('open');
+}
+function closeModal() {
+  document.getElementById('modal-tx-success').classList.remove('open');
+  document.getElementById('modal-tx-success').style.display='none';
+  resetTransaction();
+  goToScreen('screen-dashboard');
+}
+function resetTransaction() {
+  selectedCustomer=null; txItems=[]; itemCounter=0;
+  const pill=document.getElementById('customer-pill');
+  pill.classList.remove('selected');
+  document.getElementById('customer-avatar').style.background='#e5e7eb';
+  document.getElementById('customer-avatar').innerHTML=`<svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#9ca3af" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
+  document.getElementById('customer-name-display').style.color='#9ca3af';
+  document.getElementById('customer-name-display').textContent='Tap untuk pilih nasabah';
+  document.getElementById('customer-id-display').style.display='none';
+  renderItems(); updateTotals(); updateSaveButton();
+}
+
+// ══════════════════════════════════════════════════
+// ALL TRANSACTIONS
+// ══════════════════════════════════════════════════
+function renderAllTx() {
+  const el=document.getElementById('all-tx-list');
+  let lastDay='';
+  el.innerHTML=allTransactions.map(tx=>{
+    let hdr='';
+    if(tx.day!==lastDay){hdr=`<p style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;margin:${lastDay?'12px':0} 0 6px;">${tx.day}</p>`;lastDay=tx.day;}
+    const waIcon = tx.waStatus==='sent'
+      ? `<span style="font-size:9px;font-weight:700;color:#059669;background:#d1fae5;padding:2px 6px;border-radius:8px;margin-left:3px;">✓ WA</span>`
+      : `<span style="font-size:9px;font-weight:700;color:#dc2626;background:#fee2e2;padding:2px 6px;border-radius:8px;margin-left:3px;">✗ WA</span>`;
+    return hdr+`<div class="clickable-card" onclick="openTxDetail('${tx.id}')" style="padding:12px;margin-bottom:6px;display:flex;align-items:center;gap:10px;">
+      <div style="width:36px;height:36px;background:${tx.bg};border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:12px;font-weight:700;color:${tx.color};">${tx.initials}</div>
+      <div style="flex:1;min-width:0;"><p style="font-size:12px;font-weight:700;color:#111827;">${tx.name}</p><p style="font-size:11px;color:#9ca3af;">${tx.type} · ${tx.weight}</p></div>
+      <div style="text-align:right;flex-shrink:0;">
+        <p style="font-size:12px;font-weight:800;color:#059669;">+Rp ${tx.value.toLocaleString('id-ID')}</p>
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:2px;margin-top:2px;">${waIcon}${tx.time!=='—'?`<span style="font-size:10px;color:#9ca3af;margin-left:3px;">${tx.time}</span>`:''}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openTxDetail(txId) {
+  const tx = allTransactions.find(t=>t.id===txId);
+  if (!tx) return;
+  const idx = tx.id; // use id as unique key for DOM elements
+  const waFailed = tx.waStatus === 'failed';
+  const items = tx.items || [{name:tx.type, weight:parseFloat(tx.weight), priceSnap:Math.round(tx.value/parseFloat(tx.weight)), subtotal:tx.value}];
+  const saldoAfter = tx.saldoAfter || (125500 + tx.value);
+  const panel = document.getElementById('tx-detail-panel');
+  panel.innerHTML = `
+    <div style="width:36px;height:4px;background:#e5e7eb;border-radius:4px;margin:0 auto 18px;"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <p style="font-size:15px;font-weight:800;color:#111827;">Detail Transaksi</p>
+      <span style="font-size:10px;font-weight:700;color:#059669;background:#d1fae5;padding:3px 10px;border-radius:12px;">Selesai</span>
+    </div>
+    <!-- Nasabah & waktu -->
+    <div style="display:flex;align-items:center;gap:12px;background:#f9fafb;border-radius:14px;padding:12px 14px;margin-bottom:14px;">
+      <div style="width:40px;height:40px;background:${tx.bg};border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px;font-weight:700;color:${tx.color};">${tx.initials}</div>
+      <div style="flex:1;">
+        <p style="font-size:13px;font-weight:700;color:#111827;">${tx.name}</p>
+        <p style="font-size:11px;color:#9ca3af;">${tx.day}${tx.time!=='—'?' · '+tx.time:''}</p>
+      </div>
+    </div>
+    <!-- Item list -->
+    <p style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Rincian Setoran</p>
+    <div style="background:#f9fafb;border-radius:14px;overflow:hidden;margin-bottom:14px;">
+      <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;padding:8px 12px;border-bottom:1px solid #f3f4f6;">
+        <span style="font-size:10px;font-weight:700;color:#9ca3af;">JENIS</span>
+        <span style="font-size:10px;font-weight:700;color:#9ca3af;text-align:right;">BERAT</span>
+        <span style="font-size:10px;font-weight:700;color:#9ca3af;text-align:right;min-width:56px;">HARGA/KG</span>
+        <span style="font-size:10px;font-weight:700;color:#9ca3af;text-align:right;min-width:64px;">SUBTOTAL</span>
+      </div>
+      ${items.map(it=>`
+      <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:4px;padding:9px 12px;border-bottom:1px solid #f3f4f6;">
+        <span style="font-size:12px;font-weight:600;color:#111827;">${it.name}</span>
+        <span style="font-size:12px;color:#374151;text-align:right;">${it.weight} kg</span>
+        <span style="font-size:12px;color:#6b7280;text-align:right;min-width:56px;">Rp ${(it.priceSnap||it.price||0).toLocaleString('id-ID')}</span>
+        <span style="font-size:12px;font-weight:700;color:#111827;text-align:right;min-width:64px;">Rp ${it.subtotal.toLocaleString('id-ID')}</span>
+      </div>`).join('')}
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;">
+        <span style="font-size:12px;font-weight:700;color:#111827;">Total Setoran</span>
+        <span style="font-size:14px;font-weight:800;color:#059669;">+Rp ${tx.value.toLocaleString('id-ID')}</span>
+      </div>
+    </div>
+    <!-- Saldo info -->
+    <div style="background:#ecfdf5;border-radius:14px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <p style="font-size:11px;color:#6b7280;font-weight:500;">Saldo Setelah Transaksi</p>
+        <p style="font-size:16px;font-weight:800;color:#059669;">Rp ${saldoAfter.toLocaleString('id-ID')}</p>
+      </div>
+      <div style="width:38px;height:38px;background:#d1fae5;border-radius:10px;display:flex;align-items:center;justify-content:center;">
+        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#059669" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      </div>
+    </div>
+    <!-- WA status -->
+    <p style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Status Notifikasi WA</p>
+    <div id="wa-status-card-${idx}" style="background:#fff;border:1.5px solid ${waFailed?'#fecaca':'#bbf7d0'};border-radius:14px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:34px;height:34px;background:${waFailed?'#fee2e2':'#d1fae5'};border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="${waFailed?'#dc2626':'#059669'}"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.553 4.116 1.52 5.845L.057 23.5a.5.5 0 0 0 .613.614l5.733-1.51A11.943 11.943 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 22a9.943 9.943 0 0 1-5.09-1.4l-.364-.214-3.772.993.995-3.691-.233-.375A9.957 9.957 0 0 1 2 12C2 6.477 6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/></svg>
+        </div>
+        <div>
+          <p id="wa-status-text-${idx}" style="font-size:12px;font-weight:700;color:${waFailed?'#dc2626':'#059669'};">${waFailed?'Gagal Kirim':'Terkirim Sukses'}</p>
+          <p style="font-size:11px;color:#9ca3af;">ke ${tx.name}</p>
+        </div>
+      </div>
+      ${waFailed?`<button id="wa-retry-btn-${idx}" onclick="retryWa('${idx}')" style="background:linear-gradient(135deg,#059669,#047857);color:#fff;border:none;border-radius:10px;padding:7px 12px;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:5px;">
+        <span id="wa-retry-label-${idx}">↺ Coba Lagi</span>
+      </button>`:`<span style="font-size:11px;font-weight:600;color:#059669;">✓</span>`}
+    </div>
+  `;
+  openOverlay('overlay-tx-detail');
+}
+
+function retryWa(idx) {
+  const btn = document.getElementById(`wa-retry-btn-${idx}`);
+  const label = document.getElementById(`wa-retry-label-${idx}`);
+  if (!btn || !label) return;
+  btn.disabled = true;
+  btn.style.opacity = '0.7';
+  label.innerHTML = '<span class="spinner" style="width:12px;height:12px;border-width:1.5px;"></span>';
+  setTimeout(() => {
+    const card = document.getElementById(`wa-status-card-${idx}`);
+    const statusText = document.getElementById(`wa-status-text-${idx}`);
+    if (card) card.style.borderColor = '#bbf7d0';
+    if (statusText) { statusText.textContent = 'Terkirim Sukses'; statusText.style.color = '#059669'; }
+    btn.outerHTML = `<span style="font-size:11px;font-weight:600;color:#059669;">✓</span>`;
+  }, 1100);
+}
+
+// ══════════════════════════════════════════════════
+// TOAST
+// ══════════════════════════════════════════════════
+function showToast(msg) {
+  let t=document.getElementById('app-toast');
+  if(!t){
+    t=document.createElement('div'); t.id='app-toast';
+    t.style.cssText='position:absolute;bottom:80px;left:50%;transform:translateX(-50%) translateY(20px);background:#1f2937;color:#fff;font-size:12px;font-weight:600;padding:10px 18px;border-radius:20px;white-space:nowrap;opacity:0;transition:all 0.3s ease;z-index:90;pointer-events:none;';
+    document.getElementById('app-shell').appendChild(t);
+  }
+  t.textContent=msg; t.style.opacity='1'; t.style.transform='translateX(-50%) translateY(0)';
+  clearTimeout(t._timer);
+  t._timer=setTimeout(()=>{t.style.opacity='0';t.style.transform='translateX(-50%) translateY(20px)';},2500);
+}
+
+// ══════════════════════════════════════════════════
+// SETTINGS TABS
+// ══════════════════════════════════════════════════
+function switchSettingsTab(tab) {
+  const isPribadi = tab === 'pribadi';
+  // Tab buttons
+  const btnPribadi = document.getElementById('stab-pribadi');
+  const btnTim     = document.getElementById('stab-tim');
+  if (btnPribadi) {
+    btnPribadi.style.color       = isPribadi ? '#059669' : '#9ca3af';
+    btnPribadi.style.borderBottomColor = isPribadi ? '#059669' : 'transparent';
+  }
+  if (btnTim) {
+    btnTim.style.color       = !isPribadi ? '#059669' : '#9ca3af';
+    btnTim.style.borderBottomColor = !isPribadi ? '#059669' : 'transparent';
+  }
+  // Tab content
+  const contentPribadi = document.getElementById('stab-content-pribadi');
+  const contentTim     = document.getElementById('stab-content-tim');
+  if (contentPribadi) contentPribadi.style.display = isPribadi ? 'block' : 'none';
+  if (contentTim)     contentTim.style.display     = !isPribadi ? 'block' : 'none';
+  // Bottom bar: hide save button on Tim tab
+  const bottomBar = document.getElementById('settings-bottom-bar');
+  if (bottomBar) bottomBar.style.display = isPribadi ? 'flex' : 'none';
+}
+
+function copyInviteLink() {
+  showToast('🔗 Link undangan berhasil disalin!');
+}
+
+// ══════════════════════════════════════════════════
+// SETTINGS SCREEN
+// ══════════════════════════════════════════════════
+function updateWaPreview() {
+  const tpl = (document.getElementById('set-wa-template')?.value || '');
+  const preview = tpl
+    .replace(/\[Nama\]/g,    '<b style="color:#059669;">Budi Santoso</b>')
+    .replace(/\[Total\]/g,   '<b style="color:#059669;">Rp 15.600</b>')
+    .replace(/\[Saldo\]/g,   '<b style="color:#059669;">Rp 141.100</b>')
+    .replace(/\[Tanggal\]/g, '<b style="color:#6b7280;">11 Jun 2026</b>')
+    .replace(/\[daftar_item\]/g, '<b style="color:#0891b2;">Plastik 2.5kg=8750, Kertas 1.2kg=1440</b>');
+  const el = document.getElementById('wa-preview');
+  if (el) el.innerHTML = preview;
+}
+
+function insertVar(variable) {
+  const ta = document.getElementById('set-wa-template');
+  if (!ta) return;
+  const start = ta.selectionStart;
+  const end   = ta.selectionEnd;
+  ta.value = ta.value.slice(0, start) + variable + ta.value.slice(end);
+  ta.selectionStart = ta.selectionEnd = start + variable.length;
+  ta.focus();
+  updateWaPreview();
+}
+
+function saveSettings() {
+  // Update dashboard header greeting if name changed
+  const bankName = document.getElementById('set-bank-name')?.value || 'Bank Sampah BTH';
+  const headerBankEl = document.querySelector('#screen-dashboard p[style*="font-size:11px"]');
+  if (headerBankEl) headerBankEl.textContent = bankName;
+  showToast('✅ Pengaturan berhasil disimpan');
+  setTimeout(() => goToScreen('screen-dashboard'), 900);
+}
+
+function doLogout() {
+  document.getElementById('modal-logout').style.display='flex';
+  document.getElementById('modal-logout').classList.add('open');
+}
+function closeLogoutModal() {
+  document.getElementById('modal-logout').classList.remove('open');
+  document.getElementById('modal-logout').style.display='none';
+}
+function confirmLogout() {
+  closeLogoutModal();
+  goToScreen('screen-login');
+  setTimeout(() => showToast('Anda telah keluar dari aplikasi'), 400);
+}
+
+// Hook live preview update to textarea input
+document.addEventListener('DOMContentLoaded', () => {
+  const ta = document.getElementById('set-wa-template');
+  if (ta) ta.addEventListener('input', updateWaPreview);
+});
+
+// ══════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════
+// SUPERADMIN — TAB SWITCHING
+// ══════════════════════════════════════════════════
+function switchAdminTab(tab) {
+  // Semua konten disembunyikan dulu
+  ['menunggu', 'disetujui', 'ditolak'].forEach(function(t) {
+    var content = document.getElementById('sa-content-' + t);
+    if (content) content.style.display = 'none';
+
+    var btn = document.getElementById('sa-tab-btn-' + t);
+    if (btn) {
+      btn.style.background = 'rgba(255,255,255,0.2)';
+      btn.style.color      = 'rgba(255,255,255,0.8)';
+      btn.style.boxShadow  = 'none';
+    }
+  });
+
+  // Tampilkan tab yang dipilih
+  var activeContent = document.getElementById('sa-content-' + tab);
+  if (activeContent) activeContent.style.display = 'block';
+
+  // Aktifkan tombol tab yang dipilih
+  var activeBtn = document.getElementById('sa-tab-btn-' + tab);
+  if (activeBtn) {
+    activeBtn.style.background = '#fff';
+    activeBtn.style.color      = '#059669';
+    activeBtn.style.boxShadow  = '0 2px 6px rgba(0,0,0,0.1)';
+  }
+}
+
+// ══════════════════════════════════════════════════
+// SUPERADMIN — TAMPILKAN LAYAR
+// ══════════════════════════════════════════════════
+function showSuperAdminScreen() {
+  goToScreen('screen-superadmin');
+  // Pastikan tab default "menunggu" aktif saat layar dibuka
+  setTimeout(function() { switchAdminTab('menunggu'); }, 60);
+}
+
+// ══════════════════════════════════════════════════
+// SUPERADMIN — AKSI KARTU PENDAFTARAN
+// ══════════════════════════════════════════════════
+function adminLihatBukti(regId) {
+  // Placeholder: akan dihubungkan ke overlay foto di iterasi berikutnya
+  showToast('🖼️ Membuka bukti foto ' + regId + '...');
+}
+
+function adminSetujui(regId, namaBS) {
+  showToast('✅ ' + namaBS + ' berhasil disetujui');
+  // TODO: pindahkan kartu ke tab Disetujui & update badge pending
+}
+
+function adminTolak(regId, namaBS) {
+  showToast('🚫 ' + namaBS + ' ditolak');
+  // TODO: pindahkan kartu ke tab Ditolak & update badge pending
+}
+
+renderItems();
+renderCustomerPage();
+renderPricePage();
+renderAllTx();
+</script>
+</body>
+</html>

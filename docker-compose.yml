@@ -1,0 +1,50 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: pilah-db
+    environment:
+      POSTGRES_DB: pilah
+      POSTGRES_USER: pilah
+      POSTGRES_PASSWORD: pilah
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pilah -d pilah"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    container_name: pilah-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DJANGO_SECRET_KEY: local-docker-dev-key-change-me
+      DJANGO_DEBUG: "true"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0,pilah-api"
+      CORS_ALLOW_ALL_ORIGINS: "true"
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: pilah
+      DB_USER: pilah
+      DB_PASSWORD: pilah
+      DB_HOST: db
+      DB_PORT: "5432"
+      PILAH_ALLOW_FAKE_GOOGLE_TOKEN: "true"
+      PILAH_PUBLIC_APP_URL: http://localhost:8000
+      WHATSAPP_GATEWAY_URL: ""
+      WHATSAPP_GATEWAY_TOKEN: ""
+    ports:
+      - "8000:8000"
+    volumes:
+      - media_data:/app/media
+      - static_data:/app/staticfiles
+    command: ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--reload"]
+
+volumes:
+  postgres_data:
+  media_data:
+  static_data:

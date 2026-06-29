@@ -1,0 +1,98 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.envrc
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+.webassets-cache/
+
+# Migrations are usually committed. Uncomment only for throwaway projects.
+# **/migrations/**
+# !**/migrations/__init__.py
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets.json
+
+# Test, coverage, and type-check caches
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pytest_cache/
+.tox/
+.nox/
+.mypy_cache/
+.pyre/
+.ruff_cache/
+.hypothesis/
+
+# Jupyter and notebooks
+.ipynb_checkpoints/
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+
+# AI agent and coding assistant artifacts
+.codex/
+.aider*
+.aider.chat.history.md
+.aider.input.history
+.cursor/
+.continue/
+.windsurf/
+.claude/
+CLAUDE.local.md
+AGENTS.local.md
+ai-agent.log
+agent.log
+agent-runs/
+agent-output/
+tmp/
+temp/

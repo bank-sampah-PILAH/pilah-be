@@ -1,0 +1,186 @@
+@startuml PILAH_ERD
+
+skinparam {
+  BackgroundColor #FAFAFA
+  ArrowColor #059669
+  ArrowThickness 1.5
+  EntityBackgroundColor #FFFFFF
+  EntityBorderColor #D1D5DB
+  EntityFontSize 13
+  EntityAttributeFontSize 12
+  EntityHeaderBackgroundColor #ECFDF5
+  EntityHeaderFontColor #065F46
+  EntityHeaderFontSize 13
+  EntityHeaderFontStyle bold
+  Shadowing false
+  RoundCorner 8
+  Linetype ortho
+}
+
+' ══════════════════════════════════════
+' TABEL: bank_sampah
+' ══════════════════════════════════════
+entity "bank_sampah" as bank_sampah {
+  + id : uuid <<PK>>
+  --
+  nama : varchar
+  alamat : text
+  no_hp_pic : varchar
+  wa_gateway_token : text
+  foto_logo : varchar
+  foto_kegiatan : varchar
+  status : enum(pending, active, rejected)
+  invite_token : varchar
+  invite_token_expires : timestamp
+  is_active : boolean
+  created_at : timestamp
+}
+
+' ══════════════════════════════════════
+' TABEL: users
+' ══════════════════════════════════════
+entity "users" as users {
+  + id : uuid <<PK>>
+  --
+  google_id : varchar
+  email : varchar
+  nama : varchar
+  no_hp : varchar
+  jenis_kelamin : enum(laki-laki, perempuan)
+  tanggal_lahir : date
+  role : enum(pengelola, superadmin)
+  is_profile_complete : boolean
+  bank_sampah_id : uuid <<FK>>
+  is_active : boolean
+  created_at : timestamp
+}
+
+' ══════════════════════════════════════
+' TABEL: nasabah
+' ══════════════════════════════════════
+entity "nasabah" as nasabah {
+  + id : uuid <<PK>>
+  --
+  bank_sampah_id : uuid <<FK>>
+  nomor : varchar
+  nama : varchar
+  jenis_kelamin : enum(laki-laki, perempuan)
+  tanggal_lahir : date
+  alamat : text
+  no_hp : varchar
+  tanggal_daftar : date
+  is_active : boolean
+  created_at : timestamp
+  updated_at : timestamp
+}
+
+' ══════════════════════════════════════
+' TABEL: saldo
+' ══════════════════════════════════════
+entity "saldo" as saldo {
+  + id : uuid <<PK>>
+  --
+  nasabah_id : uuid <<FK>>
+  total_saldo : decimal
+  updated_at : timestamp
+}
+
+' ══════════════════════════════════════
+' TABEL: jenis_sampah
+' ══════════════════════════════════════
+entity "jenis_sampah" as jenis_sampah {
+  + id : uuid <<PK>>
+  --
+  bank_sampah_id : uuid <<FK>>
+  nomor : varchar
+  nama_sampah : varchar
+  kategori : enum(kertas, plastik, logam, kaca, dll)
+  deskripsi : text, nullable, max 200 char
+  harga_per_kg : decimal
+  is_active : boolean
+  updated_at : timestamp
+}
+
+' ══════════════════════════════════════
+' TABEL: transaksi
+' ══════════════════════════════════════
+entity "transaksi" as transaksi {
+  + id : uuid <<PK>>
+  --
+  nasabah_id : uuid <<FK>>
+  bank_sampah_id : uuid <<FK>>
+  dicatat_oleh : uuid <<FK>>
+  tanggal : timestamp
+  total_nilai : decimal
+  tipe : enum
+  catatan : text
+  status_wa : enum(pending, terkirim, gagal)
+  created_at : timestamp
+}
+
+' ══════════════════════════════════════
+' TABEL: detail_transaksi
+' ══════════════════════════════════════
+entity "detail_transaksi" as detail_transaksi {
+  + id : uuid <<PK>>
+  --
+  transaksi_id : uuid <<FK>>
+  jenis_sampah_id : uuid <<FK>>
+  nama_sampah_snapshot : varchar
+  kategori_snapshot : enum(kertas, plastik, logam, kaca, dll)
+  harga_snapshot : decimal
+  berat : decimal
+  subtotal : decimal
+}
+
+' ══════════════════════════════════════
+' TABEL: bs_approval_log
+' ══════════════════════════════════════
+entity "bs_approval_log" as bs_approval_log {
+  + id : uuid <<PK>>
+  --
+  bank_sampah_id : uuid <<FK>>
+  superadmin_id : uuid <<FK>>
+  status : enum(approved, rejected)
+  catatan : text
+  created_at : timestamp
+}
+
+' ══════════════════════════════════════
+' RELASI
+' ══════════════════════════════════════
+
+' bank_sampah → users (one-to-many)
+bank_sampah ||--o{ users : "memiliki pengelola"
+
+' bank_sampah → nasabah (one-to-many)
+bank_sampah ||--o{ nasabah : "memiliki nasabah"
+
+' bank_sampah → jenis_sampah (one-to-many)
+bank_sampah ||--o{ jenis_sampah : "mendefinisikan"
+
+' bank_sampah → transaksi (one-to-many)
+bank_sampah ||--o{ transaksi : "memiliki"
+
+' bank_sampah → bs_approval_log (one-to-many)
+bank_sampah ||--o{ bs_approval_log : "dicatat di"
+
+' users → transaksi (one-to-many)
+users ||--o{ transaksi : "mencatat\n(dicatat_oleh)"
+
+' users (superadmin) → bs_approval_log (one-to-many)
+users ||--o{ bs_approval_log : "memproses\n(superadmin)"
+
+' nasabah → saldo (one-to-one)
+nasabah ||--|| saldo : "memiliki saldo"
+
+' nasabah → transaksi (one-to-many)
+nasabah ||--o{ transaksi : "melakukan"
+
+' transaksi → detail_transaksi (one-to-many)
+transaksi ||--o{ detail_transaksi : "terdiri dari"
+
+' jenis_sampah → detail_transaksi (one-to-many)
+jenis_sampah ||--o{ detail_transaksi : "digunakan di"
+
+@enduml

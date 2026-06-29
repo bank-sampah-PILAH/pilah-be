@@ -1,0 +1,1328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PILAH API Documentation v1.0</title>
+  <style>
+    :root {
+      --green: #059669;
+      --green-light: #d1fae5;
+      --green-dark: #047857;
+      --gray-50: #f9fafb;
+      --gray-100: #f3f4f6;
+      --gray-200: #e5e7eb;
+      --gray-400: #9ca3af;
+      --gray-600: #4b5563;
+      --gray-700: #374151;
+      --gray-800: #1f2937;
+      --gray-900: #111827;
+      --blue: #3b82f6;
+      --blue-light: #dbeafe;
+      --yellow: #f59e0b;
+      --yellow-light: #fef3c7;
+      --red: #ef4444;
+      --red-light: #fee2e2;
+      --purple: #8b5cf6;
+      --purple-light: #ede9fe;
+      --orange: #f97316;
+      --orange-light: #ffedd5;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--gray-50);
+      color: var(--gray-800);
+      line-height: 1.6;
+    }
+    /* Layout */
+    .layout { display: flex; min-height: 100vh; }
+    .sidebar {
+      width: 280px;
+      min-width: 280px;
+      background: var(--gray-900);
+      color: #e5e7eb;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 0 0 24px;
+    }
+    .sidebar-header {
+      background: var(--green-dark);
+      padding: 20px 20px 16px;
+      margin-bottom: 8px;
+    }
+    .sidebar-header h1 { font-size: 1.2rem; color: #fff; font-weight: 700; }
+    .sidebar-header p { font-size: 0.75rem; color: #a7f3d0; margin-top: 2px; }
+    .sidebar-badge {
+      display: inline-block;
+      background: var(--green);
+      color: #fff;
+      font-size: 0.65rem;
+      padding: 1px 7px;
+      border-radius: 20px;
+      margin-top: 6px;
+      font-weight: 600;
+    }
+    .sidebar-section { padding: 0 12px; margin-top: 12px; }
+    .sidebar-section-title {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--gray-400);
+      text-transform: uppercase;
+      padding: 0 8px;
+      margin-bottom: 4px;
+    }
+    .sidebar a {
+      display: block;
+      padding: 6px 10px;
+      color: #d1d5db;
+      text-decoration: none;
+      font-size: 0.82rem;
+      border-radius: 6px;
+      transition: background 0.15s;
+    }
+    .sidebar a:hover { background: #374151; color: #fff; }
+    .sidebar a .badge {
+      float: right;
+      font-size: 0.62rem;
+      padding: 1px 6px;
+      border-radius: 10px;
+      font-weight: 600;
+      margin-top: 1px;
+    }
+    .badge-get { background: var(--blue); color: #fff; }
+    .badge-post { background: var(--green); color: #fff; }
+    .badge-put { background: var(--yellow); color: #000; }
+    .badge-patch { background: var(--orange); color: #fff; }
+    .badge-delete { background: var(--red); color: #fff; }
+
+    /* Main content */
+    .main { flex: 1; max-width: 900px; padding: 40px 48px; }
+
+    /* Section headers */
+    .section-header {
+      border-left: 4px solid var(--green);
+      padding-left: 16px;
+      margin: 48px 0 24px;
+    }
+    .section-header h2 { font-size: 1.4rem; color: var(--gray-900); font-weight: 700; }
+    .section-header p { font-size: 0.875rem; color: var(--gray-600); margin-top: 4px; }
+
+    /* Intro */
+    .intro-card {
+      background: #fff;
+      border: 1px solid var(--gray-200);
+      border-radius: 12px;
+      padding: 28px;
+      margin-bottom: 32px;
+    }
+    .intro-card h1 { font-size: 1.8rem; font-weight: 800; color: var(--gray-900); }
+    .intro-card .subtitle { color: var(--gray-600); margin-top: 6px; font-size: 0.95rem; }
+    .meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 20px; }
+    .meta-item { background: var(--gray-50); border-radius: 8px; padding: 12px 16px; }
+    .meta-item .label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; color: var(--gray-400); letter-spacing: 0.05em; }
+    .meta-item .value { font-size: 0.9rem; color: var(--gray-800); font-weight: 600; margin-top: 2px; }
+
+    /* Base URL */
+    .base-url {
+      background: var(--gray-900);
+      color: #a7f3d0;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-family: monospace;
+      font-size: 0.9rem;
+      margin: 16px 0;
+    }
+    .base-url .label { color: var(--gray-400); font-size: 0.75rem; font-family: sans-serif; margin-bottom: 4px; }
+
+    /* Endpoint cards */
+    .endpoint {
+      background: #fff;
+      border: 1px solid var(--gray-200);
+      border-radius: 12px;
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+    .endpoint-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 20px;
+      cursor: pointer;
+      background: #fff;
+    }
+    .endpoint-header:hover { background: var(--gray-50); }
+    .method-badge {
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 6px;
+      letter-spacing: 0.05em;
+      min-width: 60px;
+      text-align: center;
+    }
+    .method-get { background: var(--blue-light); color: #1d4ed8; }
+    .method-post { background: var(--green-light); color: #065f46; }
+    .method-put { background: var(--yellow-light); color: #92400e; }
+    .method-patch { background: var(--orange-light); color: #9a3412; }
+    .method-delete { background: var(--red-light); color: #991b1b; }
+    .endpoint-path {
+      font-family: monospace;
+      font-size: 0.9rem;
+      color: var(--gray-800);
+      font-weight: 600;
+    }
+    .endpoint-desc {
+      font-size: 0.8rem;
+      color: var(--gray-600);
+      margin-left: auto;
+    }
+    .endpoint-auth {
+      font-size: 0.7rem;
+      color: var(--yellow);
+      background: var(--yellow-light);
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .endpoint-body { border-top: 1px solid var(--gray-200); padding: 20px; }
+
+    /* Tables */
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-top: 8px; }
+    th {
+      text-align: left;
+      background: var(--gray-50);
+      color: var(--gray-700);
+      font-weight: 600;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--gray-200);
+    }
+    td { padding: 8px 12px; border-bottom: 1px solid var(--gray-100); color: var(--gray-700); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    .required { color: var(--red); font-size: 0.7rem; font-weight: 600; }
+    .optional { color: var(--gray-400); font-size: 0.7rem; }
+    code {
+      font-family: monospace;
+      background: var(--gray-100);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 0.82em;
+      color: var(--gray-800);
+    }
+
+    /* Code blocks */
+    .code-block {
+      background: var(--gray-900);
+      color: #e2e8f0;
+      border-radius: 8px;
+      padding: 16px;
+      font-family: monospace;
+      font-size: 0.78rem;
+      overflow-x: auto;
+      margin-top: 8px;
+      line-height: 1.7;
+      white-space: pre;
+    }
+    .code-block .key { color: #93c5fd; }
+    .code-block .str { color: #86efac; }
+    .code-block .num { color: #fcd34d; }
+    .code-block .bool { color: #f9a8d4; }
+    .code-block .null { color: #d1d5db; }
+    .code-block .comment { color: #6b7280; }
+
+    /* Response tags */
+    .response-section { margin-top: 16px; }
+    .response-tag {
+      display: inline-block;
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 700;
+      margin-right: 6px;
+      margin-bottom: 6px;
+    }
+    .r-200 { background: #dcfce7; color: #166534; }
+    .r-201 { background: #dbeafe; color: #1e40af; }
+    .r-400 { background: #fef3c7; color: #92400e; }
+    .r-401 { background: #fee2e2; color: #991b1b; }
+    .r-403 { background: #fce7f3; color: #9d174d; }
+    .r-404 { background: #ede9fe; color: #5b21b6; }
+    .r-422 { background: #ffedd5; color: #9a3412; }
+    .r-500 { background: #f3f4f6; color: #374151; }
+
+    /* Label */
+    .block-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--gray-400);
+      margin-bottom: 6px;
+      margin-top: 14px;
+    }
+
+    /* Auth info box */
+    .info-box {
+      background: var(--blue-light);
+      border-left: 3px solid var(--blue);
+      border-radius: 0 8px 8px 0;
+      padding: 12px 16px;
+      margin: 16px 0;
+      font-size: 0.82rem;
+      color: #1e40af;
+    }
+    .warn-box {
+      background: var(--yellow-light);
+      border-left: 3px solid var(--yellow);
+      border-radius: 0 8px 8px 0;
+      padding: 12px 16px;
+      margin: 8px 0;
+      font-size: 0.82rem;
+      color: #92400e;
+    }
+
+    /* Notes */
+    .note { font-size: 0.78rem; color: var(--gray-600); margin-top: 8px; font-style: italic; }
+
+    /* TOC top */
+    .toc-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
+    .toc-chip {
+      background: #fff;
+      border: 1px solid var(--gray-200);
+      border-radius: 20px;
+      padding: 5px 14px;
+      font-size: 0.78rem;
+      color: var(--gray-700);
+      text-decoration: none;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .toc-chip:hover { border-color: var(--green); color: var(--green); }
+
+    @media (max-width: 900px) {
+      .sidebar { display: none; }
+      .main { padding: 24px 20px; }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+
+<!-- SIDEBAR -->
+<nav class="sidebar">
+  <div class="sidebar-header">
+    <h1>PILAH API</h1>
+    <p>Bank Sampah Management System</p>
+    <span class="sidebar-badge">v1.0.0</span>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Authentication</div>
+    <a href="#auth"><span class="badge badge-post">POST</span>/auth/google</a>
+    <a href="#auth"><span class="badge badge-post">POST</span>/auth/refresh</a>
+    <a href="#auth"><span class="badge badge-post">POST</span>/auth/logout</a>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Bank Sampah</div>
+    <a href="#bank"><span class="badge badge-get">GET</span>/bank-sampah/me</a>
+    <a href="#bank"><span class="badge badge-put">PUT</span>/bank-sampah/me</a>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Nasabah</div>
+    <a href="#nasabah"><span class="badge badge-get">GET</span>/nasabah</a>
+    <a href="#nasabah"><span class="badge badge-post">POST</span>/nasabah</a>
+    <a href="#nasabah"><span class="badge badge-get">GET</span>/nasabah/:id</a>
+    <a href="#nasabah"><span class="badge badge-put">PUT</span>/nasabah/:id</a>
+    <a href="#nasabah"><span class="badge badge-patch">PATCH</span>/nasabah/:id/status</a>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Jenis Sampah</div>
+    <a href="#jenis"><span class="badge badge-get">GET</span>/jenis-sampah</a>
+    <a href="#jenis"><span class="badge badge-post">POST</span>/jenis-sampah</a>
+    <a href="#jenis"><span class="badge badge-put">PUT</span>/jenis-sampah/:id</a>
+    <a href="#jenis"><span class="badge badge-patch">PATCH</span>/jenis-sampah/:id/status</a>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Transaksi</div>
+    <a href="#transaksi"><span class="badge badge-get">GET</span>/transaksi</a>
+    <a href="#transaksi"><span class="badge badge-post">POST</span>/transaksi</a>
+    <a href="#transaksi"><span class="badge badge-get">GET</span>/transaksi/:id</a>
+    <a href="#transaksi"><span class="badge badge-post">POST</span>/transaksi/:id/notify-wa</a>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Saldo</div>
+    <a href="#saldo"><span class="badge badge-get">GET</span>/nasabah/:id/saldo</a>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Dashboard</div>
+    <a href="#dashboard"><span class="badge badge-get">GET</span>/dashboard/stats</a>
+    <a href="#dashboard"><span class="badge badge-get">GET</span>/dashboard/recent-transactions</a>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Pengaturan</div>
+    <a href="#pengaturan"><span class="badge badge-get">GET</span>/pengaturan/wa-template</a>
+    <a href="#pengaturan"><span class="badge badge-put">PUT</span>/pengaturan/wa-template</a>
+  </div>
+</nav>
+
+<!-- MAIN -->
+<main class="main">
+
+  <!-- INTRO -->
+  <div class="intro-card">
+    <h1>PILAH API Documentation</h1>
+    <p class="subtitle">REST API untuk Aplikasi Mobile Manajemen Bank Sampah Digital</p>
+    <div class="meta-grid">
+      <div class="meta-item">
+        <div class="label">Version</div>
+        <div class="value">v1.0.0</div>
+      </div>
+      <div class="meta-item">
+        <div class="label">Backend</div>
+        <div class="value">Django + DRF</div>
+      </div>
+      <div class="meta-item">
+        <div class="label">Auth</div>
+        <div class="value">JWT (Bearer)</div>
+      </div>
+      <div class="meta-item">
+        <div class="label">Database</div>
+        <div class="value">PostgreSQL (Supabase)</div>
+      </div>
+      <div class="meta-item">
+        <div class="label">Platform</div>
+        <div class="value">Railway / Render</div>
+      </div>
+      <div class="meta-item">
+        <div class="label">Content-Type</div>
+        <div class="value">application/json</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="base-url">
+    <div class="label">BASE URL</div>
+    https://api.pilah.app/api/v1
+  </div>
+
+  <div class="info-box">
+    🔐 <strong>Authentication:</strong> Semua endpoint (kecuali <code>POST /auth/google</code>) memerlukan header <code>Authorization: Bearer &lt;access_token&gt;</code>. Token didapat setelah Google OAuth berhasil.<br><br>
+    🏢 <strong>Multi-tenancy:</strong> Semua data yang diakses secara otomatis difilter berdasarkan <code>bank_sampah_id</code> dari JWT. Pengelola hanya bisa mengakses data bank sampah miliknya sendiri.
+  </div>
+
+  <!-- Quick links -->
+  <div class="toc-row">
+    <a href="#auth" class="toc-chip">🔑 Authentication</a>
+    <a href="#bank" class="toc-chip">🏦 Bank Sampah</a>
+    <a href="#nasabah" class="toc-chip">👥 Nasabah</a>
+    <a href="#jenis" class="toc-chip">♻️ Jenis Sampah</a>
+    <a href="#transaksi" class="toc-chip">📋 Transaksi</a>
+    <a href="#saldo" class="toc-chip">💰 Saldo</a>
+    <a href="#dashboard" class="toc-chip">📊 Dashboard</a>
+    <a href="#pengaturan" class="toc-chip">⚙️ Pengaturan</a>
+    <a href="#errors" class="toc-chip">❌ Error Codes</a>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- AUTHENTICATION -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div id="auth" class="section-header">
+    <h2>🔑 Authentication</h2>
+    <p>Login via Google OAuth 2.0 dan manajemen sesi JWT</p>
+  </div>
+
+  <!-- POST /auth/google -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-post">POST</span>
+      <span class="endpoint-path">/auth/google</span>
+      <span class="endpoint-desc">Login / Register via Google OAuth</span>
+    </div>
+    <div class="endpoint-body">
+      <p style="font-size:0.85rem;color:var(--gray-600);margin-bottom:12px;">Menerima Google ID Token dari Flutter (setelah user login Google di client), memverifikasinya, dan mengembalikan JWT. Jika akun belum ada, otomatis dibuat dengan role <code>pengelola</code>.</p>
+
+      <div class="block-label">Request Body</div>
+      <table>
+        <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+        <tr><td><code>id_token</code></td><td>string</td><td><span class="required">Required</span></td><td>Google ID Token dari Google Sign-In SDK</td></tr>
+      </table>
+
+      <div class="block-label">Request Example</div>
+      <div class="code-block"><span class="comment">// POST /api/v1/auth/google</span>
+{
+  <span class="key">"id_token"</span>: <span class="str">"eyJhbGciOiJSUzI1NiIsImtpZCI6Ijc..."</span>
+}</div>
+
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span>
+      <div class="code-block">{
+  <span class="key">"access_token"</span>: <span class="str">"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."</span>,
+  <span class="key">"refresh_token"</span>: <span class="str">"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."</span>,
+  <span class="key">"token_type"</span>: <span class="str">"Bearer"</span>,
+  <span class="key">"expires_in"</span>: <span class="num">86400</span>,  <span class="comment">// 24 jam dalam detik</span>
+  <span class="key">"user"</span>: {
+    <span class="key">"id"</span>: <span class="str">"uuid-user-xxx"</span>,
+    <span class="key">"name"</span>: <span class="str">"Ibu Sari"</span>,
+    <span class="key">"email"</span>: <span class="str">"sari@gmail.com"</span>,
+    <span class="key">"role"</span>: <span class="str">"pengelola"</span>,
+    <span class="key">"bank_sampah_id"</span>: <span class="str">"uuid-bank-xxx"</span>,
+    <span class="key">"bank_sampah_nama"</span>: <span class="str">"Bank Sampah BTH"</span>
+  },
+  <span class="key">"is_new_user"</span>: <span class="bool">false</span>  <span class="comment">// true jika akun baru dibuat</span>
+}</div>
+      <span class="response-tag r-401">401 Unauthorized</span> — ID Token invalid atau expired<br>
+      <span class="response-tag r-500">500 Internal Server Error</span> — Gagal verifikasi ke Google
+    </div>
+  </div>
+
+  <!-- POST /auth/refresh -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-post">POST</span>
+      <span class="endpoint-path">/auth/refresh</span>
+      <span class="endpoint-desc">Refresh access token</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="block-label">Request Body</div>
+      <table>
+        <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+        <tr><td><code>refresh_token</code></td><td>string</td><td><span class="required">Required</span></td><td>Refresh token yang diterima dari <code>/auth/google</code></td></tr>
+      </table>
+
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span>
+      <div class="code-block">{
+  <span class="key">"access_token"</span>: <span class="str">"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."</span>,
+  <span class="key">"expires_in"</span>: <span class="num">86400</span>
+}</div>
+      <span class="response-tag r-401">401</span> — Refresh token invalid / expired
+    </div>
+  </div>
+
+  <!-- POST /auth/logout -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-post">POST</span>
+      <span class="endpoint-path">/auth/logout</span>
+      <span class="endpoint-desc">Logout & invalidate token</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <p style="font-size:0.85rem;color:var(--gray-600);">Menghapus / blacklist token di server. Client harus menghapus token dari local storage secara mandiri.</p>
+
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span>
+      <div class="code-block">{
+  <span class="key">"message"</span>: <span class="str">"Logout berhasil"</span>
+}</div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- BANK SAMPAH -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div id="bank" class="section-header">
+    <h2>🏦 Bank Sampah</h2>
+    <p>Profil dan informasi bank sampah milik pengelola yang login</p>
+  </div>
+
+  <!-- GET /bank-sampah/me -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-get">GET</span>
+      <span class="endpoint-path">/bank-sampah/me</span>
+      <span class="endpoint-desc">Get profil bank sampah saat ini</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span>
+      <div class="code-block">{
+  <span class="key">"id"</span>: <span class="str">"uuid-bank-xxx"</span>,
+  <span class="key">"nama"</span>: <span class="str">"Bank Sampah BTH"</span>,
+  <span class="key">"alamat"</span>: <span class="str">"Kel. Kukusan, Kec. Beji, Kota Depok"</span>,
+  <span class="key">"kota"</span>: <span class="str">"Depok"</span>,
+  <span class="key">"no_hp_pic"</span>: <span class="str">"+628123456789"</span>,
+  <span class="key">"wa_gateway_token"</span>: <span class="str">"token-xxx"</span>,  <span class="comment">// null jika belum diset</span>
+  <span class="key">"is_active"</span>: <span class="bool">true</span>,
+  <span class="key">"created_at"</span>: <span class="str">"2026-01-15T08:00:00Z"</span>,
+  <span class="key">"pengelola"</span>: {
+    <span class="key">"id"</span>: <span class="str">"uuid-user-xxx"</span>,
+    <span class="key">"nama"</span>: <span class="str">"Ibu Sari"</span>,
+    <span class="key">"email"</span>: <span class="str">"sari@gmail.com"</span>
+  }
+}</div>
+    </div>
+  </div>
+
+  <!-- PUT /bank-sampah/me -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-put">PUT</span>
+      <span class="endpoint-path">/bank-sampah/me</span>
+      <span class="endpoint-desc">Update profil bank sampah</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="block-label">Request Body</div>
+      <table>
+        <tr><th>Field</th><th>Type</th><th>Required</th><th>Validasi</th></tr>
+        <tr><td><code>nama</code></td><td>string</td><td><span class="required">Required</span></td><td>min 3 karakter</td></tr>
+        <tr><td><code>alamat</code></td><td>string</td><td><span class="optional">Optional</span></td><td>—</td></tr>
+        <tr><td><code>kota</code></td><td>string</td><td><span class="optional">Optional</span></td><td>—</td></tr>
+        <tr><td><code>no_hp_pic</code></td><td>string</td><td><span class="required">Required</span></td><td>Format +62, panjang 9–13 digit setelah +62</td></tr>
+      </table>
+
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span> — Objek bank sampah terbaru<br>
+      <span class="response-tag r-422">422</span> — Validasi gagal
+      <div class="code-block"><span class="comment">// 422 Unprocessable Entity</span>
+{
+  <span class="key">"errors"</span>: {
+    <span class="key">"nama"</span>: [<span class="str">"Nama bank sampah wajib diisi"</span>],
+    <span class="key">"no_hp_pic"</span>: [<span class="str">"Format nomor tidak valid"</span>]
+  }
+}</div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- NASABAH -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div id="nasabah" class="section-header">
+    <h2>👥 Manajemen Nasabah</h2>
+    <p>CRUD data nasabah bank sampah (F-02)</p>
+  </div>
+
+  <!-- GET /nasabah -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-get">GET</span>
+      <span class="endpoint-path">/nasabah</span>
+      <span class="endpoint-desc">Daftar semua nasabah</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="block-label">Query Parameters</div>
+      <table>
+        <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+        <tr><td><code>search</code></td><td>string</td><td>—</td><td>Filter realtime by nama atau no_hp (min 2 karakter)</td></tr>
+        <tr><td><code>status</code></td><td>string</td><td><code>aktif</code></td><td><code>aktif</code> | <code>tidak_aktif</code> | <code>semua</code></td></tr>
+        <tr><td><code>page</code></td><td>integer</td><td><code>1</code></td><td>Halaman pagination</td></tr>
+        <tr><td><code>page_size</code></td><td>integer</td><td><code>20</code></td><td>Jumlah item per halaman (max 100)</td></tr>
+      </table>
+
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span>
+      <div class="code-block">{
+  <span class="key">"count"</span>: <span class="num">42</span>,
+  <span class="key">"next"</span>: <span class="str">"https://api.pilah.app/api/v1/nasabah?page=2"</span>,
+  <span class="key">"previous"</span>: <span class="null">null</span>,
+  <span class="key">"results"</span>: [
+    {
+      <span class="key">"id"</span>: <span class="str">"uuid-nasabah-xxx"</span>,
+      <span class="key">"kode"</span>: <span class="str">"NAS-0001"</span>,
+      <span class="key">"nama"</span>: <span class="str">"Ahmad Ridwan"</span>,
+      <span class="key">"no_hp"</span>: <span class="str">"+628123456789"</span>,
+      <span class="key">"alamat"</span>: <span class="str">"Jl. Mawar No. 12, RT 02/03, Kukusan"</span>,
+      <span class="key">"tanggal_daftar"</span>: <span class="str">"2026-05-12"</span>,
+      <span class="key">"is_active"</span>: <span class="bool">true</span>,
+      <span class="key">"total_saldo"</span>: <span class="num">450000.00</span>,
+      <span class="key">"created_at"</span>: <span class="str">"2026-05-12T10:00:00Z"</span>
+    }
+  ]
+}</div>
+    </div>
+  </div>
+
+  <!-- POST /nasabah -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-post">POST</span>
+      <span class="endpoint-path">/nasabah</span>
+      <span class="endpoint-desc">Tambah nasabah baru</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="block-label">Request Body</div>
+      <table>
+        <tr><th>Field</th><th>Type</th><th>Required</th><th>Validasi</th></tr>
+        <tr><td><code>nama</code></td><td>string</td><td><span class="required">Required</span></td><td>min 3, max 100 karakter</td></tr>
+        <tr><td><code>no_hp</code></td><td>string</td><td><span class="required">Required</span></td><td>Format valid Indonesia, diawali 8, 9–13 digit setelah +62. Prefix +62 di-handle server</td></tr>
+        <tr><td><code>alamat</code></td><td>string</td><td><span class="required">Required</span></td><td>min 10 karakter</td></tr>
+      </table>
+
+      <div class="block-label">Request Example</div>
+      <div class="code-block">{
+  <span class="key">"nama"</span>: <span class="str">"Budi Santoso"</span>,
+  <span class="key">"no_hp"</span>: <span class="str">"081234567890"</span>,
+  <span class="key">"alamat"</span>: <span class="str">"Jl. Anggrek No. 3, RT 05/02, Kukusan"</span>
+}</div>
+
+      <div class="block-label">Response</div>
+      <span class="response-tag r-201">201 Created</span>
+      <div class="code-block">{
+  <span class="key">"id"</span>: <span class="str">"uuid-nasabah-yyy"</span>,
+  <span class="key">"kode"</span>: <span class="str">"NAS-0002"</span>,
+  <span class="key">"nama"</span>: <span class="str">"Budi Santoso"</span>,
+  <span class="key">"no_hp"</span>: <span class="str">"+6281234567890"</span>,
+  <span class="key">"alamat"</span>: <span class="str">"Jl. Anggrek No. 3, RT 05/02, Kukusan"</span>,
+  <span class="key">"tanggal_daftar"</span>: <span class="str">"2026-06-20"</span>,  <span class="comment">// auto-set by server</span>
+  <span class="key">"is_active"</span>: <span class="bool">true</span>,  <span class="comment">// auto-set true</span>
+  <span class="key">"total_saldo"</span>: <span class="num">0.00</span>,
+  <span class="key">"created_at"</span>: <span class="str">"2026-06-20T09:30:00Z"</span>
+}</div>
+      <span class="response-tag r-422">422</span> — Validasi gagal
+      <div class="code-block">{
+  <span class="key">"errors"</span>: {
+    <span class="key">"nama"</span>: [<span class="str">"Nama minimal 3 karakter"</span>],
+    <span class="key">"no_hp"</span>: [<span class="str">"Format nomor tidak valid. Contoh: 081234567890"</span>],
+    <span class="key">"alamat"</span>: [<span class="str">"Alamat wajib diisi"</span>]
+  }
+}</div>
+    </div>
+  </div>
+
+  <!-- GET /nasabah/:id -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-get">GET</span>
+      <span class="endpoint-path">/nasabah/:id</span>
+      <span class="endpoint-desc">Detail nasabah + ringkasan transaksi</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="block-label">Path Parameters</div>
+      <table>
+        <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+        <tr><td><code>id</code></td><td>string (UUID)</td><td>ID nasabah</td></tr>
+      </table>
+
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span>
+      <div class="code-block">{
+  <span class="key">"id"</span>: <span class="str">"uuid-nasabah-xxx"</span>,
+  <span class="key">"kode"</span>: <span class="str">"NAS-0001"</span>,
+  <span class="key">"nama"</span>: <span class="str">"Ahmad Ridwan"</span>,
+  <span class="key">"no_hp"</span>: <span class="str">"+628123456789"</span>,
+  <span class="key">"alamat"</span>: <span class="str">"Jl. Mawar No. 12, RT 02/03, Kukusan"</span>,
+  <span class="key">"tanggal_daftar"</span>: <span class="str">"2026-05-12"</span>,
+  <span class="key">"is_active"</span>: <span class="bool">true</span>,
+  <span class="key">"total_saldo"</span>: <span class="num">450000.00</span>,
+  <span class="key">"ringkasan_transaksi"</span>: {
+    <span class="key">"jumlah_transaksi"</span>: <span class="num">18</span>,
+    <span class="key">"total_kg"</span>: <span class="num">120.5</span>,
+    <span class="key">"tanggal_transaksi_terakhir"</span>: <span class="str">"2026-06-15T09:45:00Z"</span>
+  },
+  <span class="key">"created_at"</span>: <span class="str">"2026-05-12T10:00:00Z"</span>
+}</div>
+      <span class="response-tag r-404">404</span> — Nasabah tidak ditemukan / bukan milik bank sampah ini
+    </div>
+  </div>
+
+  <!-- PUT /nasabah/:id -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-put">PUT</span>
+      <span class="endpoint-path">/nasabah/:id</span>
+      <span class="endpoint-desc">Update data nasabah</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="block-label">Request Body</div>
+      <table>
+        <tr><th>Field</th><th>Type</th><th>Required</th><th>Validasi</th></tr>
+        <tr><td><code>nama</code></td><td>string</td><td><span class="required">Required</span></td><td>min 3, max 100 karakter</td></tr>
+        <tr><td><code>no_hp</code></td><td>string</td><td><span class="required">Required</span></td><td>Format valid Indonesia</td></tr>
+        <tr><td><code>alamat</code></td><td>string</td><td><span class="required">Required</span></td><td>min 10 karakter</td></tr>
+      </table>
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span> — Objek nasabah terbaru<br>
+      <span class="response-tag r-422">422</span> — Validasi gagal<br>
+      <span class="response-tag r-403">403</span> — Nasabah nonaktif tidak bisa diedit
+    </div>
+  </div>
+
+  <!-- PATCH /nasabah/:id/status -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-patch">PATCH</span>
+      <span class="endpoint-path">/nasabah/:id/status</span>
+      <span class="endpoint-desc">Aktifkan / nonaktifkan nasabah (soft delete)</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="warn-box">⚠️ Bukan hard delete. Data nasabah dan riwayat transaksinya tetap tersimpan. Nasabah nonaktif tidak muncul di dropdown form transaksi baru.</div>
+
+      <div class="block-label">Request Body</div>
+      <table>
+        <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+        <tr><td><code>is_active</code></td><td>boolean</td><td><span class="required">Required</span></td><td><code>true</code> untuk aktifkan, <code>false</code> untuk nonaktifkan</td></tr>
+      </table>
+
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span>
+      <div class="code-block">{
+  <span class="key">"id"</span>: <span class="str">"uuid-nasabah-xxx"</span>,
+  <span class="key">"is_active"</span>: <span class="bool">false</span>,
+  <span class="key">"message"</span>: <span class="str">"Nasabah berhasil dinonaktifkan"</span>
+}</div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- JENIS SAMPAH -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div id="jenis" class="section-header">
+    <h2>♻️ Manajemen Jenis Sampah</h2>
+    <p>CRUD master data jenis sampah dan harga per kg (F-03)</p>
+  </div>
+
+  <!-- GET /jenis-sampah -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-get">GET</span>
+      <span class="endpoint-path">/jenis-sampah</span>
+      <span class="endpoint-desc">Daftar semua jenis sampah</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="block-label">Query Parameters</div>
+      <table>
+        <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+        <tr><td><code>search</code></td><td>string</td><td>—</td><td>Filter realtime by nama jenis sampah (min 2 karakter)</td></tr>
+        <tr><td><code>status</code></td><td>string</td><td><code>aktif</code></td><td><code>aktif</code> | <code>tidak_aktif</code> | <code>semua</code></td></tr>
+        <tr><td><code>kategori</code></td><td>string</td><td>—</td><td><code>organik</code> | <code>anorganik</code></td></tr>
+      </table>
+
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span>
+      <div class="code-block">{
+  <span class="key">"count"</span>: <span class="num">5</span>,
+  <span class="key">"results"</span>: [
+    {
+      <span class="key">"id"</span>: <span class="str">"uuid-jenis-xxx"</span>,
+      <span class="key">"nama_sampah"</span>: <span class="str">"Plastik PET"</span>,
+      <span class="key">"kategori"</span>: <span class="str">"anorganik"</span>,
+      <span class="key">"deskripsi"</span>: <span class="str">"Botol bening, kemasan"</span>,
+      <span class="key">"satuan"</span>: <span class="str">"kg"</span>,  <span class="comment">// always "kg", auto-set</span>
+      <span class="key">"harga_per_kg"</span>: <span class="num">3500.00</span>,
+      <span class="key">"is_active"</span>: <span class="bool">true</span>,
+      <span class="key">"updated_at"</span>: <span class="str">"2026-06-01T00:00:00Z"</span>
+    }
+  ]
+}</div>
+    </div>
+  </div>
+
+  <!-- POST /jenis-sampah -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-post">POST</span>
+      <span class="endpoint-path">/jenis-sampah</span>
+      <span class="endpoint-desc">Tambah jenis sampah baru</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="block-label">Request Body</div>
+      <table>
+        <tr><th>Field</th><th>Type</th><th>Required</th><th>Validasi</th></tr>
+        <tr><td><code>nama_sampah</code></td><td>string</td><td><span class="required">Required</span></td><td>min 2, max 50 karakter</td></tr>
+        <tr><td><code>kategori</code></td><td>string</td><td><span class="required">Required</span></td><td><code>"organik"</code> | <code>"anorganik"</code>. Default: <code>"anorganik"</code></td></tr>
+        <tr><td><code>deskripsi</code></td><td>string</td><td><span class="optional">Optional</span></td><td>max 200 karakter</td></tr>
+        <tr><td><code>harga_per_kg</code></td><td>number</td><td><span class="required">Required</span></td><td>angka positif > 0, max 9 digit</td></tr>
+      </table>
+
+      <div class="block-label">Request Example</div>
+      <div class="code-block">{
+  <span class="key">"nama_sampah"</span>: <span class="str">"Plastik PET"</span>,
+  <span class="key">"kategori"</span>: <span class="str">"anorganik"</span>,
+  <span class="key">"deskripsi"</span>: <span class="str">"Botol bening, kemasan plastik"</span>,
+  <span class="key">"harga_per_kg"</span>: <span class="num">3500</span>
+}</div>
+
+      <div class="block-label">Response</div>
+      <span class="response-tag r-201">201 Created</span>
+      <div class="code-block">{
+  <span class="key">"id"</span>: <span class="str">"uuid-jenis-yyy"</span>,
+  <span class="key">"nama_sampah"</span>: <span class="str">"Plastik PET"</span>,
+  <span class="key">"kategori"</span>: <span class="str">"anorganik"</span>,
+  <span class="key">"deskripsi"</span>: <span class="str">"Botol bening, kemasan plastik"</span>,
+  <span class="key">"satuan"</span>: <span class="str">"kg"</span>,
+  <span class="key">"harga_per_kg"</span>: <span class="num">3500.00</span>,
+  <span class="key">"is_active"</span>: <span class="bool">true</span>,
+  <span class="key">"updated_at"</span>: <span class="str">"2026-06-20T09:30:00Z"</span>
+}</div>
+      <span class="response-tag r-422">422</span>
+      <div class="code-block">{
+  <span class="key">"errors"</span>: {
+    <span class="key">"nama_sampah"</span>: [<span class="str">"Nama jenis sampah wajib diisi"</span>],
+    <span class="key">"harga_per_kg"</span>: [<span class="str">"Harga harus berupa angka positif"</span>]
+  }
+}</div>
+    </div>
+  </div>
+
+  <!-- PUT /jenis-sampah/:id -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-put">PUT</span>
+      <span class="endpoint-path">/jenis-sampah/:id</span>
+      <span class="endpoint-desc">Update jenis sampah</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="warn-box">⚠️ Perubahan harga tidak berlaku retroaktif. Transaksi lama tetap menggunakan harga snapshot saat transaksi terjadi (<code>harga_snapshot</code> di tabel <code>detail_transaksi</code>).</div>
+      <div class="block-label">Request Body</div>
+      <p class="note">Sama dengan POST. Semua field ter-prefill dengan data saat ini.</p>
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span> — Objek jenis sampah terbaru<br>
+      <span class="response-tag r-422">422</span> — Validasi gagal
+    </div>
+  </div>
+
+  <!-- PATCH /jenis-sampah/:id/status -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-patch">PATCH</span>
+      <span class="endpoint-path">/jenis-sampah/:id/status</span>
+      <span class="endpoint-desc">Aktifkan / nonaktifkan jenis sampah</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="block-label">Request Body</div>
+      <table>
+        <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+        <tr><td><code>is_active</code></td><td>boolean</td><td><span class="required">Required</span></td><td><code>false</code> = nonaktifkan (hilang dari dropdown form transaksi baru)</td></tr>
+      </table>
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span>
+      <div class="code-block">{
+  <span class="key">"id"</span>: <span class="str">"uuid-jenis-xxx"</span>,
+  <span class="key">"is_active"</span>: <span class="bool">false</span>,
+  <span class="key">"message"</span>: <span class="str">"Jenis sampah berhasil dinonaktifkan"</span>
+}</div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- TRANSAKSI -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div id="transaksi" class="section-header">
+    <h2>📋 Transaksi Setoran</h2>
+    <p>Pencatatan dan riwayat transaksi setoran sampah (F-04)</p>
+  </div>
+
+  <!-- GET /transaksi -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-get">GET</span>
+      <span class="endpoint-path">/transaksi</span>
+      <span class="endpoint-desc">Daftar semua transaksi dengan filter</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="block-label">Query Parameters</div>
+      <table>
+        <tr><th>Parameter</th><th>Type</th><th>Default</th><th>Description</th></tr>
+        <tr><td><code>search</code></td><td>string</td><td>—</td><td>Filter realtime by nama nasabah</td></tr>
+        <tr><td><code>periode</code></td><td>string</td><td><code>hari_ini</code></td><td><code>hari_ini</code> | <code>minggu_ini</code> | <code>bulan_ini</code> | <code>custom</code></td></tr>
+        <tr><td><code>dari_tanggal</code></td><td>date</td><td>—</td><td>Format <code>YYYY-MM-DD</code>. Wajib jika <code>periode=custom</code></td></tr>
+        <tr><td><code>sampai_tanggal</code></td><td>date</td><td>—</td><td>Format <code>YYYY-MM-DD</code>. Wajib jika <code>periode=custom</code>. Harus ≥ dari_tanggal</td></tr>
+        <tr><td><code>nasabah_id</code></td><td>string</td><td>—</td><td>Filter by nasabah tertentu</td></tr>
+        <tr><td><code>page</code></td><td>integer</td><td><code>1</code></td><td>Halaman pagination</td></tr>
+        <tr><td><code>page_size</code></td><td>integer</td><td><code>20</code></td><td>Max 100</td></tr>
+      </table>
+
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span>
+      <div class="code-block">{
+  <span class="key">"count"</span>: <span class="num">28</span>,
+  <span class="key">"next"</span>: <span class="null">null</span>,
+  <span class="key">"previous"</span>: <span class="null">null</span>,
+  <span class="key">"results"</span>: [
+    {
+      <span class="key">"id"</span>: <span class="str">"uuid-trx-xxx"</span>,
+      <span class="key">"nasabah_id"</span>: <span class="str">"uuid-nasabah-xxx"</span>,
+      <span class="key">"nasabah_nama"</span>: <span class="str">"Budi Santoso"</span>,
+      <span class="key">"nasabah_inisial"</span>: <span class="str">"BS"</span>,
+      <span class="key">"jenis_sampah_utama"</span>: <span class="str">"Plastik PET"</span>,  <span class="comment">// jenis dengan berat terbesar</span>
+      <span class="key">"total_berat_kg"</span>: <span class="num">5.2</span>,
+      <span class="key">"total_nilai"</span>: <span class="num">15600.00</span>,
+      <span class="key">"tanggal"</span>: <span class="str">"2026-06-20T09:45:00Z"</span>,
+      <span class="key">"status_wa"</span>: <span class="str">"terkirim"</span>,  <span class="comment">// "terkirim" | "gagal" | "belum_dikirim"</span>
+      <span class="key">"dicatat_oleh"</span>: <span class="str">"uuid-user-xxx"</span>
+    }
+  ]
+}</div>
+      <span class="response-tag r-400">400</span>
+      <div class="code-block">{
+  <span class="key">"error"</span>: <span class="str">"Tanggal akhir tidak boleh lebih awal dari tanggal awal"</span>
+}</div>
+    </div>
+  </div>
+
+  <!-- POST /transaksi -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-post">POST</span>
+      <span class="endpoint-path">/transaksi</span>
+      <span class="endpoint-desc">Catat transaksi setoran baru</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="info-box">ℹ️ Endpoint ini secara atomik: (1) menyimpan transaksi, (2) menyimpan detail_transaksi dengan snapshot harga, dan (3) mengupdate <code>total_saldo</code> di tabel <code>saldo</code>. Semua dalam satu database transaction.</div>
+
+      <div class="block-label">Request Body</div>
+      <table>
+        <tr><th>Field</th><th>Type</th><th>Required</th><th>Validasi</th></tr>
+        <tr><td><code>nasabah_id</code></td><td>string (UUID)</td><td><span class="required">Required</span></td><td>Nasabah harus aktif (<code>is_active=true</code>) dan milik bank sampah ini</td></tr>
+        <tr><td><code>items</code></td><td>array</td><td><span class="required">Required</span></td><td>Min 1 item</td></tr>
+        <tr><td><code>items[].jenis_sampah_id</code></td><td>string (UUID)</td><td><span class="required">Required</span></td><td>Jenis sampah harus aktif</td></tr>
+        <tr><td><code>items[].berat</code></td><td>number</td><td><span class="required">Required</span></td><td>Desimal max 3 digit, > 0</td></tr>
+        <tr><td><code>items[].harga_per_kg</code></td><td>number</td><td><span class="optional">Optional</span></td><td>Jika tidak diisi, gunakan harga aktif dari master. Pengelola bisa override per item</td></tr>
+        <tr><td><code>catatan</code></td><td>string</td><td><span class="optional">Optional</span></td><td>Catatan tambahan transaksi</td></tr>
+      </table>
+
+      <div class="block-label">Request Example</div>
+      <div class="code-block">{
+  <span class="key">"nasabah_id"</span>: <span class="str">"uuid-nasabah-xxx"</span>,
+  <span class="key">"items"</span>: [
+    {
+      <span class="key">"jenis_sampah_id"</span>: <span class="str">"uuid-jenis-aaa"</span>,
+      <span class="key">"berat"</span>: <span class="num">2.5</span>,
+      <span class="key">"harga_per_kg"</span>: <span class="num">3500</span>  <span class="comment">// optional override</span>
+    },
+    {
+      <span class="key">"jenis_sampah_id"</span>: <span class="str">"uuid-jenis-bbb"</span>,
+      <span class="key">"berat"</span>: <span class="num">1.200</span>
+      <span class="comment">// harga_per_kg tidak diisi → pakai harga master</span>
+    }
+  ],
+  <span class="key">"catatan"</span>: <span class="str">"Setoran rutin bulan Juni"</span>
+}</div>
+
+      <div class="block-label">Response</div>
+      <span class="response-tag r-201">201 Created</span>
+      <div class="code-block">{
+  <span class="key">"id"</span>: <span class="str">"uuid-trx-yyy"</span>,
+  <span class="key">"nasabah_id"</span>: <span class="str">"uuid-nasabah-xxx"</span>,
+  <span class="key">"nasabah_nama"</span>: <span class="str">"Ahmad Ridwan"</span>,
+  <span class="key">"bank_sampah_id"</span>: <span class="str">"uuid-bank-xxx"</span>,
+  <span class="key">"dicatat_oleh"</span>: <span class="str">"uuid-user-xxx"</span>,
+  <span class="key">"tanggal"</span>: <span class="str">"2026-06-20T09:30:00Z"</span>,  <span class="comment">// auto-set server</span>
+  <span class="key">"total_nilai"</span>: <span class="num">11500.00</span>,
+  <span class="key">"catatan"</span>: <span class="str">"Setoran rutin bulan Juni"</span>,
+  <span class="key">"status_wa"</span>: <span class="str">"belum_dikirim"</span>,
+  <span class="key">"items"</span>: [
+    {
+      <span class="key">"id"</span>: <span class="str">"uuid-detail-1"</span>,
+      <span class="key">"jenis_sampah_id"</span>: <span class="str">"uuid-jenis-aaa"</span>,
+      <span class="key">"nama_sampah_snapshot"</span>: <span class="str">"Plastik PET"</span>,
+      <span class="key">"harga_snapshot"</span>: <span class="num">3500.00</span>,
+      <span class="key">"berat"</span>: <span class="num">2.500</span>,
+      <span class="key">"subtotal"</span>: <span class="num">8750.00</span>
+    },
+    {
+      <span class="key">"id"</span>: <span class="str">"uuid-detail-2"</span>,
+      <span class="key">"jenis_sampah_id"</span>: <span class="str">"uuid-jenis-bbb"</span>,
+      <span class="key">"nama_sampah_snapshot"</span>: <span class="str">"Kertas HVS"</span>,
+      <span class="key">"harga_snapshot"</span>: <span class="num">2291.67</span>,
+      <span class="key">"berat"</span>: <span class="num">1.200</span>,
+      <span class="key">"subtotal"</span>: <span class="num">2750.00</span>
+    }
+  ],
+  <span class="key">"saldo_setelah_transaksi"</span>: <span class="num">461500.00</span>
+}</div>
+      <span class="response-tag r-422">422</span>
+      <div class="code-block">{
+  <span class="key">"errors"</span>: {
+    <span class="key">"nasabah_id"</span>: [<span class="str">"Nasabah tidak ditemukan atau tidak aktif"</span>],
+    <span class="key">"items"</span>: [<span class="str">"Minimal 1 item setoran diperlukan"</span>],
+    <span class="key">"items[0].berat"</span>: [<span class="str">"Berat harus lebih dari 0"</span>]
+  }
+}</div>
+    </div>
+  </div>
+
+  <!-- GET /transaksi/:id -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-get">GET</span>
+      <span class="endpoint-path">/transaksi/:id</span>
+      <span class="endpoint-desc">Detail lengkap satu transaksi</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span>
+      <p class="note">Response sama dengan POST /transaksi 201 response, tambah field <code>status_wa</code> dengan detail.</p>
+      <div class="code-block">{
+  <span class="key">"id"</span>: <span class="str">"uuid-trx-xxx"</span>,
+  <span class="key">"nasabah_nama"</span>: <span class="str">"Budi Santoso"</span>,
+  <span class="key">"tanggal"</span>: <span class="str">"2026-06-20T09:45:00Z"</span>,
+  <span class="key">"total_nilai"</span>: <span class="num">15600.00</span>,
+  <span class="key">"saldo_setelah_transaksi"</span>: <span class="num">125000.00</span>,
+  <span class="key">"items"</span>: [ <span class="comment">/* array detail_transaksi */</span> ],
+  <span class="key">"status_wa"</span>: <span class="str">"gagal"</span>,  <span class="comment">// "terkirim" | "gagal" | "belum_dikirim"</span>
+  <span class="key">"catatan"</span>: <span class="null">null</span>
+}</div>
+    </div>
+  </div>
+
+  <!-- POST /transaksi/:id/notify-wa -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-post">POST</span>
+      <span class="endpoint-path">/transaksi/:id/notify-wa</span>
+      <span class="endpoint-desc">Kirim / retry notifikasi WhatsApp ke nasabah</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <p style="font-size:0.85rem;color:var(--gray-600);margin-bottom:12px;">Mengirim notifikasi WhatsApp ke nomor HP nasabah melalui WhatsApp Gateway API. Bisa digunakan untuk pengiriman pertama kali atau retry jika sebelumnya gagal. Mengupdate <code>status_wa</code> di database setelah pengiriman.</p>
+
+      <div class="block-label">Request Body</div>
+      <p class="note">Tidak perlu request body. Server menggunakan data transaksi yang sudah ada dan template WA dari pengaturan bank sampah.</p>
+
+      <div class="block-label">Pesan WhatsApp yang Dikirim</div>
+      <div class="code-block"><span class="comment">// Template default (bisa dikustomisasi di /pengaturan/wa-template)</span>
+Halo {Nama}, setoran sampahmu senilai {Total} sudah kami catat ya.
+Saldo tabunganmu sekarang adalah Rp {Saldo}.
+{daftar_item}
+Terima kasih! 🌿</div>
+
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span> — Berhasil dikirim
+      <div class="code-block">{
+  <span class="key">"success"</span>: <span class="bool">true</span>,
+  <span class="key">"status_wa"</span>: <span class="str">"terkirim"</span>,
+  <span class="key">"message"</span>: <span class="str">"Notifikasi WhatsApp berhasil dikirim"</span>
+}</div>
+      <span class="response-tag r-400">400 Bad Request</span> — Gagal kirim
+      <div class="code-block">{
+  <span class="key">"success"</span>: <span class="bool">false</span>,
+  <span class="key">"status_wa"</span>: <span class="str">"gagal"</span>,
+  <span class="key">"error"</span>: <span class="str">"Nomor tidak aktif di WhatsApp"</span>
+}</div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- SALDO -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div id="saldo" class="section-header">
+    <h2>💰 Saldo Nasabah</h2>
+    <p>Informasi saldo dan riwayat perubahan saldo nasabah</p>
+  </div>
+
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-get">GET</span>
+      <span class="endpoint-path">/nasabah/:id/saldo</span>
+      <span class="endpoint-desc">Saldo terkini nasabah</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span>
+      <div class="code-block">{
+  <span class="key">"nasabah_id"</span>: <span class="str">"uuid-nasabah-xxx"</span>,
+  <span class="key">"nasabah_nama"</span>: <span class="str">"Ahmad Ridwan"</span>,
+  <span class="key">"total_saldo"</span>: <span class="num">450000.00</span>,
+  <span class="key">"updated_at"</span>: <span class="str">"2026-06-20T09:45:00Z"</span>
+}</div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- DASHBOARD -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div id="dashboard" class="section-header">
+    <h2>📊 Dashboard</h2>
+    <p>Statistik ringkasan bank sampah (F-06)</p>
+  </div>
+
+  <!-- GET /dashboard/stats -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-get">GET</span>
+      <span class="endpoint-path">/dashboard/stats</span>
+      <span class="endpoint-desc">Kartu statistik bulan berjalan</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <p class="note">Data otomatis difilter per bank_sampah pengelola yang login. Di-refresh setiap kali halaman dibuka (bukan cache).</p>
+
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span>
+      <div class="code-block">{
+  <span class="key">"bank_sampah_nama"</span>: <span class="str">"Bank Sampah BTH"</span>,
+  <span class="key">"pengelola_nama"</span>: <span class="str">"Ibu Sari"</span>,
+  <span class="key">"periode"</span>: <span class="str">"2026-06"</span>,  <span class="comment">// bulan kalender berjalan</span>
+  <span class="key">"nasabah_aktif"</span>: <span class="num">128</span>,
+  <span class="key">"transaksi_bulan_ini"</span>: <span class="num">45</span>,
+  <span class="key">"total_sampah_kg_bulan_ini"</span>: <span class="num">450.75</span>,
+  <span class="key">"total_nilai_bulan_ini"</span>: <span class="num">12450000.00</span>
+}</div>
+    </div>
+  </div>
+
+  <!-- GET /dashboard/recent-transactions -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-get">GET</span>
+      <span class="endpoint-path">/dashboard/recent-transactions</span>
+      <span class="endpoint-desc">3 transaksi terbaru untuk dashboard</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span>
+      <div class="code-block">{
+  <span class="key">"transactions"</span>: [
+    {
+      <span class="key">"id"</span>: <span class="str">"uuid-trx-1"</span>,
+      <span class="key">"nasabah_nama"</span>: <span class="str">"Budi Santoso"</span>,
+      <span class="key">"nasabah_inisial"</span>: <span class="str">"BS"</span>,
+      <span class="key">"jenis_sampah_utama"</span>: <span class="str">"Plastik PET"</span>,
+      <span class="key">"total_berat_kg"</span>: <span class="num">5.2</span>,
+      <span class="key">"total_nilai"</span>: <span class="num">15600.00</span>,
+      <span class="key">"tanggal"</span>: <span class="str">"2026-06-20T09:45:00Z"</span>
+    },
+    <span class="comment">// ... 2 lagi</span>
+  ]
+}</div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- PENGATURAN -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div id="pengaturan" class="section-header">
+    <h2>⚙️ Pengaturan</h2>
+    <p>Konfigurasi template pesan WhatsApp (F-05)</p>
+  </div>
+
+  <!-- GET /pengaturan/wa-template -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-get">GET</span>
+      <span class="endpoint-path">/pengaturan/wa-template</span>
+      <span class="endpoint-desc">Get template pesan WhatsApp saat ini</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span>
+      <div class="code-block">{
+  <span class="key">"template"</span>: <span class="str">"Halo {Nama}, setoran sampahmu senilai {Total} sudah kami catat ya.\nSaldo tabunganmu sekarang adalah Rp {Saldo}.\n{daftar_item}\nTerima kasih! 🌿"</span>,
+  <span class="key">"variabel_tersedia"</span>: [
+    <span class="str">"{Nama}"</span>, <span class="str">"{Total}"</span>, <span class="str">"{Saldo}"</span>, <span class="str">"{Tanggal}"</span>, <span class="str">"{daftar_item}"</span>
+  ],
+  <span class="key">"preview_contoh"</span>: <span class="str">"Halo Budi Santoso, setoran sampahmu senilai Rp 15.600 sudah kami catat ya...."</span>
+}</div>
+    </div>
+  </div>
+
+  <!-- PUT /pengaturan/wa-template -->
+  <div class="endpoint">
+    <div class="endpoint-header">
+      <span class="method-badge method-put">PUT</span>
+      <span class="endpoint-path">/pengaturan/wa-template</span>
+      <span class="endpoint-desc">Update template pesan WhatsApp</span>
+      <span class="endpoint-auth">🔒 Auth Required</span>
+    </div>
+    <div class="endpoint-body">
+      <div class="block-label">Request Body</div>
+      <table>
+        <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+        <tr><td><code>template</code></td><td>string</td><td><span class="required">Required</span></td><td>Template pesan dengan variabel dinamis: <code>{Nama}</code>, <code>{Total}</code>, <code>{Saldo}</code>, <code>{Tanggal}</code>, <code>{daftar_item}</code></td></tr>
+      </table>
+
+      <div class="block-label">Request Example</div>
+      <div class="code-block">{
+  <span class="key">"template"</span>: <span class="str">"Halo {Nama}! 👋\nSetoran sampahmu sebesar {Total} telah kami terima.\nSaldo terbaru: Rp {Saldo}\nTerima kasih sudah peduli lingkungan! 🌱"</span>
+}</div>
+
+      <div class="block-label">Response</div>
+      <span class="response-tag r-200">200 OK</span>
+      <div class="code-block">{
+  <span class="key">"template"</span>: <span class="str">"Halo {Nama}! 👋\n..."</span>,
+  <span class="key">"message"</span>: <span class="str">"Template berhasil disimpan"</span>
+}</div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- ERROR CODES -->
+  <!-- ═══════════════════════════════════════════ -->
+  <div id="errors" class="section-header">
+    <h2>❌ Standard Error Responses</h2>
+    <p>Format error response yang konsisten di semua endpoint</p>
+  </div>
+
+  <div style="background:#fff;border:1px solid var(--gray-200);border-radius:12px;padding:20px;">
+    <table>
+      <tr><th>HTTP Status</th><th>Code</th><th>Kapan Terjadi</th></tr>
+      <tr><td><span class="response-tag r-400">400</span></td><td>Bad Request</td><td>Request tidak valid (mis. format tanggal salah, constraint logic)</td></tr>
+      <tr><td><span class="response-tag r-401">401</span></td><td>Unauthorized</td><td>Token tidak ada, invalid, atau expired</td></tr>
+      <tr><td><span class="response-tag r-403">403</span></td><td>Forbidden</td><td>Akses ke resource milik bank sampah lain</td></tr>
+      <tr><td><span class="response-tag r-404">404</span></td><td>Not Found</td><td>Resource tidak ditemukan</td></tr>
+      <tr><td><span class="response-tag r-422">422</span></td><td>Unprocessable Entity</td><td>Validasi field gagal</td></tr>
+      <tr><td><span class="response-tag r-500">500</span></td><td>Internal Server Error</td><td>Error server tak terduga</td></tr>
+    </table>
+
+    <div class="block-label">Format Response Error (Umum)</div>
+    <div class="code-block">{
+  <span class="key">"error"</span>: <span class="str">"Pesan error singkat"</span>,
+  <span class="key">"detail"</span>: <span class="str">"Penjelasan lebih lengkap (opsional)"</span>
+}
+
+<span class="comment">// 422 Validasi — format khusus:</span>
+{
+  <span class="key">"errors"</span>: {
+    <span class="key">"nama_field"</span>: [<span class="str">"Pesan error 1"</span>, <span class="str">"Pesan error 2"</span>]
+  }
+}</div>
+
+    <div class="block-label">JWT Payload Structure</div>
+    <div class="code-block">{
+  <span class="key">"user_id"</span>: <span class="str">"uuid-user-xxx"</span>,
+  <span class="key">"bank_sampah_id"</span>: <span class="str">"uuid-bank-xxx"</span>,
+  <span class="key">"role"</span>: <span class="str">"pengelola"</span>,
+  <span class="key">"email"</span>: <span class="str">"sari@gmail.com"</span>,
+  <span class="key">"exp"</span>: <span class="num">1753100000</span>,
+  <span class="key">"iat"</span>: <span class="num">1753013600</span>
+}</div>
+  </div>
+
+  <!-- Footer -->
+  <div style="margin-top:48px;padding:20px;background:var(--gray-50);border-radius:12px;font-size:0.78rem;color:var(--gray-500);text-align:center;">
+    PILAH API Documentation v1.0.0 — Aplikasi Mobile Manajemen Bank Sampah Digital<br>
+    Django + DRF + JWT + Supabase (PostgreSQL) · Dibuat untuk Bank Sampah BTH, Depok
+  </div>
+
+</main>
+</div>
+</body>
+</html>
