@@ -134,9 +134,12 @@ Auth and app variables:
 
 ```env
 GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_IDS=
 PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false
 PILAH_PUBLIC_APP_URL=https://pilah.example.com
 ```
+
+For mobile apps, set `GOOGLE_CLIENT_IDS` to a comma-separated list of OAuth client IDs that may appear as the Google ID token audience, for example Android and iOS client IDs. `GOOGLE_CLIENT_ID` is still supported for a single client.
 
 WhatsApp gateway variables:
 
@@ -394,5 +397,5 @@ python manage.py test
 - This repository is backend-only.
 - The included HTML page is an API test utility, not the product interface.
 - Docker uses development credentials by default; change secrets before deployment.
-- Production Google OAuth requires a real `GOOGLE_CLIENT_ID`.
+- Production Google OAuth requires a real `GOOGLE_CLIENT_ID` or comma-separated `GOOGLE_CLIENT_IDS`.
 - Production file storage can be moved from local filesystem to S3, Supabase Storage, or another Django storage backend.

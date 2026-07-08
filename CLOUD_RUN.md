@@ -45,6 +45,7 @@ export GCS_BUCKET='pilah-media-prod'
 export DJANGO_SECRET_KEY='change-this-django-secret'
 export PILAH_PUBLIC_APP_URL=''
 export GOOGLE_CLIENT_ID=''
+export GOOGLE_CLIENT_IDS=''
 export WHATSAPP_GATEWAY_URL=''
 export WHATSAPP_GATEWAY_TOKEN=''
 ```
@@ -101,7 +102,7 @@ You can also create the SuperAdmin inside a locally configured environment with 
 Set these before production use:
 
 - `DJANGO_SECRET_KEY` to a long random value.
-- `GOOGLE_CLIENT_ID` to the production OAuth client ID.
+- `GOOGLE_CLIENT_IDS` to a comma-separated list of production OAuth client IDs for the mobile app, such as Android and iOS client IDs. `GOOGLE_CLIENT_ID` is still supported for one client.
 - `DJANGO_ALLOWED_HOSTS` to the Cloud Run domain or custom domain.
 - `CORS_ALLOW_ALL_ORIGINS=false` once the frontend domain is known.
 - `PILAH_PUBLIC_APP_URL` to the public app or API URL used for invite links.
