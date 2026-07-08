@@ -44,7 +44,8 @@ jobs:
       - name: Build and push image
         run: |
           IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}/${IMAGE_NAME}:${GITHUB_SHA}"
-          gcloud builds submit --project "${PROJECT_ID}" --tag "${IMAGE_URI}" .
+          docker build --tag "${IMAGE_URI}" .
+          docker push "${IMAGE_URI}"
           echo "IMAGE_URI=${IMAGE_URI}" >> "${GITHUB_ENV}"
 
       - name: Deploy Cloud Run
