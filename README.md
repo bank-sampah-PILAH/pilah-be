@@ -67,6 +67,8 @@ Reset local Docker data:
 docker compose down -v
 ```
 
+For Google Cloud Run deployment, see [CLOUD_RUN.md](CLOUD_RUN.md).
+
 ## Direct Local Setup
 
 Create and activate a virtual environment:

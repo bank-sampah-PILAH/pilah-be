@@ -25,6 +25,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "rest_framework",
     "drf_spectacular",
+    "storages",
     "rest_framework_simplejwt.token_blacklist",
     "api",
 ]
@@ -112,16 +113,25 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+GS_BUCKET_NAME = os.getenv("GS_BUCKET_NAME", "")
+GS_LOCATION = os.getenv("GS_LOCATION", "media")
+GS_DEFAULT_ACL = None
+GS_QUERYSTRING_AUTH = os.getenv("GS_QUERYSTRING_AUTH", "true").lower() == "true"
+
 STORAGES = {
     "default": {
+        "BACKEND": "storages.backends.gcloud.GoogleCloudStorage",
+    }
+    if GS_BUCKET_NAME
+    else {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
     },
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
 }
-MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "api.User"
