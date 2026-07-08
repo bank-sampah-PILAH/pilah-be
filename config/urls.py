@@ -21,9 +21,19 @@ from django.urls import include, path
 from django.views.generic import TemplateView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
+
+class ApiTestView(TemplateView):
+    template_name = "api_test.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["google_client_id"] = settings.GOOGLE_CLIENT_ID
+        return context
+
+
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("api-test/", TemplateView.as_view(template_name="api_test.html"), name="api-test"),
+    path("api-test/", ApiTestView.as_view(), name="api-test"),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
     path("api/v1/", include("api.urls")),

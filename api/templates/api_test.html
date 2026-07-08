@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PILAH API E2E Test Runner</title>
+  <script src="https://accounts.google.com/gsi/client" defer></script>
   <style>
     :root {
       color-scheme: light;
@@ -186,6 +187,12 @@
     }
     .muted { color: var(--muted); }
     .small { font-size: 12px; }
+    .google-login {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      align-items: flex-start;
+    }
     @media (max-width: 980px) {
       main { grid-template-columns: 1fr; }
       .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -227,6 +234,19 @@
           <button id="download" type="button" disabled>Download JSON</button>
         </div>
         <p class="muted small">The runner creates unique test data every run. It uses local dev auth tokens in the form <code>dev:email:name</code>.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Production Google Login</h2>
+        <span id="google-login-state" class="status pending">IDLE</span>
+      </div>
+      <div class="content google-login">
+        <div id="google-signin"></div>
+        <button id="google-send" type="button" disabled>Send ID Token</button>
+        <p class="muted small">Signs in with Google, sends the returned ID token to <code>/auth/google</code>, and stores the PILAH access token in this page.</p>
+        <pre id="google-login-output">{}</pre>
       </div>
     </section>
 
@@ -290,8 +310,11 @@
       refresh: null,
       ids: {},
       report: null,
-      abort: false
+      abort: false,
+      googleCredential: null
     };
+
+    const googleClientId = "{{ google_client_id|escapejs }}";
 
     const els = {
       runState: document.getElementById("run-state"),
@@ -310,6 +333,87 @@
       steps: document.getElementById("steps"),
       detail: document.getElementById("detail-output")
     };
+
+    const googleEls = {
+      state: document.getElementById("google-login-state"),
+      send: document.getElementById("google-send"),
+      output: document.getElementById("google-login-output")
+    };
+
+    function setGoogleState(value, className) {
+      googleEls.state.textContent = value;
+      googleEls.state.className = `status ${className}`;
+    }
+
+    function writeGoogleOutput(value) {
+      googleEls.output.textContent = JSON.stringify(value, null, 2);
+    }
+
+    window.handleGoogleCredential = function handleGoogleCredential(response) {
+      state.googleCredential = response.credential;
+      googleEls.send.disabled = false;
+      setGoogleState("READY", "running");
+      writeGoogleOutput({
+        status: "credential_received",
+        id_token_length: response.credential ? response.credential.length : 0
+      });
+    };
+
+    async function sendGoogleCredential() {
+      if (!state.googleCredential) {
+        setGoogleState("FAILED", "failed");
+        writeGoogleOutput({ error: "Google ID token is not available" });
+        return;
+      }
+      setGoogleState("RUNNING", "running");
+      googleEls.send.disabled = true;
+      try {
+        const response = await fetch(`${normalizeBaseUrl()}/auth/google`, {
+          method: "POST",
+          headers: {
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ id_token: state.googleCredential })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        state.token = data.access_token;
+        state.refresh = data.refresh_token;
+        setGoogleState("PASSED", "passed");
+        writeGoogleOutput(data);
+      } catch (error) {
+        setGoogleState("FAILED", "failed");
+        writeGoogleOutput({ error: error.message });
+      } finally {
+        googleEls.send.disabled = false;
+      }
+    }
+
+    window.addEventListener("load", () => {
+      if (!googleClientId) {
+        setGoogleState("NO CLIENT", "failed");
+        writeGoogleOutput({ error: "GOOGLE_CLIENT_ID is not configured on the server" });
+        return;
+      }
+      if (!window.google || !window.google.accounts) {
+        setGoogleState("NO SDK", "failed");
+        writeGoogleOutput({ error: "Google Identity Services SDK did not load" });
+        return;
+      }
+      window.google.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: window.handleGoogleCredential
+      });
+      window.google.accounts.id.renderButton(document.getElementById("google-signin"), {
+        theme: "outline",
+        size: "large",
+        width: 260
+      });
+      setGoogleState("READY", "pending");
+    });
 
     function nowStamp() {
       return new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
@@ -795,6 +899,7 @@
       els.download.disabled = true;
     });
     els.download.addEventListener("click", downloadReport);
+    googleEls.send.addEventListener("click", sendGoogleCredential);
 
     setDefaultEmail();
     resetReport();
