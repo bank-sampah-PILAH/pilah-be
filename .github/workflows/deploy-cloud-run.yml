@@ -1,0 +1,60 @@
+name: Deploy Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION }}
+  SERVICE_NAME: ${{ vars.CLOUD_RUN_SERVICE }}
+  ARTIFACT_REPO: ${{ vars.ARTIFACT_REPO }}
+  IMAGE_NAME: ${{ vars.IMAGE_NAME }}
+  SQL_CONNECTION_NAME: ${{ vars.SQL_CONNECTION_NAME }}
+  RUNTIME_SERVICE_ACCOUNT: ${{ vars.RUNTIME_SERVICE_ACCOUNT }}
+  GS_BUCKET_NAME: ${{ vars.GS_BUCKET_NAME }}
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker auth
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and push image
+        run: |
+          IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}/${IMAGE_NAME}:${GITHUB_SHA}"
+          gcloud builds submit --project "${PROJECT_ID}" --tag "${IMAGE_URI}" .
+          echo "IMAGE_URI=${IMAGE_URI}" >> "${GITHUB_ENV}"
+
+      - name: Deploy Cloud Run
+        run: |
+          gcloud run deploy "${SERVICE_NAME}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --image "${IMAGE_URI}" \
+            --platform managed \
+            --allow-unauthenticated \
+            --service-account "${RUNTIME_SERVICE_ACCOUNT}" \
+            --add-cloudsql-instances "${SQL_CONNECTION_NAME}" \
+            --set-env-vars "^|^DJANGO_DEBUG=false|DJANGO_ALLOWED_HOSTS=*|CORS_ALLOW_ALL_ORIGINS=true|DB_ENGINE=django.db.backends.postgresql|DB_NAME=${{ secrets.DB_NAME }}|DB_USER=${{ secrets.DB_USER }}|DB_PASSWORD=${{ secrets.DB_PASSWORD }}|DB_HOST=/cloudsql/${SQL_CONNECTION_NAME}|DB_PORT=5432|GS_BUCKET_NAME=${GS_BUCKET_NAME}|PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false|PILAH_PUBLIC_APP_URL=${{ vars.PILAH_PUBLIC_APP_URL }}|GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}|WHATSAPP_GATEWAY_URL=${{ secrets.WHATSAPP_GATEWAY_URL }}|WHATSAPP_GATEWAY_TOKEN=${{ secrets.WHATSAPP_GATEWAY_TOKEN }}|DJANGO_SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}"
