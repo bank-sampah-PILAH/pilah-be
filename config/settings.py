@@ -165,9 +165,7 @@ SIMPLE_JWT = {
 
 CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "true").lower() == "true"
 
-_google_client_ids = os.getenv("GOOGLE_CLIENT_IDS", os.getenv("GOOGLE_CLIENT_ID", ""))
-GOOGLE_CLIENT_IDS = [client_id.strip() for client_id in _google_client_ids.split(",") if client_id.strip()]
-GOOGLE_CLIENT_ID = GOOGLE_CLIENT_IDS[0] if GOOGLE_CLIENT_IDS else ""
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 PILAH_ALLOW_FAKE_GOOGLE_TOKEN = os.getenv("PILAH_ALLOW_FAKE_GOOGLE_TOKEN", str(DEBUG)).lower() == "true"
 PILAH_PUBLIC_APP_URL = os.getenv("PILAH_PUBLIC_APP_URL", "")
 WHATSAPP_GATEWAY_URL = os.getenv("WHATSAPP_GATEWAY_URL", "")

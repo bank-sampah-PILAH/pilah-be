@@ -107,15 +107,9 @@ class AuthService:
         if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and raw_id_token.startswith("dev:"):
             _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
             return {"sub": f"dev-{email}", "email": email, "name": name or email.split("@")[0]}
-        audiences = settings.GOOGLE_CLIENT_IDS or [None]
+        audience = settings.GOOGLE_CLIENT_ID or None
         try:
-            last_error = None
-            for audience in audiences:
-                try:
-                    return google_id_token.verify_oauth2_token(raw_id_token, google_requests.Request(), audience)
-                except Exception as exc:
-                    last_error = exc
-            raise last_error
+            return google_id_token.verify_oauth2_token(raw_id_token, google_requests.Request(), audience)
         except Exception as exc:
             raise serializers.ValidationError({"id_token": ["ID Token invalid atau expired"]}) from exc
 
