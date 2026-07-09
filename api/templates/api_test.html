@@ -244,7 +244,7 @@
       </div>
       <div class="content google-login">
         <div id="google-signin"></div>
-        <button id="google-send" type="button" disabled>Send ID Token</button>
+        <button id="google-send" type="button" disabled>Retry API Login</button>
         <p class="muted small">Signs in with Google, sends the returned ID token to <code>/auth/google</code>, and stores the PILAH access token in this page.</p>
         <pre id="google-login-output">{}</pre>
       </div>
@@ -350,13 +350,23 @@
     }
 
     window.handleGoogleCredential = function handleGoogleCredential(response) {
+      if (!response || !response.credential) {
+        state.googleCredential = null;
+        googleEls.send.disabled = true;
+        setGoogleState("FAILED", "failed");
+        writeGoogleOutput({
+          error: "Google did not return an ID token",
+          response
+        });
+        return;
+      }
       state.googleCredential = response.credential;
-      googleEls.send.disabled = false;
       setGoogleState("READY", "running");
       writeGoogleOutput({
         status: "credential_received",
         id_token_length: response.credential ? response.credential.length : 0
       });
+      sendGoogleCredential();
     };
 
     async function sendGoogleCredential() {
@@ -405,7 +415,11 @@
       }
       window.google.accounts.id.initialize({
         client_id: googleClientId,
-        callback: window.handleGoogleCredential
+        callback: window.handleGoogleCredential,
+        ux_mode: "popup",
+        auto_select: false,
+        itp_support: true,
+        use_fedcm_for_button: false
       });
       window.google.accounts.id.renderButton(document.getElementById("google-signin"), {
         theme: "outline",
