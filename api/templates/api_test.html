@@ -230,6 +230,7 @@
         </div>
         <div class="actions">
           <button id="run-all" class="primary" type="button">Run Full Flow</button>
+          <button id="run-token" type="button" disabled>Run With Google Token</button>
           <button id="clear" type="button">Clear Report</button>
           <button id="download" type="button" disabled>Download JSON</button>
         </div>
@@ -312,7 +313,8 @@
       ids: {},
       report: null,
       abort: false,
-      googleCredential: null
+      googleCredential: null,
+      googleUser: null
     };
 
     const googleClientId = "{{ google_client_id|escapejs }}";
@@ -324,6 +326,7 @@
       name: document.getElementById("name"),
       notes: document.getElementById("notes"),
       runAll: document.getElementById("run-all"),
+      runToken: document.getElementById("run-token"),
       clear: document.getElementById("clear"),
       download: document.getElementById("download"),
       duration: document.getElementById("duration"),
@@ -349,6 +352,17 @@
 
     function writeGoogleOutput(value) {
       googleEls.output.textContent = JSON.stringify(value, null, 2);
+    }
+
+    function applyAuthData(data) {
+      state.token = data.access_token;
+      state.refresh = data.refresh_token;
+      state.googleUser = data.user || null;
+      if (data.user) {
+        els.email.value = data.user.email || els.email.value;
+        els.name.value = data.user.nama || data.user.name || els.name.value;
+      }
+      els.runToken.disabled = !state.token;
     }
 
     window.handleGoogleCredential = function handleGoogleCredential(response) {
@@ -392,8 +406,7 @@
         if (!response.ok) {
           throw new Error(data.error || `HTTP ${response.status}`);
         }
-        state.token = data.access_token;
-        state.refresh = data.refresh_token;
+        applyAuthData(data);
         setGoogleState("PASSED", "passed");
         writeGoogleOutput(data);
       } catch (error) {
@@ -431,8 +444,7 @@
         writeGoogleOutput(message.payload || { error: "Google OAuth failed" });
         return;
       }
-      state.token = message.payload.access_token;
-      state.refresh = message.payload.refresh_token;
+      applyAuthData(message.payload);
       setGoogleState("PASSED", "passed");
       writeGoogleOutput(message.payload);
     });
@@ -477,9 +489,13 @@
       els.runState.className = `status ${className}`;
     }
 
-    function resetReport() {
-      state.token = null;
-      state.refresh = null;
+    function resetReport(options = {}) {
+      if (!options.keepAuth) {
+        state.token = null;
+        state.refresh = null;
+        state.googleUser = null;
+        els.runToken.disabled = true;
+      }
       state.ids = {};
       state.report = {
         started_at: null,
@@ -890,6 +906,194 @@
       }
     }
 
+    async function runWithCurrentToken() {
+      if (!state.token) {
+        setRunState("FAILED", "failed");
+        writeGoogleOutput({ error: "Login with Google first, then run this flow" });
+        return;
+      }
+
+      resetReport({ keepAuth: true });
+      const runStart = performance.now();
+      const unique = nowStamp();
+      const name = els.name.value || state.googleUser?.nama || state.googleUser?.name || "Google Runner";
+      let currentState = null;
+      let currentRole = null;
+      state.report.started_at = new Date().toISOString();
+      state.report.email = els.email.value || state.googleUser?.email || "";
+      state.report.base_url = normalizeBaseUrl();
+      state.report.notes = `${els.notes.value || ""}\nProduction token flow`.trim();
+      state.report.status = "running";
+      setRunState("RUNNING", "running");
+      els.runAll.disabled = true;
+      els.runToken.disabled = true;
+      els.download.disabled = true;
+      renderReport();
+
+      try {
+        await call("Get Google auth state", "GET", "/auth/me", 200, undefined, data => {
+          currentState = data.state;
+          currentRole = data.role;
+          state.ids.user = data.id;
+          state.googleUser = data;
+          assert(Boolean(data.email), "Authenticated user email is missing");
+        });
+
+        if (currentRole === "superadmin") {
+          await call("SuperAdmin pending queue", "GET", "/superadmin/bank-sampah?status=pending", 200, undefined, data => {
+            assert(typeof data.count === "number", "Expected pending queue count");
+          });
+          state.report.status = "passed";
+          state.report.notes = `${state.report.notes}\nStopped after SuperAdmin smoke test.`;
+          setRunState("PASSED", "passed");
+          return;
+        }
+
+        assert(currentRole === "pengelola", "Production token flow expects pengelola or superadmin role");
+
+        if (currentState === "complete_profile") {
+          await call("Complete Google user profile", "PUT", "/onboarding/profile", 200, {
+            nama: name,
+            jenis_kelamin: "laki-laki",
+            tanggal_lahir: "1990-01-01",
+            no_hp: "081234567892"
+          }, data => {
+            assert(data.is_profile_complete === true, "Profile should be complete");
+            currentState = data.next_step;
+          });
+        }
+
+        if (currentState === "register_bank_sampah") {
+          const registrationForm = new FormData();
+          registrationForm.append("nama", `Bank Sampah Google ${unique}`);
+          registrationForm.append("alamat", "Kelurahan Kukusan, Kecamatan Beji, Kota Depok");
+          registrationForm.append("kota", "Depok");
+          registrationForm.append("no_hp_pic", "081234567890");
+          registrationForm.append("foto_kegiatan", new Blob(["pilah-google-e2e-image"], { type: "image/png" }), `google-kegiatan-${unique}.png`);
+          await call("Register bank sampah with Google token", "POST", "/onboarding/bank-sampah", 201, registrationForm, data => {
+            assert(data.status === "pending", "New bank registration should be pending");
+            assert(data.next_step === "approval_pending", "Expected pending approval next step");
+            state.ids.bank_sampah = data.id;
+          });
+          state.report.status = "passed";
+          state.report.notes = `${state.report.notes}\nStopped at approval_pending because SuperAdmin approval requires a separate SuperAdmin token.`;
+          setRunState("PASSED", "passed");
+          return;
+        }
+
+        if (currentState === "approval_pending" || currentState === "registration_rejected") {
+          await call("Confirm gated dashboard state", "GET", "/dashboard/stats", 403, undefined, data => {
+            assert(Boolean(data.error), "Expected profile/bank status gate");
+          });
+          state.report.status = "passed";
+          state.report.notes = `${state.report.notes}\nStopped at ${currentState}; operational endpoints require an active bank sampah.`;
+          setRunState("PASSED", "passed");
+          return;
+        }
+
+        assert(currentState === "dashboard", `Unsupported Google user state: ${currentState}`);
+
+        await call("Get active auth state", "GET", "/auth/me", 200, undefined, data => {
+          assert(data.state === "dashboard", "Pengelola should be on dashboard");
+        });
+
+        await call("Get bank profile", "GET", "/bank-sampah/me", 200, undefined, data => {
+          assert(data.status === "active", "Bank should be active");
+          state.ids.bank_sampah = data.id;
+        });
+
+        await call("Reject invalid nasabah", "POST", "/nasabah", 422, {
+          nama: "Bo",
+          no_hp: "123",
+          alamat: "short"
+        }, data => assert(Boolean(data.errors), "Expected validation errors"));
+
+        await call("Create nasabah", "POST", "/nasabah", 201, {
+          kode: `NAS-G${unique.slice(-5)}`,
+          nama: `Google Runner Nasabah ${unique}`,
+          jenis_kelamin: "laki-laki",
+          tanggal_lahir: "1990-01-01",
+          no_hp: "081234567891",
+          alamat: "Jl. Anggrek No. 3, RT 05/02, Kukusan"
+        }, data => {
+          assert(data.kode.startsWith("NAS-"), "Missing nasabah code");
+          assert(money(data.total_saldo) === "0.00", "Initial saldo must be zero");
+          state.ids.nasabah = data.id;
+        });
+
+        await call("Create jenis sampah", "POST", "/jenis-sampah", 201, {
+          kode: `PLG-${unique.slice(-6)}`,
+          nama_sampah: `Plastik Google ${unique}`,
+          kategori: "plastik",
+          deskripsi: "Botol bening dan kemasan plastik",
+          harga_per_kg: 3500
+        }, data => {
+          assert(data.satuan === "kg", "Satuan must be kg");
+          state.ids.jenis_sampah = data.id;
+        });
+
+        await call("Create transaction", "POST", "/transaksi", 201, {
+          nasabah_id: state.ids.nasabah,
+          items: [
+            { jenis_sampah_id: state.ids.jenis_sampah, berat: "2.500" },
+            { jenis_sampah_id: state.ids.jenis_sampah, berat: "1.200", harga_per_kg: "4000" }
+          ],
+          catatan: "Setoran from Google token E2E runner"
+        }, data => {
+          assert(money(data.total_nilai) === "13800.00", "Unexpected total nilai");
+          assert(money(data.saldo_setelah_transaksi) === "13800.00", "Unexpected saldo after transaction");
+          state.ids.transaksi = data.id;
+        });
+
+        await call("List transactions", "GET", "/transaksi?periode=bulan_ini", 200, undefined, data => {
+          assert(data.count >= 1, "Expected at least one transaction");
+        });
+
+        await call("Export transaction Excel", "GET", "/transaksi/export?periode=bulan_ini", 200, undefined, (_data, response) => {
+          assert(response.headers.get("content-type").includes("spreadsheet"), "Expected xlsx content type");
+        });
+
+        await call("Get nasabah saldo", "GET", `/nasabah/${state.ids.nasabah}/saldo`, 200, undefined, data => {
+          assert(money(data.total_saldo) === "13800.00", "Saldo endpoint did not match transaction total");
+        });
+
+        await call("Get dashboard stats", "GET", "/dashboard/stats", 200, undefined, data => {
+          assert(data.nasabah_aktif >= 1, "Expected active nasabah");
+          assert(data.transaksi_bulan_ini >= 1, "Expected monthly transaction count");
+        });
+
+        await call("Get WA template", "GET", "/pengaturan/wa-template", 200, undefined, data => {
+          assert(data.variabel_tersedia.includes("{Nama}"), "Expected {Nama} variable");
+        });
+
+        if (state.refresh) {
+          await call("Logout Google token", "POST", "/auth/logout", 200, {
+            refresh_token: state.refresh
+          }, data => assert(data.message === "Logout berhasil", "Unexpected logout message"));
+          state.token = null;
+          state.refresh = null;
+          els.runToken.disabled = true;
+        }
+
+        state.report.status = "passed";
+        setRunState("PASSED", "passed");
+      } catch (error) {
+        state.report.status = "failed";
+        state.report.failure = error.message;
+        setRunState("FAILED", "failed");
+      } finally {
+        state.report.finished_at = new Date().toISOString();
+        state.report.duration_ms = Math.round(performance.now() - runStart);
+        state.report.created = { ...state.ids };
+        els.runAll.disabled = false;
+        if (state.token) {
+          els.runToken.disabled = false;
+        }
+        els.download.disabled = false;
+        renderReport();
+      }
+    }
+
     function renderReport() {
       const report = state.report || { steps: [], created: {} };
       const passed = report.steps.filter(step => step.passed).length;
@@ -941,6 +1145,7 @@
     }
 
     els.runAll.addEventListener("click", runFullFlow);
+    els.runToken.addEventListener("click", runWithCurrentToken);
     els.clear.addEventListener("click", () => {
       setDefaultEmail();
       resetReport();
