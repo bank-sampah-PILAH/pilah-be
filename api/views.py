@@ -1,7 +1,11 @@
-from django.db.models import Q
+import json
+
+from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.conf import settings
-from django.http import HttpResponse
+from django.db.models import Q
+from django.http import HttpResponse, HttpResponseRedirect
 from django.utils.http import urlencode
+import requests
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -60,6 +64,93 @@ class GoogleAuthView(APIView):
             return Response(AuthService.login_with_google(token))
         except Exception:
             return Response({"error": "ID Token invalid atau expired"}, status=401)
+
+
+class GoogleOAuthStartView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+            return Response({"error": "Google OAuth client is not configured"}, status=503)
+        redirect_uri = settings.GOOGLE_REDIRECT_URI or request.build_absolute_uri("/api/v1/auth/google/callback")
+        next_url = request.GET.get("next") or "/api-test/"
+        if not next_url.startswith("/"):
+            next_url = "/api-test/"
+        state = TimestampSigner().sign(next_url)
+        params = urlencode(
+            {
+                "client_id": settings.GOOGLE_CLIENT_ID,
+                "redirect_uri": redirect_uri,
+                "response_type": "code",
+                "scope": "openid email profile",
+                "state": state,
+                "prompt": "select_account",
+            }
+        )
+        return HttpResponseRedirect(f"https://accounts.google.com/o/oauth2/v2/auth?{params}")
+
+
+class GoogleOAuthCallbackView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        if request.GET.get("error"):
+            return self._popup_response(False, {"error": request.GET.get("error")})
+        code = request.GET.get("code")
+        raw_state = request.GET.get("state", "")
+        if not code:
+            return self._popup_response(False, {"error": "Missing Google authorization code"})
+        try:
+            next_url = TimestampSigner().unsign(raw_state, max_age=600)
+        except (BadSignature, SignatureExpired):
+            next_url = "/api-test/"
+        if not next_url.startswith("/"):
+            next_url = "/api-test/"
+
+        redirect_uri = settings.GOOGLE_REDIRECT_URI or request.build_absolute_uri("/api/v1/auth/google/callback")
+        try:
+            token_response = requests.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "client_id": settings.GOOGLE_CLIENT_ID,
+                    "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                    "code": code,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": redirect_uri,
+                },
+                timeout=10,
+            )
+            token_payload = token_response.json()
+            if token_response.status_code >= 400:
+                return self._popup_response(False, token_payload, next_url)
+            id_token = token_payload.get("id_token")
+            if not id_token:
+                return self._popup_response(False, {"error": "Google did not return an ID token"}, next_url)
+            return self._popup_response(True, AuthService.login_with_google(id_token), next_url)
+        except Exception as exc:
+            return self._popup_response(False, {"error": str(exc)}, next_url)
+
+    @staticmethod
+    def _popup_response(ok, payload, next_url="/api-test/"):
+        message = json.dumps({"type": "pilah-google-oauth", "ok": ok, "payload": payload})
+        fallback = json.dumps(payload, indent=2)
+        html = f"""<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>PILAH Google OAuth</title></head>
+<body>
+<pre>{fallback}</pre>
+<script>
+  const message = {message};
+  if (window.opener) {{
+    window.opener.postMessage(message, window.location.origin);
+    window.close();
+  }} else {{
+    window.location.href = {json.dumps(next_url)};
+  }}
+</script>
+</body>
+</html>"""
+        return HttpResponse(html, status=200 if ok else 400)
 
 
 class RefreshTokenView(APIView):

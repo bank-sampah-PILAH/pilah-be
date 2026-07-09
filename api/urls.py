@@ -10,6 +10,8 @@ from api.views import (
     DashboardStatsView,
     GenerateInviteView,
     GoogleAuthView,
+    GoogleOAuthCallbackView,
+    GoogleOAuthStartView,
     JenisSampahViewSet,
     LogoutView,
     NasabahViewSet,
@@ -30,6 +32,8 @@ router.register("superadmin/bank-sampah", SuperAdminBankSampahViewSet, basename=
 
 urlpatterns = [
     path("auth/google", GoogleAuthView.as_view(), name="auth-google"),
+    path("auth/google/start", GoogleOAuthStartView.as_view(), name="auth-google-start"),
+    path("auth/google/callback", GoogleOAuthCallbackView.as_view(), name="auth-google-callback"),
     path("auth/refresh", RefreshTokenView.as_view(), name="auth-refresh"),
     path("auth/logout", LogoutView.as_view(), name="auth-logout"),
     path("auth/me", AuthMeView.as_view(), name="auth-me"),

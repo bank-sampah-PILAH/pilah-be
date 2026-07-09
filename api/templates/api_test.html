@@ -244,8 +244,9 @@
       </div>
       <div class="content google-login">
         <div id="google-signin"></div>
+        <button id="google-server-start" class="primary" type="button">Server OAuth Login</button>
         <button id="google-send" type="button" disabled>Retry API Login</button>
-        <p class="muted small">Signs in with Google, sends the returned ID token to <code>/auth/google</code>, and stores the PILAH access token in this page.</p>
+        <p class="muted small">Use Server OAuth Login if the Google Identity Services button is blocked by origin validation. It opens Google in a popup and returns PILAH tokens through the backend callback.</p>
         <pre id="google-login-output">{}</pre>
       </div>
     </section>
@@ -336,6 +337,7 @@
 
     const googleEls = {
       state: document.getElementById("google-login-state"),
+      serverStart: document.getElementById("google-server-start"),
       send: document.getElementById("google-send"),
       output: document.getElementById("google-login-output")
     };
@@ -401,6 +403,39 @@
         googleEls.send.disabled = false;
       }
     }
+
+    function startServerGoogleOAuth() {
+      setGoogleState("RUNNING", "running");
+      writeGoogleOutput({ status: "opening_google_oauth_popup" });
+      const popup = window.open(
+        `${normalizeBaseUrl()}/auth/google/start?next=/api-test/`,
+        "pilah-google-oauth",
+        "width=520,height=680,menubar=no,toolbar=no,location=yes,status=no"
+      );
+      if (!popup) {
+        setGoogleState("FAILED", "failed");
+        writeGoogleOutput({ error: "Popup was blocked by the browser" });
+      }
+    }
+
+    window.addEventListener("message", event => {
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+      const message = event.data || {};
+      if (message.type !== "pilah-google-oauth") {
+        return;
+      }
+      if (!message.ok) {
+        setGoogleState("FAILED", "failed");
+        writeGoogleOutput(message.payload || { error: "Google OAuth failed" });
+        return;
+      }
+      state.token = message.payload.access_token;
+      state.refresh = message.payload.refresh_token;
+      setGoogleState("PASSED", "passed");
+      writeGoogleOutput(message.payload);
+    });
 
     window.addEventListener("load", () => {
       if (!googleClientId) {
@@ -913,6 +948,7 @@
       els.download.disabled = true;
     });
     els.download.addEventListener("click", downloadReport);
+    googleEls.serverStart.addEventListener("click", startServerGoogleOAuth);
     googleEls.send.addEventListener("click", sendGoogleCredential);
 
     setDefaultEmail();
