@@ -284,8 +284,11 @@ class NasabahViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         nomor = serializer.validated_data["nomor"]
+        no_hp = serializer.validated_data["no_hp"]
         if Nasabah.objects.filter(bank_sampah=request.user.bank_sampah, nomor=nomor).exists():
             return Response({"errors": {"kode": ["ID Nasabah sudah digunakan"]}}, status=422)
+        if Nasabah.objects.filter(bank_sampah=request.user.bank_sampah, no_hp=no_hp).exists():
+            return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
         nasabah = serializer.save(
             bank_sampah=request.user.bank_sampah,
         )
@@ -299,7 +302,13 @@ class NasabahViewSet(viewsets.ModelViewSet):
         nomor = request.data.get("kode")
         if nomor and Nasabah.objects.filter(bank_sampah=request.user.bank_sampah, nomor=nomor).exclude(id=instance.id).exists():
             return Response({"errors": {"kode": ["ID Nasabah sudah digunakan"]}}, status=422)
-        return super().update(request, *args, **kwargs)
+        serializer = self.get_serializer(instance, data=request.data, partial=kwargs.pop("partial", False))
+        serializer.is_valid(raise_exception=True)
+        no_hp = serializer.validated_data.get("no_hp")
+        if no_hp and Nasabah.objects.filter(bank_sampah=request.user.bank_sampah, no_hp=no_hp).exclude(id=instance.id).exists():
+            return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
+        self.perform_update(serializer)
+        return Response(serializer.data)
 
     @action(detail=True, methods=["patch"], url_path="status")
     def set_status(self, request, pk=None):

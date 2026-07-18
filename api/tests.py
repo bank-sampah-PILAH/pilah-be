@@ -76,6 +76,65 @@ class APISpecTests(APITestCase):
         )
         self.assertEqual(inactive_update.status_code, 403)
 
+    def test_nasabah_duplicate_phone_returns_validation_error(self):
+        first = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+            },
+            format="json",
+        )
+        self.assertEqual(first.status_code, 201)
+
+        duplicate_create = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0002",
+                "nama": "Dewi Lestari",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1992-02-02",
+                "no_hp": "+6281234567890",
+                "alamat": "Jl. Melati No. 7",
+            },
+            format="json",
+        )
+        self.assertEqual(duplicate_create.status_code, 422)
+        self.assertEqual(duplicate_create.data["errors"]["no_hp"], ["Nomor HP nasabah sudah digunakan"])
+
+        second = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0002",
+                "nama": "Dewi Lestari",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1992-02-02",
+                "no_hp": "081999999999",
+                "alamat": "Jl. Melati No. 7",
+            },
+            format="json",
+        )
+        self.assertEqual(second.status_code, 201)
+
+        duplicate_update = self.client.put(
+            f"/api/v1/nasabah/{second.data['id']}",
+            {
+                "kode": "NAS-0002",
+                "nama": "Dewi Lestari",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1992-02-02",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Melati No. 7",
+            },
+            format="json",
+        )
+        self.assertEqual(duplicate_update.status_code, 422)
+        self.assertEqual(duplicate_update.data["errors"]["no_hp"], ["Nomor HP nasabah sudah digunakan"])
+
     def test_jenis_sampah_and_transaction_update_saldo(self):
         nasabah = Nasabah.objects.create(
             bank_sampah=self.bank,
