@@ -17,6 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.conf import settings
 from django.conf.urls.static import static
+from django.http import JsonResponse
 from django.urls import include, path
 from django.views.generic import TemplateView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
@@ -31,8 +32,27 @@ class ApiTestView(TemplateView):
         return context
 
 
+def assetlinks(request):
+    return JsonResponse(
+        [
+            {
+                "relation": ["delegate_permission/common.handle_all_urls"],
+                "target": {
+                    "namespace": "android_app",
+                    "package_name": "com.mobile.pilahapp",
+                    "sha256_cert_fingerprints": [
+                        "70:EF:3E:65:35:DD:83:3C:5B:43:79:E9:23:13:84:8E:E9:82:30:4F:A8:C6:E6:5F:A1:E5:3A:8A:6F:D8:EB:FC"
+                    ],
+                },
+            }
+        ],
+        safe=False,
+    )
+
+
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path(".well-known/assetlinks.json", assetlinks, name="assetlinks"),
     path("api-test/", ApiTestView.as_view(), name="api-test"),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),

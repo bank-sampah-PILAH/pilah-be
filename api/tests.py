@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal
 from unittest.mock import Mock, patch
 
@@ -376,3 +377,16 @@ class APISpecTests(APITestCase):
 
         approvals = self.client.get("/api/v1/superadmin/bank-sampah")
         self.assertEqual(approvals.status_code, 200)
+
+    def test_android_assetlinks(self):
+        self.client.credentials()
+        response = self.client.get("/.well-known/assetlinks.json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/json")
+        data = json.loads(response.content)
+        self.assertEqual(data[0]["target"]["package_name"], "com.mobile.pilahapp")
+        self.assertEqual(
+            data[0]["target"]["sha256_cert_fingerprints"],
+            ["70:EF:3E:65:35:DD:83:3C:5B:43:79:E9:23:13:84:8E:E9:82:30:4F:A8:C6:E6:5F:A1:E5:3A:8A:6F:D8:EB:FC"],
+        )
