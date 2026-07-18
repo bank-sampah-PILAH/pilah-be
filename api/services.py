@@ -130,6 +130,8 @@ class OnboardingService:
     @staticmethod
     @transaction.atomic
     def complete_profile(user, profile_data):
+        if user.is_profile_complete:
+            raise ValueError("Profil sudah lengkap")
         for field, value in profile_data.items():
             setattr(user, field, value)
         user.is_profile_complete = True
@@ -170,6 +172,10 @@ class OnboardingService:
             raise ValueError("Tautan undangan tidak valid atau sudah kedaluwarsa")
         if user.role != User.Role.PENGELOLA:
             raise PermissionError("Hanya pengelola yang dapat menerima undangan")
+        if user.bank_sampah_id == bank.id and user.is_primary_pengelola:
+            raise ValueError("Pengelola utama tidak dapat menerima tautan undangan miliknya sendiri")
+        if user.bank_sampah_id:
+            raise ValueError("Akun ini sudah tergabung dengan bank sampah")
         user.bank_sampah = bank
         user.is_primary_pengelola = False
         if user.nama and user.no_hp and user.jenis_kelamin and user.tanggal_lahir:

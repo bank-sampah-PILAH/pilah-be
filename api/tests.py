@@ -335,9 +335,29 @@ class APISpecTests(APITestCase):
         active_dashboard = self.client.get("/api/v1/dashboard/stats")
         self.assertEqual(active_dashboard.status_code, 200)
 
+        profile_overwrite = self.client.put(
+            "/api/v1/onboarding/profile",
+            {
+                "nama": "Overwritten User",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1999-09-09",
+                "no_hp": "081299999999",
+            },
+            format="json",
+        )
+        self.assertEqual(profile_overwrite.status_code, 400)
+        self.assertEqual(profile_overwrite.data["error"], "Profil sudah lengkap")
+
         invite = self.client.post("/api/v1/team/invite")
         self.assertEqual(invite.status_code, 201)
         self.assertIn("token", invite.data)
+
+        self_accept = self.client.post("/api/v1/invites/accept", {"token": invite.data["token"]}, format="json")
+        self.assertEqual(self_accept.status_code, 400)
+        self.assertEqual(self_accept.data["error"], "Pengelola utama tidak dapat menerima tautan undangan miliknya sendiri")
+        onboard_user = User.objects.get(email="onboard@example.com")
+        self.assertTrue(onboard_user.is_primary_pengelola)
+        self.assertEqual(str(onboard_user.bank_sampah_id), registration.data["id"])
 
         self.client.credentials()
         invited_login = self.client.post("/api/v1/auth/google", {"id_token": "dev:invited@example.com:Invited User"}, format="json")
@@ -357,6 +377,10 @@ class APISpecTests(APITestCase):
         accepted = self.client.post("/api/v1/invites/accept", {"token": invite.data["token"]}, format="json")
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(accepted.data["next_step"], "dashboard")
+
+        repeated_accept = self.client.post("/api/v1/invites/accept", {"token": invite.data["token"]}, format="json")
+        self.assertEqual(repeated_accept.status_code, 400)
+        self.assertEqual(repeated_accept.data["error"], "Akun ini sudah tergabung dengan bank sampah")
 
         team = self.client.get("/api/v1/team")
         self.assertEqual(team.status_code, 200)

@@ -204,7 +204,10 @@ class CompleteProfileView(APIView):
     def put(self, request):
         serializer = UserProfileSerializer(request.user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        user = OnboardingService.complete_profile(request.user, serializer.validated_data)
+        try:
+            user = OnboardingService.complete_profile(request.user, serializer.validated_data)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
         data = UserProfileSerializer(user).data
         data["next_step"] = AuthService.user_state(user)
         return Response(data)
@@ -220,6 +223,8 @@ class RegisterBankSampahView(APIView):
         serializer.is_valid(raise_exception=True)
         try:
             bank = OnboardingService.register_bank_sampah(request.user, serializer.validated_data)
+        except PermissionError as exc:
+            return Response({"error": str(exc)}, status=403)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         data = BankSampahSerializer(bank).data
@@ -236,6 +241,8 @@ class AcceptInviteView(APIView):
         serializer.is_valid(raise_exception=True)
         try:
             bank = OnboardingService.accept_invite(request.user, serializer.validated_data["token"])
+        except PermissionError as exc:
+            return Response({"error": str(exc)}, status=403)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         data = BankSampahSerializer(bank).data
