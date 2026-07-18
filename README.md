@@ -144,6 +144,12 @@ WhatsApp gateway variables:
 WHATSAPP_GATEWAY_URL=
 WHATSAPP_GATEWAY_TOKEN=
 WHATSAPP_GATEWAY_TIMEOUT=10
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_API_KEY_SID=
+TWILIO_API_KEY_SECRET=
+TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+TWILIO_MESSAGING_SERVICE_SID=
 ```
 
 ## Development Auth Tokens
@@ -275,9 +281,11 @@ Supported periods:
 
 The export returns an `.xlsx` file with category, item, price, total weight, and Excel formulas for totals.
 
-## WhatsApp Gateway
+## WhatsApp Gateway and Twilio
 
-The backend renders the configured WhatsApp template and posts to `WHATSAPP_GATEWAY_URL` when configured.
+The backend renders the configured WhatsApp template and sends it through Twilio when `TWILIO_ACCOUNT_SID` and either `TWILIO_AUTH_TOKEN` or `TWILIO_API_KEY_SID` plus `TWILIO_API_KEY_SECRET` are configured. Twilio WhatsApp sends require either `TWILIO_WHATSAPP_FROM` or `TWILIO_MESSAGING_SERVICE_SID`.
+
+If Twilio is not configured, the backend posts to `WHATSAPP_GATEWAY_URL` when configured.
 
 Default outgoing JSON body:
 
@@ -288,7 +296,7 @@ Default outgoing JSON body:
 }
 ```
 
-If `WHATSAPP_GATEWAY_URL` is empty, the notification endpoint simulates success and updates `status_wa`.
+If neither Twilio nor `WHATSAPP_GATEWAY_URL` is configured, the notification endpoint returns an error and updates `status_wa` to `gagal`.
 
 ## File Uploads
 

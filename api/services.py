@@ -336,7 +336,7 @@ class WhatsAppService:
 
     @staticmethod
     def preview(bank_sampah):
-        message = WhatsAppService.render(
+        return WhatsAppService.render(
             WhatsAppService.get_template(bank_sampah),
             nama="Budi Santoso",
             total=Decimal("15600"),
@@ -344,7 +344,6 @@ class WhatsAppService:
             tanggal=timezone.localdate(),
             daftar_item="- Plastik PET 5.2 kg",
         )
-        return message[:85] + "...." if len(message) > 85 else message
 
     @staticmethod
     def notify(transaksi):
@@ -353,6 +352,27 @@ class WhatsAppService:
             transaksi.save(update_fields=["status_wa"])
             return {"success": False, "status_wa": transaksi.status_wa, "error": "Nomor tidak aktif di WhatsApp"}
         message = WhatsAppService.message_for_transaction(transaksi)
+        has_twilio_auth = settings.TWILIO_AUTH_TOKEN or (settings.TWILIO_API_KEY_SID and settings.TWILIO_API_KEY_SECRET)
+        has_any_twilio_env = any(
+            [
+                settings.TWILIO_ACCOUNT_SID,
+                settings.TWILIO_AUTH_TOKEN,
+                settings.TWILIO_API_KEY_SID,
+                settings.TWILIO_API_KEY_SECRET,
+                settings.TWILIO_WHATSAPP_FROM,
+                settings.TWILIO_MESSAGING_SERVICE_SID,
+            ]
+        )
+        if settings.TWILIO_ACCOUNT_SID and has_twilio_auth:
+            return WhatsAppService.notify_twilio(transaksi, message)
+        if has_any_twilio_env:
+            transaksi.status_wa = Transaksi.StatusWA.GAGAL
+            transaksi.save(update_fields=["status_wa"])
+            return {
+                "success": False,
+                "status_wa": transaksi.status_wa,
+                "error": "Konfigurasi Twilio belum lengkap",
+            }
         if settings.WHATSAPP_GATEWAY_URL:
             try:
                 response = requests.post(
@@ -369,9 +389,74 @@ class WhatsAppService:
                 transaksi.status_wa = Transaksi.StatusWA.GAGAL
                 transaksi.save(update_fields=["status_wa"])
                 return {"success": False, "status_wa": transaksi.status_wa, "error": str(exc)}
-        transaksi.status_wa = Transaksi.StatusWA.TERKIRIM
+        transaksi.status_wa = Transaksi.StatusWA.GAGAL
         transaksi.save(update_fields=["status_wa"])
-        return {"success": True, "status_wa": transaksi.status_wa, "message": "Notifikasi WhatsApp berhasil dikirim"}
+        return {
+            "success": False,
+            "status_wa": transaksi.status_wa,
+            "error": "Konfigurasi WhatsApp/Twilio belum diisi",
+        }
+
+    @staticmethod
+    def notify_twilio(transaksi, message):
+        if not settings.TWILIO_WHATSAPP_FROM and not settings.TWILIO_MESSAGING_SERVICE_SID:
+            transaksi.status_wa = Transaksi.StatusWA.GAGAL
+            transaksi.save(update_fields=["status_wa"])
+            return {
+                "success": False,
+                "status_wa": transaksi.status_wa,
+                "error": "TWILIO_WHATSAPP_FROM atau TWILIO_MESSAGING_SERVICE_SID wajib diisi",
+            }
+
+        payload = {
+            "To": WhatsAppService.twilio_whatsapp_number(transaksi.nasabah.no_hp),
+            "Body": message,
+        }
+        if settings.TWILIO_MESSAGING_SERVICE_SID:
+            payload["MessagingServiceSid"] = settings.TWILIO_MESSAGING_SERVICE_SID
+        else:
+            payload["From"] = settings.TWILIO_WHATSAPP_FROM
+
+        auth_user = settings.TWILIO_API_KEY_SID or settings.TWILIO_ACCOUNT_SID
+        auth_password = settings.TWILIO_API_KEY_SECRET or settings.TWILIO_AUTH_TOKEN
+        try:
+            response = requests.post(
+                f"https://api.twilio.com/2010-04-01/Accounts/{settings.TWILIO_ACCOUNT_SID}/Messages.json",
+                data=payload,
+                auth=(auth_user, auth_password),
+                timeout=settings.WHATSAPP_GATEWAY_TIMEOUT,
+            )
+            try:
+                response_payload = response.json()
+            except ValueError:
+                response_payload = {}
+            if response.status_code >= 400:
+                transaksi.status_wa = Transaksi.StatusWA.GAGAL
+                transaksi.save(update_fields=["status_wa"])
+                return {
+                    "success": False,
+                    "status_wa": transaksi.status_wa,
+                    "error": response_payload.get("message") or response.text or "Gagal kirim WhatsApp via Twilio",
+                    "provider": "twilio",
+                }
+            transaksi.status_wa = Transaksi.StatusWA.TERKIRIM
+            transaksi.save(update_fields=["status_wa"])
+            return {
+                "success": True,
+                "status_wa": transaksi.status_wa,
+                "message": "Notifikasi WhatsApp berhasil dikirim",
+                "provider": "twilio",
+                "provider_message_id": response_payload.get("sid"),
+            }
+        except requests.RequestException as exc:
+            transaksi.status_wa = Transaksi.StatusWA.GAGAL
+            transaksi.save(update_fields=["status_wa"])
+            return {"success": False, "status_wa": transaksi.status_wa, "error": str(exc), "provider": "twilio"}
+
+    @staticmethod
+    def twilio_whatsapp_number(phone):
+        phone = str(phone).strip()
+        return phone if phone.startswith("whatsapp:") else f"whatsapp:{phone}"
 
     @staticmethod
     def gateway_headers(bank_sampah):

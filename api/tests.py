@@ -1,4 +1,5 @@
 from decimal import Decimal
+from unittest.mock import Mock, patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APITestCase
@@ -109,15 +110,77 @@ class APISpecTests(APITestCase):
         self.assertEqual(saldo.status_code, 200)
         self.assertEqual(saldo.data["total_saldo"], "8750.00")
 
-        notify = self.client.post(f"/api/v1/transaksi/{transaksi.data['id']}/notify-wa")
-        self.assertEqual(notify.status_code, 200)
-        self.assertEqual(notify.data["status_wa"], "terkirim")
+        with self.settings(
+            TWILIO_ACCOUNT_SID="",
+            TWILIO_AUTH_TOKEN="",
+            TWILIO_API_KEY_SID="",
+            TWILIO_API_KEY_SECRET="",
+            TWILIO_WHATSAPP_FROM="",
+            TWILIO_MESSAGING_SERVICE_SID="",
+            WHATSAPP_GATEWAY_URL="",
+        ):
+            notify = self.client.post(f"/api/v1/transaksi/{transaksi.data['id']}/notify-wa")
+        self.assertEqual(notify.status_code, 400)
+        self.assertEqual(notify.data["status_wa"], "gagal")
+        self.assertEqual(notify.data["error"], "Konfigurasi WhatsApp/Twilio belum diisi")
 
         export = self.client.get("/api/v1/transaksi/export?periode=bulan_ini")
         self.assertEqual(export.status_code, 200)
         self.assertEqual(
             export["Content-Type"],
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    @patch("api.services.requests.post")
+    def test_transaction_notify_wa_uses_twilio(self, post):
+        post.return_value = Mock(status_code=201, json=lambda: {"sid": "SM123"}, text="")
+        nasabah = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0002",
+            nama="Dewi Lestari",
+            no_hp="+628111111111",
+            alamat="Jl. Melati No. 9",
+        )
+        Saldo.objects.create(nasabah=nasabah)
+        jenis = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="JS-0002",
+            nama_sampah="Kardus",
+            kategori="kertas",
+            harga_per_kg=Decimal("2000"),
+        )
+        transaksi = self.client.post(
+            "/api/v1/transaksi",
+            {
+                "nasabah_id": str(nasabah.id),
+                "items": [{"jenis_sampah_id": str(jenis.id), "berat": "1.000"}],
+            },
+            format="json",
+        )
+
+        with self.settings(
+            TWILIO_ACCOUNT_SID="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            TWILIO_AUTH_TOKEN="",
+            TWILIO_API_KEY_SID="SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            TWILIO_API_KEY_SECRET="secret",
+            TWILIO_WHATSAPP_FROM="whatsapp:+14155238886",
+            TWILIO_MESSAGING_SERVICE_SID="",
+            WHATSAPP_GATEWAY_URL="",
+        ):
+            notify = self.client.post(f"/api/v1/transaksi/{transaksi.data['id']}/notify-wa")
+
+        self.assertEqual(notify.status_code, 200)
+        self.assertEqual(notify.data["status_wa"], "terkirim")
+        self.assertEqual(notify.data["provider"], "twilio")
+        post.assert_called_once_with(
+            "https://api.twilio.com/2010-04-01/Accounts/ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/Messages.json",
+            data={
+                "To": "whatsapp:+628111111111",
+                "Body": post.call_args.kwargs["data"]["Body"],
+                "From": "whatsapp:+14155238886",
+            },
+            auth=("SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "secret"),
+            timeout=10,
         )
 
     def test_dashboard_and_wa_template(self):
