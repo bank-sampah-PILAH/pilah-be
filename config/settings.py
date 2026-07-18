@@ -121,6 +121,8 @@ GS_BUCKET_NAME = os.getenv("GS_BUCKET_NAME", "")
 GS_LOCATION = os.getenv("GS_LOCATION", "media")
 GS_DEFAULT_ACL = None
 GS_QUERYSTRING_AUTH = os.getenv("GS_QUERYSTRING_AUTH", "true").lower() == "true"
+GS_IAM_SIGN_BLOB = os.getenv("GS_IAM_SIGN_BLOB", "false").lower() == "true"
+GS_SA_EMAIL = os.getenv("GS_SA_EMAIL", "")
 
 STORAGES = {
     "default": {
