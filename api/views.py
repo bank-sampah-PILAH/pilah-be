@@ -252,6 +252,7 @@ class AcceptInviteView(APIView):
 
 class BankSampahMeView(APIView):
     permission_classes = [IsActivePengelola]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     serializer_class = BankSampahSerializer
 
     def get(self, request):
@@ -539,7 +540,7 @@ class GenerateInviteView(APIView):
 class SuperAdminBankSampahViewSet(viewsets.GenericViewSet):
     permission_classes = [IsSuperAdmin]
     serializer_class = BankSampahApprovalListSerializer
-    queryset = BankSampah.objects.all().order_by("-created_at")
+    queryset = BankSampah.objects.all().order_by("created_at")
 
     def list(self, request):
         status_filter = request.query_params.get("status", BankSampah.Status.PENDING)

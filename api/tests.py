@@ -1,8 +1,10 @@
 import json
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -32,6 +34,24 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["no_hp_pic"], "+6281234567890")
         self.assertEqual(response.data["pengelola"]["email"], "sari@example.com")
+
+    def test_bank_profile_update_accepts_logo_upload(self):
+        response = self.client.put(
+            "/api/v1/bank-sampah/me",
+            {
+                "nama": "Bank Sampah BTH",
+                "alamat": "Kel. Kukusan",
+                "kota": "Depok",
+                "no_hp_pic": "081234567890",
+                "foto_logo": SimpleUploadedFile("logo.png", b"logo", content_type="image/png"),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("bank_sampah/logo/", response.data["foto_logo"])
+        self.bank.refresh_from_db()
+        self.assertTrue(self.bank.foto_logo.name.startswith("bank_sampah/logo/"))
 
     def test_nasabah_create_list_detail_status_and_saldo(self):
         created = self.client.post(
@@ -351,6 +371,9 @@ class APISpecTests(APITestCase):
         invite = self.client.post("/api/v1/team/invite")
         self.assertEqual(invite.status_code, 201)
         self.assertIn("token", invite.data)
+        expires_at = invite.data["expires_at"]
+        self.assertGreaterEqual(expires_at, timezone.now() + timedelta(days=3) - timedelta(seconds=5))
+        self.assertLessEqual(expires_at, timezone.now() + timedelta(days=3) + timedelta(seconds=5))
 
         self_accept = self.client.post("/api/v1/invites/accept", {"token": invite.data["token"]}, format="json")
         self.assertEqual(self_accept.status_code, 400)
@@ -401,6 +424,27 @@ class APISpecTests(APITestCase):
 
         approvals = self.client.get("/api/v1/superadmin/bank-sampah")
         self.assertEqual(approvals.status_code, 200)
+
+    def test_superadmin_bank_queue_sorts_oldest_first(self):
+        self.client.credentials()
+        superadmin = User.objects.create_user(
+            email="queue-admin@example.com",
+            nama="Queue Admin",
+            role=User.Role.SUPERADMIN,
+            is_profile_complete=True,
+        )
+        refresh = RefreshToken.for_user(superadmin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        older = BankSampah.objects.create(nama="Older Pending", alamat="Depok", no_hp_pic="+628111111111", status=BankSampah.Status.PENDING)
+        newer = BankSampah.objects.create(nama="Newer Pending", alamat="Depok", no_hp_pic="+628222222222", status=BankSampah.Status.PENDING)
+        BankSampah.objects.filter(id=older.id).update(created_at=timezone.now() - timedelta(days=2))
+        BankSampah.objects.filter(id=newer.id).update(created_at=timezone.now() - timedelta(days=1))
+
+        response = self.client.get("/api/v1/superadmin/bank-sampah?status=pending")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["results"][0]["id"], str(older.id))
+        self.assertEqual(response.data["results"][1]["id"], str(newer.id))
 
     def test_android_assetlinks(self):
         self.client.credentials()

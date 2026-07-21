@@ -216,7 +216,7 @@ class TeamService:
     @staticmethod
     def generate_invite(bank):
         bank.invite_token = secrets.token_urlsafe(32)
-        bank.invite_token_expires = timezone.now() + timedelta(days=7)
+        bank.invite_token_expires = timezone.now() + timedelta(days=3)
         bank.save(update_fields=["invite_token", "invite_token_expires", "updated_at"])
         return bank.invite_token
 

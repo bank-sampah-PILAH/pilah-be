@@ -13,7 +13,19 @@ class BankSampahSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = BankSampah
-        fields = ["id", "nama", "alamat", "kota", "no_hp_pic", "wa_gateway_token", "status", "is_active", "created_at", "pengelola"]
+        fields = [
+            "id",
+            "nama",
+            "alamat",
+            "kota",
+            "no_hp_pic",
+            "wa_gateway_token",
+            "foto_logo",
+            "status",
+            "is_active",
+            "created_at",
+            "pengelola",
+        ]
         read_only_fields = ["id", "status", "is_active", "created_at", "pengelola"]
 
     def validate_nama(self, value):
@@ -26,6 +38,9 @@ class BankSampahSerializer(serializers.ModelSerializer):
             return normalize_indonesian_phone(value)
         except serializers.ValidationError:
             raise serializers.ValidationError("Format nomor tidak valid")
+
+    def validate_foto_logo(self, value):
+        return validate_image_upload(value, "Foto logo")
 
     def get_pengelola(self, obj):
         user = obj.users.filter(role="pengelola", is_active=True).first()
@@ -85,12 +100,7 @@ class BankSampahRegistrationSerializer(serializers.Serializer):
     def validate_foto_kegiatan(self, value):
         if not value:
             raise serializers.ValidationError("Foto kegiatan wajib diunggah sebagai bukti validasi")
-        name = getattr(value, "name", str(value)).lower()
-        if not name.endswith((".jpg", ".jpeg", ".png")):
-            raise serializers.ValidationError("Format foto harus JPG, JPEG, atau PNG")
-        if getattr(value, "size", 0) > 5 * 1024 * 1024:
-            raise serializers.ValidationError("Ukuran foto maksimal 5 MB")
-        return value
+        return validate_image_upload(value, "Foto kegiatan")
 
 
 class AuthUserSerializer(serializers.ModelSerializer):
@@ -141,6 +151,15 @@ class BankSampahApprovalListSerializer(serializers.ModelSerializer):
         if not user:
             return None
         return {"id": str(user.id), "nama": user.nama, "email": user.email, "no_hp": user.no_hp}
+
+
+def validate_image_upload(value, label):
+    name = getattr(value, "name", str(value)).lower()
+    if not name.endswith((".jpg", ".jpeg", ".png")):
+        raise serializers.ValidationError(f"{label} harus berformat JPG, JPEG, atau PNG")
+    if getattr(value, "size", 0) > 5 * 1024 * 1024:
+        raise serializers.ValidationError(f"Ukuran {label.lower()} maksimal 5 MB")
+    return value
 
 
 class ApprovalDecisionSerializer(serializers.Serializer):

@@ -26,7 +26,7 @@ class BankSampah(TimestampedModel):
     no_hp_pic = models.CharField(max_length=20)
     wa_gateway_token = models.TextField(blank=True, null=True)
     wa_template = models.TextField(blank=True)
-    foto_logo = models.CharField(max_length=255, blank=True)
+    foto_logo = models.FileField(upload_to="bank_sampah/logo/", blank=True)
     foto_kegiatan = models.FileField(upload_to="bank_sampah/kegiatan/", blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     invite_token = models.CharField(max_length=120, blank=True)
