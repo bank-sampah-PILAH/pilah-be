@@ -40,6 +40,7 @@ urlpatterns = [
     path("onboarding/profile", CompleteProfileView.as_view(), name="onboarding-profile"),
     path("onboarding/bank-sampah", RegisterBankSampahView.as_view(), name="onboarding-bank-sampah"),
     path("invites/accept", AcceptInviteView.as_view(), name="invite-accept"),
+    path("bank-sampah/invite/join", AcceptInviteView.as_view(), name="bank-sampah-invite-join"),
     path("bank-sampah/me", BankSampahMeView.as_view(), name="bank-sampah-me"),
     path("team", TeamView.as_view(), name="team"),
     path("team/invite", GenerateInviteView.as_view(), name="team-invite"),

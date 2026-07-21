@@ -136,7 +136,15 @@ class TeamMemberSerializer(serializers.ModelSerializer):
 
 
 class InviteAcceptSerializer(serializers.Serializer):
-    token = serializers.CharField(required=True)
+    token = serializers.CharField(required=False, allow_blank=True)
+    invite_token = serializers.CharField(required=False, allow_blank=True, write_only=True)
+
+    def validate(self, attrs):
+        token = attrs.get("token") or attrs.get("invite_token")
+        if not token:
+            raise serializers.ValidationError({"token": ["Token undangan wajib diisi"]})
+        attrs["token"] = token
+        return attrs
 
 
 class BankSampahApprovalListSerializer(serializers.ModelSerializer):

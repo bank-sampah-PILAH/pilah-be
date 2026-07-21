@@ -172,16 +172,17 @@ class OnboardingService:
             raise ValueError("Tautan undangan tidak valid atau sudah kedaluwarsa")
         if user.role != User.Role.PENGELOLA:
             raise PermissionError("Hanya pengelola yang dapat menerima undangan")
-        if user.bank_sampah_id == bank.id and user.is_primary_pengelola:
-            raise ValueError("Pengelola utama tidak dapat menerima tautan undangan miliknya sendiri")
-        if user.bank_sampah_id:
+        if user.bank_sampah_id == bank.id:
+            return bank, "already_member"
+        if user.bank_sampah_id and user.bank_sampah.status in [BankSampah.Status.ACTIVE, BankSampah.Status.PENDING]:
             raise ValueError("Akun ini sudah tergabung dengan bank sampah")
+        outcome = "join_success"
         user.bank_sampah = bank
         user.is_primary_pengelola = False
         if user.nama and user.no_hp and user.jenis_kelamin and user.tanggal_lahir:
             user.is_profile_complete = True
         user.save(update_fields=["bank_sampah", "is_primary_pengelola", "is_profile_complete", "updated_at"])
-        return bank
+        return bank, outcome
 
 
 class ApprovalService:

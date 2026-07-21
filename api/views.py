@@ -9,7 +9,7 @@ import requests
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -233,20 +233,27 @@ class RegisterBankSampahView(APIView):
 
 
 class AcceptInviteView(APIView):
-    permission_classes = [IsPengelola]
+    permission_classes = [IsAuthenticated]
     serializer_class = InviteAcceptSerializer
 
     def post(self, request):
         serializer = InviteAcceptSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            bank = OnboardingService.accept_invite(request.user, serializer.validated_data["token"])
+            bank, outcome = OnboardingService.accept_invite(request.user, serializer.validated_data["token"])
         except PermissionError as exc:
             return Response({"error": str(exc)}, status=403)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         data = BankSampahSerializer(bank).data
         data["next_step"] = AuthService.user_state(request.user)
+        data["outcome"] = outcome
+        data["bank_sampah_id"] = str(bank.id)
+        data["bank_sampah_nama"] = bank.nama
+        if outcome == "already_member":
+            data["message"] = "Anda sudah terdaftar pada bank sampah ini"
+        else:
+            data["message"] = f"Berhasil bergabung ke Bank Sampah {bank.nama}"
         return Response(data)
 
 

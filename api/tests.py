@@ -376,8 +376,9 @@ class APISpecTests(APITestCase):
         self.assertLessEqual(expires_at, timezone.now() + timedelta(days=3) + timedelta(seconds=5))
 
         self_accept = self.client.post("/api/v1/invites/accept", {"token": invite.data["token"]}, format="json")
-        self.assertEqual(self_accept.status_code, 400)
-        self.assertEqual(self_accept.data["error"], "Pengelola utama tidak dapat menerima tautan undangan miliknya sendiri")
+        self.assertEqual(self_accept.status_code, 200)
+        self.assertEqual(self_accept.data["outcome"], "already_member")
+        self.assertEqual(self_accept.data["message"], "Anda sudah terdaftar pada bank sampah ini")
         onboard_user = User.objects.get(email="onboard@example.com")
         self.assertTrue(onboard_user.is_primary_pengelola)
         self.assertEqual(str(onboard_user.bank_sampah_id), registration.data["id"])
@@ -400,10 +401,13 @@ class APISpecTests(APITestCase):
         accepted = self.client.post("/api/v1/invites/accept", {"token": invite.data["token"]}, format="json")
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(accepted.data["next_step"], "dashboard")
+        self.assertEqual(accepted.data["outcome"], "join_success")
+        self.assertEqual(accepted.data["bank_sampah_id"], registration.data["id"])
+        self.assertEqual(accepted.data["bank_sampah_nama"], "Bank Sampah Pending")
 
         repeated_accept = self.client.post("/api/v1/invites/accept", {"token": invite.data["token"]}, format="json")
-        self.assertEqual(repeated_accept.status_code, 400)
-        self.assertEqual(repeated_accept.data["error"], "Akun ini sudah tergabung dengan bank sampah")
+        self.assertEqual(repeated_accept.status_code, 200)
+        self.assertEqual(repeated_accept.data["outcome"], "already_member")
 
         team = self.client.get("/api/v1/team")
         self.assertEqual(team.status_code, 200)
@@ -411,6 +415,100 @@ class APISpecTests(APITestCase):
 
         denied_invite = self.client.post("/api/v1/team/invite")
         self.assertEqual(denied_invite.status_code, 403)
+
+    def test_invite_join_rejects_superadmin_at_join_endpoint(self):
+        active_bank = BankSampah.objects.create(nama="Invite Target", alamat="Depok", no_hp_pic="+628111111111")
+        invite_token = active_bank.invite_token = "target-token"
+        active_bank.invite_token_expires = timezone.now() + timedelta(days=3)
+        active_bank.save(update_fields=["invite_token", "invite_token_expires", "updated_at"])
+        superadmin = User.objects.create_user(
+            email="super-invite@example.com",
+            nama="Super Invite",
+            role=User.Role.SUPERADMIN,
+            is_profile_complete=True,
+        )
+        refresh = RefreshToken.for_user(superadmin)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post("/api/v1/bank-sampah/invite/join", {"invite_token": invite_token}, format="json")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data["error"], "Hanya pengelola yang dapat menerima undangan")
+
+    def test_invite_join_rejects_active_and_pending_other_bank(self):
+        target_bank = BankSampah.objects.create(nama="Target Active", alamat="Depok", no_hp_pic="+628111111111")
+        invite_token = target_bank.invite_token = "target-active-token"
+        target_bank.invite_token_expires = timezone.now() + timedelta(days=3)
+        target_bank.save(update_fields=["invite_token", "invite_token_expires", "updated_at"])
+        active_bank = BankSampah.objects.create(nama="Current Active", alamat="Depok", no_hp_pic="+628222222222")
+        pending_bank = BankSampah.objects.create(
+            nama="Current Pending",
+            alamat="Depok",
+            no_hp_pic="+628333333333",
+            status=BankSampah.Status.PENDING,
+            is_active=False,
+        )
+
+        active_user = User.objects.create_user(
+            email="active-current@example.com",
+            nama="Active Current",
+            bank_sampah=active_bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        pending_user = User.objects.create_user(
+            email="pending-current@example.com",
+            nama="Pending Current",
+            bank_sampah=pending_bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+
+        for user in [active_user, pending_user]:
+            refresh = RefreshToken.for_user(user)
+            self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+            response = self.client.post("/api/v1/invites/accept", {"token": invite_token}, format="json")
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.data["error"], "Akun ini sudah tergabung dengan bank sampah")
+            user.refresh_from_db()
+            self.assertNotEqual(user.bank_sampah_id, target_bank.id)
+
+    def test_invite_join_reassigns_rejected_primary_to_active_bank(self):
+        target_bank = BankSampah.objects.create(nama="Target Join", alamat="Depok", no_hp_pic="+628111111111")
+        invite_token = target_bank.invite_token = "target-reassign-token"
+        target_bank.invite_token_expires = timezone.now() + timedelta(days=3)
+        target_bank.save(update_fields=["invite_token", "invite_token_expires", "updated_at"])
+        rejected_bank = BankSampah.objects.create(
+            nama="Rejected History",
+            alamat="Depok",
+            no_hp_pic="+628222222222",
+            status=BankSampah.Status.REJECTED,
+            is_active=False,
+        )
+        user = User.objects.create_user(
+            email="rejected-primary@example.com",
+            nama="Rejected Primary",
+            no_hp="+628555555555",
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1990-01-01",
+            bank_sampah=rejected_bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post("/api/v1/invites/accept", {"token": invite_token}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["outcome"], "join_success")
+        self.assertEqual(response.data["message"], "Berhasil bergabung ke Bank Sampah Target Join")
+        self.assertEqual(response.data["bank_sampah_id"], str(target_bank.id))
+        self.assertEqual(response.data["bank_sampah_nama"], "Target Join")
+        user.refresh_from_db()
+        self.assertEqual(user.bank_sampah_id, target_bank.id)
+        self.assertFalse(user.is_primary_pengelola)
+        self.assertTrue(BankSampah.objects.filter(id=rejected_bank.id, status=BankSampah.Status.REJECTED).exists())
 
     def test_superadmin_cannot_use_pengelola_endpoints(self):
         self.client.credentials()
