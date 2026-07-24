@@ -1,6 +1,6 @@
 from calendar import monthrange
 from datetime import date, datetime, time, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
 import secrets
 
@@ -343,14 +343,34 @@ class WhatsAppService:
 
     @staticmethod
     def preview(bank_sampah):
-        return WhatsAppService.render(
+        daftar_item = WhatsAppService.format_daftar_item(
+            [
+                {
+                    "nama_sampah_snapshot": "Plastik PET",
+                    "berat": Decimal("5.200"),
+                }
+            ]
+        )
+        daftar_item_harga = WhatsAppService.format_daftar_item_harga(
+            [
+                {
+                    "nama_sampah_snapshot": "Plastik PET",
+                    "berat": Decimal("5.200"),
+                    "harga_snapshot": Decimal("3500"),
+                    "subtotal": Decimal("18200"),
+                }
+            ]
+        )
+        message = WhatsAppService.render(
             WhatsAppService.get_template(bank_sampah),
             nama="Budi Santoso",
             total=Decimal("15600"),
             saldo=Decimal("125000"),
             tanggal=timezone.localdate(),
-            daftar_item="- Plastik PET 5.2 kg",
+            daftar_item=daftar_item,
+            daftar_item_harga=daftar_item_harga,
         )
+        return message
 
     @staticmethod
     def notify(transaksi):
@@ -392,6 +412,14 @@ class WhatsAppService:
                     transaksi.status_wa = Transaksi.StatusWA.GAGAL
                     transaksi.save(update_fields=["status_wa"])
                     return {"success": False, "status_wa": transaksi.status_wa, "error": response.text or "Gagal kirim WhatsApp"}
+                transaksi.status_wa = Transaksi.StatusWA.TERKIRIM
+                transaksi.save(update_fields=["status_wa"])
+                return {
+                    "success": True,
+                    "status_wa": transaksi.status_wa,
+                    "message": "Notifikasi WhatsApp berhasil dikirim",
+                    "provider": "gateway",
+                }
             except requests.RequestException as exc:
                 transaksi.status_wa = Transaksi.StatusWA.GAGAL
                 transaksi.save(update_fields=["status_wa"])
@@ -475,10 +503,9 @@ class WhatsAppService:
 
     @staticmethod
     def message_for_transaction(transaksi):
-        daftar_item = "\n".join(
-            f"- {item.nama_sampah_snapshot} {item.berat} kg x {WhatsAppService.format_rupiah(item.harga_snapshot)} = {WhatsAppService.format_rupiah(item.subtotal)}"
-            for item in transaksi.items.all()
-        )
+        items = list(transaksi.items.all())
+        daftar_item = WhatsAppService.format_daftar_item(items)
+        daftar_item_harga = WhatsAppService.format_daftar_item_harga(items)
         return WhatsAppService.render(
             WhatsAppService.get_template(transaksi.bank_sampah),
             nama=transaksi.nasabah.nama,
@@ -486,21 +513,61 @@ class WhatsAppService:
             saldo=transaksi.nasabah.saldo.total_saldo,
             tanggal=timezone.localtime(transaksi.tanggal).date(),
             daftar_item=daftar_item,
+            daftar_item_harga=daftar_item_harga,
         )
 
     @staticmethod
-    def render(template, nama, total, saldo, tanggal, daftar_item):
+    def render(template, nama, total, saldo, tanggal, daftar_item, daftar_item_harga=""):
         return (
             template.replace("{Nama}", nama)
             .replace("{Total}", WhatsAppService.format_rupiah(total))
             .replace("{Saldo}", WhatsAppService.format_rupiah(saldo))
             .replace("{Tanggal}", tanggal.isoformat())
+            .replace("{daftar_item_harga}", daftar_item_harga)
             .replace("{daftar_item}", daftar_item)
         )
 
     @staticmethod
     def format_rupiah(value):
         return f"Rp {int(value):,}".replace(",", ".")
+
+    @staticmethod
+    def format_kg(value):
+        rounded = Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        normalized = rounded.normalize()
+        if normalized == normalized.to_integral():
+            text = f"{normalized:.0f}"
+        else:
+            text = format(normalized, "f")
+        return text.replace(".", ",")
+
+    @staticmethod
+    def format_daftar_item(items):
+        return "\n".join(
+            (
+                f"- {WhatsAppService.get_item_value(item, 'nama_sampah_snapshot')} "
+                f"{WhatsAppService.format_kg(WhatsAppService.get_item_value(item, 'berat'))} kg"
+            )
+            for item in items
+        )
+
+    @staticmethod
+    def format_daftar_item_harga(items):
+        return "\n".join(
+            (
+                f"- {WhatsAppService.get_item_value(item, 'nama_sampah_snapshot')} "
+                f"{WhatsAppService.format_kg(WhatsAppService.get_item_value(item, 'berat'))} kg x "
+                f"{WhatsAppService.format_rupiah(WhatsAppService.get_item_value(item, 'harga_snapshot'))} = "
+                f"{WhatsAppService.format_rupiah(WhatsAppService.get_item_value(item, 'subtotal'))}"
+            )
+            for item in items
+        )
+
+    @staticmethod
+    def get_item_value(item, field):
+        if isinstance(item, dict):
+            return item[field]
+        return getattr(item, field)
 
 
 def _month_label():

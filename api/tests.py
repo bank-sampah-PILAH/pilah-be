@@ -4,6 +4,7 @@ from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -275,6 +276,88 @@ class APISpecTests(APITestCase):
         updated = self.client.put("/api/v1/pengaturan/wa-template", {"template": "Halo {Nama}, saldo {Saldo}"}, format="json")
         self.assertEqual(updated.status_code, 200)
         self.assertEqual(updated.data["message"], "Template berhasil disimpan")
+
+    @override_settings(
+        TWILIO_ACCOUNT_SID="",
+        TWILIO_AUTH_TOKEN="",
+        TWILIO_API_KEY_SID="",
+        TWILIO_API_KEY_SECRET="",
+        TWILIO_WHATSAPP_FROM="",
+        TWILIO_MESSAGING_SERVICE_SID="",
+        WHATSAPP_GATEWAY_URL="https://wa.example.test/send",
+        WHATSAPP_GATEWAY_TOKEN="test-token",
+    )
+    @patch("api.services.requests.post")
+    def test_wa_template_item_variables_match_sent_payload(self, post):
+        post.return_value = Mock(status_code=200, text="")
+        self.client.put(
+            "/api/v1/pengaturan/wa-template",
+            {
+                "template": (
+                    "Halo {Nama}\n"
+                    "{daftar_item}\n"
+                    "Lengkap:\n"
+                    "{daftar_item_harga}\n"
+                    "Saldo {Saldo}"
+                )
+            },
+            format="json",
+        )
+        nasabah = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0002",
+            nama="Budi Santoso",
+            no_hp="+628123456789",
+            alamat="Jl. Melati No. 5",
+        )
+        Saldo.objects.create(nasabah=nasabah)
+        kertas = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="JS-0003",
+            nama_sampah="kertas hvs",
+            kategori="kertas",
+            harga_per_kg=Decimal("1500"),
+        )
+        botol = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="JS-0004",
+            nama_sampah="botol kaca",
+            kategori="kaca",
+            harga_per_kg=Decimal("1000"),
+        )
+        transaksi = self.client.post(
+            "/api/v1/transaksi",
+            {
+                "nasabah_id": str(nasabah.id),
+                "items": [
+                    {"jenis_sampah_id": str(kertas.id), "berat": "2.300"},
+                    {"jenis_sampah_id": str(botol.id), "berat": "17.123"},
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(transaksi.status_code, 201)
+
+        notify = self.client.post(f"/api/v1/transaksi/{transaksi.data['id']}/notify-wa")
+
+        self.assertEqual(notify.status_code, 200, notify.data)
+        sent_payload = post.call_args.kwargs["json"]
+        self.assertEqual(
+            sent_payload["message"],
+            (
+                "Halo Budi Santoso\n"
+                "- kertas hvs 2,3 kg\n"
+                "- botol kaca 17,12 kg\n"
+                "Lengkap:\n"
+                "- kertas hvs 2,3 kg x Rp 1.500 = Rp 3.450\n"
+                "- botol kaca 17,12 kg x Rp 1.000 = Rp 17.123\n"
+                "Saldo Rp 20.573"
+            ),
+        )
+
+        template = self.client.get("/api/v1/pengaturan/wa-template")
+        self.assertIn("{daftar_item_harga}", template.data["variabel_tersedia"])
+        self.assertNotIn("....", template.data["preview_contoh"])
 
     def test_google_dev_auth(self):
         response = self.client.post("/api/v1/auth/google", {"id_token": "dev:new@example.com:New User"}, format="json")

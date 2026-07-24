@@ -500,7 +500,14 @@ class WATemplateView(APIView):
         return Response(
             {
                 "template": WhatsAppService.get_template(bank),
-                "variabel_tersedia": ["{Nama}", "{Total}", "{Saldo}", "{Tanggal}", "{daftar_item}"],
+                "variabel_tersedia": [
+                    "{Nama}",
+                    "{Total}",
+                    "{Saldo}",
+                    "{Tanggal}",
+                    "{daftar_item}",
+                    "{daftar_item_harga}",
+                ],
                 "preview_contoh": WhatsAppService.preview(bank),
             }
         )
