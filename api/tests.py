@@ -1,11 +1,13 @@
 import json
 from datetime import timedelta
 from decimal import Decimal
+from io import BytesIO
 from unittest.mock import Mock, patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.utils import timezone
+from openpyxl import load_workbook
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -211,6 +213,35 @@ class APISpecTests(APITestCase):
             export["Content-Type"],
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+        self.assertIn("PILAH_Riwayat_Transaksi_", export["Content-Disposition"])
+        workbook = load_workbook(BytesIO(export.content), data_only=False)
+        sheet = workbook["Riwayat Transaksi"]
+        self.assertEqual(sheet.freeze_panes, "A5")
+        self.assertEqual(sheet["A1"].value, "PILAH - Riwayat Transaksi")
+        self.assertIn("Filter periode: Bulan Ini", sheet["A2"].value)
+        self.assertEqual(
+            [sheet.cell(4, col).value for col in range(1, 11)],
+            [
+                "No",
+                "Tanggal",
+                "Waktu",
+                "Nama Nasabah",
+                "ID Nasabah",
+                "Jenis Sampah",
+                "Berat (kg)",
+                "Harga/kg (Rp)",
+                "Subtotal (Rp)",
+                "Saldo Setelah Transaksi (Rp)",
+            ],
+        )
+        self.assertEqual(sheet["A5"].value, 1)
+        self.assertEqual(sheet["D5"].value, "Ahmad Ridwan")
+        self.assertEqual(sheet["E5"].value, "NAS-0001")
+        self.assertEqual(sheet["F5"].value, "Plastik PET")
+        self.assertEqual(sheet["G5"].value, 2.5)
+        self.assertEqual(sheet["H5"].value, 3500)
+        self.assertEqual(sheet["I5"].value, 8750)
+        self.assertEqual(sheet["J5"].value, 8750)
 
     @patch("api.services.requests.post")
     def test_transaction_notify_wa_uses_twilio(self, post):

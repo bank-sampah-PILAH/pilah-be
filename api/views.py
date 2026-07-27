@@ -432,7 +432,7 @@ class TransaksiViewSet(viewsets.GenericViewSet):
             return Response({"error": str(exc)}, status=400)
         if not qs.exists():
             return Response({"error": "Tidak ada data pada periode ini"}, status=400)
-        content, filename = TransactionService.export_excel(qs)
+        content, filename = TransactionService.export_excel(qs, request)
         response = HttpResponse(
             content,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
