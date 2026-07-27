@@ -641,6 +641,7 @@ def _fill_raw_export_sheet(ws, queryset, request=None):
         .select_related("transaksi__nasabah")
         .order_by("-transaksi__tanggal", "id")
     )
+    saldo_after_by_transaction = _saldo_after_by_transaction(queryset)
     for number, item in enumerate(details, start=1):
         local_datetime = timezone.localtime(item.transaksi.tanggal)
         ws.append(
@@ -654,11 +655,40 @@ def _fill_raw_export_sheet(ws, queryset, request=None):
                 float(item.berat),
                 int(item.harga_snapshot),
                 int(item.subtotal),
-                int(item.transaksi.nasabah.saldo.total_saldo),
+                int(saldo_after_by_transaction[item.transaksi_id]),
             ]
         )
 
     _style_raw_export_sheet(ws)
+
+
+def _saldo_after_by_transaction(queryset):
+    target_transactions = list(queryset.select_related("bank_sampah").order_by("tanggal", "id"))
+    if not target_transactions:
+        return {}
+
+    target_ids = {transaction.id for transaction in target_transactions}
+    nasabah_ids = {transaction.nasabah_id for transaction in target_transactions}
+    latest_transaction = target_transactions[-1]
+    bank_sampah = latest_transaction.bank_sampah
+    running_balances = {nasabah_id: Decimal("0.00") for nasabah_id in nasabah_ids}
+    saldo_after = {}
+
+    transactions = (
+        Transaksi.objects.filter(
+            bank_sampah=bank_sampah,
+            nasabah_id__in=nasabah_ids,
+            tanggal__lte=latest_transaction.tanggal,
+        )
+        .only("id", "nasabah_id", "total_nilai", "tanggal")
+        .order_by("nasabah_id", "tanggal", "id")
+    )
+    for transaction in transactions:
+        running_balances[transaction.nasabah_id] += transaction.total_nilai
+        if transaction.id in target_ids:
+            saldo_after[transaction.id] = running_balances[transaction.nasabah_id]
+
+    return saldo_after
 
 
 def _export_filter_label(queryset, request):

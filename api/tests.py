@@ -207,6 +207,18 @@ class APISpecTests(APITestCase):
         self.assertEqual(notify.data["status_wa"], "gagal")
         self.assertEqual(notify.data["error"], "Konfigurasi WhatsApp/Twilio belum diisi")
 
+        transaksi_kedua = self.client.post(
+            "/api/v1/transaksi",
+            {
+                "nasabah_id": str(nasabah.id),
+                "items": [{"jenis_sampah_id": jenis.data["id"], "berat": "1.000"}],
+                "catatan": "Setoran kedua",
+            },
+            format="json",
+        )
+        self.assertEqual(transaksi_kedua.status_code, 201)
+        self.assertEqual(transaksi_kedua.data["saldo_setelah_transaksi"], Decimal("12250.00"))
+
         export = self.client.get("/api/v1/transaksi/export?periode=bulan_ini")
         self.assertEqual(export.status_code, 200)
         self.assertEqual(
@@ -224,7 +236,7 @@ class APISpecTests(APITestCase):
         self.assertEqual(summary_sheet["A2"].value, "plastik")
         self.assertEqual(summary_sheet["B2"].value, "Plastik PET")
         self.assertEqual(summary_sheet["C2"].value, 3500)
-        self.assertEqual(summary_sheet["D2"].value, 2.5)
+        self.assertEqual(summary_sheet["D2"].value, 3.5)
         self.assertEqual(summary_sheet["E2"].value, "=C2*D2")
         sheet = workbook["Riwayat Transaksi"]
         self.assertEqual(sheet.freeze_panes, "A5")
@@ -249,10 +261,13 @@ class APISpecTests(APITestCase):
         self.assertEqual(sheet["D5"].value, "Ahmad Ridwan")
         self.assertEqual(sheet["E5"].value, "NAS-0001")
         self.assertEqual(sheet["F5"].value, "Plastik PET")
-        self.assertEqual(sheet["G5"].value, 2.5)
+        self.assertEqual(sheet["G5"].value, 1)
         self.assertEqual(sheet["H5"].value, 3500)
-        self.assertEqual(sheet["I5"].value, 8750)
-        self.assertEqual(sheet["J5"].value, 8750)
+        self.assertEqual(sheet["I5"].value, 3500)
+        self.assertEqual(sheet["J5"].value, 12250)
+        self.assertEqual(sheet["G6"].value, 2.5)
+        self.assertEqual(sheet["I6"].value, 8750)
+        self.assertEqual(sheet["J6"].value, 8750)
 
     @patch("api.services.requests.post")
     def test_transaction_notify_wa_uses_twilio(self, post):
