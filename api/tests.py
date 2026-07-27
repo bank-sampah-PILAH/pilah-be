@@ -213,8 +213,19 @@ class APISpecTests(APITestCase):
             export["Content-Type"],
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        self.assertIn("PILAH_Riwayat_Transaksi_", export["Content-Disposition"])
+        self.assertIn("PILAH_Laporan_", export["Content-Disposition"])
         workbook = load_workbook(BytesIO(export.content), data_only=False)
+        self.assertEqual(workbook.sheetnames, ["Laporan", "Riwayat Transaksi"])
+        summary_sheet = workbook["Laporan"]
+        self.assertEqual(
+            [summary_sheet.cell(1, col).value for col in range(1, 6)],
+            ["Jenis", "Sampah", "Harga per kg", "Jumlah kg", "Total"],
+        )
+        self.assertEqual(summary_sheet["A2"].value, "plastik")
+        self.assertEqual(summary_sheet["B2"].value, "Plastik PET")
+        self.assertEqual(summary_sheet["C2"].value, 3500)
+        self.assertEqual(summary_sheet["D2"].value, 2.5)
+        self.assertEqual(summary_sheet["E2"].value, "=C2*D2")
         sheet = workbook["Riwayat Transaksi"]
         self.assertEqual(sheet.freeze_panes, "A5")
         self.assertEqual(sheet["A1"].value, "PILAH - Riwayat Transaksi")

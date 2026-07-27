@@ -581,7 +581,40 @@ class TransactionExportMixin:
 
 def _export_excel(queryset, request=None):
     wb = Workbook()
-    ws = wb.active
+    _fill_summary_export_sheet(wb.active, queryset)
+    _fill_raw_export_sheet(wb.create_sheet("Riwayat Transaksi"), queryset, request)
+    stream = BytesIO()
+    wb.save(stream)
+    return stream.getvalue(), f"PILAH_Laporan_{_month_label()}.xlsx"
+
+
+def _fill_summary_export_sheet(ws, queryset):
+    ws.title = "Laporan"
+    ws.append(["Jenis", "Sampah", "Harga per kg", "Jumlah kg", "Total"])
+    rows = (
+        DetailTransaksi.objects.filter(transaksi__in=queryset)
+        .values("kategori_snapshot", "nama_sampah_snapshot", "harga_snapshot")
+        .annotate(total_kg=Sum("berat"))
+        .order_by("kategori_snapshot", "nama_sampah_snapshot")
+    )
+    current_row = 2
+    for row in rows:
+        ws.append(
+            [
+                row["kategori_snapshot"],
+                row["nama_sampah_snapshot"],
+                float(row["harga_snapshot"]),
+                float(row["total_kg"]),
+                f"=C{current_row}*D{current_row}",
+            ]
+        )
+        current_row += 1
+    ws.append(["", "", "", "TOTAL", f"=SUM(E2:E{current_row - 1})"])
+    for column in ["A", "B", "C", "D", "E"]:
+        ws.column_dimensions[column].width = 22
+
+
+def _fill_raw_export_sheet(ws, queryset, request=None):
     ws.title = "Riwayat Transaksi"
     ws.merge_cells("A1:J1")
     ws.merge_cells("A2:J2")
@@ -626,9 +659,6 @@ def _export_excel(queryset, request=None):
         )
 
     _style_raw_export_sheet(ws)
-    stream = BytesIO()
-    wb.save(stream)
-    return stream.getvalue(), f"PILAH_Riwayat_Transaksi_{_month_label()}.xlsx"
 
 
 def _export_filter_label(queryset, request):
