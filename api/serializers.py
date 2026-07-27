@@ -2,6 +2,8 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
+from django.db.models import Q, Sum
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from api.models import BankSampah, BankSampahApprovalLog, DetailTransaksi, JenisSampah, Nasabah, Saldo, Transaksi, User
@@ -358,7 +360,11 @@ class TransactionDetailSerializer(serializers.ModelSerializer):
         ]
 
     def get_saldo_setelah_transaksi(self, obj):
-        return obj.nasabah.saldo.total_saldo
+        return (
+            Transaksi.objects.filter(bank_sampah=obj.bank_sampah, nasabah=obj.nasabah)
+            .filter(Q(tanggal__lt=obj.tanggal) | Q(tanggal=obj.tanggal, id__lte=obj.id))
+            .aggregate(total=Coalesce(Sum("total_nilai"), Decimal("0.00")))["total"]
+        )
 
 
 class TransactionListSerializer(serializers.ModelSerializer):

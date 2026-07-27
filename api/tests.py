@@ -218,6 +218,12 @@ class APISpecTests(APITestCase):
         )
         self.assertEqual(transaksi_kedua.status_code, 201)
         self.assertEqual(transaksi_kedua.data["saldo_setelah_transaksi"], Decimal("12250.00"))
+        detail_pertama = self.client.get(f"/api/v1/transaksi/{transaksi.data['id']}")
+        self.assertEqual(detail_pertama.status_code, 200)
+        self.assertEqual(detail_pertama.data["saldo_setelah_transaksi"], Decimal("8750.00"))
+        detail_kedua = self.client.get(f"/api/v1/transaksi/{transaksi_kedua.data['id']}")
+        self.assertEqual(detail_kedua.status_code, 200)
+        self.assertEqual(detail_kedua.data["saldo_setelah_transaksi"], Decimal("12250.00"))
 
         export = self.client.get("/api/v1/transaksi/export?periode=bulan_ini")
         self.assertEqual(export.status_code, 200)
