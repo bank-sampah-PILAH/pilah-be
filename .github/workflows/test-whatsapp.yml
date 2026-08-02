@@ -3,6 +3,11 @@ name: Test WhatsApp Template
 on:
   workflow_dispatch:
     inputs:
+      send_messages:
+        description: Send new messages before inspecting status
+        required: true
+        default: true
+        type: boolean
       recipient_one:
         description: First recipient in E.164 format
         required: true
@@ -42,6 +47,7 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Send approved template
+        if: ${{ inputs.send_messages }}
         env:
           RECIPIENT_ONE: ${{ inputs.recipient_one }}
           RECIPIENT_TWO: ${{ inputs.recipient_two }}
@@ -76,6 +82,23 @@ jobs:
             fi
           done
           exit "${failed}"
+
+      - name: Inspect target message statuses
+        if: always()
+        env:
+          RECIPIENT_ONE: ${{ inputs.recipient_one }}
+          RECIPIENT_TWO: ${{ inputs.recipient_two }}
+        run: |
+          set -euo pipefail
+          auth_user="${TWILIO_API_KEY_SID:-${TWILIO_ACCOUNT_SID}}"
+          auth_password="${TWILIO_API_KEY_SECRET:-${TWILIO_AUTH_TOKEN}}"
+          curl --fail --silent --show-error \
+            --user "${auth_user}:${auth_password}" \
+            "https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json?PageSize=50" \
+            | jq \
+              --arg first "whatsapp:${RECIPIENT_ONE}" \
+              --arg second "whatsapp:${RECIPIENT_TWO}" \
+              '[.messages[] | select(.to == $first or .to == $second) | {sid, to, status, error_code, error_message, date_sent}][:10]'
 
       - name: Inspect recent failed Twilio messages
         if: always()
