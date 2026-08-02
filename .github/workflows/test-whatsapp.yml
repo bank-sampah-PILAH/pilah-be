@@ -1,0 +1,100 @@
+name: Test WhatsApp Template
+
+on:
+  workflow_dispatch:
+    inputs:
+      recipient_one:
+        description: First recipient in E.164 format
+        required: true
+        type: string
+      recipient_two:
+        description: Second recipient in E.164 format
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test:
+    name: Send template and inspect failures
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      SERVICE_NAME: ${{ vars.CLOUD_RUN_SERVICE }}
+      TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+      TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+      TWILIO_API_KEY_SID: ${{ secrets.TWILIO_API_KEY_SID }}
+      TWILIO_API_KEY_SECRET: ${{ secrets.TWILIO_API_KEY_SECRET }}
+      TWILIO_WHATSAPP_FROM: ${{ vars.TWILIO_WHATSAPP_FROM }}
+      TWILIO_CONTENT_SID: ${{ vars.TWILIO_CONTENT_SID }}
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Send approved template
+        env:
+          RECIPIENT_ONE: ${{ inputs.recipient_one }}
+          RECIPIENT_TWO: ${{ inputs.recipient_two }}
+        run: |
+          set -euo pipefail
+          auth_user="${TWILIO_API_KEY_SID:-${TWILIO_ACCOUNT_SID}}"
+          auth_password="${TWILIO_API_KEY_SECRET:-${TWILIO_AUTH_TOKEN}}"
+          test -n "${TWILIO_ACCOUNT_SID}"
+          test -n "${auth_user}"
+          test -n "${auth_password}"
+          test -n "${TWILIO_WHATSAPP_FROM}"
+          test -n "${TWILIO_CONTENT_SID}"
+
+          content_variables='{"1":"PILAH Test","2":"- Test integrasi 1 kg"}'
+          failed=0
+          for recipient in "${RECIPIENT_ONE}" "${RECIPIENT_TWO}"; do
+            response_file="$(mktemp)"
+            http_code="$(curl --silent --show-error \
+              --user "${auth_user}:${auth_password}" \
+              --output "${response_file}" \
+              --write-out '%{http_code}' \
+              --data-urlencode "To=whatsapp:${recipient}" \
+              --data-urlencode "From=${TWILIO_WHATSAPP_FROM}" \
+              --data-urlencode "ContentSid=${TWILIO_CONTENT_SID}" \
+              --data-urlencode "ContentVariables=${content_variables}" \
+              "https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json")"
+            jq --arg http_code "${http_code}" \
+              '{http_code: $http_code, sid, to, status, error_code, error_message, message}' \
+              "${response_file}"
+            if [ "${http_code}" -lt 200 ] || [ "${http_code}" -ge 300 ]; then
+              failed=1
+            fi
+          done
+          exit "${failed}"
+
+      - name: Inspect recent failed Twilio messages
+        if: always()
+        run: |
+          set -euo pipefail
+          auth_user="${TWILIO_API_KEY_SID:-${TWILIO_ACCOUNT_SID}}"
+          auth_password="${TWILIO_API_KEY_SECRET:-${TWILIO_AUTH_TOKEN}}"
+          curl --fail --silent --show-error \
+            --user "${auth_user}:${auth_password}" \
+            "https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json?PageSize=50" \
+            | jq '[.messages[] | select(.status == "failed" or .status == "undelivered") | {sid, to, status, error_code, error_message, date_sent}]'
+
+      - name: Inspect recent Cloud Run Twilio errors
+        if: always()
+        continue-on-error: true
+        run: |
+          gcloud logging read \
+            "resource.type=cloud_run_revision AND resource.labels.service_name=${SERVICE_NAME} AND (textPayload:Twilio OR jsonPayload.message:Twilio OR httpRequest.requestUrl:notify-wa)" \
+            --project "${PROJECT_ID}" \
+            --freshness 24h \
+            --limit 30 \
+            --format='table(timestamp,severity,httpRequest.status,textPayload,jsonPayload.message)'
