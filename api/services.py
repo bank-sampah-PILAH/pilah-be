@@ -451,7 +451,10 @@ class WhatsAppService:
             payload.update(
                 {
                     "ContentSid": settings.TWILIO_CONTENT_SID,
-                    "ContentVariables": json.dumps({"1": message}, ensure_ascii=False),
+                    "ContentVariables": json.dumps(
+                        WhatsAppService.content_variables_for_transaction(transaksi),
+                        ensure_ascii=False,
+                    ),
                 }
             )
         else:
@@ -496,6 +499,13 @@ class WhatsAppService:
             transaksi.status_wa = Transaksi.StatusWA.GAGAL
             transaksi.save(update_fields=["status_wa"])
             return {"success": False, "status_wa": transaksi.status_wa, "error": str(exc), "provider": "twilio"}
+
+    @staticmethod
+    def content_variables_for_transaction(transaksi):
+        return {
+            "1": transaksi.nasabah.nama,
+            "2": WhatsAppService.format_daftar_item(transaksi.items.all()),
+        }
 
     @staticmethod
     def twilio_whatsapp_number(phone):

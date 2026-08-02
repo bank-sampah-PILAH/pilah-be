@@ -318,9 +318,10 @@ class APISpecTests(APITestCase):
         self.assertEqual(notify.data["status_wa"], "terkirim")
         self.assertEqual(notify.data["provider"], "twilio")
         content_variables = post.call_args.kwargs["data"]["ContentVariables"]
-        rendered_message = json.loads(content_variables)["1"]
-        self.assertIn("Halo Dewi Lestari", rendered_message)
-        self.assertIn("- Kardus 1 kg", rendered_message)
+        self.assertEqual(
+            json.loads(content_variables),
+            {"1": "Dewi Lestari", "2": "- Kardus 1 kg"},
+        )
         post.assert_called_once_with(
             "https://api.twilio.com/2010-04-01/Accounts/ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/Messages.json",
             data={

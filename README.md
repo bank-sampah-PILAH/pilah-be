@@ -284,7 +284,7 @@ The export returns an `.xlsx` file with category, item, price, total weight, and
 
 ## WhatsApp Gateway and Twilio
 
-The backend renders the configured WhatsApp template and sends it through Twilio when `TWILIO_ACCOUNT_SID` and either `TWILIO_AUTH_TOKEN` or `TWILIO_API_KEY_SID` plus `TWILIO_API_KEY_SECRET` are configured. Twilio WhatsApp sends require either `TWILIO_WHATSAPP_FROM` or `TWILIO_MESSAGING_SERVICE_SID`. When `TWILIO_CONTENT_SID` is set, the rendered message is sent as Content Template variable `{{1}}`; otherwise it is sent as a free-form `Body`.
+The backend renders the configured WhatsApp template and sends it through Twilio when `TWILIO_ACCOUNT_SID` and either `TWILIO_AUTH_TOKEN` or `TWILIO_API_KEY_SID` plus `TWILIO_API_KEY_SECRET` are configured. Twilio WhatsApp sends require either `TWILIO_WHATSAPP_FROM` or `TWILIO_MESSAGING_SERVICE_SID`. When `TWILIO_CONTENT_SID` is set, Content Template variable `{{1}}` contains the nasabah name and `{{2}}` contains the item list without prices; otherwise the configured message is sent as a free-form `Body`.
 
 If Twilio is not configured, the backend posts to `WHATSAPP_GATEWAY_URL` when configured.
 
