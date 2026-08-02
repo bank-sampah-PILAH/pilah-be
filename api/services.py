@@ -2,6 +2,7 @@ from calendar import monthrange
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO
+import json
 import secrets
 
 from django.conf import settings
@@ -389,6 +390,7 @@ class WhatsAppService:
                 settings.TWILIO_API_KEY_SECRET,
                 settings.TWILIO_WHATSAPP_FROM,
                 settings.TWILIO_MESSAGING_SERVICE_SID,
+                settings.TWILIO_CONTENT_SID,
             ]
         )
         if settings.TWILIO_ACCOUNT_SID and has_twilio_auth:
@@ -444,10 +446,16 @@ class WhatsAppService:
                 "error": "TWILIO_WHATSAPP_FROM atau TWILIO_MESSAGING_SERVICE_SID wajib diisi",
             }
 
-        payload = {
-            "To": WhatsAppService.twilio_whatsapp_number(transaksi.nasabah.no_hp),
-            "Body": message,
-        }
+        payload = {"To": WhatsAppService.twilio_whatsapp_number(transaksi.nasabah.no_hp)}
+        if settings.TWILIO_CONTENT_SID:
+            payload.update(
+                {
+                    "ContentSid": settings.TWILIO_CONTENT_SID,
+                    "ContentVariables": json.dumps({"1": message}, ensure_ascii=False),
+                }
+            )
+        else:
+            payload["Body"] = message
         if settings.TWILIO_MESSAGING_SERVICE_SID:
             payload["MessagingServiceSid"] = settings.TWILIO_MESSAGING_SERVICE_SID
         else:

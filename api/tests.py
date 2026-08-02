@@ -309,6 +309,7 @@ class APISpecTests(APITestCase):
             TWILIO_API_KEY_SECRET="secret",
             TWILIO_WHATSAPP_FROM="whatsapp:+14155238886",
             TWILIO_MESSAGING_SERVICE_SID="",
+            TWILIO_CONTENT_SID="HXb1844641bcade1dafdfecdf5f6a4aefd",
             WHATSAPP_GATEWAY_URL="",
         ):
             notify = self.client.post(f"/api/v1/transaksi/{transaksi.data['id']}/notify-wa")
@@ -316,11 +317,16 @@ class APISpecTests(APITestCase):
         self.assertEqual(notify.status_code, 200)
         self.assertEqual(notify.data["status_wa"], "terkirim")
         self.assertEqual(notify.data["provider"], "twilio")
+        content_variables = post.call_args.kwargs["data"]["ContentVariables"]
+        rendered_message = json.loads(content_variables)["1"]
+        self.assertIn("Halo Dewi Lestari", rendered_message)
+        self.assertIn("- Kardus 1 kg", rendered_message)
         post.assert_called_once_with(
             "https://api.twilio.com/2010-04-01/Accounts/ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/Messages.json",
             data={
                 "To": "whatsapp:+628111111111",
-                "Body": post.call_args.kwargs["data"]["Body"],
+                "ContentSid": "HXb1844641bcade1dafdfecdf5f6a4aefd",
+                "ContentVariables": content_variables,
                 "From": "whatsapp:+14155238886",
             },
             auth=("SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "secret"),

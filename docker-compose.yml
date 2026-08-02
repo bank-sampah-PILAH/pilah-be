@@ -37,6 +37,7 @@ services:
       PILAH_PUBLIC_APP_URL: http://localhost:8000
       WHATSAPP_GATEWAY_URL: ""
       WHATSAPP_GATEWAY_TOKEN: ""
+      TWILIO_CONTENT_SID: ""
     ports:
       - "8000:8000"
     volumes:
