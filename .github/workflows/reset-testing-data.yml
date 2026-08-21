@@ -53,24 +53,6 @@ jobs:
       - name: Install backend dependencies
         run: pip install --requirement requirements.txt
 
-      - name: Start Cloud SQL Auth Proxy
-        run: |
-          set -euo pipefail
-          curl --fail --location --silent --show-error \
-            --output /tmp/cloud-sql-proxy \
-            https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.25.3/cloud-sql-proxy.linux.amd64
-          chmod +x /tmp/cloud-sql-proxy
-          /tmp/cloud-sql-proxy "${SQL_CONNECTION_NAME}" --address 127.0.0.1 --port 5432 &
-          echo "CLOUD_SQL_PROXY_PID=$!" >> "${GITHUB_ENV}"
-          for attempt in {1..30}; do
-            if (echo > /dev/tcp/127.0.0.1/5432) 2>/dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Cloud SQL Auth Proxy did not become ready" >&2
-          exit 1
-
       - name: Flush testing data
         env:
           DJANGO_DEBUG: "false"
@@ -82,13 +64,25 @@ jobs:
           PILAH_ALLOW_FAKE_GOOGLE_TOKEN: "false"
         run: |
           set -euo pipefail
+          curl --fail --location --silent --show-error \
+            --output /tmp/cloud-sql-proxy \
+            https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.25.3/cloud-sql-proxy.linux.amd64
+          chmod +x /tmp/cloud-sql-proxy
+          /tmp/cloud-sql-proxy "${SQL_CONNECTION_NAME}" --address 127.0.0.1 --port 5432 &
+          proxy_pid=$!
+          trap 'kill "${proxy_pid}" 2>/dev/null || true' EXIT
+          proxy_ready=false
+          for attempt in {1..30}; do
+            if (echo > /dev/tcp/127.0.0.1/5432) 2>/dev/null; then
+              proxy_ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "${proxy_ready}" != "true" ]; then
+            echo "Cloud SQL Auth Proxy did not become ready" >&2
+            exit 1
+          fi
           python manage.py flush --noinput
           python manage.py shell --command \
             'from api.models import BankSampah, Nasabah, Transaksi, User; assert User.objects.count() == BankSampah.objects.count() == Nasabah.objects.count() == Transaksi.objects.count() == 0; print("Application data reset verified")'
-
-      - name: Stop Cloud SQL Auth Proxy
-        if: always()
-        run: |
-          if [ -n "${CLOUD_SQL_PROXY_PID:-}" ]; then
-            kill "${CLOUD_SQL_PROXY_PID}" || true
-          fi
