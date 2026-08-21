@@ -1,0 +1,94 @@
+name: Reset Testing Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type RESET-PILAH-TEST-DATA to confirm
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  reset:
+    name: Flush Cloud SQL application data
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      SQL_CONNECTION_NAME: ${{ vars.SQL_CONNECTION_NAME }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+
+    steps:
+      - name: Validate destructive target
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          test "${CONFIRMATION}" = "RESET-PILAH-TEST-DATA"
+          test "${PROJECT_ID}" = "pilah-app"
+          test "${SQL_CONNECTION_NAME}" = "pilah-app:asia-southeast2:pilah-postgres"
+          test "${DB_NAME}" = "pilah"
+          echo "Confirmed reset target: ${SQL_CONNECTION_NAME}/${DB_NAME}"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install backend dependencies
+        run: pip install --requirement requirements.txt
+
+      - name: Start Cloud SQL Auth Proxy
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error \
+            --output /tmp/cloud-sql-proxy \
+            https://github.com/GoogleCloudPlatform/cloud-sql-proxy/releases/latest/download/cloud-sql-proxy.linux.amd64
+          chmod +x /tmp/cloud-sql-proxy
+          /tmp/cloud-sql-proxy "${SQL_CONNECTION_NAME}" --address 127.0.0.1 --port 5432 &
+          echo "CLOUD_SQL_PROXY_PID=$!" >> "${GITHUB_ENV}"
+          for attempt in {1..30}; do
+            if (echo > /dev/tcp/127.0.0.1/5432) 2>/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Cloud SQL Auth Proxy did not become ready" >&2
+          exit 1
+
+      - name: Flush testing data
+        env:
+          DJANGO_DEBUG: "false"
+          DJANGO_SECRET_KEY: reset-workflow-only
+          DB_ENGINE: django.db.backends.postgresql
+          DB_HOST: 127.0.0.1
+          DB_PORT: "5432"
+          GS_BUCKET_NAME: ""
+          PILAH_ALLOW_FAKE_GOOGLE_TOKEN: "false"
+        run: |
+          set -euo pipefail
+          python manage.py flush --noinput
+          python manage.py shell --command \
+            'from api.models import BankSampah, Nasabah, Transaksi, User; assert User.objects.count() == BankSampah.objects.count() == Nasabah.objects.count() == Transaksi.objects.count() == 0; print("Application data reset verified")'
+
+      - name: Stop Cloud SQL Auth Proxy
+        if: always()
+        run: |
+          if [ -n "${CLOUD_SQL_PROXY_PID:-}" ]; then
+            kill "${CLOUD_SQL_PROXY_PID}" || true
+          fi
