@@ -58,7 +58,7 @@ jobs:
           set -euo pipefail
           curl --fail --location --silent --show-error \
             --output /tmp/cloud-sql-proxy \
-            https://github.com/GoogleCloudPlatform/cloud-sql-proxy/releases/latest/download/cloud-sql-proxy.linux.amd64
+            https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.25.3/cloud-sql-proxy.linux.amd64
           chmod +x /tmp/cloud-sql-proxy
           /tmp/cloud-sql-proxy "${SQL_CONNECTION_NAME}" --address 127.0.0.1 --port 5432 &
           echo "CLOUD_SQL_PROXY_PID=$!" >> "${GITHUB_ENV}"
