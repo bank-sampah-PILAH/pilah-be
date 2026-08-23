@@ -1,0 +1,82 @@
+name: Provision Django Admin
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  provision:
+    name: Create or update production superadmin
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      SERVICE_NAME: ${{ vars.CLOUD_RUN_SERVICE }}
+      SQL_CONNECTION_NAME: ${{ vars.SQL_CONNECTION_NAME }}
+      RUNTIME_SERVICE_ACCOUNT: ${{ vars.RUNTIME_SERVICE_ACCOUNT }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      ADMIN_PASSWORD: ${{ secrets.DJANGO_ADMIN_PASSWORD }}
+      ADMIN_JOB_NAME: pilah-provision-django-admin
+
+    steps:
+      - name: Validate production target
+        run: |
+          set -euo pipefail
+          test "${PROJECT_ID}" = "pilah-app"
+          test "${REGION}" = "asia-southeast2"
+          test "${SERVICE_NAME}" = "pilah-be"
+          test "${SQL_CONNECTION_NAME}" = "pilah-app:asia-southeast2:pilah-postgres"
+          test "${RUNTIME_SERVICE_ACCOUNT}" = "pilah-be-runtime@pilah-app.iam.gserviceaccount.com"
+          test "${DB_NAME}" = "pilah"
+          test -n "${ADMIN_PASSWORD}"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy provisioning job from production image
+        run: |
+          set -euo pipefail
+          image_uri="$(gcloud run services describe "${SERVICE_NAME}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --format='value(spec.template.spec.containers[0].image)')"
+          test -n "${image_uri}"
+          gcloud run jobs deploy "${ADMIN_JOB_NAME}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --image "${image_uri}" \
+            --service-account "${RUNTIME_SERVICE_ACCOUNT}" \
+            --set-cloudsql-instances "${SQL_CONNECTION_NAME}" \
+            --set-env-vars "^|^DJANGO_DEBUG=false|DJANGO_SECRET_KEY=admin-job-only|DB_ENGINE=django.db.backends.postgresql|DB_NAME=${DB_NAME}|DB_USER=${DB_USER}|DB_PASSWORD=${DB_PASSWORD}|DB_HOST=/cloudsql/${SQL_CONNECTION_NAME}|DB_PORT=5432|GS_BUCKET_NAME=" \
+            --command /app/docker/entrypoint.sh \
+            --args python,manage.py,createsuperadmin,--email=banksampahpilah@gmail.com,--password=${ADMIN_PASSWORD},--nama=PILAH \
+            --max-retries 0 \
+            --task-timeout 10m \
+            --quiet
+
+      - name: Create and verify superadmin
+        run: |
+          gcloud run jobs execute "${ADMIN_JOB_NAME}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --wait
+
+      - name: Delete temporary provisioning job
+        if: always()
+        continue-on-error: true
+        run: |
+          gcloud run jobs delete "${ADMIN_JOB_NAME}" \
+            --project "${PROJECT_ID}" \
+            --region "${REGION}" \
+            --quiet

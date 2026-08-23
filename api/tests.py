@@ -5,7 +5,7 @@ from io import BytesIO
 from unittest.mock import Mock, patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import override_settings
+from django.test import Client, override_settings
 from django.utils import timezone
 from openpyxl import load_workbook
 from rest_framework.test import APITestCase
@@ -37,6 +37,34 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["no_hp_pic"], "+6281234567890")
         self.assertEqual(response.data["pengelola"]["email"], "sari@example.com")
+
+    @override_settings(
+        ALLOWED_HOSTS=["admin.example.com"],
+        CSRF_TRUSTED_ORIGINS=["https://admin.example.com"],
+        SECURE_PROXY_SSL_HEADER=("HTTP_X_FORWARDED_PROTO", "https"),
+        STORAGES={
+            "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+            "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+        },
+    )
+    def test_admin_login_accepts_cloud_run_https_origin(self):
+        client = Client(enforce_csrf_checks=True)
+        request_headers = {
+            "HTTP_HOST": "admin.example.com",
+            "HTTP_X_FORWARDED_PROTO": "https",
+        }
+        login_page = client.get("/admin/login/", **request_headers)
+        csrf_token = login_page.cookies["csrftoken"].value
+
+        response = client.post(
+            "/admin/login/",
+            {"username": "missing@example.com", "password": "invalid", "csrfmiddlewaretoken": csrf_token},
+            HTTP_ORIGIN="https://admin.example.com",
+            HTTP_REFERER="https://admin.example.com/admin/login/",
+            **request_headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
 
     def test_bank_profile_update_accepts_logo_upload(self):
         response = self.client.put(

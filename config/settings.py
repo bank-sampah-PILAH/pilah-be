@@ -12,6 +12,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-local-pilah-dev-key")
 DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
 ALLOWED_HOSTS = [host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()]
+PILAH_PUBLIC_APP_URL = os.getenv("PILAH_PUBLIC_APP_URL", "")
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CSRF_TRUSTED_ORIGINS", PILAH_PUBLIC_APP_URL).split(",")
+    if origin.strip()
+]
+CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
 SECURE_REFERRER_POLICY = os.getenv("SECURE_REFERRER_POLICY", "strict-origin-when-cross-origin")
 SECURE_CROSS_ORIGIN_OPENER_POLICY = os.getenv("SECURE_CROSS_ORIGIN_OPENER_POLICY", "same-origin-allow-popups")
 
@@ -173,7 +183,6 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "")
 PILAH_ALLOW_FAKE_GOOGLE_TOKEN = os.getenv("PILAH_ALLOW_FAKE_GOOGLE_TOKEN", str(DEBUG)).lower() == "true"
-PILAH_PUBLIC_APP_URL = os.getenv("PILAH_PUBLIC_APP_URL", "")
 WHATSAPP_GATEWAY_URL = os.getenv("WHATSAPP_GATEWAY_URL", "")
 WHATSAPP_GATEWAY_TOKEN = os.getenv("WHATSAPP_GATEWAY_TOKEN", "")
 WHATSAPP_GATEWAY_TIMEOUT = int(os.getenv("WHATSAPP_GATEWAY_TIMEOUT", "10"))
