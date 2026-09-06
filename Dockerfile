@@ -25,9 +25,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH"
 
-# libpq5 for psycopg; curl for the container HEALTHCHECK probe.
+# libpq5 for psycopg; curl for the container HEALTHCHECK probe. System pip is
+# stripped too: python:3.12-slim ships an old pip (CVE-carrying) that Trivy
+# would flag on the final image — the app venv is the only Python env here.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libpq5 curl \
+    && rm -rf /usr/local/lib/python3.12/site-packages/pip* \
+        /usr/local/lib/python3.12/site-packages/setuptools* \
+        /usr/local/lib/python3.12/site-packages/wheel* \
+        /usr/local/bin/pip* \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=deps /opt/venv /opt/venv
