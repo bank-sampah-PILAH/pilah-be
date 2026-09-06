@@ -2,13 +2,17 @@
 # Actions budget, so the split is deliberate:
 #   - PRs (the gate): lint, tests on postgres with coverage, migrations,
 #     django checks. Nothing else.
-#   - main pushes: everything above plus the heavier scans — docker build +
-#     smoke test, trivy, gitleaks, mypy, pip-audit, migration linter.
+#   - staging & main pushes: everything above plus the heavier scans —
+#     docker build + smoke test, trivy, gitleaks, mypy, pip-audit,
+#     migration linter. Feature branches PR into staging; staging → main
+#     promotes, so the heavier tier runs exactly when an image/deploy
+#     decision is being made.
 name: CI
 
 on:
   push:
     branches:
+      - staging
       - main
   pull_request:
 
@@ -156,7 +160,7 @@ jobs:
     name: Docker build & scan
     runs-on: ubuntu-latest
     needs: [lint, checks, test]
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'staging')
     permissions:
       contents: read
     steps:
@@ -215,7 +219,7 @@ jobs:
     name: Secret scan
     runs-on: ubuntu-latest
     needs: lint
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'staging')
     permissions:
       contents: read
     # Gitleaks over the full git history. Blocking — a leaked credential must
@@ -233,7 +237,7 @@ jobs:
     name: Type check
     runs-on: ubuntu-latest
     needs: lint
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'staging')
     # mypy --strict against pyproject.toml [tool.mypy]: full first-party
     # checking, django-stubs plugin resolves models/FKs. Blocking — new code
     # must be fully typed.
@@ -258,7 +262,7 @@ jobs:
     name: Dependency security scan
     runs-on: ubuntu-latest
     needs: lint
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'staging')
     # pip-audit: check the pinned requirements.txt against published advisory
     # databases (PyPI / OSV). Blocking — the requirements are exact-pinned, so
     # a new advisory means a real version bump.
@@ -286,7 +290,7 @@ jobs:
     name: Migration safety lint
     runs-on: ubuntu-latest
     needs: lint
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'staging')
     # django-migration-linter flags destructive migration operations (dropped
     # columns/tables, renamed fields, type changes) that makemigrations
     # --check cannot see — the kind that silently eat prod data on Cloud SQL
