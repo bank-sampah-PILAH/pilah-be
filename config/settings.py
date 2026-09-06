@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "storages",
     "rest_framework_simplejwt.token_blacklist",
+    "django_migration_linter",  # provides `manage.py lintmigrations` (CI); inert otherwise
     "api",
 ]
 
