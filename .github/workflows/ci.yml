@@ -110,9 +110,9 @@ jobs:
         # in future apps (not just api/) still gate the build.
         run: coverage run --source=api manage.py test -v 2
 
-      - name: Coverage report
+      - name: Coverage report (fail under 80%)
         run: |
-          coverage report --show-missing --skip-covered
+          coverage report --show-missing --skip-covered --fail-under=80
           coverage xml
 
       - name: Upload coverage
