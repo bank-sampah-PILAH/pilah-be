@@ -1,7 +1,8 @@
 # CodeQL — static security analysis. Finds injection, auth bypass, and
 # other taint-tracked vulnerabilities the linter and test suite can't see.
-# Results appear in the repo's Code Scanning tab (needs GHAS on private
-# still runs and reports per-run alerts).
+# This repo is private without GitHub Advanced Security, so results can't be
+# uploaded to the Code Scanning tab (that upload requires GHAS). Analysis
+# still runs and the SARIF report is attached as a workflow artifact.
 name: CodeQL
 
 on:
@@ -35,4 +36,19 @@ jobs:
 
       - uses: github/codeql-action/autobuild@v3
 
+      # upload: false — the code-scanning upload is what fails on a
+      # non-GHAS private repo. SARIF stays in the workspace for the artifact
+      # step below; the job still fails if CodeQL itself errors.
       - uses: github/codeql-action/analyze@v3
+        with:
+          upload: false
+          # Default SARIF path is outside the checkout dir; keep it inside so
+          # the artifact step can grab it.
+          output: codeql-sarif/python.sarif
+
+      - name: Attach CodeQL SARIF (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-sarif
+          path: codeql-sarif/python.sarif
+          if-no-files-found: error
