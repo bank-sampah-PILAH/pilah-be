@@ -2,6 +2,7 @@ import json
 from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -15,7 +16,7 @@ from api.models import BankSampah, BankSampahApprovalLog, JenisSampah, Nasabah, 
 
 
 class APISpecTests(APITestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         self.bank = BankSampah.objects.create(
             nama="Bank Sampah BTH", alamat="Depok", kota="Depok", no_hp_pic="+628123456789"
         )
@@ -29,7 +30,7 @@ class APISpecTests(APITestCase):
         refresh = RefreshToken.for_user(self.user)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
-    def test_bank_profile_update_normalizes_phone(self):
+    def test_bank_profile_update_normalizes_phone(self) -> None:
         response = self.client.put(
             "/api/v1/bank-sampah/me",
             {
@@ -54,13 +55,13 @@ class APISpecTests(APITestCase):
             "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
         },
     )
-    def test_admin_login_accepts_cloud_run_https_origin(self):
+    def test_admin_login_accepts_cloud_run_https_origin(self) -> None:
         client = Client(enforce_csrf_checks=True)
-        request_headers = {
+        request_headers: dict[str, str] = {
             "HTTP_HOST": "admin.example.com",
             "HTTP_X_FORWARDED_PROTO": "https",
         }
-        login_page = client.get("/admin/login/", **request_headers)
+        login_page = client.get("/admin/login/", **cast(dict[str, Any], request_headers))
         csrf_token = login_page.cookies["csrftoken"].value
 
         response = client.post(
@@ -72,12 +73,12 @@ class APISpecTests(APITestCase):
             },
             HTTP_ORIGIN="https://admin.example.com",
             HTTP_REFERER="https://admin.example.com/admin/login/",
-            **request_headers,
+            **cast(dict[str, Any], request_headers),
         )
 
         self.assertEqual(response.status_code, 200)
 
-    def test_bank_profile_update_accepts_logo_upload(self):
+    def test_bank_profile_update_accepts_logo_upload(self) -> None:
         response = self.client.put(
             "/api/v1/bank-sampah/me",
             {
@@ -93,9 +94,10 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("bank_sampah/logo/", response.data["foto_logo"])
         self.bank.refresh_from_db()
+        assert self.bank.foto_logo.name is not None
         self.assertTrue(self.bank.foto_logo.name.startswith("bank_sampah/logo/"))
 
-    def test_nasabah_create_list_detail_status_and_saldo(self):
+    def test_nasabah_create_list_detail_status_and_saldo(self) -> None:
         created = self.client.post(
             "/api/v1/nasabah",
             {
@@ -141,7 +143,7 @@ class APISpecTests(APITestCase):
         )
         self.assertEqual(inactive_update.status_code, 403)
 
-    def test_nasabah_duplicate_phone_returns_validation_error(self):
+    def test_nasabah_duplicate_phone_returns_validation_error(self) -> None:
         first = self.client.post(
             "/api/v1/nasabah",
             {
@@ -204,7 +206,7 @@ class APISpecTests(APITestCase):
             duplicate_update.data["errors"]["no_hp"], ["Nomor HP nasabah sudah digunakan"]
         )
 
-    def test_jenis_sampah_and_transaction_update_saldo(self):
+    def test_jenis_sampah_and_transaction_update_saldo(self) -> None:
         nasabah = Nasabah.objects.create(
             bank_sampah=self.bank,
             nomor="NAS-0001",
@@ -327,7 +329,7 @@ class APISpecTests(APITestCase):
         self.assertEqual(sheet["J6"].value, 8750)
 
     @patch("api.services.requests.post")
-    def test_transaction_notify_wa_uses_twilio(self, post):
+    def test_transaction_notify_wa_uses_twilio(self, post: Mock) -> None:
         post.return_value = Mock(status_code=201, json=lambda: {"sid": "SM123"}, text="")
         nasabah = Nasabah.objects.create(
             bank_sampah=self.bank,
@@ -385,7 +387,7 @@ class APISpecTests(APITestCase):
             timeout=10,
         )
 
-    def test_dashboard_and_wa_template(self):
+    def test_dashboard_and_wa_template(self) -> None:
         stats = self.client.get("/api/v1/dashboard/stats")
         self.assertEqual(stats.status_code, 200)
         self.assertEqual(stats.data["bank_sampah_nama"], "Bank Sampah BTH")
@@ -413,7 +415,7 @@ class APISpecTests(APITestCase):
         WHATSAPP_GATEWAY_TOKEN="test-token",
     )
     @patch("api.services.requests.post")
-    def test_wa_template_item_variables_match_sent_payload(self, post):
+    def test_wa_template_item_variables_match_sent_payload(self, post: Mock) -> None:
         post.return_value = Mock(status_code=200, text="")
         self.client.put(
             "/api/v1/pengaturan/wa-template",
@@ -480,7 +482,7 @@ class APISpecTests(APITestCase):
         self.assertIn("{daftar_item_harga}", template.data["variabel_tersedia"])
         self.assertNotIn("....", template.data["preview_contoh"])
 
-    def test_google_dev_auth(self):
+    def test_google_dev_auth(self) -> None:
         response = self.client.post(
             "/api/v1/auth/google", {"id_token": "dev:new@example.com:New User"}, format="json"
         )
@@ -491,7 +493,7 @@ class APISpecTests(APITestCase):
         self.assertIsNone(response.data["user"]["bank_sampah_id"])
         self.assertEqual(response.data["next_step"], "complete_profile")
 
-    def test_onboarding_superadmin_approval_and_invite_flow(self):
+    def test_onboarding_superadmin_approval_and_invite_flow(self) -> None:
         self.client.credentials()
         login = self.client.post(
             "/api/v1/auth/google",
@@ -642,7 +644,7 @@ class APISpecTests(APITestCase):
         denied_invite = self.client.post("/api/v1/team/invite")
         self.assertEqual(denied_invite.status_code, 403)
 
-    def test_invite_join_rejects_superadmin_at_join_endpoint(self):
+    def test_invite_join_rejects_superadmin_at_join_endpoint(self) -> None:
         active_bank = BankSampah.objects.create(
             nama="Invite Target", alamat="Depok", no_hp_pic="+628111111111"
         )
@@ -665,7 +667,7 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.data["error"], "Hanya pengelola yang dapat menerima undangan")
 
-    def test_invite_join_rejects_active_and_pending_other_bank(self):
+    def test_invite_join_rejects_active_and_pending_other_bank(self) -> None:
         target_bank = BankSampah.objects.create(
             nama="Target Active", alamat="Depok", no_hp_pic="+628111111111"
         )
@@ -709,7 +711,7 @@ class APISpecTests(APITestCase):
             user.refresh_from_db()
             self.assertNotEqual(user.bank_sampah_id, target_bank.id)
 
-    def test_invite_join_reassigns_rejected_primary_to_active_bank(self):
+    def test_invite_join_reassigns_rejected_primary_to_active_bank(self) -> None:
         target_bank = BankSampah.objects.create(
             nama="Target Join", alamat="Depok", no_hp_pic="+628111111111"
         )
@@ -754,7 +756,7 @@ class APISpecTests(APITestCase):
             ).exists()
         )
 
-    def test_superadmin_cannot_use_pengelola_endpoints(self):
+    def test_superadmin_cannot_use_pengelola_endpoints(self) -> None:
         self.client.credentials()
         response = self.client.post(
             "/api/v1/auth/google",
@@ -771,7 +773,7 @@ class APISpecTests(APITestCase):
         approvals = self.client.get("/api/v1/superadmin/bank-sampah")
         self.assertEqual(approvals.status_code, 200)
 
-    def test_superadmin_bank_queue_sorts_oldest_first(self):
+    def test_superadmin_bank_queue_sorts_oldest_first(self) -> None:
         self.client.credentials()
         superadmin = User.objects.create_user(
             email="queue-admin@example.com",
@@ -802,7 +804,7 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.data["results"][0]["id"], str(older.id))
         self.assertEqual(response.data["results"][1]["id"], str(newer.id))
 
-    def test_android_assetlinks(self):
+    def test_android_assetlinks(self) -> None:
         self.client.credentials()
         response = self.client.get("/.well-known/assetlinks.json")
 
@@ -830,7 +832,7 @@ class APISpecTests(APITestCase):
 
 
 class HealthzTests(TestCase):
-    def test_healthz_ok(self):
+    def test_healthz_ok(self) -> None:
         response = self.client.get("/healthz")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")

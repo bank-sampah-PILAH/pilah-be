@@ -1,3 +1,5 @@
+from argparse import ArgumentParser
+
 from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
 
@@ -9,10 +11,10 @@ CONFIRMATION = "RESET-PILAH-TEST-DATA"
 class Command(BaseCommand):
     help = "Clear application data while preserving the database schema and migrations."
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument("--confirm", required=True)
 
-    def handle(self, *args, **options):
+    def handle(self, *args: object, **options: object) -> None:
         if options["confirm"] != CONFIRMATION:
             raise CommandError(f"Pass --confirm={CONFIRMATION} to run this destructive command.")
 

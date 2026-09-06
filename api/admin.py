@@ -14,7 +14,7 @@ from api.models import (
 
 
 @admin.register(User)
-class UserAdmin(BaseUserAdmin):
+class UserAdmin(BaseUserAdmin):  # type: ignore[type-arg]  # stubs are generic, runtime is not
     ordering = ("email",)
     list_display = (
         "email",

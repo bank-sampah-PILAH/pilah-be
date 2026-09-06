@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
@@ -37,12 +38,12 @@ class BankSampah(TimestampedModel):
         db_table = "bank_sampah"
         ordering = ["nama"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.nama
 
 
-class UserManager(BaseUserManager):
-    def create_user(self, email, password=None, **extra_fields):
+class UserManager(BaseUserManager["User"]):
+    def create_user(self, email: str, password: str | None = None, **extra_fields: Any) -> "User":
         if not email:
             raise ValueError("Email wajib diisi")
         email = self.normalize_email(email)
@@ -51,7 +52,9 @@ class UserManager(BaseUserManager):
         user.save(using=self._db)
         return user
 
-    def create_superuser(self, email, password=None, **extra_fields):
+    def create_superuser(
+        self, email: str, password: str | None = None, **extra_fields: Any
+    ) -> "User":
         extra_fields.setdefault("role", User.Role.SUPERADMIN)
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
@@ -86,13 +89,13 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
     objects = UserManager()
 
     USERNAME_FIELD = "email"
-    REQUIRED_FIELDS: list[str] = []
+    REQUIRED_FIELDS: "list[str]" = []  # type: ignore[misc]  # stubs declare class var on base
 
     class Meta:
         db_table = "users"
         ordering = ["nama"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.email
 
 
@@ -117,7 +120,7 @@ class Nasabah(TimestampedModel):
         unique_together = (("bank_sampah", "nomor"), ("bank_sampah", "no_hp"))
         ordering = ["nomor"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.nomor} - {self.nama}"
 
 
@@ -158,7 +161,7 @@ class JenisSampah(models.Model):
         unique_together = (("bank_sampah", "nomor"),)
         ordering = ["nomor"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.nama_sampah
 
 

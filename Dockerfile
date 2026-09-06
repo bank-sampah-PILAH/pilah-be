@@ -15,7 +15,8 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip \
-    && /opt/venv/bin/pip install -r requirements.txt
+    && /opt/venv/bin/pip install -r requirements.txt \
+    && /opt/venv/bin/pip uninstall -y pip setuptools wheel
 
 # ---- runtime stage: only venv + app, no build tooling --------------------
 FROM python:3.12-slim AS runtime
@@ -27,9 +28,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # libpq5 for psycopg; curl for the container HEALTHCHECK probe.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libpq5 curl \
-    && rm -rf /var/lib/apt/lists/* \
-    # CVE hygiene: drop the bundled pip/setuptools/wheel from the runtime image
-    && pip uninstall -y pip setuptools wheel
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=deps /opt/venv /opt/venv
 

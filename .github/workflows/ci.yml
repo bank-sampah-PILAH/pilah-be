@@ -1,12 +1,14 @@
 # CI — the merge gate for pilah-be. Runs on every push and PR. Covers:
-#   - lint (ruff, report-only until findings cleaned up)
-#   - tests (Django test suite on both sqlite and postgres:16)
-#   - system checks incl. --deploy checks
+#   - lint (ruff, blocking)
+#   - tests (Django test suite on both sqlite and postgres:16, coverage >= 80%)
+#   - system checks incl. --deploy (error-level, blocking)
 #   - OpenAPI schema generation (drf-spectacular)
 #   - DB migration check (applied migrations + makemigrations --check drift)
-#   - Docker build + Trivy scan + SBOM
+#   - migration safety lint (new migrations, ERROR-level, blocking)
+#   - types (mypy strict, blocking)
+#   - Docker build + smoke test + Trivy (HIGH/CRITICAL, blocking) + SBOM
 #   - secret scan (gitleaks, blocking)
-#   - pip-audit dependency advisories (report-only for now)
+#   - pip-audit dependency advisories (blocking)
 name: CI
 
 on:
@@ -54,9 +56,8 @@ jobs:
         run: ruff format --check .
 
       # Lints the workflow files themselves (syntax, expression misuse,
-      # invalid action inputs). Report-only.
-      - name: actionlint (report only)
-        continue-on-error: true
+      # invalid action inputs).
+      - name: actionlint
         run: docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:latest -color
 
   test:
@@ -153,13 +154,12 @@ jobs:
       - name: Django system checks
         run: python manage.py check
 
-      # --deploy raises deploy-time settings issues (SECURE_HSTS_SECONDS,
-      # SECURE_SSL_REDIRECT, etc.) as warnings. DEBUG=true (needed for tests/
-      # fake google tokens) makes several fire, so only error-level fails.
-      # Flip to --fail-level WARNING once a prod-shaped env is wired into CI.
+      # --deploy raises deploy-time settings issues as warnings. DEBUG=true
+      # (needed for tests/fake google tokens) fires several (HSTS, SSL
+      # redirect, cookie flags), so only error-level checks fail here.
+      # Tighten to --fail-level WARNING once a prod-shaped env is in CI.
       - name: Deploy checks
-        continue-on-error: true
-        run: python manage.py check --deploy
+        run: python manage.py check --deploy --fail-level ERROR
 
       - name: Generate OpenAPI schema
         run: python manage.py spectacular --file /tmp/openapi-schema.yml
@@ -252,11 +252,15 @@ jobs:
           pip install -r requirements.txt
           pip install django-migration-linter
 
-      - name: Lint migrations (report only)
-        continue-on-error: true
+      # Blocking on ERROR. Historical migrations that predate this gate and
+      # lint ERR (three api migrations + the third-party token_blacklist app,
+      # excluded wholesale) are skipped by exact name so only NEW migrations
+      # must be clean. If a needed migration is blocked, fix the migration
+      # (not the gate) or add a targeted --ignore-name-contains.
+      - name: Lint migrations (new migrations only)
         env:
           MIGRATION_LINTER: "1"
-        run: python manage.py lintmigrations --database default --cache-path /tmp/lintercache
+        run: python manage.py lintmigrations --database default --exclude-apps token_blacklist --ignore-name 0002_user_is_primary_pengelola 0003_alter_banksampah_foto_kegiatan_and_more 0004_alter_banksampah_foto_logo
 
   docker:
     name: Docker build & scan
@@ -301,21 +305,22 @@ jobs:
           done
           [ "$(docker inspect --format '{{.State.Health.Status}}' smoke)" = "healthy" ] \
             || { docker logs smoke; exit 1; }
-          curl -fsS http://127.0.0.1:8080/healthz | tee /dev/stderr | grep -q '"status":"ok"'
+          curl -fsS http://127.0.0.1:8080/healthz | tee /dev/stderr | grep -q '"status": *"ok"'
           docker rm -f smoke
 
       # Trivy: scan the built image for known vulnerabilities (CVEs).
-      # Report-only for now; tighten to blocking with:
-      #   exit-code: "1" + remove continue-on-error + add:
-      #   --severity HIGH,CRITICAL --ignore-unfixed
+      # Blocking on HIGH/CRITICAL with a known fix. MEDIUM/LOW and unfixable
+      # findings don't gate. If a new CVE has no fix yet, triage with a
+      # .trivyignore entry (with an expiry comment), never by loosening this.
       - name: Trivy scan
-        continue-on-error: true
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: pilah-be:ci
           format: sarif
           output: trivy.sarif
-          exit-code: "0"
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
 
       - name: Attach trivy SARIF (artifact)
         if: always()
@@ -328,7 +333,6 @@ jobs:
       # SBOM: inventory of every package in the image (SPDX), kept as an
       # artifact for audit / supply-chain traceability.
       - name: SBOM
-        continue-on-error: true
         uses: anchore/sbom-action@v0
         with:
           image: pilah-be:ci
@@ -369,10 +373,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint
     # mypy --strict against pyproject.toml [tool.mypy]: full first-party
-    # checking, django-stubs plugin resolves models/FKs. Report-only: 297+
-    # pre-existing findings (143 unannotated functions across api/). Tighten
-    # to blocking by removing continue-on-error once annotations land —
-    # track the count trend in the meantime.
+    # checking, django-stubs plugin resolves models/FKs. Blocking — new code
+    # must be fully typed.
     steps:
       - uses: actions/checkout@v4
 
@@ -387,8 +389,7 @@ jobs:
           pip install -r requirements.txt
           pip install mypy==2.3.1 django-stubs
 
-      - name: mypy strict (report only)
-        continue-on-error: true
+      - name: mypy strict
         run: mypy api config
 
   security:

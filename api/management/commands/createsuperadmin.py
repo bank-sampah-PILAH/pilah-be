@@ -1,3 +1,5 @@
+from argparse import ArgumentParser
+
 from django.core.management.base import BaseCommand, CommandError
 
 from api.models import User
@@ -6,15 +8,15 @@ from api.models import User
 class Command(BaseCommand):
     help = "Create or update a PILAH SuperAdmin account."
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument("--email", required=True)
         parser.add_argument("--password", required=True)
         parser.add_argument("--nama", default="SuperAdmin PILAH")
 
-    def handle(self, *args, **options):
-        email = options["email"]
-        password = options["password"]
-        nama = options["nama"]
+    def handle(self, *args: object, **options: object) -> None:
+        email = str(options["email"])
+        password = str(options["password"])
+        nama = str(options["nama"])
         if len(password) < 8:
             raise CommandError("Password minimal 8 karakter")
         user, created = User.objects.get_or_create(
