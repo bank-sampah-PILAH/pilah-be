@@ -884,4 +884,4 @@ def _style_raw_export_sheet(ws):
             cell.number_format = "#,##0"
 
 
-TransactionService.export_excel = staticmethod(_export_excel)
+TransactionService.export_excel = staticmethod(_export_excel)  # type: ignore[attr-defined]  # ponytail: module-level def patched onto class; move _export_excel into TransactionService when touching exports

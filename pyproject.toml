@@ -20,3 +20,25 @@ ignore = [
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+# Keep the checker strict while tolerating untyped third-party libs whose
+# stubs aren't shipped (openpyxl, google-cloud-storage, whitenoise, drf
+# internals via django-stubs coverage gaps). First-party code stays fully
+# checked — ignore_missing_imports never silences errors in api/ or config/.
+ignore_missing_imports = true
+# Django needs its models resolved for FK/related lookups to type-check.
+plugins = ["mypy_django_plugin.main"]
+
+[tool.django-stubs]
+django_settings_module = "config.settings"
+
+[tool.mypy-overrides]
+module = [
+    "openpyxl.*",
+    "google.*",
+    "whitenoise.*",
+]
+ignore_missing_imports = true
