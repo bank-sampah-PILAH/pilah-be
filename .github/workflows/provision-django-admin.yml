@@ -60,7 +60,7 @@ jobs:
             --set-cloudsql-instances "${SQL_CONNECTION_NAME}" \
             --set-env-vars "^|^DJANGO_DEBUG=false|DJANGO_SECRET_KEY=admin-job-only|DB_ENGINE=django.db.backends.postgresql|DB_NAME=${DB_NAME}|DB_USER=${DB_USER}|DB_PASSWORD=${DB_PASSWORD}|DB_HOST=/cloudsql/${SQL_CONNECTION_NAME}|DB_PORT=5432|GS_BUCKET_NAME=" \
             --command /app/docker/entrypoint.sh \
-            --args python,manage.py,createsuperadmin,--email=banksampahpilah@gmail.com,--password=${ADMIN_PASSWORD},--nama=PILAH \
+            --args "python,manage.py,createsuperadmin,--email=banksampahpilah@gmail.com,--password=${ADMIN_PASSWORD},--nama=PILAH" \
             --max-retries 0 \
             --task-timeout 10m \
             --quiet

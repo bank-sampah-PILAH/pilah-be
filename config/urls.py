@@ -14,25 +14,28 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
-from django.contrib import admin
+
 from django.conf import settings
 from django.conf.urls.static import static
-from django.http import JsonResponse
+from django.contrib import admin
+from django.http import HttpRequest, JsonResponse
 from django.urls import include, path
 from django.views.generic import TemplateView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+
+from api.health import healthz
 
 
 class ApiTestView(TemplateView):
     template_name = "api_test.html"
 
-    def get_context_data(self, **kwargs):
+    def get_context_data(self, **kwargs: object) -> dict[str, object]:
         context = super().get_context_data(**kwargs)
         context["google_client_id"] = settings.GOOGLE_CLIENT_ID
         return context
 
 
-def assetlinks(request):
+def assetlinks(request: HttpRequest) -> JsonResponse:
     return JsonResponse(
         [
             {
@@ -54,6 +57,7 @@ def assetlinks(request):
 
 
 urlpatterns = [
+    path("healthz", healthz, name="healthz"),
     path("admin/", admin.site.urls),
     path(".well-known/assetlinks.json", assetlinks, name="assetlinks"),
     path("api-test/", ApiTestView.as_view(), name="api-test"),

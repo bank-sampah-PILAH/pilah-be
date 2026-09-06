@@ -1,0 +1,23 @@
+# Dependabot version updates. pip keeps requirements.txt pinned to exact
+# versions, so Dependabot opens one PR per outdated/vulnerable dep.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # One PR for all patch/minor bumps; major bumps stay separate PRs.
+      pip-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch
