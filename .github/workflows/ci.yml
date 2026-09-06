@@ -1,18 +1,15 @@
-# CI — the merge gate for pilah-be. Runs on every push and PR. Covers:
-#   - lint (ruff, blocking)
-#   - tests (Django test suite on both sqlite and postgres:16, coverage >= 80%)
-#   - system checks incl. --deploy (error-level, blocking)
-#   - OpenAPI schema generation (drf-spectacular)
-#   - DB migration check (applied migrations + makemigrations --check drift)
-#   - migration safety lint (new migrations, ERROR-level, blocking)
-#   - types (mypy strict, blocking)
-#   - Docker build + smoke test + Trivy (HIGH/CRITICAL, blocking) + SBOM
-#   - secret scan (gitleaks, blocking)
-#   - pip-audit dependency advisories (blocking)
+# CI — the merge gate for pilah-be. Small/mid project on a limited free-tier
+# Actions budget, so the split is deliberate:
+#   - PRs (the gate): lint, tests on postgres with coverage, migrations,
+#     django checks. Nothing else.
+#   - main pushes: everything above plus the heavier scans — docker build +
+#     smoke test, trivy, gitleaks, mypy, pip-audit, migration linter.
 name: CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 concurrency:
@@ -61,12 +58,11 @@ jobs:
         run: docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:latest -color
 
   test:
-    name: Tests (${{ matrix.database }})
+    name: Tests (postgres, coverage)
     runs-on: ubuntu-latest
     # Postgres service container (postgres:16 = what prod Cloud SQL runs).
-    # The sqlite matrix job ignores it and uses the settings default
-    # (BASE_DIR/db.sqlite3). Service containers are always reachable on
-    # localhost, so DB_HOST stays 127.0.0.1 in both jobs.
+    # Service containers are always reachable on localhost, so DB_HOST stays
+    # 127.0.0.1.
     services:
       postgres:
         image: postgres:16
@@ -81,10 +77,13 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-    strategy:
-      fail-fast: false
-      matrix:
-        database: [sqlite, postgres]
+    env:
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: pilah
+      DB_USER: pilah
+      DB_PASSWORD: pilah
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
     steps:
       - uses: actions/checkout@v4
 
@@ -104,37 +103,19 @@ jobs:
       - name: pip check (dependency conflicts)
         run: pip check
 
-      - name: Set database env (postgres)
-        if: matrix.database == 'postgres'
-        run: |
-          {
-            echo "DB_ENGINE=django.db.backends.postgresql"
-            echo "DB_NAME=pilah"
-            echo "DB_USER=pilah"
-            echo "DB_PASSWORD=pilah"
-            echo "DB_HOST=127.0.0.1"
-            echo "DB_PORT=5432"
-          } >> "$GITHUB_ENV"
-
       - name: Check for missing migrations
         run: python manage.py makemigrations --check --dry-run
 
+      - name: Apply migrations
+        run: python manage.py migrate --noinput
+
+      # Plain `manage.py test` = discovery across every Django app, so tests
+      # in future apps (not just api/) still gate the build.
       - name: Run tests with coverage
-                # Plain `manage.py test` = discovery across every Django app, so tests
-        # in future apps (not just api/) still gate the build.
         run: coverage run --source=api manage.py test -v 2
 
       - name: Coverage report (fail under 80%)
-        run: |
-          coverage report --show-missing --skip-covered --fail-under=80
-          coverage xml
-
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-${{ matrix.database }}
-          path: coverage.xml
-          if-no-files-found: error
+        run: coverage report --show-missing --skip-covered --fail-under=80
 
   checks:
     name: System & deploy checks
@@ -163,111 +144,19 @@ jobs:
       - name: Deploy checks
         run: python manage.py check --deploy --fail-level ERROR
 
-      - name: Generate OpenAPI schema
-        run: python manage.py spectacular --file /tmp/openapi-schema.yml
-
-      - name: Upload OpenAPI schema
-        uses: actions/upload-artifact@v4
-        with:
-          name: openapi-schema
-          path: /tmp/openapi-schema.yml
-          if-no-files-found: error
-
-  db-migrations:
-    name: DB migrations
-    runs-on: ubuntu-latest
-    needs: lint
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_DB: pilah
-          POSTGRES_USER: pilah
-          POSTGRES_PASSWORD: pilah
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U pilah"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Apply migrations
-        env:
-          DB_ENGINE: django.db.backends.postgresql
-          DB_NAME: pilah
-          DB_USER: pilah
-          DB_PASSWORD: pilah
-          DB_HOST: 127.0.0.1
-          DB_PORT: "5432"
-        run: python manage.py migrate --noinput
-
-      # Same check as the test job but standalone so migration regressions
-      # fail here even when the test matrix is skipped/flaky.
-      - name: Check for missing migrations
-        env:
-          DB_ENGINE: django.db.backends.postgresql
-          DB_NAME: pilah
-          DB_USER: pilah
-          DB_PASSWORD: pilah
-          DB_HOST: 127.0.0.1
-          DB_PORT: "5432"
-        run: python manage.py makemigrations --check --dry-run
-
       - name: Collect static files
         run: python manage.py collectstatic --noinput
 
-  migration-linter:
-    name: Migration safety lint
-    runs-on: ubuntu-latest
-    needs: lint
-    # django-migration-linter flags destructive migration operations (dropped
-    # columns/tables, renamed fields, type changes) that makemigrations
-    # --check cannot see — the kind that silently eat prod data on Cloud SQL
-    # when `migrate` runs in the deploy entrypoint. Report-only for now:
-    # existing migrations predate this gate and may carry findings. Once
-    # triaged, tighten to blocking by removing continue-on-error (fail on
-    # ERROR only: --ignore-applied-migrations + default warning tolerance).
-    steps:
-      - uses: actions/checkout@v4
+      - name: Generate OpenAPI schema
+        run: python manage.py spectacular --file /tmp/openapi-schema.yml
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install django-migration-linter
-
-      # Blocking on ERROR. Historical migrations that predate this gate and
-      # lint ERR (three api migrations + the third-party token_blacklist app,
-      # excluded wholesale) are skipped by exact name so only NEW migrations
-      # must be clean. If a needed migration is blocked, fix the migration
-      # (not the gate) or add a targeted --ignore-name-contains.
-      - name: Lint migrations (new migrations only)
-        env:
-          MIGRATION_LINTER: "1"
-        run: python manage.py lintmigrations --database default --exclude-apps token_blacklist --ignore-name 0002_user_is_primary_pengelola 0003_alter_banksampah_foto_kegiatan_and_more 0004_alter_banksampah_foto_logo
-
+  # Everything below runs on main pushes only — valuable but not worth the
+  # free-tier minutes on every PR.
   docker:
     name: Docker build & scan
     runs-on: ubuntu-latest
     needs: [lint, checks, test]
+    if: github.event_name == 'push'
     permissions:
       contents: read
     steps:
@@ -318,62 +207,33 @@ jobs:
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: pilah-be:ci
-          format: sarif
-          output: trivy.sarif
           exit-code: "1"
           severity: HIGH,CRITICAL
           ignore-unfixed: true
-
-      - name: Attach trivy SARIF (artifact)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-sarif
-          path: trivy.sarif
-          if-no-files-found: warn
-
-      # SBOM: inventory of every package in the image (SPDX), kept as an
-      # artifact for audit / supply-chain traceability.
-      - name: SBOM
-        uses: anchore/sbom-action@v0
-        with:
-          image: pilah-be:ci
-          artifact-name: sbom.spdx.json
-          format: spdx-json
 
   secret-scan:
     name: Secret scan
     runs-on: ubuntu-latest
     needs: lint
+    if: github.event_name == 'push'
     permissions:
       contents: read
-    # Gitleaks: scans the full git history for high-entropy strings and known
-    # secret patterns. Blocking — a leaked credential must fail the gate.
-    # Private repo: run the gitleaks CLI via Docker rather than
-    # gitleaks-action (which needs a license for private-repo PR mode).
+    # Gitleaks over the full git history. Blocking — a leaked credential must
+    # fail the build. Run via Docker CLI (private repo: gitleaks-action needs
+    # a license for PR mode).
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: gitleaks
-        run: |
-          docker run --rm -v "$PWD":/repo zricethezav/gitleaks \
-            detect --source /repo --no-banner \
-            --report-format sarif --report-path /repo/gitleaks.sarif
-
-      - name: Attach gitleaks SARIF (artifact)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gitleaks-sarif
-          path: gitleaks.sarif
-          if-no-files-found: warn
+        run: docker run --rm -v "$PWD":/repo zricethezav/gitleaks detect --source /repo --no-banner
 
   types:
     name: Type check
     runs-on: ubuntu-latest
     needs: lint
+    if: github.event_name == 'push'
     # mypy --strict against pyproject.toml [tool.mypy]: full first-party
     # checking, django-stubs plugin resolves models/FKs. Blocking — new code
     # must be fully typed.
@@ -398,6 +258,7 @@ jobs:
     name: Dependency security scan
     runs-on: ubuntu-latest
     needs: lint
+    if: github.event_name == 'push'
     # pip-audit: check the pinned requirements.txt against published advisory
     # databases (PyPI / OSV). Blocking — the requirements are exact-pinned, so
     # a new advisory means a real version bump.
@@ -420,3 +281,36 @@ jobs:
       # triage it with a pip-audit --ignore-vuln in a follow-up.
       - name: pip-audit
         run: pip install pip-audit && pip-audit -r requirements.txt
+
+  migration-linter:
+    name: Migration safety lint
+    runs-on: ubuntu-latest
+    needs: lint
+    if: github.event_name == 'push'
+    # django-migration-linter flags destructive migration operations (dropped
+    # columns/tables, renamed fields, type changes) that makemigrations
+    # --check cannot see — the kind that silently eat prod data on Cloud SQL
+    # when `migrate` runs in the deploy entrypoint.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install django-migration-linter
+
+      # Blocking on ERROR. Historical migrations that predate this gate and
+      # lint ERR (three api migrations + the third-party token_blacklist app,
+      # excluded wholesale) are skipped by exact name so only NEW migrations
+      # must be clean. If a needed migration is blocked, fix the migration
+      # (not the gate) or add a targeted --ignore-name-contains.
+      - name: Lint migrations (new migrations only)
+        env:
+          MIGRATION_LINTER: "1"
+        run: python manage.py lintmigrations --database default --exclude-apps token_blacklist --ignore-name 0002_user_is_primary_pengelola 0003_alter_banksampah_foto_kegiatan_and_more 0004_alter_banksampah_foto_logo
