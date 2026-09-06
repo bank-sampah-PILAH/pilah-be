@@ -1,0 +1,114 @@
+# Non-gate checks: gitleaks, pip-audit, django-migration-linter. Weekly cron
+# plus manual dispatch — not per-PR. These catch slow-moving problems (leaked
+# secrets, new advisories, destructive migration patterns), not merge-time
+# regressions, so burning Actions minutes on every push isn't worth it.
+# Requires workflow_dispatch on the branch you want to audit (Actions tab ->
+# Scheduled checks -> Run workflow).
+name: Scheduled checks
+
+on:
+  schedule:
+    # Mondays, off the hour to spread load.
+    - cron: "23 2 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: scheduled-checks
+  cancel-in-progress: false
+
+env:
+  # Placeholders only — CI never talks to real Google/Twilio/WhatsApp.
+  DJANGO_SECRET_KEY: ci-placeholder-secret-key
+  DJANGO_DEBUG: "true"
+  DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+  PILAH_ALLOW_FAKE_GOOGLE_TOKEN: "true"
+  CORS_ALLOW_ALL_ORIGINS: "true"
+
+jobs:
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # Full-history scan. Blocking — a leaked credential must fail the run.
+    # Docker CLI (private repo: gitleaks-action needs a license for PR mode).
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: gitleaks
+        run: docker run --rm -v "$PWD":/repo zricethezav/gitleaks detect --source /repo --no-banner
+
+  pip-audit:
+    name: Dependency advisories (pip-audit)
+    runs-on: ubuntu-latest
+    # requirements.txt is exact-pinned, so a new advisory means a real bump.
+    # If an advisory has no fix yet, triage with pip-audit --ignore-vuln.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pip-audit
+
+      - name: pip-audit
+        run: pip-audit -r requirements.txt
+
+  migration-linter:
+    name: Migration safety lint
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: pilah
+          POSTGRES_USER: pilah
+          POSTGRES_PASSWORD: pilah
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pilah"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    # django-migration-linter flags destructive operations (dropped columns/
+    # tables, renamed fields, type changes) that makemigrations --check
+    # cannot see — the kind that silently eat prod data on Cloud SQL when
+    # `migrate` runs in the deploy entrypoint.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install django-migration-linter
+
+      # Blocking on ERROR. Historical migrations that predate this check and
+      # lint ERR (three api migrations + the third-party token_blacklist app,
+      # excluded wholesale) are skipped by exact name so only NEW migrations
+      # must be clean. If a needed migration is blocked, fix the migration
+      # (not the gate) or add a targeted --ignore-name-contains.
+      - name: Lint migrations (new migrations only)
+        env:
+          MIGRATION_LINTER: "1"
+          DB_ENGINE: django.db.backends.postgresql
+          DB_NAME: pilah
+          DB_USER: pilah
+          DB_PASSWORD: pilah
+          DB_HOST: 127.0.0.1
+          DB_PORT: "5432"
+        run: python manage.py lintmigrations --database default --exclude-apps token_blacklist --ignore-name 0002_user_is_primary_pengelola 0003_alter_banksampah_foto_kegiatan_and_more 0004_alter_banksampah_foto_logo
