@@ -107,12 +107,14 @@ jobs:
       - name: Set database env (postgres)
         if: matrix.database == 'postgres'
         run: |
-          echo "DB_ENGINE=django.db.backends.postgresql" >> "$GITHUB_ENV"
-          echo "DB_NAME=pilah" >> "$GITHUB_ENV"
-          echo "DB_USER=pilah" >> "$GITHUB_ENV"
-          echo "DB_PASSWORD=pilah" >> "$GITHUB_ENV"
-          echo "DB_HOST=127.0.0.1" >> "$GITHUB_ENV"
-          echo "DB_PORT=5432" >> "$GITHUB_ENV"
+          {
+            echo "DB_ENGINE=django.db.backends.postgresql"
+            echo "DB_NAME=pilah"
+            echo "DB_USER=pilah"
+            echo "DB_PASSWORD=pilah"
+            echo "DB_HOST=127.0.0.1"
+            echo "DB_PORT=5432"
+          } >> "$GITHUB_ENV"
 
       - name: Check for missing migrations
         run: python manage.py makemigrations --check --dry-run
@@ -297,7 +299,7 @@ jobs:
             -e CORS_ALLOW_ALL_ORIGINS=true \
             -p 8080:8080 \
             pilah-be:ci
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             status="$(docker inspect --format '{{.State.Health.Status}}' smoke)"
             [ "$status" = "healthy" ] && break
             [ "$status" = "unhealthy" ] && { docker logs smoke; exit 1; }
