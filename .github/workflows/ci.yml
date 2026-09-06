@@ -42,17 +42,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install ruff
+          pip install ruff==0.16.6
 
-      # Ruff is not yet configured in-repo (no pyproject.toml). Report-only so
-      # the gate stays green while findings get cleaned up; tighten to
-      # blocking once a pyproject.toml with lint config lands.
-      - name: Ruff lint (report only)
-        continue-on-error: true
+      # pyproject.toml [tool.ruff] holds the config. Blocking: a failing rule
+      # fails the gate. BLE001/S110/RUF012 are ignored there by design (DRF
+      # patterns + intentional broad catches at API boundaries).
+      - name: Ruff lint
         run: ruff check .
 
-      - name: Ruff format (report only)
-        continue-on-error: true
+      - name: Ruff format check
         run: ruff format --check .
 
   test:

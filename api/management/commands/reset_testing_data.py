@@ -3,7 +3,6 @@ from django.core.management.base import BaseCommand, CommandError
 
 from api.models import BankSampah, Nasabah, Transaksi, User
 
-
 CONFIRMATION = "RESET-PILAH-TEST-DATA"
 
 

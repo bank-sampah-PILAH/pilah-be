@@ -16,7 +16,9 @@ from api.models import BankSampah, BankSampahApprovalLog, JenisSampah, Nasabah, 
 
 class APISpecTests(APITestCase):
     def setUp(self):
-        self.bank = BankSampah.objects.create(nama="Bank Sampah BTH", alamat="Depok", kota="Depok", no_hp_pic="+628123456789")
+        self.bank = BankSampah.objects.create(
+            nama="Bank Sampah BTH", alamat="Depok", kota="Depok", no_hp_pic="+628123456789"
+        )
         self.user = User.objects.create_user(
             email="sari@example.com",
             nama="Ibu Sari",
@@ -30,7 +32,12 @@ class APISpecTests(APITestCase):
     def test_bank_profile_update_normalizes_phone(self):
         response = self.client.put(
             "/api/v1/bank-sampah/me",
-            {"nama": "Bank Sampah BTH", "alamat": "Kel. Kukusan", "kota": "Depok", "no_hp_pic": "081234567890"},
+            {
+                "nama": "Bank Sampah BTH",
+                "alamat": "Kel. Kukusan",
+                "kota": "Depok",
+                "no_hp_pic": "081234567890",
+            },
             format="json",
         )
 
@@ -58,7 +65,11 @@ class APISpecTests(APITestCase):
 
         response = client.post(
             "/admin/login/",
-            {"username": "missing@example.com", "password": "invalid", "csrfmiddlewaretoken": csrf_token},
+            {
+                "username": "missing@example.com",
+                "password": "invalid",
+                "csrfmiddlewaretoken": csrf_token,
+            },
             HTTP_ORIGIN="https://admin.example.com",
             HTTP_REFERER="https://admin.example.com/admin/login/",
             **request_headers,
@@ -110,7 +121,9 @@ class APISpecTests(APITestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.data["ringkasan_transaksi"]["jumlah_transaksi"], 0)
 
-        patched = self.client.patch(f"/api/v1/nasabah/{created.data['id']}/status", {"is_active": False}, format="json")
+        patched = self.client.patch(
+            f"/api/v1/nasabah/{created.data['id']}/status", {"is_active": False}, format="json"
+        )
         self.assertEqual(patched.status_code, 200)
         self.assertFalse(patched.data["is_active"])
 
@@ -156,7 +169,9 @@ class APISpecTests(APITestCase):
             format="json",
         )
         self.assertEqual(duplicate_create.status_code, 422)
-        self.assertEqual(duplicate_create.data["errors"]["no_hp"], ["Nomor HP nasabah sudah digunakan"])
+        self.assertEqual(
+            duplicate_create.data["errors"]["no_hp"], ["Nomor HP nasabah sudah digunakan"]
+        )
 
         second = self.client.post(
             "/api/v1/nasabah",
@@ -185,7 +200,9 @@ class APISpecTests(APITestCase):
             format="json",
         )
         self.assertEqual(duplicate_update.status_code, 422)
-        self.assertEqual(duplicate_update.data["errors"]["no_hp"], ["Nomor HP nasabah sudah digunakan"])
+        self.assertEqual(
+            duplicate_update.data["errors"]["no_hp"], ["Nomor HP nasabah sudah digunakan"]
+        )
 
     def test_jenis_sampah_and_transaction_update_saldo(self):
         nasabah = Nasabah.objects.create(
@@ -198,7 +215,13 @@ class APISpecTests(APITestCase):
         Saldo.objects.create(nasabah=nasabah)
         jenis = self.client.post(
             "/api/v1/jenis-sampah",
-            {"kode": "PLS-001", "nama_sampah": "Plastik PET", "kategori": "plastik", "deskripsi": "Botol bening", "harga_per_kg": 3500},
+            {
+                "kode": "PLS-001",
+                "nama_sampah": "Plastik PET",
+                "kategori": "plastik",
+                "deskripsi": "Botol bening",
+                "harga_per_kg": 3500,
+            },
             format="json",
         )
         self.assertEqual(jenis.status_code, 201)
@@ -371,7 +394,11 @@ class APISpecTests(APITestCase):
         self.assertEqual(template.status_code, 200)
         self.assertIn("{Nama}", template.data["variabel_tersedia"])
 
-        updated = self.client.put("/api/v1/pengaturan/wa-template", {"template": "Halo {Nama}, saldo {Saldo}"}, format="json")
+        updated = self.client.put(
+            "/api/v1/pengaturan/wa-template",
+            {"template": "Halo {Nama}, saldo {Saldo}"},
+            format="json",
+        )
         self.assertEqual(updated.status_code, 200)
         self.assertEqual(updated.data["message"], "Template berhasil disimpan")
 
@@ -392,11 +419,7 @@ class APISpecTests(APITestCase):
             "/api/v1/pengaturan/wa-template",
             {
                 "template": (
-                    "Halo {Nama}\n"
-                    "{daftar_item}\n"
-                    "Lengkap:\n"
-                    "{daftar_item_harga}\n"
-                    "Saldo {Saldo}"
+                    "Halo {Nama}\n{daftar_item}\nLengkap:\n{daftar_item_harga}\nSaldo {Saldo}"
                 )
             },
             format="json",
@@ -458,7 +481,9 @@ class APISpecTests(APITestCase):
         self.assertNotIn("....", template.data["preview_contoh"])
 
     def test_google_dev_auth(self):
-        response = self.client.post("/api/v1/auth/google", {"id_token": "dev:new@example.com:New User"}, format="json")
+        response = self.client.post(
+            "/api/v1/auth/google", {"id_token": "dev:new@example.com:New User"}, format="json"
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["token_type"], "Bearer")
@@ -468,7 +493,11 @@ class APISpecTests(APITestCase):
 
     def test_onboarding_superadmin_approval_and_invite_flow(self):
         self.client.credentials()
-        login = self.client.post("/api/v1/auth/google", {"id_token": "dev:onboard@example.com:Onboard User"}, format="json")
+        login = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev:onboard@example.com:Onboard User"},
+            format="json",
+        )
         self.assertEqual(login.status_code, 200)
         token = login.data["access_token"]
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
@@ -496,7 +525,9 @@ class APISpecTests(APITestCase):
                 "alamat": "Jl. Pending No. 1, Kukusan",
                 "kota": "Depok",
                 "no_hp_pic": "081234567893",
-                "foto_kegiatan": SimpleUploadedFile("pending.png", b"png", content_type="image/png"),
+                "foto_kegiatan": SimpleUploadedFile(
+                    "pending.png", b"png", content_type="image/png"
+                ),
             },
             format="multipart",
         )
@@ -529,7 +560,9 @@ class APISpecTests(APITestCase):
         self.assertEqual(approval.data["bank_sampah"]["status"], "active")
         self.assertEqual(BankSampahApprovalLog.objects.count(), 1)
 
-        refreshed = self.client.post("/api/v1/auth/refresh", {"refresh_token": login.data["refresh_token"]}, format="json")
+        refreshed = self.client.post(
+            "/api/v1/auth/refresh", {"refresh_token": login.data["refresh_token"]}, format="json"
+        )
         self.assertEqual(refreshed.status_code, 200)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refreshed.data['access_token']}")
 
@@ -553,10 +586,14 @@ class APISpecTests(APITestCase):
         self.assertEqual(invite.status_code, 201)
         self.assertIn("token", invite.data)
         expires_at = invite.data["expires_at"]
-        self.assertGreaterEqual(expires_at, timezone.now() + timedelta(days=3) - timedelta(seconds=5))
+        self.assertGreaterEqual(
+            expires_at, timezone.now() + timedelta(days=3) - timedelta(seconds=5)
+        )
         self.assertLessEqual(expires_at, timezone.now() + timedelta(days=3) + timedelta(seconds=5))
 
-        self_accept = self.client.post("/api/v1/invites/accept", {"token": invite.data["token"]}, format="json")
+        self_accept = self.client.post(
+            "/api/v1/invites/accept", {"token": invite.data["token"]}, format="json"
+        )
         self.assertEqual(self_accept.status_code, 200)
         self.assertEqual(self_accept.data["outcome"], "already_member")
         self.assertEqual(self_accept.data["message"], "Anda sudah terdaftar pada bank sampah ini")
@@ -565,7 +602,11 @@ class APISpecTests(APITestCase):
         self.assertEqual(str(onboard_user.bank_sampah_id), registration.data["id"])
 
         self.client.credentials()
-        invited_login = self.client.post("/api/v1/auth/google", {"id_token": "dev:invited@example.com:Invited User"}, format="json")
+        invited_login = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev:invited@example.com:Invited User"},
+            format="json",
+        )
         self.assertEqual(invited_login.status_code, 200)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {invited_login.data['access_token']}")
         invited_profile = self.client.put(
@@ -579,14 +620,18 @@ class APISpecTests(APITestCase):
             format="json",
         )
         self.assertEqual(invited_profile.status_code, 200)
-        accepted = self.client.post("/api/v1/invites/accept", {"token": invite.data["token"]}, format="json")
+        accepted = self.client.post(
+            "/api/v1/invites/accept", {"token": invite.data["token"]}, format="json"
+        )
         self.assertEqual(accepted.status_code, 200)
         self.assertEqual(accepted.data["next_step"], "dashboard")
         self.assertEqual(accepted.data["outcome"], "join_success")
         self.assertEqual(accepted.data["bank_sampah_id"], registration.data["id"])
         self.assertEqual(accepted.data["bank_sampah_nama"], "Bank Sampah Pending")
 
-        repeated_accept = self.client.post("/api/v1/invites/accept", {"token": invite.data["token"]}, format="json")
+        repeated_accept = self.client.post(
+            "/api/v1/invites/accept", {"token": invite.data["token"]}, format="json"
+        )
         self.assertEqual(repeated_accept.status_code, 200)
         self.assertEqual(repeated_accept.data["outcome"], "already_member")
 
@@ -598,7 +643,9 @@ class APISpecTests(APITestCase):
         self.assertEqual(denied_invite.status_code, 403)
 
     def test_invite_join_rejects_superadmin_at_join_endpoint(self):
-        active_bank = BankSampah.objects.create(nama="Invite Target", alamat="Depok", no_hp_pic="+628111111111")
+        active_bank = BankSampah.objects.create(
+            nama="Invite Target", alamat="Depok", no_hp_pic="+628111111111"
+        )
         invite_token = active_bank.invite_token = "target-token"
         active_bank.invite_token_expires = timezone.now() + timedelta(days=3)
         active_bank.save(update_fields=["invite_token", "invite_token_expires", "updated_at"])
@@ -611,17 +658,23 @@ class APISpecTests(APITestCase):
         refresh = RefreshToken.for_user(superadmin)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
-        response = self.client.post("/api/v1/bank-sampah/invite/join", {"invite_token": invite_token}, format="json")
+        response = self.client.post(
+            "/api/v1/bank-sampah/invite/join", {"invite_token": invite_token}, format="json"
+        )
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.data["error"], "Hanya pengelola yang dapat menerima undangan")
 
     def test_invite_join_rejects_active_and_pending_other_bank(self):
-        target_bank = BankSampah.objects.create(nama="Target Active", alamat="Depok", no_hp_pic="+628111111111")
+        target_bank = BankSampah.objects.create(
+            nama="Target Active", alamat="Depok", no_hp_pic="+628111111111"
+        )
         invite_token = target_bank.invite_token = "target-active-token"
         target_bank.invite_token_expires = timezone.now() + timedelta(days=3)
         target_bank.save(update_fields=["invite_token", "invite_token_expires", "updated_at"])
-        active_bank = BankSampah.objects.create(nama="Current Active", alamat="Depok", no_hp_pic="+628222222222")
+        active_bank = BankSampah.objects.create(
+            nama="Current Active", alamat="Depok", no_hp_pic="+628222222222"
+        )
         pending_bank = BankSampah.objects.create(
             nama="Current Pending",
             alamat="Depok",
@@ -648,14 +701,18 @@ class APISpecTests(APITestCase):
         for user in [active_user, pending_user]:
             refresh = RefreshToken.for_user(user)
             self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
-            response = self.client.post("/api/v1/invites/accept", {"token": invite_token}, format="json")
+            response = self.client.post(
+                "/api/v1/invites/accept", {"token": invite_token}, format="json"
+            )
             self.assertEqual(response.status_code, 400)
             self.assertEqual(response.data["error"], "Akun ini sudah tergabung dengan bank sampah")
             user.refresh_from_db()
             self.assertNotEqual(user.bank_sampah_id, target_bank.id)
 
     def test_invite_join_reassigns_rejected_primary_to_active_bank(self):
-        target_bank = BankSampah.objects.create(nama="Target Join", alamat="Depok", no_hp_pic="+628111111111")
+        target_bank = BankSampah.objects.create(
+            nama="Target Join", alamat="Depok", no_hp_pic="+628111111111"
+        )
         invite_token = target_bank.invite_token = "target-reassign-token"
         target_bank.invite_token_expires = timezone.now() + timedelta(days=3)
         target_bank.save(update_fields=["invite_token", "invite_token_expires", "updated_at"])
@@ -679,7 +736,9 @@ class APISpecTests(APITestCase):
         refresh = RefreshToken.for_user(user)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
-        response = self.client.post("/api/v1/invites/accept", {"token": invite_token}, format="json")
+        response = self.client.post(
+            "/api/v1/invites/accept", {"token": invite_token}, format="json"
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["outcome"], "join_success")
@@ -689,11 +748,19 @@ class APISpecTests(APITestCase):
         user.refresh_from_db()
         self.assertEqual(user.bank_sampah_id, target_bank.id)
         self.assertFalse(user.is_primary_pengelola)
-        self.assertTrue(BankSampah.objects.filter(id=rejected_bank.id, status=BankSampah.Status.REJECTED).exists())
+        self.assertTrue(
+            BankSampah.objects.filter(
+                id=rejected_bank.id, status=BankSampah.Status.REJECTED
+            ).exists()
+        )
 
     def test_superadmin_cannot_use_pengelola_endpoints(self):
         self.client.credentials()
-        response = self.client.post("/api/v1/auth/google", {"id_token": "dev-superadmin:root@example.com:Root Admin"}, format="json")
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev-superadmin:root@example.com:Root Admin"},
+            format="json",
+        )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["user"]["role"], "superadmin")
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access_token']}")
@@ -714,8 +781,18 @@ class APISpecTests(APITestCase):
         )
         refresh = RefreshToken.for_user(superadmin)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
-        older = BankSampah.objects.create(nama="Older Pending", alamat="Depok", no_hp_pic="+628111111111", status=BankSampah.Status.PENDING)
-        newer = BankSampah.objects.create(nama="Newer Pending", alamat="Depok", no_hp_pic="+628222222222", status=BankSampah.Status.PENDING)
+        older = BankSampah.objects.create(
+            nama="Older Pending",
+            alamat="Depok",
+            no_hp_pic="+628111111111",
+            status=BankSampah.Status.PENDING,
+        )
+        newer = BankSampah.objects.create(
+            nama="Newer Pending",
+            alamat="Depok",
+            no_hp_pic="+628222222222",
+            status=BankSampah.Status.PENDING,
+        )
         BankSampah.objects.filter(id=older.id).update(created_at=timezone.now() - timedelta(days=2))
         BankSampah.objects.filter(id=newer.id).update(created_at=timezone.now() - timedelta(days=1))
 

@@ -1,10 +1,11 @@
-from calendar import monthrange
-from datetime import date, datetime, time, timedelta
-from decimal import Decimal, ROUND_HALF_UP
-from io import BytesIO
 import json
 import secrets
+from calendar import monthrange
+from datetime import date, datetime, time, timedelta
+from decimal import ROUND_HALF_UP, Decimal
+from io import BytesIO
 
+import requests
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Sum
@@ -14,11 +15,19 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-import requests
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import BankSampah, BankSampahApprovalLog, DetailTransaksi, JenisSampah, Nasabah, Saldo, Transaksi, User
+from api.models import (
+    BankSampah,
+    BankSampahApprovalLog,
+    DetailTransaksi,
+    JenisSampah,
+    Nasabah,
+    Saldo,
+    Transaksi,
+    User,
+)
 
 DEFAULT_WA_TEMPLATE = (
     "Halo {Nama}, setoran sampahmu senilai {Total} sudah kami catat ya.\n"
@@ -105,15 +114,24 @@ class AuthService:
     def _verify_google_token(raw_id_token):
         if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and raw_id_token.startswith("dev-superadmin:"):
             _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
-            return {"sub": f"dev-superadmin-{email}", "email": email, "name": name or email.split("@")[0], "role": User.Role.SUPERADMIN}
+            return {
+                "sub": f"dev-superadmin-{email}",
+                "email": email,
+                "name": name or email.split("@")[0],
+                "role": User.Role.SUPERADMIN,
+            }
         if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and raw_id_token.startswith("dev:"):
             _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
             return {"sub": f"dev-{email}", "email": email, "name": name or email.split("@")[0]}
         audience = settings.GOOGLE_CLIENT_ID or None
         try:
-            return google_id_token.verify_oauth2_token(raw_id_token, google_requests.Request(), audience)
+            return google_id_token.verify_oauth2_token(
+                raw_id_token, google_requests.Request(), audience
+            )
         except Exception as exc:
-            raise serializers.ValidationError({"id_token": ["ID Token invalid atau expired"]}) from exc
+            raise serializers.ValidationError(
+                {"id_token": ["ID Token invalid atau expired"]}
+            ) from exc
 
 
 class NumberingService:
@@ -137,7 +155,16 @@ class OnboardingService:
         for field, value in profile_data.items():
             setattr(user, field, value)
         user.is_profile_complete = True
-        user.save(update_fields=["nama", "no_hp", "jenis_kelamin", "tanggal_lahir", "is_profile_complete", "updated_at"])
+        user.save(
+            update_fields=[
+                "nama",
+                "no_hp",
+                "jenis_kelamin",
+                "tanggal_lahir",
+                "is_profile_complete",
+                "updated_at",
+            ]
+        )
         return user
 
     @staticmethod
@@ -169,21 +196,33 @@ class OnboardingService:
     @staticmethod
     @transaction.atomic
     def accept_invite(user, token):
-        bank = BankSampah.objects.filter(invite_token=token, invite_token_expires__gt=timezone.now()).first()
+        bank = BankSampah.objects.filter(
+            invite_token=token, invite_token_expires__gt=timezone.now()
+        ).first()
         if not bank or bank.status != BankSampah.Status.ACTIVE:
             raise ValueError("Tautan undangan tidak valid atau sudah kedaluwarsa")
         if user.role != User.Role.PENGELOLA:
             raise PermissionError("Hanya pengelola yang dapat menerima undangan")
         if user.bank_sampah_id == bank.id:
             return bank, "already_member"
-        if user.bank_sampah_id and user.bank_sampah.status in [BankSampah.Status.ACTIVE, BankSampah.Status.PENDING]:
+        if user.bank_sampah_id and user.bank_sampah.status in [
+            BankSampah.Status.ACTIVE,
+            BankSampah.Status.PENDING,
+        ]:
             raise ValueError("Akun ini sudah tergabung dengan bank sampah")
         outcome = "join_success"
         user.bank_sampah = bank
         user.is_primary_pengelola = False
         if user.nama and user.no_hp and user.jenis_kelamin and user.tanggal_lahir:
             user.is_profile_complete = True
-        user.save(update_fields=["bank_sampah", "is_primary_pengelola", "is_profile_complete", "updated_at"])
+        user.save(
+            update_fields=[
+                "bank_sampah",
+                "is_primary_pengelola",
+                "is_profile_complete",
+                "updated_at",
+            ]
+        )
         return bank, outcome
 
 
@@ -229,11 +268,15 @@ class TransactionService:
     @transaction.atomic
     def create_setoran(user, payload):
         bank = user.bank_sampah
-        nasabah = Nasabah.objects.select_for_update().filter(
-            id=payload["nasabah_id"], bank_sampah=bank, is_active=True
-        ).first()
+        nasabah = (
+            Nasabah.objects.select_for_update()
+            .filter(id=payload["nasabah_id"], bank_sampah=bank, is_active=True)
+            .first()
+        )
         if not nasabah:
-            raise serializers.ValidationError({"nasabah_id": ["Nasabah tidak ditemukan atau tidak aktif"]})
+            raise serializers.ValidationError(
+                {"nasabah_id": ["Nasabah tidak ditemukan atau tidak aktif"]}
+            )
 
         saldo, _ = Saldo.objects.select_for_update().get_or_create(nasabah=nasabah)
         transaksi = Transaksi.objects.create(
@@ -249,7 +292,13 @@ class TransactionService:
                 id=item_payload["jenis_sampah_id"], bank_sampah=bank, is_active=True
             ).first()
             if not jenis:
-                raise serializers.ValidationError({f"items[{index}].jenis_sampah_id": ["Jenis sampah tidak ditemukan atau tidak aktif"]})
+                raise serializers.ValidationError(
+                    {
+                        f"items[{index}].jenis_sampah_id": [
+                            "Jenis sampah tidak ditemukan atau tidak aktif"
+                        ]
+                    }
+                )
             harga = item_payload.get("harga_per_kg") or jenis.harga_per_kg
             berat = item_payload["berat"]
             subtotal = (harga * berat).quantize(Decimal("0.01"))
@@ -291,7 +340,9 @@ class TransactionFilterService:
             start = TransactionFilterService._parse_date(request.query_params.get("dari_tanggal"))
             end = TransactionFilterService._parse_date(request.query_params.get("sampai_tanggal"))
             if not start or not end:
-                raise serializers.ValidationError({"error": "dari_tanggal dan sampai_tanggal wajib diisi"})
+                raise serializers.ValidationError(
+                    {"error": "dari_tanggal dan sampai_tanggal wajib diisi"}
+                )
             if end < start:
                 raise ValueError("Tanggal akhir tidak boleh lebih awal dari tanggal awal")
         else:
@@ -322,16 +373,20 @@ class DashboardService:
         start_dt = timezone.make_aware(datetime.combine(start, time.min), tz)
         end_dt = timezone.make_aware(datetime.combine(end, time.max), tz)
 
-        transaksi = Transaksi.objects.filter(bank_sampah=user.bank_sampah, tanggal__range=(start_dt, end_dt))
-        totals = DetailTransaksi.objects.filter(transaksi__in=transaksi).aggregate(
-            total_kg=Coalesce(Sum("berat"), Decimal("0")),
+        transaksi = Transaksi.objects.filter(
+            bank_sampah=user.bank_sampah, tanggal__range=(start_dt, end_dt)
         )
-        nilai = transaksi.aggregate(total=Coalesce(Sum("total_nilai"), Decimal("0")))["total"]
+        totals = DetailTransaksi.objects.filter(transaksi__in=transaksi).aggregate(
+            total_kg=Coalesce(Sum("berat"), Decimal(0)),
+        )
+        nilai = transaksi.aggregate(total=Coalesce(Sum("total_nilai"), Decimal(0)))["total"]
         return {
             "bank_sampah_nama": user.bank_sampah.nama,
             "pengelola_nama": user.nama,
             "periode": today.strftime("%Y-%m"),
-            "nasabah_aktif": Nasabah.objects.filter(bank_sampah=user.bank_sampah, is_active=True).count(),
+            "nasabah_aktif": Nasabah.objects.filter(
+                bank_sampah=user.bank_sampah, is_active=True
+            ).count(),
             "transaksi_bulan_ini": transaksi.count(),
             "total_sampah_kg_bulan_ini": totals["total_kg"],
             "total_nilai_bulan_ini": nilai,
@@ -358,16 +413,16 @@ class WhatsAppService:
                 {
                     "nama_sampah_snapshot": "Plastik PET",
                     "berat": Decimal("5.200"),
-                    "harga_snapshot": Decimal("3500"),
-                    "subtotal": Decimal("18200"),
+                    "harga_snapshot": Decimal(3500),
+                    "subtotal": Decimal(18200),
                 }
             ]
         )
         message = WhatsAppService.render(
             WhatsAppService.get_template(bank_sampah),
             nama="Budi Santoso",
-            total=Decimal("15600"),
-            saldo=Decimal("125000"),
+            total=Decimal(15600),
+            saldo=Decimal(125000),
             tanggal=timezone.localdate(),
             daftar_item=daftar_item,
             daftar_item_harga=daftar_item_harga,
@@ -379,9 +434,15 @@ class WhatsAppService:
         if not transaksi.nasabah.no_hp:
             transaksi.status_wa = Transaksi.StatusWA.GAGAL
             transaksi.save(update_fields=["status_wa"])
-            return {"success": False, "status_wa": transaksi.status_wa, "error": "Nomor tidak aktif di WhatsApp"}
+            return {
+                "success": False,
+                "status_wa": transaksi.status_wa,
+                "error": "Nomor tidak aktif di WhatsApp",
+            }
         message = WhatsAppService.message_for_transaction(transaksi)
-        has_twilio_auth = settings.TWILIO_AUTH_TOKEN or (settings.TWILIO_API_KEY_SID and settings.TWILIO_API_KEY_SECRET)
+        has_twilio_auth = settings.TWILIO_AUTH_TOKEN or (
+            settings.TWILIO_API_KEY_SID and settings.TWILIO_API_KEY_SECRET
+        )
         has_any_twilio_env = any(
             [
                 settings.TWILIO_ACCOUNT_SID,
@@ -414,7 +475,11 @@ class WhatsAppService:
                 if response.status_code >= 400:
                     transaksi.status_wa = Transaksi.StatusWA.GAGAL
                     transaksi.save(update_fields=["status_wa"])
-                    return {"success": False, "status_wa": transaksi.status_wa, "error": response.text or "Gagal kirim WhatsApp"}
+                    return {
+                        "success": False,
+                        "status_wa": transaksi.status_wa,
+                        "error": response.text or "Gagal kirim WhatsApp",
+                    }
                 transaksi.status_wa = Transaksi.StatusWA.TERKIRIM
                 transaksi.save(update_fields=["status_wa"])
                 return {
@@ -483,7 +548,9 @@ class WhatsAppService:
                 return {
                     "success": False,
                     "status_wa": transaksi.status_wa,
-                    "error": response_payload.get("message") or response.text or "Gagal kirim WhatsApp via Twilio",
+                    "error": response_payload.get("message")
+                    or response.text
+                    or "Gagal kirim WhatsApp via Twilio",
                     "provider": "twilio",
                 }
             transaksi.status_wa = Transaksi.StatusWA.TERKIRIM
@@ -498,7 +565,12 @@ class WhatsAppService:
         except requests.RequestException as exc:
             transaksi.status_wa = Transaksi.StatusWA.GAGAL
             transaksi.save(update_fields=["status_wa"])
-            return {"success": False, "status_wa": transaksi.status_wa, "error": str(exc), "provider": "twilio"}
+            return {
+                "success": False,
+                "status_wa": transaksi.status_wa,
+                "error": str(exc),
+                "provider": "twilio",
+            }
 
     @staticmethod
     def content_variables_for_transaction(transaksi):
@@ -685,8 +757,8 @@ def _saldo_after_by_transaction(queryset):
     if not target_transactions:
         return {}
 
-    target_ids = {transaction.id for transaction in target_transactions}
-    nasabah_ids = {transaction.nasabah_id for transaction in target_transactions}
+    target_ids = {trans.id for trans in target_transactions}
+    nasabah_ids = {trans.nasabah_id for trans in target_transactions}
     latest_transaction = target_transactions[-1]
     bank_sampah = latest_transaction.bank_sampah
     running_balances = {nasabah_id: Decimal("0.00") for nasabah_id in nasabah_ids}
@@ -701,10 +773,10 @@ def _saldo_after_by_transaction(queryset):
         .only("id", "nasabah_id", "total_nilai", "tanggal")
         .order_by("nasabah_id", "tanggal", "id")
     )
-    for transaction in transactions:
-        running_balances[transaction.nasabah_id] += transaction.total_nilai
-        if transaction.id in target_ids:
-            saldo_after[transaction.id] = running_balances[transaction.nasabah_id]
+    for trans in transactions:
+        running_balances[trans.nasabah_id] += trans.total_nilai
+        if trans.id in target_ids:
+            saldo_after[trans.id] = running_balances[trans.nasabah_id]
 
     return saldo_after
 
@@ -733,7 +805,9 @@ def _period_label(request):
         first_this_month = today.replace(day=1)
         previous_month = first_this_month - timedelta(days=1)
         end_day = monthrange(previous_month.year, previous_month.month)[1]
-        return f"Bulan Lalu (1 - {end_day} {_month_name(previous_month.month)} {previous_month.year})"
+        return (
+            f"Bulan Lalu (1 - {end_day} {_month_name(previous_month.month)} {previous_month.year})"
+        )
     if periode == "custom":
         start = request.query_params.get("dari_tanggal", "")
         end = request.query_params.get("sampai_tanggal", "")

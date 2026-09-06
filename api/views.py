@@ -1,11 +1,11 @@
 import json
 
-from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
+import requests
 from django.conf import settings
+from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.db.models import Q
 from django.http import HttpResponse, HttpResponseRedirect
 from django.utils.http import urlencode
-import requests
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -20,9 +20,9 @@ from api.serializers import (
     ApprovalDecisionSerializer,
     ApprovalLogSerializer,
     AuthUserSerializer,
-    BankSampahSerializer,
     BankSampahApprovalListSerializer,
     BankSampahRegistrationSerializer,
+    BankSampahSerializer,
     GoogleAuthSerializer,
     InviteAcceptSerializer,
     JenisSampahSerializer,
@@ -43,7 +43,6 @@ from api.services import (
     ApprovalService,
     AuthService,
     DashboardService,
-    NumberingService,
     OnboardingService,
     TeamService,
     TransactionFilterService,
@@ -72,7 +71,9 @@ class GoogleOAuthStartView(APIView):
     def get(self, request):
         if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
             return Response({"error": "Google OAuth client is not configured"}, status=503)
-        redirect_uri = settings.GOOGLE_REDIRECT_URI or request.build_absolute_uri("/api/v1/auth/google/callback")
+        redirect_uri = settings.GOOGLE_REDIRECT_URI or request.build_absolute_uri(
+            "/api/v1/auth/google/callback"
+        )
         next_url = request.GET.get("next") or "/api-test/"
         if not next_url.startswith("/"):
             next_url = "/api-test/"
@@ -107,7 +108,9 @@ class GoogleOAuthCallbackView(APIView):
         if not next_url.startswith("/"):
             next_url = "/api-test/"
 
-        redirect_uri = settings.GOOGLE_REDIRECT_URI or request.build_absolute_uri("/api/v1/auth/google/callback")
+        redirect_uri = settings.GOOGLE_REDIRECT_URI or request.build_absolute_uri(
+            "/api/v1/auth/google/callback"
+        )
         try:
             token_response = requests.post(
                 "https://oauth2.googleapis.com/token",
@@ -125,7 +128,9 @@ class GoogleOAuthCallbackView(APIView):
                 return self._popup_response(False, token_payload, next_url)
             id_token = token_payload.get("id_token")
             if not id_token:
-                return self._popup_response(False, {"error": "Google did not return an ID token"}, next_url)
+                return self._popup_response(
+                    False, {"error": "Google did not return an ID token"}, next_url
+                )
             return self._popup_response(True, AuthService.login_with_google(id_token), next_url)
         except Exception as exc:
             return self._popup_response(False, {"error": str(exc)}, next_url)
@@ -240,7 +245,9 @@ class AcceptInviteView(APIView):
         serializer = InviteAcceptSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            bank, outcome = OnboardingService.accept_invite(request.user, serializer.validated_data["token"])
+            bank, outcome = OnboardingService.accept_invite(
+                request.user, serializer.validated_data["token"]
+            )
         except PermissionError as exc:
             return Response({"error": str(exc)}, status=403)
         except ValueError as exc:
@@ -278,7 +285,9 @@ class NasabahViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_queryset(self):
-        qs = Nasabah.objects.filter(bank_sampah=self.request.user.bank_sampah).select_related("saldo")
+        qs = Nasabah.objects.filter(bank_sampah=self.request.user.bank_sampah).select_related(
+            "saldo"
+        )
         search = self.request.query_params.get("search", "")
         status_filter = self.request.query_params.get("status", "aktif")
         if self.action == "list" and len(search) >= 2:
@@ -315,12 +324,24 @@ class NasabahViewSet(viewsets.ModelViewSet):
         if not instance.is_active:
             return Response({"error": "Nasabah nonaktif tidak bisa diedit"}, status=403)
         nomor = request.data.get("kode")
-        if nomor and Nasabah.objects.filter(bank_sampah=request.user.bank_sampah, nomor=nomor).exclude(id=instance.id).exists():
+        if (
+            nomor
+            and Nasabah.objects.filter(bank_sampah=request.user.bank_sampah, nomor=nomor)
+            .exclude(id=instance.id)
+            .exists()
+        ):
             return Response({"errors": {"kode": ["ID Nasabah sudah digunakan"]}}, status=422)
-        serializer = self.get_serializer(instance, data=request.data, partial=kwargs.pop("partial", False))
+        serializer = self.get_serializer(
+            instance, data=request.data, partial=kwargs.pop("partial", False)
+        )
         serializer.is_valid(raise_exception=True)
         no_hp = serializer.validated_data.get("no_hp")
-        if no_hp and Nasabah.objects.filter(bank_sampah=request.user.bank_sampah, no_hp=no_hp).exclude(id=instance.id).exists():
+        if (
+            no_hp
+            and Nasabah.objects.filter(bank_sampah=request.user.bank_sampah, no_hp=no_hp)
+            .exclude(id=instance.id)
+            .exists()
+        ):
             return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
         self.perform_update(serializer)
         return Response(serializer.data)
@@ -333,7 +354,13 @@ class NasabahViewSet(viewsets.ModelViewSet):
         nasabah.is_active = serializer.validated_data["is_active"]
         nasabah.save(update_fields=["is_active", "updated_at"])
         state = "diaktifkan" if nasabah.is_active else "dinonaktifkan"
-        return Response({"id": str(nasabah.id), "is_active": nasabah.is_active, "message": f"Nasabah berhasil {state}"})
+        return Response(
+            {
+                "id": str(nasabah.id),
+                "is_active": nasabah.is_active,
+                "message": f"Nasabah berhasil {state}",
+            }
+        )
 
 
 class JenisSampahViewSet(viewsets.ModelViewSet):
@@ -371,7 +398,12 @@ class JenisSampahViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         nomor = request.data.get("kode")
-        if nomor and JenisSampah.objects.filter(bank_sampah=request.user.bank_sampah, nomor=nomor).exclude(id=instance.id).exists():
+        if (
+            nomor
+            and JenisSampah.objects.filter(bank_sampah=request.user.bank_sampah, nomor=nomor)
+            .exclude(id=instance.id)
+            .exists()
+        ):
             return Response({"errors": {"kode": ["Kode sampah sudah digunakan"]}}, status=422)
         return super().update(request, *args, **kwargs)
 
@@ -383,7 +415,13 @@ class JenisSampahViewSet(viewsets.ModelViewSet):
         jenis.is_active = serializer.validated_data["is_active"]
         jenis.save(update_fields=["is_active", "updated_at"])
         state = "diaktifkan" if jenis.is_active else "dinonaktifkan"
-        return Response({"id": str(jenis.id), "is_active": jenis.is_active, "message": f"Jenis sampah berhasil {state}"})
+        return Response(
+            {
+                "id": str(jenis.id),
+                "is_active": jenis.is_active,
+                "message": f"Jenis sampah berhasil {state}",
+            }
+        )
 
 
 class TransaksiViewSet(viewsets.GenericViewSet):
@@ -526,10 +564,12 @@ class TeamView(APIView):
     serializer_class = TeamMemberSerializer
 
     def get(self, request):
-        members = User.objects.filter(bank_sampah=request.user.bank_sampah, role=User.Role.PENGELOLA, is_active=True).order_by(
-            "-is_primary_pengelola", "nama"
+        members = User.objects.filter(
+            bank_sampah=request.user.bank_sampah, role=User.Role.PENGELOLA, is_active=True
+        ).order_by("-is_primary_pengelola", "nama")
+        return Response(
+            {"members": TeamMemberSerializer(members, many=True, context={"request": request}).data}
         )
-        return Response({"members": TeamMemberSerializer(members, many=True, context={"request": request}).data})
 
 
 class GenerateInviteView(APIView):
@@ -559,7 +599,11 @@ class SuperAdminBankSampahViewSet(viewsets.GenericViewSet):
     def list(self, request):
         status_filter = request.query_params.get("status", BankSampah.Status.PENDING)
         qs = self.get_queryset()
-        if status_filter in [BankSampah.Status.PENDING, BankSampah.Status.ACTIVE, BankSampah.Status.REJECTED]:
+        if status_filter in [
+            BankSampah.Status.PENDING,
+            BankSampah.Status.ACTIVE,
+            BankSampah.Status.REJECTED,
+        ]:
             qs = qs.filter(status=status_filter)
         serializer = self.get_serializer(qs, many=True)
         return Response({"count": qs.count(), "results": serializer.data})
@@ -572,13 +616,27 @@ class SuperAdminBankSampahViewSet(viewsets.GenericViewSet):
         bank = self.get_object()
         serializer = ApprovalDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        log = ApprovalService.approve(bank, request.user, serializer.validated_data.get("catatan", ""))
-        return Response({"bank_sampah": self.get_serializer(bank).data, "approval_log": ApprovalLogSerializer(log).data})
+        log = ApprovalService.approve(
+            bank, request.user, serializer.validated_data.get("catatan", "")
+        )
+        return Response(
+            {
+                "bank_sampah": self.get_serializer(bank).data,
+                "approval_log": ApprovalLogSerializer(log).data,
+            }
+        )
 
     @action(detail=True, methods=["post"], url_path="reject")
     def reject(self, request, pk=None):
         bank = self.get_object()
         serializer = ApprovalDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        log = ApprovalService.reject(bank, request.user, serializer.validated_data.get("catatan", ""))
-        return Response({"bank_sampah": self.get_serializer(bank).data, "approval_log": ApprovalLogSerializer(log).data})
+        log = ApprovalService.reject(
+            bank, request.user, serializer.validated_data.get("catatan", "")
+        )
+        return Response(
+            {
+                "bank_sampah": self.get_serializer(bank).data,
+                "approval_log": ApprovalLogSerializer(log).data,
+            }
+        )

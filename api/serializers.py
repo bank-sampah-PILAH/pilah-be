@@ -1,12 +1,20 @@
 from decimal import Decimal
 
-from rest_framework import serializers
-
 from django.db.models import Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
+from rest_framework import serializers
 
-from api.models import BankSampah, BankSampahApprovalLog, DetailTransaksi, JenisSampah, Nasabah, Saldo, Transaksi, User
+from api.models import (
+    BankSampah,
+    BankSampahApprovalLog,
+    DetailTransaksi,
+    JenisSampah,
+    Nasabah,
+    Saldo,
+    Transaksi,
+    User,
+)
 from api.validators import get_initials, normalize_indonesian_phone
 
 
@@ -38,8 +46,8 @@ class BankSampahSerializer(serializers.ModelSerializer):
     def validate_no_hp_pic(self, value):
         try:
             return normalize_indonesian_phone(value)
-        except serializers.ValidationError:
-            raise serializers.ValidationError("Format nomor tidak valid")
+        except serializers.ValidationError as err:
+            raise serializers.ValidationError("Format nomor tidak valid") from err
 
     def validate_foto_logo(self, value):
         return validate_image_upload(value, "Foto logo")
@@ -54,7 +62,17 @@ class BankSampahSerializer(serializers.ModelSerializer):
 class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["id", "nama", "email", "no_hp", "jenis_kelamin", "tanggal_lahir", "role", "is_profile_complete", "is_primary_pengelola"]
+        fields = [
+            "id",
+            "nama",
+            "email",
+            "no_hp",
+            "jenis_kelamin",
+            "tanggal_lahir",
+            "role",
+            "is_profile_complete",
+            "is_primary_pengelola",
+        ]
         read_only_fields = ["id", "email", "role", "is_profile_complete", "is_primary_pengelola"]
 
     def validate_nama(self, value):
@@ -93,7 +111,9 @@ class BankSampahRegistrationSerializer(serializers.Serializer):
     def validate_alamat(self, value):
         value = value.strip()
         if len(value) < 10:
-            raise serializers.ValidationError("Alamat lengkap wajib diisi untuk keperluan verifikasi lokasi")
+            raise serializers.ValidationError(
+                "Alamat lengkap wajib diisi untuk keperluan verifikasi lokasi"
+            )
         return value
 
     def validate_no_hp_pic(self, value):
@@ -130,7 +150,15 @@ class TeamMemberSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "nama", "email", "role", "is_primary_pengelola", "is_current_user", "created_at"]
+        fields = [
+            "id",
+            "nama",
+            "email",
+            "role",
+            "is_primary_pengelola",
+            "is_current_user",
+            "created_at",
+        ]
 
     def get_is_current_user(self, obj):
         request = self.context.get("request")
@@ -154,7 +182,17 @@ class BankSampahApprovalListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = BankSampah
-        fields = ["id", "nama", "alamat", "kota", "no_hp_pic", "foto_kegiatan", "status", "created_at", "pengelola_utama"]
+        fields = [
+            "id",
+            "nama",
+            "alamat",
+            "kota",
+            "no_hp_pic",
+            "foto_kegiatan",
+            "status",
+            "created_at",
+            "pengelola_utama",
+        ]
 
     def get_pengelola_utama(self, obj):
         user = obj.users.filter(is_primary_pengelola=True).first()
@@ -260,7 +298,7 @@ class NasabahDetailSerializer(NasabahSerializer):
 
     def get_ringkasan_transaksi(self, obj):
         items = DetailTransaksi.objects.filter(transaksi__nasabah=obj)
-        total_kg = sum((item.berat for item in items), Decimal("0"))
+        total_kg = sum((item.berat for item in items), Decimal(0))
         last_transaction = obj.transaksi.order_by("-tanggal").first()
         return {
             "jumlah_transaksi": obj.transaksi.count(),
@@ -279,7 +317,17 @@ class JenisSampahSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = JenisSampah
-        fields = ["id", "kode", "nama_sampah", "kategori", "deskripsi", "satuan", "harga_per_kg", "is_active", "updated_at"]
+        fields = [
+            "id",
+            "kode",
+            "nama_sampah",
+            "kategori",
+            "deskripsi",
+            "satuan",
+            "harga_per_kg",
+            "is_active",
+            "updated_at",
+        ]
         read_only_fields = ["id", "satuan", "is_active", "updated_at"]
 
     def validate_kode(self, value):
@@ -302,7 +350,7 @@ class JenisSampahSerializer(serializers.ModelSerializer):
     def validate_harga_per_kg(self, value):
         if value <= 0:
             raise serializers.ValidationError("Harga harus berupa angka positif")
-        if value >= Decimal("1000000000"):
+        if value >= Decimal(1000000000):
             raise serializers.ValidationError("Harga maksimal 9 digit")
         return value
 
@@ -313,7 +361,9 @@ class JenisSampahSerializer(serializers.ModelSerializer):
 class TransactionItemInputSerializer(serializers.Serializer):
     jenis_sampah_id = serializers.UUIDField(required=True)
     berat = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal("0.001"))
-    harga_per_kg = serializers.DecimalField(max_digits=11, decimal_places=2, min_value=Decimal("0.01"), required=False)
+    harga_per_kg = serializers.DecimalField(
+        max_digits=11, decimal_places=2, min_value=Decimal("0.01"), required=False
+    )
 
 
 class TransactionCreateSerializer(serializers.Serializer):
@@ -332,7 +382,14 @@ class DetailTransaksiSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = DetailTransaksi
-        fields = ["id", "jenis_sampah_id", "nama_sampah_snapshot", "harga_snapshot", "berat", "subtotal"]
+        fields = [
+            "id",
+            "jenis_sampah_id",
+            "nama_sampah_snapshot",
+            "harga_snapshot",
+            "berat",
+            "subtotal",
+        ]
 
 
 class TransactionDetailSerializer(serializers.ModelSerializer):
@@ -398,7 +455,7 @@ class TransactionListSerializer(serializers.ModelSerializer):
         return item.nama_sampah_snapshot if item else None
 
     def get_total_berat_kg(self, obj):
-        return sum((item.berat for item in obj.items.all()), Decimal("0"))
+        return sum((item.berat for item in obj.items.all()), Decimal(0))
 
 
 class SaldoSerializer(serializers.ModelSerializer):
