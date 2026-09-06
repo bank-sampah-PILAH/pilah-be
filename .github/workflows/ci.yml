@@ -106,7 +106,9 @@ jobs:
         run: python manage.py makemigrations --check --dry-run
 
       - name: Run tests with coverage
-        run: coverage run --source=api manage.py test api -v 2
+                # Plain `manage.py test` = discovery across every Django app, so tests
+        # in future apps (not just api/) still gate the build.
+        run: coverage run --source=api manage.py test -v 2
 
       - name: Coverage report
         run: |
