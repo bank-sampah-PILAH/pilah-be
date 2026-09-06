@@ -20,6 +20,9 @@ jobs:
     permissions:
       contents: read
       security-events: write
+      # CodeQL's PR overlay-base cache lives in the Actions cache; reading it
+      # needs the workflow-runs API, which requires actions: read.
+      actions: read
     steps:
       - uses: actions/checkout@v4
 
