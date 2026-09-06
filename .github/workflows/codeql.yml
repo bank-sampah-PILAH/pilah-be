@@ -1,0 +1,35 @@
+# CodeQL — static security analysis. Finds injection, auth bypass, and
+# other taint-tracked vulnerabilities the linter and test suite can't see.
+# Results appear in the repo's Code Scanning tab (needs GHAS on private
+# still runs and reports per-run alerts).
+name: CodeQL
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  schedule:
+    # Weekly scan catches newly-disclosed vulnerable patterns in unchanged code.
+    - cron: "17 3 * * 1"
+
+jobs:
+  analyze:
+    name: Analyze (python)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Python needs no build — autobuild handles it (no-op for interpreted
+      # languages). Single language matrix kept simple rather than expanded
+      # later; add actions to the matrix if pilah-be ever gains TS/JS.
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: python
+
+      - uses: github/codeql-action/autobuild@v3
+
+      - uses: github/codeql-action/analyze@v3
