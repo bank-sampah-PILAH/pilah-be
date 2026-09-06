@@ -23,6 +23,8 @@ from django.urls import include, path
 from django.views.generic import TemplateView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
+from api.health import healthz
+
 
 class ApiTestView(TemplateView):
     template_name = "api_test.html"
@@ -55,6 +57,7 @@ def assetlinks(request):
 
 
 urlpatterns = [
+    path("healthz", healthz, name="healthz"),
     path("admin/", admin.site.urls),
     path(".well-known/assetlinks.json", assetlinks, name="assetlinks"),
     path("api-test/", ApiTestView.as_view(), name="api-test"),

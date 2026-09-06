@@ -5,7 +5,7 @@ from io import BytesIO
 from unittest.mock import Mock, patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import Client, override_settings
+from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 from openpyxl import load_workbook
 from rest_framework.test import APITestCase
@@ -827,3 +827,11 @@ class APISpecTests(APITestCase):
                 },
             ],
         )
+
+
+class HealthzTests(TestCase):
+    def test_healthz_ok(self):
+        response = self.client.get("/healthz")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ok")
+        self.assertTrue(response.json()["database"])

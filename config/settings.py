@@ -43,9 +43,14 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "storages",
     "rest_framework_simplejwt.token_blacklist",
-    "django_migration_linter",  # provides `manage.py lintmigrations` (CI); inert otherwise
     "api",
 ]
+
+# CI-only: enables `manage.py lintmigrations` (the safety lint job). The
+# package is installed only in that job, so gate the app registration on
+# the same env var the job sets — keeps prod images free of it.
+if os.getenv("MIGRATION_LINTER") == "1":
+    INSTALLED_APPS += ["django_migration_linter"]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

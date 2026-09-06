@@ -254,6 +254,8 @@ jobs:
 
       - name: Lint migrations (report only)
         continue-on-error: true
+        env:
+          MIGRATION_LINTER: "1"
         run: python manage.py lintmigrations --database default --cache-path /tmp/lintercache
 
   docker:
@@ -276,6 +278,31 @@ jobs:
           tags: pilah-be:ci
           cache-from: type=gha
           cache-to: type=gha,mode=min
+
+      # Smoke-test the built image: boots it with a placeholder env, waits for
+      # the container HEALTHCHECK to report healthy, and verifies /healthz
+      # responds. Catches broken entrypoint/migrations/gunicorn wiring before
+      # deploy, not on Cloud Run.
+      - name: Smoke test image
+        run: |
+          docker run -d --name smoke \
+            -e DJANGO_SECRET_KEY=ci-placeholder-secret-key \
+            -e DJANGO_DEBUG=true \
+            -e DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1 \
+            -e PILAH_ALLOW_FAKE_GOOGLE_TOKEN=true \
+            -e CORS_ALLOW_ALL_ORIGINS=true \
+            -p 8080:8080 \
+            pilah-be:ci
+          for i in $(seq 1 60); do
+            status="$(docker inspect --format '{{.State.Health.Status}}' smoke)"
+            [ "$status" = "healthy" ] && break
+            [ "$status" = "unhealthy" ] && { docker logs smoke; exit 1; }
+            sleep 3
+          done
+          [ "$(docker inspect --format '{{.State.Health.Status}}' smoke)" = "healthy" ] \
+            || { docker logs smoke; exit 1; }
+          curl -fsS http://127.0.0.1:8080/healthz | tee /dev/stderr | grep -q '"status":"ok"'
+          docker rm -f smoke
 
       # Trivy: scan the built image for known vulnerabilities (CVEs).
       # Report-only for now; tighten to blocking with:
