@@ -33,7 +33,7 @@ jobs:
     # Full-history scan. Blocking — a leaked credential must fail the run.
     # Docker CLI (private repo: gitleaks-action needs a license for PR mode).
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -46,7 +46,7 @@ jobs:
     # requirements.txt is exact-pinned, so a new advisory means a real bump.
     # If an advisory has no fix yet, triage with pip-audit --ignore-vuln.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
@@ -84,7 +84,7 @@ jobs:
     # cannot see — the kind that silently eat prod data on Cloud SQL when
     # `migrate` runs in the deploy entrypoint.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
