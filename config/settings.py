@@ -11,7 +11,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-local-pilah-dev-key")
 DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
-ALLOWED_HOSTS = [host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()]
+ALLOWED_HOSTS = [
+    host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()
+]
 PILAH_PUBLIC_APP_URL = os.getenv("PILAH_PUBLIC_APP_URL", "")
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
@@ -23,7 +25,9 @@ CSRF_TRUSTED_ORIGINS = [
 CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_SECURE = not DEBUG
 SECURE_REFERRER_POLICY = os.getenv("SECURE_REFERRER_POLICY", "strict-origin-when-cross-origin")
-SECURE_CROSS_ORIGIN_OPENER_POLICY = os.getenv("SECURE_CROSS_ORIGIN_OPENER_POLICY", "same-origin-allow-popups")
+SECURE_CROSS_ORIGIN_OPENER_POLICY = os.getenv(
+    "SECURE_CROSS_ORIGIN_OPENER_POLICY", "same-origin-allow-popups"
+)
 
 # Application definition
 
@@ -41,6 +45,12 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt.token_blacklist",
     "api",
 ]
+
+# CI-only: enables `manage.py lintmigrations` (the safety lint job). The
+# package is installed only in that job, so gate the app registration on
+# the same env var the job sets — keeps prod images free of it.
+if os.getenv("MIGRATION_LINTER") == "1":
+    INSTALLED_APPS += ["django_migration_linter"]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -154,9 +164,7 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
-    "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.IsAuthenticated",
-    ),
+    "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_PAGINATION_CLASS": "api.pagination.StandardPagination",
     "PAGE_SIZE": 20,
     "EXCEPTION_HANDLER": "api.exceptions.api_exception_handler",
@@ -182,7 +190,9 @@ CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "true").lower() == 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "")
-PILAH_ALLOW_FAKE_GOOGLE_TOKEN = os.getenv("PILAH_ALLOW_FAKE_GOOGLE_TOKEN", str(DEBUG)).lower() == "true"
+PILAH_ALLOW_FAKE_GOOGLE_TOKEN = (
+    os.getenv("PILAH_ALLOW_FAKE_GOOGLE_TOKEN", str(DEBUG)).lower() == "true"
+)
 WHATSAPP_GATEWAY_URL = os.getenv("WHATSAPP_GATEWAY_URL", "")
 WHATSAPP_GATEWAY_TOKEN = os.getenv("WHATSAPP_GATEWAY_TOKEN", "")
 WHATSAPP_GATEWAY_TIMEOUT = int(os.getenv("WHATSAPP_GATEWAY_TIMEOUT", "10"))

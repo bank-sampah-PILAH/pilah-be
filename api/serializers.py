@@ -1,16 +1,26 @@
+from collections.abc import Mapping
 from decimal import Decimal
+from typing import Any
 
-from rest_framework import serializers
-
-from django.db.models import Q, Sum
+from django.db.models import Model, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
+from rest_framework import serializers
 
-from api.models import BankSampah, BankSampahApprovalLog, DetailTransaksi, JenisSampah, Nasabah, Saldo, Transaksi, User
+from api.models import (
+    BankSampah,
+    BankSampahApprovalLog,
+    DetailTransaksi,
+    JenisSampah,
+    Nasabah,
+    Saldo,
+    Transaksi,
+    User,
+)
 from api.validators import get_initials, normalize_indonesian_phone
 
 
-class BankSampahSerializer(serializers.ModelSerializer):
+class BankSampahSerializer(serializers.ModelSerializer[Model]):
     pengelola = serializers.SerializerMethodField()
 
     class Meta:
@@ -30,82 +40,94 @@ class BankSampahSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "status", "is_active", "created_at", "pengelola"]
 
-    def validate_nama(self, value):
+    def validate_nama(self, value: Any) -> Any:
         if len(value.strip()) < 3:
             raise serializers.ValidationError("Nama bank sampah wajib diisi")
         return value.strip()
 
-    def validate_no_hp_pic(self, value):
+    def validate_no_hp_pic(self, value: Any) -> Any:
         try:
             return normalize_indonesian_phone(value)
-        except serializers.ValidationError:
-            raise serializers.ValidationError("Format nomor tidak valid")
+        except serializers.ValidationError as err:
+            raise serializers.ValidationError("Format nomor tidak valid") from err
 
-    def validate_foto_logo(self, value):
+    def validate_foto_logo(self, value: Any) -> Any:
         return validate_image_upload(value, "Foto logo")
 
-    def get_pengelola(self, obj):
+    def get_pengelola(self, obj: Any) -> Any:
         user = obj.users.filter(role="pengelola", is_active=True).first()
         if not user:
             return None
         return {"id": str(user.id), "nama": user.nama, "email": user.email}
 
 
-class UserProfileSerializer(serializers.ModelSerializer):
+class UserProfileSerializer(serializers.ModelSerializer[Model]):
     class Meta:
         model = User
-        fields = ["id", "nama", "email", "no_hp", "jenis_kelamin", "tanggal_lahir", "role", "is_profile_complete", "is_primary_pengelola"]
+        fields = [
+            "id",
+            "nama",
+            "email",
+            "no_hp",
+            "jenis_kelamin",
+            "tanggal_lahir",
+            "role",
+            "is_profile_complete",
+            "is_primary_pengelola",
+        ]
         read_only_fields = ["id", "email", "role", "is_profile_complete", "is_primary_pengelola"]
 
-    def validate_nama(self, value):
+    def validate_nama(self, value: Any) -> Any:
         value = value.strip()
         if not 3 <= len(value) <= 100:
             raise serializers.ValidationError("Nama minimal 3 karakter")
         return value
 
-    def validate_no_hp(self, value):
+    def validate_no_hp(self, value: Any) -> Any:
         return normalize_indonesian_phone(value)
 
-    def validate_jenis_kelamin(self, value):
+    def validate_jenis_kelamin(self, value: Any) -> Any:
         if value not in [User.Gender.MALE, User.Gender.FEMALE]:
             raise serializers.ValidationError("Jenis kelamin wajib dipilih")
         return value
 
-    def validate_tanggal_lahir(self, value):
+    def validate_tanggal_lahir(self, value: Any) -> Any:
         if value > timezone.localdate():
             raise serializers.ValidationError("Tanggal lahir tidak boleh di masa depan")
         return value
 
 
-class BankSampahRegistrationSerializer(serializers.Serializer):
+class BankSampahRegistrationSerializer(serializers.Serializer[Any]):
     nama = serializers.CharField(required=True, max_length=100)
     alamat = serializers.CharField(required=True)
     kota = serializers.CharField(required=False, allow_blank=True, max_length=100)
     no_hp_pic = serializers.CharField(required=True)
     foto_kegiatan = serializers.FileField(required=True)
 
-    def validate_nama(self, value):
+    def validate_nama(self, value: Any) -> Any:
         value = value.strip()
         if len(value) < 3:
             raise serializers.ValidationError("Nama Bank Sampah wajib diisi (minimal 3 karakter)")
         return value
 
-    def validate_alamat(self, value):
+    def validate_alamat(self, value: Any) -> Any:
         value = value.strip()
         if len(value) < 10:
-            raise serializers.ValidationError("Alamat lengkap wajib diisi untuk keperluan verifikasi lokasi")
+            raise serializers.ValidationError(
+                "Alamat lengkap wajib diisi untuk keperluan verifikasi lokasi"
+            )
         return value
 
-    def validate_no_hp_pic(self, value):
+    def validate_no_hp_pic(self, value: Any) -> Any:
         return normalize_indonesian_phone(value)
 
-    def validate_foto_kegiatan(self, value):
+    def validate_foto_kegiatan(self, value: Any) -> Any:
         if not value:
             raise serializers.ValidationError("Foto kegiatan wajib diunggah sebagai bukti validasi")
         return validate_image_upload(value, "Foto kegiatan")
 
 
-class AuthUserSerializer(serializers.ModelSerializer):
+class AuthUserSerializer(serializers.ModelSerializer[Model]):
     bank_sampah_id = serializers.UUIDField(source="bank_sampah.id", allow_null=True)
     bank_sampah_nama = serializers.CharField(source="bank_sampah.nama", allow_null=True)
     bank_sampah_status = serializers.CharField(source="bank_sampah.status", allow_null=True)
@@ -125,45 +147,64 @@ class AuthUserSerializer(serializers.ModelSerializer):
         ]
 
 
-class TeamMemberSerializer(serializers.ModelSerializer):
+class TeamMemberSerializer(serializers.ModelSerializer[Model]):
     is_current_user = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ["id", "nama", "email", "role", "is_primary_pengelola", "is_current_user", "created_at"]
+        fields = [
+            "id",
+            "nama",
+            "email",
+            "role",
+            "is_primary_pengelola",
+            "is_current_user",
+            "created_at",
+        ]
 
-    def get_is_current_user(self, obj):
+    def get_is_current_user(self, obj: Any) -> Any:
         request = self.context.get("request")
         return bool(request and request.user.id == obj.id)
 
 
-class InviteAcceptSerializer(serializers.Serializer):
+class InviteAcceptSerializer(serializers.Serializer[Any]):
     token = serializers.CharField(required=False, allow_blank=True)
     invite_token = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
-    def validate(self, attrs):
-        token = attrs.get("token") or attrs.get("invite_token")
+    def validate(self, attrs: Mapping[str, Any]) -> dict[str, Any]:
+        mutable = dict(attrs)
+        token = mutable.get("token") or mutable.get("invite_token")
         if not token:
             raise serializers.ValidationError({"token": ["Token undangan wajib diisi"]})
-        attrs["token"] = token
-        return attrs
+        mutable["token"] = token
+        return mutable
 
 
-class BankSampahApprovalListSerializer(serializers.ModelSerializer):
+class BankSampahApprovalListSerializer(serializers.ModelSerializer[Model]):
     pengelola_utama = serializers.SerializerMethodField()
 
     class Meta:
         model = BankSampah
-        fields = ["id", "nama", "alamat", "kota", "no_hp_pic", "foto_kegiatan", "status", "created_at", "pengelola_utama"]
+        fields = [
+            "id",
+            "nama",
+            "alamat",
+            "kota",
+            "no_hp_pic",
+            "foto_kegiatan",
+            "status",
+            "created_at",
+            "pengelola_utama",
+        ]
 
-    def get_pengelola_utama(self, obj):
+    def get_pengelola_utama(self, obj: Any) -> Any:
         user = obj.users.filter(is_primary_pengelola=True).first()
         if not user:
             return None
         return {"id": str(user.id), "nama": user.nama, "email": user.email, "no_hp": user.no_hp}
 
 
-def validate_image_upload(value, label):
+def validate_image_upload(value: Any, label: str) -> Any:
     name = getattr(value, "name", str(value)).lower()
     if not name.endswith((".jpg", ".jpeg", ".png")):
         raise serializers.ValidationError(f"{label} harus berformat JPG, JPEG, atau PNG")
@@ -172,11 +213,11 @@ def validate_image_upload(value, label):
     return value
 
 
-class ApprovalDecisionSerializer(serializers.Serializer):
+class ApprovalDecisionSerializer(serializers.Serializer[Any]):
     catatan = serializers.CharField(required=False, allow_blank=True)
 
 
-class ApprovalLogSerializer(serializers.ModelSerializer):
+class ApprovalLogSerializer(serializers.ModelSerializer[Model]):
     superadmin_email = serializers.EmailField(source="superadmin.email")
 
     class Meta:
@@ -184,19 +225,19 @@ class ApprovalLogSerializer(serializers.ModelSerializer):
         fields = ["id", "bank_sampah_id", "superadmin_email", "status", "catatan", "created_at"]
 
 
-class GoogleAuthSerializer(serializers.Serializer):
+class GoogleAuthSerializer(serializers.Serializer[Any]):
     id_token = serializers.CharField(required=True)
 
 
-class RefreshTokenSerializer(serializers.Serializer):
+class RefreshTokenSerializer(serializers.Serializer[Any]):
     refresh_token = serializers.CharField(required=True)
 
 
-class LogoutSerializer(serializers.Serializer):
+class LogoutSerializer(serializers.Serializer[Any]):
     refresh_token = serializers.CharField(required=False, allow_blank=True)
 
 
-class NasabahSerializer(serializers.ModelSerializer):
+class NasabahSerializer(serializers.ModelSerializer[Model]):
     kode = serializers.CharField(source="nomor", required=True, max_length=20)
     total_saldo = serializers.SerializerMethodField()
 
@@ -217,38 +258,38 @@ class NasabahSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "tanggal_daftar", "is_active", "total_saldo", "created_at"]
 
-    def validate_kode(self, value):
+    def validate_kode(self, value: Any) -> Any:
         value = value.strip()
         if not value:
             raise serializers.ValidationError("ID Nasabah wajib diisi")
         return value
 
-    def validate_nama(self, value):
+    def validate_nama(self, value: Any) -> Any:
         value = value.strip()
         if not 3 <= len(value) <= 100:
             raise serializers.ValidationError("Nama minimal 3 karakter")
         return value
 
-    def validate_no_hp(self, value):
+    def validate_no_hp(self, value: Any) -> Any:
         return normalize_indonesian_phone(value)
 
-    def validate_jenis_kelamin(self, value):
+    def validate_jenis_kelamin(self, value: Any) -> Any:
         if value not in [Nasabah.Gender.MALE, Nasabah.Gender.FEMALE]:
             raise serializers.ValidationError("Jenis kelamin wajib dipilih")
         return value
 
-    def validate_tanggal_lahir(self, value):
+    def validate_tanggal_lahir(self, value: Any) -> Any:
         if value > timezone.localdate():
             raise serializers.ValidationError("Tanggal lahir tidak boleh di masa depan")
         return value
 
-    def validate_alamat(self, value):
+    def validate_alamat(self, value: Any) -> Any:
         value = value.strip()
         if len(value) < 10:
             raise serializers.ValidationError("Alamat wajib diisi")
         return value
 
-    def get_total_saldo(self, obj):
+    def get_total_saldo(self, obj: Any) -> Any:
         return getattr(getattr(obj, "saldo", None), "total_saldo", Decimal("0.00"))
 
 
@@ -258,9 +299,9 @@ class NasabahDetailSerializer(NasabahSerializer):
     class Meta(NasabahSerializer.Meta):
         fields = NasabahSerializer.Meta.fields + ["ringkasan_transaksi"]
 
-    def get_ringkasan_transaksi(self, obj):
+    def get_ringkasan_transaksi(self, obj: Any) -> Any:
         items = DetailTransaksi.objects.filter(transaksi__nasabah=obj)
-        total_kg = sum((item.berat for item in items), Decimal("0"))
+        total_kg = sum((item.berat for item in items), Decimal(0))
         last_transaction = obj.transaksi.order_by("-tanggal").first()
         return {
             "jumlah_transaksi": obj.transaksi.count(),
@@ -269,73 +310,92 @@ class NasabahDetailSerializer(NasabahSerializer):
         }
 
 
-class StatusSerializer(serializers.Serializer):
+class StatusSerializer(serializers.Serializer[Any]):
     is_active = serializers.BooleanField(required=True)
 
 
-class JenisSampahSerializer(serializers.ModelSerializer):
+class JenisSampahSerializer(serializers.ModelSerializer[Model]):
     satuan = serializers.SerializerMethodField()
     kode = serializers.CharField(source="nomor", required=True, max_length=20)
 
     class Meta:
         model = JenisSampah
-        fields = ["id", "kode", "nama_sampah", "kategori", "deskripsi", "satuan", "harga_per_kg", "is_active", "updated_at"]
+        fields = [
+            "id",
+            "kode",
+            "nama_sampah",
+            "kategori",
+            "deskripsi",
+            "satuan",
+            "harga_per_kg",
+            "is_active",
+            "updated_at",
+        ]
         read_only_fields = ["id", "satuan", "is_active", "updated_at"]
 
-    def validate_kode(self, value):
+    def validate_kode(self, value: Any) -> Any:
         value = value.strip()
         if not value:
             raise serializers.ValidationError("Kode sampah wajib diisi")
         return value
 
-    def validate_nama_sampah(self, value):
+    def validate_nama_sampah(self, value: Any) -> Any:
         value = value.strip()
         if not 2 <= len(value) <= 50:
             raise serializers.ValidationError("Nama jenis sampah wajib diisi")
         return value
 
-    def validate_deskripsi(self, value):
+    def validate_deskripsi(self, value: Any) -> Any:
         if value and len(value) > 200:
             raise serializers.ValidationError("Deskripsi maksimal 200 karakter")
         return value
 
-    def validate_harga_per_kg(self, value):
+    def validate_harga_per_kg(self, value: Any) -> Any:
         if value <= 0:
             raise serializers.ValidationError("Harga harus berupa angka positif")
-        if value >= Decimal("1000000000"):
+        if value >= Decimal(1000000000):
             raise serializers.ValidationError("Harga maksimal 9 digit")
         return value
 
-    def get_satuan(self, obj):
+    def get_satuan(self, obj: Any) -> Any:
         return "kg"
 
 
-class TransactionItemInputSerializer(serializers.Serializer):
+class TransactionItemInputSerializer(serializers.Serializer[Any]):
     jenis_sampah_id = serializers.UUIDField(required=True)
     berat = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal("0.001"))
-    harga_per_kg = serializers.DecimalField(max_digits=11, decimal_places=2, min_value=Decimal("0.01"), required=False)
+    harga_per_kg = serializers.DecimalField(
+        max_digits=11, decimal_places=2, min_value=Decimal("0.01"), required=False
+    )
 
 
-class TransactionCreateSerializer(serializers.Serializer):
+class TransactionCreateSerializer(serializers.Serializer[Any]):
     nasabah_id = serializers.UUIDField(required=True)
     items = TransactionItemInputSerializer(many=True, required=True)
     catatan = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
-    def validate_items(self, value):
+    def validate_items(self, value: Any) -> Any:
         if not value:
             raise serializers.ValidationError("Minimal 1 item setoran diperlukan")
         return value
 
 
-class DetailTransaksiSerializer(serializers.ModelSerializer):
+class DetailTransaksiSerializer(serializers.ModelSerializer[Model]):
     jenis_sampah_id = serializers.UUIDField(source="jenis_sampah.id")
 
     class Meta:
         model = DetailTransaksi
-        fields = ["id", "jenis_sampah_id", "nama_sampah_snapshot", "harga_snapshot", "berat", "subtotal"]
+        fields = [
+            "id",
+            "jenis_sampah_id",
+            "nama_sampah_snapshot",
+            "harga_snapshot",
+            "berat",
+            "subtotal",
+        ]
 
 
-class TransactionDetailSerializer(serializers.ModelSerializer):
+class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
     nasabah_id = serializers.UUIDField(source="nasabah.id")
     nasabah_nama = serializers.CharField(source="nasabah.nama")
     bank_sampah_id = serializers.UUIDField(source="bank_sampah.id")
@@ -359,7 +419,7 @@ class TransactionDetailSerializer(serializers.ModelSerializer):
             "saldo_setelah_transaksi",
         ]
 
-    def get_saldo_setelah_transaksi(self, obj):
+    def get_saldo_setelah_transaksi(self, obj: Any) -> Any:
         return (
             Transaksi.objects.filter(bank_sampah=obj.bank_sampah, nasabah=obj.nasabah)
             .filter(Q(tanggal__lt=obj.tanggal) | Q(tanggal=obj.tanggal, id__lte=obj.id))
@@ -367,7 +427,7 @@ class TransactionDetailSerializer(serializers.ModelSerializer):
         )
 
 
-class TransactionListSerializer(serializers.ModelSerializer):
+class TransactionListSerializer(serializers.ModelSerializer[Model]):
     nasabah_id = serializers.UUIDField(source="nasabah.id")
     nasabah_nama = serializers.CharField(source="nasabah.nama")
     nasabah_inisial = serializers.SerializerMethodField()
@@ -390,18 +450,18 @@ class TransactionListSerializer(serializers.ModelSerializer):
             "dicatat_oleh",
         ]
 
-    def get_nasabah_inisial(self, obj):
+    def get_nasabah_inisial(self, obj: Any) -> Any:
         return get_initials(obj.nasabah.nama)
 
-    def get_jenis_sampah_utama(self, obj):
+    def get_jenis_sampah_utama(self, obj: Any) -> Any:
         item = max(obj.items.all(), key=lambda detail: detail.berat, default=None)
         return item.nama_sampah_snapshot if item else None
 
-    def get_total_berat_kg(self, obj):
-        return sum((item.berat for item in obj.items.all()), Decimal("0"))
+    def get_total_berat_kg(self, obj: Any) -> Any:
+        return sum((item.berat for item in obj.items.all()), Decimal(0))
 
 
-class SaldoSerializer(serializers.ModelSerializer):
+class SaldoSerializer(serializers.ModelSerializer[Model]):
     nasabah_id = serializers.UUIDField(source="nasabah.id")
     nasabah_nama = serializers.CharField(source="nasabah.nama")
 
@@ -410,5 +470,5 @@ class SaldoSerializer(serializers.ModelSerializer):
         fields = ["nasabah_id", "nasabah_nama", "total_saldo", "updated_at"]
 
 
-class WATemplateSerializer(serializers.Serializer):
+class WATemplateSerializer(serializers.Serializer[Any]):
     template = serializers.CharField(required=True, allow_blank=False)

@@ -48,6 +48,18 @@ jobs:
           docker push "${IMAGE_URI}"
           echo "IMAGE_URI=${IMAGE_URI}" >> "${GITHUB_ENV}"
 
+      # Trivy on the just-built image, before it ships. Blocking on
+      # HIGH/CRITICAL with a known fix. If a new CVE has no fix yet, triage
+      # with a .trivyignore entry (with an expiry comment), never by
+      # loosening this.
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: "${{ env.IMAGE_URI }}"
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
       - name: Deploy Cloud Run
         run: |
           gcloud run deploy "${SERVICE_NAME}" \

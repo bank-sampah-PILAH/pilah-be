@@ -2,9 +2,9 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from api.views import (
-    BankSampahMeView,
     AcceptInviteView,
     AuthMeView,
+    BankSampahMeView,
     CompleteProfileView,
     DashboardRecentTransactionsView,
     DashboardStatsView,
@@ -15,8 +15,8 @@ from api.views import (
     JenisSampahViewSet,
     LogoutView,
     NasabahViewSet,
-    RegisterBankSampahView,
     RefreshTokenView,
+    RegisterBankSampahView,
     SaldoView,
     SuperAdminBankSampahViewSet,
     TeamView,
@@ -28,7 +28,9 @@ router = DefaultRouter(trailing_slash=False)
 router.register("nasabah", NasabahViewSet, basename="nasabah")
 router.register("jenis-sampah", JenisSampahViewSet, basename="jenis-sampah")
 router.register("transaksi", TransaksiViewSet, basename="transaksi")
-router.register("superadmin/bank-sampah", SuperAdminBankSampahViewSet, basename="superadmin-bank-sampah")
+router.register(
+    "superadmin/bank-sampah", SuperAdminBankSampahViewSet, basename="superadmin-bank-sampah"
+)
 
 urlpatterns = [
     path("auth/google", GoogleAuthView.as_view(), name="auth-google"),
@@ -46,7 +48,11 @@ urlpatterns = [
     path("team/invite", GenerateInviteView.as_view(), name="team-invite"),
     path("nasabah/<uuid:pk>/saldo", SaldoView.as_view(), name="nasabah-saldo"),
     path("dashboard/stats", DashboardStatsView.as_view(), name="dashboard-stats"),
-    path("dashboard/recent-transactions", DashboardRecentTransactionsView.as_view(), name="dashboard-recent"),
+    path(
+        "dashboard/recent-transactions",
+        DashboardRecentTransactionsView.as_view(),
+        name="dashboard-recent",
+    ),
     path("pengaturan/wa-template", WATemplateView.as_view(), name="wa-template"),
     path("", include(router.urls)),
 ]

@@ -3,7 +3,7 @@ import re
 from rest_framework import serializers
 
 
-def normalize_indonesian_phone(value):
+def normalize_indonesian_phone(value: str) -> str:
     if not value:
         raise serializers.ValidationError("Format nomor tidak valid. Contoh: 081234567890")
     digits = re.sub(r"\D", "", value)
@@ -18,6 +18,6 @@ def normalize_indonesian_phone(value):
     return f"+62{national}"
 
 
-def get_initials(name):
+def get_initials(name: str) -> str:
     parts = [part for part in name.split() if part]
     return "".join(part[0].upper() for part in parts[:2]) or "NA"

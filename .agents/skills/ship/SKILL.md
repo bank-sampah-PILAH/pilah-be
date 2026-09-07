@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Create an isolated sibling worktree under the repository parent's <repo>-worktrees directory, implement a requested feature or fix on a prompt-derived feature/<name> or fix/<name> branch, validate it with the repository's own checks, create atomic conventional commits, push the branch, and open a GitHub pull request or GitLab merge request. Use ONLY when the user's message starts with the literal word `ship` followed by a prompt. This trigger is mandatory regardless of change size, simplicity, or whether the user explicitly mentions a PR/MR.
+description: Create an isolated sibling worktree under the repository parent's <repo>-worktrees directory, implement a requested feature or fix on a prompt-derived feature/<name> or fix/<name> branch, validate it with the repository's own checks, create atomic conventional commits, push the branch, and open a GitHub pull request or GitLab merge request. Use `staging` as the default checkout and PR/MR target unless the user explicitly names another branch. Use ONLY when the user's message starts with the literal word `ship` followed by a prompt. This trigger is mandatory regardless of change size, simplicity, or whether the user explicitly mentions a PR/MR.
 argument-hint: "<feature or fix prompt>"
 compatibility: Requires git and either gh or glab; run from an existing Git repository.
 metadata:
@@ -23,10 +23,15 @@ Execute the complete delivery workflow from an existing repository checkout. Wor
 - Parse the prompt to determine:
   - change kind: `feature` or `fix`; use `fix` for bug, regression, broken behavior, or correction language, otherwise use `feature`;
   - a short kebab-case `<name>` that accurately summarizes the requested change.
+- Resolve the baseline and target branches before creating worktrees:
+  - default both `baseline_branch` and `target_branch` to `staging`;
+  - if the prompt explicitly names another checkout or base branch, use it for `baseline_branch`;
+  - if the prompt explicitly names another PR/MR target, use it for `target_branch`;
+  - never silently fall back to the remote default branch when the resolved branch is missing.
 - If no repository path is given, use the current repository. Resolve its main checkout with `git rev-parse --show-toplevel`. Derive the worktree parent from the main checkout's actual parent directory; do not assume a fixed root such as `~/projects`.
 - Inspect `git status --short --branch`, remotes, the default branch, project documentation, contribution instructions, and available scripts before changing anything.
 - Do not overwrite, stash, reset, or delete existing work. If the main checkout has uncommitted changes, stop and report that it must be clean before shipping.
-- Do not open a PR/MR from `main`, `master`, or another default branch directly.
+- Do not open a PR/MR from `baseline_branch`, `staging`, `main`, `master`, or another protected baseline branch directly.
 
 ## 2. Create the sibling worktree
 
@@ -49,7 +54,7 @@ For example, a main checkout at `/work/project-a` uses `/work/project-a-worktree
   - worktree path: `<parent>/<repo>-worktrees/<kind>-<name>`;
   - branch: `<kind>/<name>`.
   - The branch must therefore be `feature/name` or `fix/name`; the worktree directory is `<kind>-<name>`.
-- Create the parent directory only when needed, then create the worktree from the remote default branch:
+- Create the parent directory only when needed, then create the worktree from `origin/<baseline_branch>`:
 
 ```bash
 repo_root="$(git rev-parse --show-toplevel)"
@@ -58,8 +63,8 @@ parent="$(dirname "$repo_root")"
 worktree_root="$parent/${repo}-worktrees"
 worktree_path="$worktree_root/<kind>-<name>"
 mkdir -p "$worktree_root"
-git fetch origin
-git worktree add -b <kind>/<name> "$worktree_path" origin/<default-branch>
+git fetch origin <baseline_branch>
+git worktree add -b <kind>/<name> "$worktree_path" origin/<baseline_branch>
 if [ -d "$repo_root/.agents" ]; then
   mkdir -p "$worktree_path/.agents"
   cp -a "$repo_root/.agents/." "$worktree_path/.agents/"
@@ -119,11 +124,15 @@ Fix failures caused by the implementation and rerun the failed checks. Do not by
 git push --set-upstream origin <kind>/<name>
 ```
 
+- Verify `origin/<target_branch>` exists before opening the PR/MR.
+- Pass `target_branch` explicitly to the hosting CLI's base/target-branch
+  option; do not rely on the repository default.
+
 - Detect the hosting CLI from the remote and installed tools:
   - GitHub remote or `gh` available: use `gh pr create`;
   - GitLab remote or `glab` available: use `glab mr create`;
   - if the required CLI is unavailable, stop after the successful push and report the exact command needed; do not fabricate a link.
-- Use the remote default branch as the target unless the prompt explicitly names another target.
+- Use `target_branch` as the PR/MR target; it defaults to `staging` unless the prompt explicitly names another target.
 - Derive a concise PR/MR title from the prompt and commits. Use the relevant conventional type prefix only when it improves clarity; do not duplicate noisy prefixes.
 - Write a focused description containing summary, key changes, and testing. Include the exact validation commands. Use a temporary file in the session scratchpad for multi-line descriptions, not a new project file.
 - Create the PR/MR with the CLI and capture its returned URL and title. Do not assign reviewers, enable auto-merge, delete the source branch, or mark draft unless explicitly requested.
