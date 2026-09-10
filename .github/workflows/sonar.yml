@@ -1,0 +1,53 @@
+# SonarQube analysis. Reports to the selfhosted instance at
+# https://sonar.heraldoarman.com (Community Edition — no branch support,
+# so the report destination is switched per git branch):
+#   main    -> project pilah-be
+#   staging -> project pilah-be-staging
+#   any other branch / PR base -> pilah-be-staging (report-only, non-gating)
+name: SonarQube
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+  pull_request:
+
+concurrency:
+  group: sonar-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sonar:
+    name: SonarQube analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # fetch-depth: 0 so new-code detection can diff against the target branch.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Pick project key & token by branch
+        id: pick
+        run: |
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "key=pilah-be" >> "$GITHUB_OUTPUT"
+          else
+            echo "key=pilah-be-staging" >> "$GITHUB_OUTPUT"
+          fi
+
+      # For PRs the staging project + staging token is used; the analysis
+      # runs against the PR merge ref on the staging project.
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ steps.pick.outputs.key == 'pilah-be' && secrets.SONAR_TOKEN || secrets.SONAR_TOKEN_STAGING }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ steps.pick.outputs.key }}
+            -Dsonar.sources=api,config
+            -Dsonar.exclusions=**/migrations/**,**/*.pyc,**/__pycache__/**,**/staticfiles/**,reference/**
+            -Dsonar.python.version=3.12
