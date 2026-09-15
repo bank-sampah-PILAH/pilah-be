@@ -31,6 +31,7 @@ primary_region = "sin"
     timeout = "5s"
     method = "GET"
     path = "/healthz"
+    headers = { Host = "pilah-be-staging.fly.dev" }
 
 [[mounts]]
   source = "media_data"
