@@ -15,6 +15,7 @@ primary_region = "sin"
   DB_ENGINE = "django.db.backends.postgresql"
   DB_PORT = "5432"
   DB_SSLMODE = "require"
+  DB_CHANNEL_BINDING = "require"
 
 [http_service]
   internal_port = 8080

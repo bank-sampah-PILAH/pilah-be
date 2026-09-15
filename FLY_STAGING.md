@@ -1,13 +1,13 @@
 # Fly.io Staging
 
 Pushes to `staging` deploy `pilah-be-staging` after CI succeeds. The app runs in
-Singapore, connects directly to Neon over TLS, and stores uploaded media on the
-single `media_data` Fly volume.
+Singapore, connects to Neon over TLS, and stores uploaded media on the single
+`media_data` Fly volume.
 
 ## Required Secrets
 
 Set Django and Neon values directly on Fly. Use the individual fields from the
-Neon direct connection string; do not commit the connection string.
+Neon connection string; do not commit the connection string.
 
 ```bash
 flyctl secrets set --app pilah-be-staging \

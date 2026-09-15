@@ -96,7 +96,14 @@ DATABASES = {
         "HOST": os.getenv("DB_HOST", ""),
         "PORT": os.getenv("DB_PORT", ""),
         "CONN_HEALTH_CHECKS": True,
-        "OPTIONS": {"sslmode": os.environ["DB_SSLMODE"]} if "DB_SSLMODE" in os.environ else {},
+        "OPTIONS": {
+            option: os.environ[variable]
+            for option, variable in (
+                ("sslmode", "DB_SSLMODE"),
+                ("channel_binding", "DB_CHANNEL_BINDING"),
+            )
+            if variable in os.environ
+        },
     }
 }
 
