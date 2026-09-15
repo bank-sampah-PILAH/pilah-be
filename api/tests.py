@@ -5,9 +5,10 @@ from io import BytesIO
 from typing import Any, cast
 from unittest.mock import Mock, patch
 
+from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
-from django.urls import resolve
+from django.urls import Resolver404, resolve
 from django.utils import timezone
 from django.views.static import serve
 from openpyxl import load_workbook
@@ -843,7 +844,11 @@ class HealthzTests(TestCase):
 
 class MediaRouteTests(TestCase):
     def test_local_media_route_uses_django_file_server(self) -> None:
-        match = resolve("/media/example.png")
+        if settings.SERVE_MEDIA:
+            match = resolve("/media/example.png")
 
-        self.assertIs(match.func, serve)
-        self.assertEqual(match.kwargs["path"], "example.png")
+            self.assertIs(match.func, serve)
+            self.assertEqual(match.kwargs["path"], "example.png")
+        else:
+            with self.assertRaises(Resolver404):
+                resolve("/media/example.png")
