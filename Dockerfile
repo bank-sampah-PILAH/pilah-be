@@ -23,6 +23,7 @@ FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    HOME="/app" \
     PATH="/opt/venv/bin:$PATH"
 
 # libpq5 for psycopg; curl for the container HEALTHCHECK probe. System pip is
