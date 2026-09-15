@@ -1,7 +1,6 @@
-# CI — the merge gate for pilah-be. One verification job, one dependency
-# install: ruff, postgres tests with coverage, migration checks, django
-# checks, mypy. Deliberately single-job — small/mid project on a limited
-# free-tier Actions budget; merge feedback should be fast and cheap.
+# CI — the merge gate for pilah-be. One verification job runs lint, postgres
+# tests with coverage, migration checks, Django checks, and mypy. Successful
+# staging pushes then deploy the verified commit to Fly.io.
 #
 # Not here on purpose:
 #   - gitleaks / pip-audit / migration-linter -> scheduled-checks.yml
@@ -116,3 +115,21 @@ jobs:
       # code must be fully typed.
       - name: mypy strict
         run: mypy api config
+
+  deploy_staging:
+    name: Deploy staging to Fly.io
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://pilah-be-staging.fly.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy verified commit
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

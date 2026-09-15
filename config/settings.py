@@ -95,6 +95,8 @@ DATABASES = {
         "PASSWORD": os.getenv("DB_PASSWORD", ""),
         "HOST": os.getenv("DB_HOST", ""),
         "PORT": os.getenv("DB_PORT", ""),
+        "CONN_HEALTH_CHECKS": True,
+        "OPTIONS": {"sslmode": os.environ["DB_SSLMODE"]} if "DB_SSLMODE" in os.environ else {},
     }
 }
 
@@ -137,6 +139,7 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+SERVE_MEDIA = os.getenv("DJANGO_SERVE_MEDIA", str(DEBUG)).lower() == "true"
 GS_BUCKET_NAME = os.getenv("GS_BUCKET_NAME", "")
 GS_LOCATION = os.getenv("GS_LOCATION", "media")
 GS_DEFAULT_ACL = None

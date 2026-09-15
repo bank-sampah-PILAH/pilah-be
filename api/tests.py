@@ -7,7 +7,9 @@ from unittest.mock import Mock, patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
+from django.urls import resolve
 from django.utils import timezone
+from django.views.static import serve
 from openpyxl import load_workbook
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -837,3 +839,11 @@ class HealthzTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
         self.assertTrue(response.json()["database"])
+
+
+class MediaRouteTests(TestCase):
+    def test_local_media_route_uses_django_file_server(self) -> None:
+        match = resolve("/media/example.png")
+
+        self.assertIs(match.func, serve)
+        self.assertEqual(match.kwargs["path"], "example.png")

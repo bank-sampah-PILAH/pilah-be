@@ -67,7 +67,7 @@ Reset local Docker data:
 docker compose down -v
 ```
 
-For Google Cloud Run deployment, see [CLOUD_RUN.md](CLOUD_RUN.md).
+For deployment, see [Google Cloud Run](CLOUD_RUN.md) or [Fly.io staging](FLY_STAGING.md).
 
 ## Direct Local Setup
 
