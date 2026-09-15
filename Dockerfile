@@ -47,7 +47,8 @@ RUN chmod +x /app/docker/entrypoint.sh \
     && mkdir -p /app/staticfiles /app/media \
     && chown -R appuser:appuser /app
 
-USER appuser
+# The entrypoint fixes ownership on mounted volumes, then drops to appuser.
+USER root
 
 EXPOSE 8080
 

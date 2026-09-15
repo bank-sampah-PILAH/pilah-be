@@ -1,0 +1,42 @@
+app = "pilah-be-staging"
+primary_region = "sin"
+
+[build]
+
+[env]
+  PORT = "8080"
+  DJANGO_DEBUG = "false"
+  DJANGO_ALLOWED_HOSTS = "pilah-be-staging.fly.dev,127.0.0.1,localhost"
+  DJANGO_SERVE_MEDIA = "true"
+  CORS_ALLOW_ALL_ORIGINS = "false"
+  CSRF_TRUSTED_ORIGINS = "https://pilah-be-staging.fly.dev"
+  PILAH_ALLOW_FAKE_GOOGLE_TOKEN = "false"
+  PILAH_PUBLIC_APP_URL = "https://pilah-be-staging.fly.dev"
+  DB_ENGINE = "django.db.backends.postgresql"
+  DB_PORT = "5432"
+  DB_SSLMODE = "require"
+  DB_CHANNEL_BINDING = "require"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  max_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "60s"
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/healthz"
+
+[[mounts]]
+  source = "media_data"
+  destination = "/app/media"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "512mb"

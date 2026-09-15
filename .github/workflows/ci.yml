@@ -1,7 +1,6 @@
-# CI — the merge gate for pilah-be. One verification job, one dependency
-# install: ruff, postgres tests with coverage, migration checks, django
-# checks, mypy. Deliberately single-job — small/mid project on a limited
-# free-tier Actions budget; merge feedback should be fast and cheap.
+# CI — the merge gate for pilah-be. One verification job runs lint, postgres
+# tests with coverage, migration checks, Django checks, and mypy. Successful
+# staging pushes then deploy the verified commit to Fly.io.
 #
 # Not here on purpose:
 #   - gitleaks / pip-audit / migration-linter -> scheduled-checks.yml
@@ -101,6 +100,12 @@ jobs:
       - name: Coverage report (fail under 80%)
         run: coverage report --show-missing --skip-covered --fail-under=80
 
+      # XML report for the SonarQube step below (sonar.python.coverage.
+      # reportPaths reads it); not a gate here — the coverage report above
+      # already enforces 80%.
+      - name: Coverage XML for Sonar
+        run: coverage xml
+
       - name: Django system checks
         run: python manage.py check
 
@@ -116,3 +121,75 @@ jobs:
       # code must be fully typed.
       - name: mypy strict
         run: mypy api config
+
+      # --- SonarQube analysis (was its own sonar.yml workflow) ---
+      #
+      # Why folded in here instead of a separate workflow:
+      #   1. Coverage: Sonar needs coverage.xml, and that file only exists
+      #      inside this workspace after `coverage run`/`coverage xml`. A
+      #      separate workflow would need artifact upload/download between
+      #      jobs with a race between the two concurrent runs, and an extra
+      #      runner minute burned re-checking out and re-installing. Here the
+      #      report is just there.
+      #   2. One gate, one place: CI is already the merge gate, so a failed
+      #      Sonar push surfaces in the same run a reviewer already watches.
+      #   3. The sonar.yml version needed the same checkout (fetch-depth 0)
+      #      and pip-less scanner anyway; nothing about being a separate file
+      #      added value.
+      #
+      # Community Edition has no branch support, so the destination project
+      # is switched per branch (main -> pilah-be, staging/others ->
+      # pilah-be-staging; PRs report to the staging project, non-gating).
+      # SONAR_HOST_URL and the two SONAR_TOKEN_* secrets are repo settings.
+      - name: Pick SonarQube project key by branch
+        id: pick
+        run: |
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "key=pilah-be" >> "$GITHUB_OUTPUT"
+          else
+            echo "key=pilah-be-staging" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: SonarQube analysis
+        uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ steps.pick.outputs.key == 'pilah-be' && secrets.SONAR_TOKEN || secrets.SONAR_TOKEN_STAGING }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ steps.pick.outputs.key }}
+            -Dsonar.sources=api,config
+            -Dsonar.tests=api
+            -Dsonar.test.inclusions=**/tests.py
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.exclusions=**/migrations/**,**/*.pyc,**/__pycache__/**,**/staticfiles/**,reference/**
+            -Dsonar.python.version=3.12
+
+  deploy_staging:
+    name: Deploy staging to Fly.io
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://pilah-be-staging.fly.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy verified commit
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      # One smoke check after deploy: /healthz does a DB round-trip, so this
+      # catches a deploy that went out but came up dead.
+      - name: Smoke check /healthz
+        run: |
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 https://pilah-be-staging.fly.dev/healthz || true)
+            if [ "$code" = "200" ]; then echo "healthz OK"; exit 0; fi
+            echo "healthz=$code, retrying in 10s ($i/12)"; sleep 10
+          done
+          echo "healthz never returned 200"; exit 1

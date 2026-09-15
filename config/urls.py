@@ -16,14 +16,15 @@ Including another URLconf
 """
 
 from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
 from django.http import HttpRequest, JsonResponse
-from django.urls import include, path
+from django.urls import include, path, re_path
 from django.views.generic import TemplateView
+from django.views.static import serve
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from api.health import healthz
+from api.views import bank_sampah_activity_media
 
 
 class ApiTestView(TemplateView):
@@ -64,7 +65,16 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
     path("api/v1/", include("api.urls")),
+    path(
+        "media/activity/<path:token>", bank_sampah_activity_media, name="bank-sampah-activity-media"
+    ),
 ]
 
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+if settings.SERVE_MEDIA:
+    urlpatterns += [
+        re_path(
+            r"^media/bank_sampah/logo/(?P<path>.*)$",
+            serve,
+            {"document_root": settings.MEDIA_ROOT / "bank_sampah/logo"},
+        ),
+    ]
