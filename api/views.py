@@ -1,11 +1,13 @@
 import json
+import mimetypes
 from typing import Any
 
 import requests
 from django.conf import settings
+from django.core.files.storage import default_storage
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.db.models import Q, QuerySet
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.http import urlencode
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -51,6 +53,24 @@ from api.services import (
     TransactionService,
     WhatsAppService,
 )
+
+
+def bank_sampah_activity_media(request: HttpRequest, token: str) -> FileResponse:
+    try:
+        name = TimestampSigner(salt="bank-sampah-kegiatan").unsign(
+            token, max_age=settings.MEDIA_SIGNED_URL_MAX_AGE
+        )
+    except (BadSignature, SignatureExpired):
+        raise Http404 from None
+
+    if not name.startswith("bank_sampah/kegiatan/"):
+        raise Http404
+    try:
+        media_file = default_storage.open(name, "rb")
+    except FileNotFoundError:
+        raise Http404 from None
+    content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    return FileResponse(media_file, content_type=content_type)
 
 
 def _user(request: Request) -> User:

@@ -4,6 +4,9 @@ Pushes to `staging` deploy `pilah-be-staging` after CI succeeds. The app runs in
 Singapore, connects to Neon over TLS, and stores uploaded media on the single
 `media_data` Fly volume.
 
+Only logo files are served as public local media. Activity-proof files are
+returned to superadmins as short-lived signed URLs.
+
 ## Required Secrets
 
 Set Django and Neon values directly on Fly. Use the individual fields from the

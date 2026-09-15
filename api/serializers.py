@@ -2,8 +2,11 @@ from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
+from django.conf import settings
+from django.core.signing import TimestampSigner
 from django.db.models import Model, Q, Sum
 from django.db.models.functions import Coalesce
+from django.urls import reverse
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -182,6 +185,7 @@ class InviteAcceptSerializer(serializers.Serializer[Any]):
 
 class BankSampahApprovalListSerializer(serializers.ModelSerializer[Model]):
     pengelola_utama = serializers.SerializerMethodField()
+    foto_kegiatan = serializers.SerializerMethodField()
 
     class Meta:
         model = BankSampah
@@ -202,6 +206,22 @@ class BankSampahApprovalListSerializer(serializers.ModelSerializer[Model]):
         if not user:
             return None
         return {"id": str(user.id), "nama": user.nama, "email": user.email, "no_hp": user.no_hp}
+
+    def get_foto_kegiatan(self, obj: Any) -> str | None:
+        if not obj.foto_kegiatan:
+            return None
+        if settings.GS_BUCKET_NAME:
+            return str(obj.foto_kegiatan.url)
+
+        request = self.context.get("request")
+        if request is None:
+            return None
+        token = TimestampSigner(salt="bank-sampah-kegiatan").sign(obj.foto_kegiatan.name)
+        return str(
+            request.build_absolute_uri(
+                reverse("bank-sampah-activity-media", kwargs={"token": token})
+            )
+        )
 
 
 def validate_image_upload(value: Any, label: str) -> Any:

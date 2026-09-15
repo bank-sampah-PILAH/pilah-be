@@ -24,6 +24,7 @@ from django.views.static import serve
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from api.health import healthz
+from api.views import bank_sampah_activity_media
 
 
 class ApiTestView(TemplateView):
@@ -64,9 +65,16 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
     path("api/v1/", include("api.urls")),
+    path(
+        "media/activity/<path:token>", bank_sampah_activity_media, name="bank-sampah-activity-media"
+    ),
 ]
 
 if settings.SERVE_MEDIA:
     urlpatterns += [
-        re_path(r"^media/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
+        re_path(
+            r"^media/bank_sampah/logo/(?P<path>.*)$",
+            serve,
+            {"document_root": settings.MEDIA_ROOT / "bank_sampah/logo"},
+        ),
     ]

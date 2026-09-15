@@ -147,6 +147,7 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 SERVE_MEDIA = os.getenv("DJANGO_SERVE_MEDIA", str(DEBUG)).lower() == "true"
+MEDIA_SIGNED_URL_MAX_AGE = int(os.getenv("MEDIA_SIGNED_URL_MAX_AGE", "600"))
 GS_BUCKET_NAME = os.getenv("GS_BUCKET_NAME", "")
 GS_LOCATION = os.getenv("GS_LOCATION", "media")
 GS_DEFAULT_ACL = None

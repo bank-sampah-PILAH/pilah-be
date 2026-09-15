@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.signing import TimestampSigner
 from django.test import Client, TestCase, override_settings
 from django.urls import Resolver404, resolve
 from django.utils import timezone
@@ -16,6 +17,7 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.models import BankSampah, BankSampahApprovalLog, JenisSampah, Nasabah, Saldo, User
+from api.serializers import BankSampahApprovalListSerializer
 
 
 class APISpecTests(APITestCase):
@@ -845,10 +847,50 @@ class HealthzTests(TestCase):
 class MediaRouteTests(TestCase):
     def test_local_media_route_uses_django_file_server(self) -> None:
         if settings.SERVE_MEDIA:
-            match = resolve("/media/example.png")
+            match = resolve("/media/bank_sampah/logo/example.png")
 
             self.assertIs(match.func, serve)
             self.assertEqual(match.kwargs["path"], "example.png")
         else:
             with self.assertRaises(Resolver404):
-                resolve("/media/example.png")
+                resolve("/media/bank_sampah/logo/example.png")
+
+        with self.assertRaises(Resolver404):
+            resolve("/media/bank_sampah/kegiatan/example.png")
+
+
+class ProtectedMediaTests(TestCase):
+    @override_settings(GS_BUCKET_NAME="")
+    def test_activity_proof_uses_a_signed_url(self) -> None:
+        bank = BankSampah.objects.create(
+            nama="Test Bank",
+            no_hp_pic="+628123456789",
+            foto_kegiatan="bank_sampah/kegiatan/proof.png",
+        )
+        request = self.client.get("/").wsgi_request
+        data = BankSampahApprovalListSerializer(bank, context={"request": request}).data
+
+        self.assertIn("/media/activity/", data["foto_kegiatan"])
+        token = data["foto_kegiatan"].split("/media/activity/", 1)[1]
+        self.assertEqual(
+            TimestampSigner(salt="bank-sampah-kegiatan").unsign(
+                token, max_age=settings.MEDIA_SIGNED_URL_MAX_AGE
+            ),
+            "bank_sampah/kegiatan/proof.png",
+        )
+
+    @patch("api.views.default_storage")
+    def test_signed_activity_proof_is_served(self, storage: Mock) -> None:
+        storage.open.return_value = BytesIO(b"proof")
+        token = TimestampSigner(salt="bank-sampah-kegiatan").sign("bank_sampah/kegiatan/proof.png")
+
+        response = self.client.get(f"/media/activity/{token}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(cast(Any, response).streaming_content), b"proof")
+        storage.open.assert_called_once_with("bank_sampah/kegiatan/proof.png", "rb")
+
+    def test_unsigned_activity_proof_is_rejected(self) -> None:
+        response = self.client.get("/media/activity/not-a-valid-token")
+
+        self.assertEqual(response.status_code, 404)
