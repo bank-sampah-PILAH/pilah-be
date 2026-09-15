@@ -49,5 +49,7 @@ jobs:
           args: >
             -Dsonar.projectKey=${{ steps.pick.outputs.key }}
             -Dsonar.sources=api,config
+            -Dsonar.tests=api
+            -Dsonar.test.inclusions=**/tests.py
             -Dsonar.exclusions=**/migrations/**,**/*.pyc,**/__pycache__/**,**/staticfiles/**,reference/**
             -Dsonar.python.version=3.12
