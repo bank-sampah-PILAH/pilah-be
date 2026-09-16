@@ -959,6 +959,34 @@ class APISpecTests(APITestCase):
                     jenis_organisasi=BankSampah.OrganizationType.UNIT,
                 )
 
+    def test_nasabah_account_can_join_multiple_banks(self) -> None:
+        customer = User.objects.create_user(
+            email="multi-bank-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+        )
+        banks = [
+            BankSampah.objects.create(
+                nama=f"Unit {number}",
+                alamat="Depok",
+                no_hp_pic=f"+62822222222{number}",
+                jenis_organisasi=BankSampah.OrganizationType.UNIT,
+                parent=self.bank,
+            )
+            for number in (1, 2)
+        ]
+        for number, bank in enumerate(banks, start=1):
+            Nasabah.objects.create(
+                user=customer,
+                bank_sampah=bank,
+                nomor=f"NAS-{number:04d}",
+                nama=customer.nama,
+                alamat="Depok",
+                no_hp=f"+62833333333{number}",
+            )
+
+        self.assertEqual(customer.keanggotaan_nasabah.count(), 2)
+
 class HealthzTests(TestCase):
     def test_healthz_ok(self) -> None:
         response = self.client.get("/healthz")
