@@ -14,7 +14,7 @@ from django.utils import timezone
 from django.views.static import serve
 from openpyxl import load_workbook
 from rest_framework.test import APITestCase
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from api.models import BankSampah, BankSampahApprovalLog, JenisSampah, Nasabah, Saldo, User
 from api.serializers import BankSampahApprovalListSerializer
@@ -846,6 +846,50 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["user"]["role"], "pengelola_induk")
 
+
+    def test_nasabah_can_sign_in(self) -> None:
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev-nasabah:nasabah@example.com:Nasabah PILAH"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["user"]["role"], "nasabah")
+
+    @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=True)
+    def test_google_login_uses_role_assigned_to_existing_account(self) -> None:
+        for role in (User.Role.PENGELOLA_INDUK, User.Role.NASABAH):
+            with self.subTest(role=role):
+                email = f"{role}@example.com"
+                User.objects.create_user(email=email, nama=role, role=role)
+
+                response = self.client.post(
+                    "/api/v1/auth/google",
+                    {"id_token": f"dev:{email}:Test User"},
+                    format="json",
+                )
+
+                self.assertEqual(response.status_code, 200, response.data)
+                self.assertEqual(response.data["user"]["role"], role)
+                self.assertEqual(AccessToken(response.data["access_token"])["role"], role)
+
+    def test_new_roles_do_not_inherit_pengelola_endpoint_access(self) -> None:
+        for role in (User.Role.PENGELOLA_INDUK, User.Role.NASABAH):
+            with self.subTest(role=role):
+                user = User.objects.create_user(
+                    email=f"{role}@example.com",
+                    nama=role,
+                    role=role,
+                    bank_sampah=self.bank,
+                    is_profile_complete=True,
+                )
+                refresh = RefreshToken.for_user(user)
+                self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+                response = self.client.get("/api/v1/dashboard/stats")
+
+                self.assertEqual(response.status_code, 403)
 
 class HealthzTests(TestCase):
     def test_healthz_ok(self) -> None:
