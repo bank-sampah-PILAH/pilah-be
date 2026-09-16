@@ -6,15 +6,20 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('api', '0008_banksampah_banksampah_type_parent_consistent_and_more'),
+        ("api", "0008_banksampah_banksampah_type_parent_consistent_and_more"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='nasabah',
-            name='user',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='keanggotaan_nasabah', to=settings.AUTH_USER_MODEL),
+            model_name="nasabah",
+            name="user",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="keanggotaan_nasabah",
+                to=settings.AUTH_USER_MODEL,
+            ),
         ),
     ]

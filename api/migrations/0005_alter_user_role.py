@@ -4,15 +4,22 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('api', '0004_alter_banksampah_foto_logo'),
+        ("api", "0004_alter_banksampah_foto_logo"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='user',
-            name='role',
-            field=models.CharField(choices=[('pengelola', 'Pengelola'), ('pengelola_induk', 'Pengelola Induk'), ('superadmin', 'Superadmin')], default='pengelola', max_length=20),
+            model_name="user",
+            name="role",
+            field=models.CharField(
+                choices=[
+                    ("pengelola", "Pengelola"),
+                    ("pengelola_induk", "Pengelola Induk"),
+                    ("superadmin", "Superadmin"),
+                ],
+                default="pengelola",
+                max_length=20,
+            ),
         ),
     ]

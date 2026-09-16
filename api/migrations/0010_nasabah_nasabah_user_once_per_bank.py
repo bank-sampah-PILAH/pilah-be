@@ -4,14 +4,17 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('api', '0009_nasabah_user'),
+        ("api", "0009_nasabah_user"),
     ]
 
     operations = [
         migrations.AddConstraint(
-            model_name='nasabah',
-            constraint=models.UniqueConstraint(condition=models.Q(('user__isnull', False)), fields=('bank_sampah', 'user'), name='nasabah_user_once_per_bank'),
+            model_name="nasabah",
+            constraint=models.UniqueConstraint(
+                condition=models.Q(("user__isnull", False)),
+                fields=("bank_sampah", "user"),
+                name="nasabah_user_once_per_bank",
+            ),
         ),
     ]

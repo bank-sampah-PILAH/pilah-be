@@ -122,30 +122,21 @@ class AuthService:
 
     @staticmethod
     def _verify_google_token(raw_id_token: str) -> Mapping[str, Any]:
-        if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and raw_id_token.startswith("dev-superadmin:"):
-            _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
-            return {
-                "sub": f"dev-superadmin-{email}",
-                "email": email,
-                "name": name or email.split("@")[0],
-                "_pilah_dev_role": User.Role.SUPERADMIN,
+        if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN:
+            dev_roles = {
+                "dev-superadmin:": ("dev-superadmin", User.Role.SUPERADMIN),
+                "dev-pengelola-induk:": ("dev-pengelola-induk", User.Role.PENGELOLA_INDUK),
+                "dev-nasabah:": ("dev-nasabah", User.Role.NASABAH),
             }
-        if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and raw_id_token.startswith("dev-pengelola-induk:"):
-            _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
-            return {
-                "sub": f"dev-pengelola-induk-{email}",
-                "email": email,
-                "name": name or email.split("@")[0],
-                "_pilah_dev_role": User.Role.PENGELOLA_INDUK,
-            }
-        if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and raw_id_token.startswith("dev-nasabah:"):
-            _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
-            return {
-                "sub": f"dev-nasabah-{email}",
-                "email": email,
-                "name": name or email.split("@")[0],
-                "_pilah_dev_role": User.Role.NASABAH,
-            }
+            for prefix, (subject_prefix, role) in dev_roles.items():
+                if raw_id_token.startswith(prefix):
+                    _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
+                    return {
+                        "sub": f"{subject_prefix}-{email}",
+                        "email": email,
+                        "name": name or email.split("@")[0],
+                        "_pilah_dev_role": role,
+                    }
         if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and raw_id_token.startswith("dev:"):
             _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
             return {"sub": f"dev-{email}", "email": email, "name": name or email.split("@")[0]}

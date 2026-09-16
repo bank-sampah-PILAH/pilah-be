@@ -5,20 +5,29 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('api', '0006_alter_user_role'),
+        ("api", "0006_alter_user_role"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='banksampah',
-            name='jenis_organisasi',
-            field=models.CharField(choices=[('mandiri', 'Mandiri'), ('induk', 'Induk'), ('unit', 'Unit')], default='mandiri', max_length=20),
+            model_name="banksampah",
+            name="jenis_organisasi",
+            field=models.CharField(
+                choices=[("mandiri", "Mandiri"), ("induk", "Induk"), ("unit", "Unit")],
+                default="mandiri",
+                max_length=20,
+            ),
         ),
         migrations.AddField(
-            model_name='banksampah',
-            name='parent',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='units', to='api.banksampah'),
+            model_name="banksampah",
+            name="parent",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="units",
+                to="api.banksampah",
+            ),
         ),
     ]

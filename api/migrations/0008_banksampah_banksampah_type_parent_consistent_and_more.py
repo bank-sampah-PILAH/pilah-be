@@ -4,18 +4,29 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('api', '0007_banksampah_jenis_organisasi_banksampah_parent'),
+        ("api", "0007_banksampah_jenis_organisasi_banksampah_parent"),
     ]
 
     operations = [
         migrations.AddConstraint(
-            model_name='banksampah',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('jenis_organisasi__in', ['mandiri', 'induk']), ('parent__isnull', True)), models.Q(('jenis_organisasi', 'unit'), ('parent__isnull', False)), _connector='OR'), name='banksampah_type_parent_consistent'),
+            model_name="banksampah",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    models.Q(
+                        ("jenis_organisasi__in", ["mandiri", "induk"]), ("parent__isnull", True)
+                    ),
+                    models.Q(("jenis_organisasi", "unit"), ("parent__isnull", False)),
+                    _connector="OR",
+                ),
+                name="banksampah_type_parent_consistent",
+            ),
         ),
         migrations.AddConstraint(
-            model_name='banksampah',
-            constraint=models.CheckConstraint(condition=models.Q(('id', models.F('parent_id')), _negated=True), name='banksampah_not_own_parent'),
+            model_name="banksampah",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("id", models.F("parent_id")), _negated=True),
+                name="banksampah_not_own_parent",
+            ),
         ),
     ]

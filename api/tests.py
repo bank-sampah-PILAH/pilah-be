@@ -837,7 +837,6 @@ class APISpecTests(APITestCase):
             ],
         )
 
-
     def test_pengelola_induk_can_sign_in(self) -> None:
         response = self.client.post(
             "/api/v1/auth/google",
@@ -847,7 +846,6 @@ class APISpecTests(APITestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["user"]["role"], "pengelola_induk")
-
 
     def test_nasabah_can_sign_in(self) -> None:
         response = self.client.post(
@@ -1012,6 +1010,7 @@ class APISpecTests(APITestCase):
                     alamat="Depok",
                     no_hp="+628333333332",
                 )
+
 
 class HealthzTests(TestCase):
     def test_healthz_ok(self) -> None:
