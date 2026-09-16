@@ -53,9 +53,34 @@ class BankSampah(TimestampedModel):
     class Meta:
         db_table = "bank_sampah"
         ordering = ["nama"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        jenis_organisasi__in=["mandiri", "induk"],
+                        parent__isnull=True,
+                    )
+                    | models.Q(
+                        jenis_organisasi="unit",
+                        parent__isnull=False,
+                    )
+                ),
+                name="banksampah_type_parent_consistent",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(id=models.F("parent_id")),
+                name="banksampah_not_own_parent",
+            ),
+        ]
 
     def clean(self) -> None:
         super().clean()
+        if self.jenis_organisasi == self.OrganizationType.UNIT and not self.parent_id:
+            raise ValidationError({"parent": "Unit harus berada di bawah Bank Sampah Induk."})
+        if self.jenis_organisasi != self.OrganizationType.UNIT and self.parent_id:
+            raise ValidationError({"parent": "Hanya Bank Sampah Unit yang memiliki induk."})
+        if self.parent_id == self.pk:
+            raise ValidationError({"parent": "Bank sampah tidak dapat menjadi induknya sendiri."})
         if self.parent_id:
             parent_type = BankSampah.objects.filter(pk=self.parent_id).values_list(
                 "jenis_organisasi", flat=True
