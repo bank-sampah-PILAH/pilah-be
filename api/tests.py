@@ -891,6 +891,23 @@ class APISpecTests(APITestCase):
 
                 self.assertEqual(response.status_code, 403)
 
+    @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False)
+    @patch("api.services.google_id_token.verify_oauth2_token")
+    def test_google_profile_claim_cannot_assign_pilah_role(self, verify: Mock) -> None:
+        verify.return_value = {
+            "sub": "google-123",
+            "email": "claim@example.com",
+            "name": "Claim User",
+            "role": User.Role.SUPERADMIN,
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/google", {"id_token": "signed-google-token"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["user"]["role"], User.Role.PENGELOLA)
+
 class HealthzTests(TestCase):
     def test_healthz_ok(self) -> None:
         response = self.client.get("/healthz")
