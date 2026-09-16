@@ -129,6 +129,14 @@ class AuthService:
                 "name": name or email.split("@")[0],
                 "role": User.Role.SUPERADMIN,
             }
+        if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and raw_id_token.startswith("dev-pengelola-induk:"):
+            _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
+            return {
+                "sub": f"dev-pengelola-induk-{email}",
+                "email": email,
+                "name": name or email.split("@")[0],
+                "role": User.Role.PENGELOLA_INDUK,
+            }
         if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and raw_id_token.startswith("dev:"):
             _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
             return {"sub": f"dev-{email}", "email": email, "name": name or email.split("@")[0]}
