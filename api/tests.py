@@ -6,6 +6,7 @@ from typing import Any, cast
 from unittest.mock import Mock, patch
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.signing import TimestampSigner
 from django.test import Client, TestCase, override_settings
@@ -934,6 +935,18 @@ class APISpecTests(APITestCase):
         )
 
         bank.full_clean()
+
+    def test_bank_unit_requires_an_induk_parent(self) -> None:
+        unit = BankSampah(
+            nama="Unit without induk",
+            alamat="Depok",
+            no_hp_pic="+628222222221",
+            jenis_organisasi=BankSampah.OrganizationType.UNIT,
+            parent=self.bank,
+        )
+
+        with self.assertRaises(ValidationError):
+            unit.full_clean()
 
 class HealthzTests(TestCase):
     def test_healthz_ok(self) -> None:
