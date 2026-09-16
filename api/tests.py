@@ -9,6 +9,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.signing import TimestampSigner
+from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, override_settings
 from django.urls import Resolver404, resolve
 from django.utils import timezone
@@ -947,6 +948,16 @@ class APISpecTests(APITestCase):
 
         with self.assertRaises(ValidationError):
             unit.full_clean()
+
+    def test_bank_unit_cannot_be_saved_without_a_parent(self) -> None:
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                BankSampah.objects.create(
+                    nama="Unit without parent",
+                    alamat="Depok",
+                    no_hp_pic="+628222222222",
+                    jenis_organisasi=BankSampah.OrganizationType.UNIT,
+                )
 
 class HealthzTests(TestCase):
     def test_healthz_ok(self) -> None:
