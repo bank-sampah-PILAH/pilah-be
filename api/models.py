@@ -178,6 +178,13 @@ class Nasabah(TimestampedModel):
         db_table = "nasabah"
         unique_together = (("bank_sampah", "nomor"), ("bank_sampah", "no_hp"))
         ordering = ["nomor"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["bank_sampah", "user"],
+                condition=models.Q(user__isnull=False),
+                name="nasabah_user_once_per_bank",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.nomor} - {self.nama}"
