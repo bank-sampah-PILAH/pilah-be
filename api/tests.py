@@ -987,6 +987,32 @@ class APISpecTests(APITestCase):
 
         self.assertEqual(customer.keanggotaan_nasabah.count(), 2)
 
+    def test_nasabah_account_can_only_join_a_bank_once(self) -> None:
+        customer = User.objects.create_user(
+            email="single-bank-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+        )
+        Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama=customer.nama,
+            alamat="Depok",
+            no_hp="+628333333331",
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Nasabah.objects.create(
+                    user=customer,
+                    bank_sampah=self.bank,
+                    nomor="NAS-0002",
+                    nama=customer.nama,
+                    alamat="Depok",
+                    no_hp="+628333333332",
+                )
+
 class HealthzTests(TestCase):
     def test_healthz_ok(self) -> None:
         response = self.client.get("/healthz")
