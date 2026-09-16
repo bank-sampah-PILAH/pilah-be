@@ -69,6 +69,7 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
     class Role(models.TextChoices):
         PENGELOLA = "pengelola", "Pengelola"
         PENGELOLA_INDUK = "pengelola_induk", "Pengelola Induk"
+        NASABAH = "nasabah", "Nasabah"
         SUPERADMIN = "superadmin", "Superadmin"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
