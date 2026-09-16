@@ -15,6 +15,11 @@ class TimestampedModel(models.Model):
 
 
 class BankSampah(TimestampedModel):
+    class OrganizationType(models.TextChoices):
+        MANDIRI = "mandiri", "Mandiri"
+        INDUK = "induk", "Induk"
+        UNIT = "unit", "Unit"
+
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         ACTIVE = "active", "Active"
@@ -25,6 +30,16 @@ class BankSampah(TimestampedModel):
     alamat = models.TextField(blank=True)
     kota = models.CharField(max_length=100, blank=True)
     no_hp_pic = models.CharField(max_length=20)
+    jenis_organisasi = models.CharField(
+        max_length=20, choices=OrganizationType.choices, default=OrganizationType.MANDIRI
+    )
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        related_name="units",
+        blank=True,
+        null=True,
+    )
     wa_gateway_token = models.TextField(blank=True, null=True)
     wa_template = models.TextField(blank=True)
     foto_logo = models.FileField(upload_to="bank_sampah/logo/", blank=True)
