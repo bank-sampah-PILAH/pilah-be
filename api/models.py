@@ -2,6 +2,7 @@ import uuid
 from typing import Any
 
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -52,6 +53,15 @@ class BankSampah(TimestampedModel):
     class Meta:
         db_table = "bank_sampah"
         ordering = ["nama"]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.parent_id:
+            parent_type = BankSampah.objects.filter(pk=self.parent_id).values_list(
+                "jenis_organisasi", flat=True
+            ).first()
+            if parent_type and parent_type != self.OrganizationType.INDUK:
+                raise ValidationError({"parent": "Unit harus berada di bawah Bank Sampah Induk."})
 
     def __str__(self) -> str:
         return self.nama
