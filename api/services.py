@@ -49,7 +49,8 @@ class AuthService:
         email = profile["email"]
         google_id = profile["sub"]
         name = profile.get("name") or email.split("@")[0]
-        role = profile.get("role", User.Role.PENGELOLA)
+        # Google proves identity, not a user's PILAH authorization.
+        role = profile.get("_pilah_dev_role", User.Role.PENGELOLA)
 
         user = User.objects.filter(email=email).first()
         is_new_user = user is None
@@ -127,7 +128,7 @@ class AuthService:
                 "sub": f"dev-superadmin-{email}",
                 "email": email,
                 "name": name or email.split("@")[0],
-                "role": User.Role.SUPERADMIN,
+                "_pilah_dev_role": User.Role.SUPERADMIN,
             }
         if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and raw_id_token.startswith("dev-pengelola-induk:"):
             _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
@@ -135,7 +136,7 @@ class AuthService:
                 "sub": f"dev-pengelola-induk-{email}",
                 "email": email,
                 "name": name or email.split("@")[0],
-                "role": User.Role.PENGELOLA_INDUK,
+                "_pilah_dev_role": User.Role.PENGELOLA_INDUK,
             }
         if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and raw_id_token.startswith("dev-nasabah:"):
             _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
@@ -143,7 +144,7 @@ class AuthService:
                 "sub": f"dev-nasabah-{email}",
                 "email": email,
                 "name": name or email.split("@")[0],
-                "role": User.Role.NASABAH,
+                "_pilah_dev_role": User.Role.NASABAH,
             }
         if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and raw_id_token.startswith("dev:"):
             _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
@@ -157,7 +158,12 @@ class AuthService:
             raise serializers.ValidationError(
                 {"id_token": ["ID Token invalid atau expired"]}
             ) from exc
-        return cast(Mapping[str, Any], profile)
+        verified_profile = cast(Mapping[str, Any], profile)
+        return {
+            "sub": verified_profile["sub"],
+            "email": verified_profile["email"],
+            "name": verified_profile.get("name"),
+        }
 
 
 class NumberingService:
