@@ -908,6 +908,33 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["user"]["role"], User.Role.PENGELOLA)
 
+    def test_bank_induk_can_have_multiple_unit_banks(self) -> None:
+        parent = BankSampah.objects.create(
+            nama="Bank Sampah Induk",
+            alamat="Depok",
+            no_hp_pic="+628111111111",
+            jenis_organisasi=BankSampah.OrganizationType.INDUK,
+        )
+        for number in (1, 2):
+            BankSampah.objects.create(
+                nama=f"Unit {number}",
+                alamat="Depok",
+                no_hp_pic=f"+62822222222{number}",
+                jenis_organisasi=BankSampah.OrganizationType.UNIT,
+                parent=parent,
+            )
+
+        self.assertEqual(parent.units.count(), 2)
+
+    def test_mandiri_bank_can_be_validated_without_a_parent(self) -> None:
+        bank = BankSampah(
+            nama="Bank Mandiri",
+            alamat="Depok",
+            no_hp_pic="+628111111112",
+        )
+
+        bank.full_clean()
+
 class HealthzTests(TestCase):
     def test_healthz_ok(self) -> None:
         response = self.client.get("/healthz")
