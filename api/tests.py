@@ -836,6 +836,17 @@ class APISpecTests(APITestCase):
         )
 
 
+    def test_pengelola_induk_can_sign_in(self) -> None:
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev-pengelola-induk:induk@example.com:Pengelola Induk"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["user"]["role"], "pengelola_induk")
+
+
 class HealthzTests(TestCase):
     def test_healthz_ok(self) -> None:
         response = self.client.get("/healthz")
