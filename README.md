@@ -17,7 +17,8 @@ PILAH is a Django REST Framework backend for a digital bank sampah management sy
 
 - Google OAuth token verification with JWT session issuance
 - Development auth token support for local testing
-- Role-based access for `pengelola` and `superadmin`
+- Login roles for `pengelola`, `pengelola_induk`, `nasabah`, and `superadmin`
+- Role-based API access remains scoped to `pengelola` and `superadmin`
 - Bank sampah registration with pending, active, and rejected states
 - SuperAdmin approval and rejection workflow
 - Pengelola utama invitation links for additional team members
@@ -173,7 +174,30 @@ SuperAdmin:
 }
 ```
 
+Pengelola Induk and Nasabah:
+
+```json
+{
+  "id_token": "dev-pengelola-induk:induk@example.com:Pengelola Induk"
+}
+```
+
+```json
+{
+  "id_token": "dev-nasabah:nasabah@example.com:Nasabah PILAH"
+}
+```
+
+These role-specific token prefixes are local test helpers and work only while
+`PILAH_ALLOW_FAKE_GOOGLE_TOKEN=true`. For Google Sign-In, PILAH uses the role
+stored on the existing user account. Google profile claims cannot assign a
+PILAH role.
+
 Use only real Google ID tokens in production.
+
+Bank Sampah organizations can be `mandiri`, `induk`, or `unit`. A unit must
+belong to an induk organization. A Nasabah user can have one membership per
+bank and can belong to multiple banks.
 
 ## Role Flow
 

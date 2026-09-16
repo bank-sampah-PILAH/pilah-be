@@ -157,6 +157,13 @@ class Nasabah(TimestampedModel):
         FEMALE = "perempuan", "Perempuan"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="keanggotaan_nasabah",
+        blank=True,
+        null=True,
+    )
     bank_sampah = models.ForeignKey(BankSampah, on_delete=models.CASCADE, related_name="nasabah")
     nomor = models.CharField(max_length=30)
     nama = models.CharField(max_length=100)
