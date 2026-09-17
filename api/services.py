@@ -109,6 +109,10 @@ class AuthService:
     def user_state(user: User) -> str:
         if user.role == User.Role.SUPERADMIN:
             return "superadmin_dashboard"
+        if user.role == User.Role.PENGELOLA_INDUK:
+            return "pengelola_induk_dashboard"
+        if user.role == User.Role.NASABAH:
+            return "nasabah_dashboard"
         if not user.is_profile_complete:
             return "complete_profile"
         bank = user.bank_sampah

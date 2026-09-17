@@ -75,6 +75,14 @@ class BankSampah(TimestampedModel):
 
     def clean(self) -> None:
         super().clean()
+        if (
+            not self._state.adding
+            and self.jenis_organisasi != self.OrganizationType.INDUK
+            and self.units.exists()
+        ):
+            raise ValidationError(
+                {"jenis_organisasi": "Bank Sampah Induk yang memiliki unit tidak dapat diturunkan."}
+            )
         if self.jenis_organisasi == self.OrganizationType.UNIT and not self.parent_id:
             raise ValidationError({"parent": "Unit harus berada di bawah Bank Sampah Induk."})
         if self.jenis_organisasi != self.OrganizationType.UNIT and self.parent_id:
@@ -89,6 +97,10 @@ class BankSampah(TimestampedModel):
             )
             if parent_type and parent_type != self.OrganizationType.INDUK:
                 raise ValidationError({"parent": "Unit harus berada di bawah Bank Sampah Induk."})
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.full_clean()
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return self.nama
