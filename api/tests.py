@@ -857,6 +857,23 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["user"]["role"], "nasabah")
 
+    def test_new_role_logins_return_role_specific_states(self) -> None:
+        expected_states = {
+            "dev-pengelola-induk": "pengelola_induk_dashboard",
+            "dev-nasabah": "nasabah_dashboard",
+        }
+        for token_prefix, state in expected_states.items():
+            with self.subTest(role=token_prefix):
+                response = self.client.post(
+                    "/api/v1/auth/google",
+                    {"id_token": f"{token_prefix}:state@example.com:State User"},
+                    format="json",
+                )
+
+                self.assertEqual(response.status_code, 200, response.data)
+                self.assertEqual(response.data["next_step"], state)
+                self.assertEqual(response.data["user"]["state"], state)
+
     @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=True)
     def test_google_login_uses_role_assigned_to_existing_account(self) -> None:
         for role in (User.Role.PENGELOLA_INDUK, User.Role.NASABAH):
@@ -946,6 +963,35 @@ class APISpecTests(APITestCase):
 
         with self.assertRaises(ValidationError):
             unit.full_clean()
+
+    def test_induk_with_units_cannot_be_demoted(self) -> None:
+        parent = BankSampah.objects.create(
+            nama="Bank Sampah Induk",
+            alamat="Depok",
+            no_hp_pic="+628111111111",
+            jenis_organisasi=BankSampah.OrganizationType.INDUK,
+        )
+        BankSampah.objects.create(
+            nama="Unit 1",
+            alamat="Depok",
+            no_hp_pic="+628222222221",
+            jenis_organisasi=BankSampah.OrganizationType.UNIT,
+            parent=parent,
+        )
+
+        parent.jenis_organisasi = BankSampah.OrganizationType.MANDIRI
+        with self.assertRaises(ValidationError):
+            parent.save()
+
+    def test_unit_with_non_induk_parent_cannot_be_saved(self) -> None:
+        with self.assertRaises(ValidationError):
+            BankSampah.objects.create(
+                nama="Invalid Unit",
+                alamat="Depok",
+                no_hp_pic="+628222222222",
+                jenis_organisasi=BankSampah.OrganizationType.UNIT,
+                parent=self.bank,
+            )
 
     def test_bank_unit_cannot_be_saved_without_a_parent(self) -> None:
         with self.assertRaises(IntegrityError):
