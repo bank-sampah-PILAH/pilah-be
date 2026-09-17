@@ -862,11 +862,11 @@ class APISpecTests(APITestCase):
             "dev-pengelola-induk": "pengelola_induk_dashboard",
             "dev-nasabah": "nasabah_dashboard",
         }
-        for token_prefix, state in expected_states.items():
+        for index, (token_prefix, state) in enumerate(expected_states.items(), start=1):
             with self.subTest(role=token_prefix):
                 response = self.client.post(
                     "/api/v1/auth/google",
-                    {"id_token": f"{token_prefix}:state@example.com:State User"},
+                    {"id_token": f"{token_prefix}:state{index}@example.com:State User"},
                     format="json",
                 )
 
@@ -890,6 +890,7 @@ class APISpecTests(APITestCase):
                 self.assertEqual(response.status_code, 200, response.data)
                 self.assertEqual(response.data["user"]["role"], role)
                 self.assertEqual(AccessToken(response.data["access_token"])["role"], role)
+                self.assertEqual(response.data["next_step"], f"{role}_dashboard")
 
     def test_new_roles_do_not_inherit_pengelola_endpoint_access(self) -> None:
         for role in (User.Role.PENGELOLA_INDUK, User.Role.NASABAH):
@@ -994,14 +995,13 @@ class APISpecTests(APITestCase):
             )
 
     def test_bank_unit_cannot_be_saved_without_a_parent(self) -> None:
-        with self.assertRaises(IntegrityError):
-            with transaction.atomic():
-                BankSampah.objects.create(
-                    nama="Unit without parent",
-                    alamat="Depok",
-                    no_hp_pic="+628222222222",
-                    jenis_organisasi=BankSampah.OrganizationType.UNIT,
-                )
+        with self.assertRaises(ValidationError):
+            BankSampah.objects.create(
+                nama="Unit without parent",
+                alamat="Depok",
+                no_hp_pic="+628222222222",
+                jenis_organisasi=BankSampah.OrganizationType.UNIT,
+            )
 
     def test_nasabah_account_can_join_multiple_banks(self) -> None:
         customer = User.objects.create_user(
