@@ -1009,13 +1009,19 @@ class APISpecTests(APITestCase):
             nama="Nasabah PILAH",
             role=User.Role.NASABAH,
         )
+        parent = BankSampah.objects.create(
+            nama="Bank Sampah Induk Membership",
+            alamat="Depok",
+            no_hp_pic="+628111111113",
+            jenis_organisasi=BankSampah.OrganizationType.INDUK,
+        )
         banks = [
             BankSampah.objects.create(
                 nama=f"Unit {number}",
                 alamat="Depok",
                 no_hp_pic=f"+62822222222{number}",
                 jenis_organisasi=BankSampah.OrganizationType.UNIT,
-                parent=self.bank,
+                parent=parent,
             )
             for number in (1, 2)
         ]
