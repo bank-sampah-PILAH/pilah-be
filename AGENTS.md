@@ -6,9 +6,9 @@
   workspace.
 - Keep backend implementation changes here, not in the workspace root or the
   mobile repository.
-- Keep the canonical checkout on `main`; use `staging` as the default worktree
+- Keep the canonical checkout on `staging`; use `staging` as the worktree
   baseline and pull request target unless the request explicitly names another
-  branch.
+  branch. Never infer `main` as the baseline.
 
 ## Development
 

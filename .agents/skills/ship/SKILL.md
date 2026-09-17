@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Create an isolated sibling worktree under the repository parent's <repo>-worktrees directory, implement a requested feature or fix on a prompt-derived feature/<name> or fix/<name> branch, validate it with the repository's own checks, create atomic conventional commits, push the branch, and open a GitHub pull request or GitLab merge request. Use `staging` as the default checkout and PR/MR target unless the user explicitly names another branch. Use ONLY when the user's message starts with the literal word `ship` followed by a prompt. This trigger is mandatory regardless of change size, simplicity, or whether the user explicitly mentions a PR/MR.
+description: Create an isolated sibling worktree under the repository parent's <repo>-worktrees directory, implement a requested feature or fix on a prompt-derived feature/<name> or fix/<name> branch, validate it with the repository's own checks, create atomic conventional commits, push the branch, and open a GitHub pull request or GitLab merge request. Use `staging` as the checkout baseline and PR/MR target unless the user explicitly names another branch; never infer `main`. Use ONLY when the user's message starts with the literal word `ship` followed by a prompt. This trigger is mandatory regardless of change size, simplicity, or whether the user explicitly mentions a PR/MR.
 argument-hint: "<feature or fix prompt>"
 compatibility: Requires git and either gh or glab; run from an existing Git repository.
 metadata:
@@ -25,9 +25,10 @@ Execute the complete delivery workflow from an existing repository checkout. Wor
   - a short kebab-case `<name>` that accurately summarizes the requested change.
 - Resolve the baseline and target branches before creating worktrees:
   - default both `baseline_branch` and `target_branch` to `staging`;
+  - apply this `staging` default independently to every repository;
   - if the prompt explicitly names another checkout or base branch, use it for `baseline_branch`;
   - if the prompt explicitly names another PR/MR target, use it for `target_branch`;
-  - never silently fall back to the remote default branch when the resolved branch is missing.
+  - never infer `main` or silently fall back to the remote default branch when the resolved branch is missing.
 - If no repository path is given, use the current repository. Resolve its main checkout with `git rev-parse --show-toplevel`. Derive the worktree parent from the main checkout's actual parent directory; do not assume a fixed root such as `~/projects`.
 - Inspect `git status --short --branch`, remotes, the default branch, project documentation, contribution instructions, and available scripts before changing anything.
 - Do not overwrite, stash, reset, or delete existing work. If the main checkout has uncommitted changes, stop and report that it must be clean before shipping.
