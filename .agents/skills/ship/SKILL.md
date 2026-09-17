@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Create an isolated sibling worktree under the repository parent's <repo>-worktrees directory, implement a requested feature or fix on a prompt-derived feature/<name> or fix/<name> branch, validate it with the repository's own checks, create atomic conventional commits, push the branch, and open a GitHub pull request or GitLab merge request. Use `staging` as the checkout baseline and PR/MR target unless the user explicitly names another branch; never infer `main`. Use ONLY when the user's message starts with the literal word `ship` followed by a prompt. This trigger is mandatory regardless of change size, simplicity, or whether the user explicitly mentions a PR/MR.
+description: Create an isolated sibling worktree under the repository parent's <repo>-worktrees directory, implement a requested feature or fix on a prompt-derived feature/<name> or fix/<name> branch, or a Linear-linked feature/<issue-id>-<title> branch, validate it with the repository's own checks, create atomic conventional commits, push the branch, and open a GitHub pull request or GitLab merge request. Use `staging` as the checkout baseline and PR/MR target unless the user explicitly names another branch; never infer `main`. Use ONLY when the user's message starts with the literal word `ship` followed by a prompt. This trigger is mandatory regardless of change size, simplicity, or whether the user explicitly mentions a PR/MR.
 argument-hint: "<feature or fix prompt>"
 compatibility: Requires git and either gh or glab; run from an existing Git repository.
 metadata:
@@ -54,7 +54,7 @@ For example, a main checkout at `/work/project-a` uses `/work/project-a-worktree
   - worktree root: `<parent>/<repo>-worktrees`;
   - worktree path: `<parent>/<repo>-worktrees/<kind>-<name>`;
   - branch: `<kind>/<name>`.
-  - The branch must therefore be `feature/name` or `fix/name`; the worktree directory is `<kind>-<name>`.
+  - The branch must therefore be `feature/<issue-id>-<title>` for a Linear-linked change, or `feature/<name>` / `fix/<name>` otherwise; the worktree directory is `<kind>-<name>`.
 - Create the parent directory only when needed, then create the worktree from `origin/<baseline_branch>`:
 
 ```bash
