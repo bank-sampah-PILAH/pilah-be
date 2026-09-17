@@ -135,7 +135,11 @@ git push --set-upstream origin <kind>/<name>
 - Use `target_branch` as the PR/MR target; it defaults to `staging` unless the prompt explicitly names another target.
 - Derive a concise PR/MR title from the prompt and commits. Use the relevant conventional type prefix only when it improves clarity; do not duplicate noisy prefixes.
 - Write a focused description containing summary, key changes, and testing. Include the exact validation commands. Use a temporary file in the session scratchpad for multi-line descriptions, not a new project file.
-- Create the PR/MR with the CLI and capture its returned URL and title. Do not assign reviewers, enable auto-merge, delete the source branch, or mark draft unless explicitly requested.
+- Create the PR/MR with the CLI and capture its returned URL and title.
+- Immediately assign the authenticated user to the new PR/MR and verify the command succeeds:
+  - GitHub: `gh pr edit "<pr-url>" --add-assignee "@me"`.
+  - GitLab: `self_username="$(glab api user | jq -r '.username')"` followed by `glab mr update --assignee "$self_username"` from the new worktree.
+- Do not assign reviewers, enable auto-merge, delete the source branch, or mark draft unless explicitly requested.
 
 ## 7. Final response
 
