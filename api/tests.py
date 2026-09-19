@@ -6,15 +6,17 @@ from typing import Any, cast
 from unittest.mock import Mock, patch
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.signing import TimestampSigner
+from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, override_settings
 from django.urls import Resolver404, resolve
 from django.utils import timezone
 from django.views.static import serve
 from openpyxl import load_workbook
 from rest_framework.test import APITestCase
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from api.models import BankSampah, BankSampahApprovalLog, JenisSampah, Nasabah, Saldo, User
 from api.serializers import BankSampahApprovalListSerializer
@@ -210,6 +212,257 @@ class APISpecTests(APITestCase):
         self.assertEqual(
             duplicate_update.data["errors"]["no_hp"], ["Nomor HP nasabah sudah digunakan"]
         )
+
+    def test_nasabah_create_with_email(self) -> None:
+        created = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "Budi@Example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.data["email"], "budi@example.com")
+        self.assertTrue(Saldo.objects.filter(nasabah_id=created.data["id"]).exists())
+
+    def test_nasabah_create_without_email_still_works(self) -> None:
+        created = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertIsNone(created.data["email"])
+
+    def test_nasabah_duplicate_email_same_bank_returns_validation_error(self) -> None:
+        first = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(first.status_code, 201)
+
+        duplicate = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0002",
+                "nama": "Dewi Lestari",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1992-02-02",
+                "no_hp": "081999999999",
+                "alamat": "Jl. Melati No. 7",
+                "email": "Budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(duplicate.status_code, 422)
+        self.assertEqual(
+            duplicate.data["errors"]["email"],
+            ["Email sudah terdaftar sebagai nasabah di bank sampah ini"],
+        )
+
+    def test_nasabah_duplicate_email_other_bank_returns_validation_error(self) -> None:
+        created = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+
+        other_bank = BankSampah.objects.create(
+            nama="Bank Sampah Lain", alamat="Jakarta", kota="Jakarta", no_hp_pic="+628123456788"
+        )
+        other_user = User.objects.create_user(
+            email="pengelola-lain@example.com",
+            nama="Pengelola Lain",
+            bank_sampah=other_bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        refresh = RefreshToken.for_user(other_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        duplicate = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NSL-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(duplicate.status_code, 422)
+        self.assertEqual(
+            duplicate.data["errors"]["email"],
+            ["Email sudah terdaftar sebagai nasabah di bank sampah lain"],
+        )
+
+    def test_nasabah_email_on_update(self) -> None:
+        first = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(first.status_code, 201)
+
+        second = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0002",
+                "nama": "Dewi Lestari",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1992-02-02",
+                "no_hp": "081999999999",
+                "alamat": "Jl. Melati No. 7",
+                "email": "dewi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(second.status_code, 201)
+
+        stolen = self.client.put(
+            f"/api/v1/nasabah/{second.data['id']}",
+            {
+                "kode": "NAS-0002",
+                "nama": "Dewi Lestari",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1992-02-02",
+                "no_hp": "081999999999",
+                "alamat": "Jl. Melati No. 7",
+                "email": "budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(stolen.status_code, 422)
+        self.assertEqual(
+            stolen.data["errors"]["email"],
+            ["Email sudah terdaftar sebagai nasabah di bank sampah ini"],
+        )
+
+        kept = self.client.put(
+            f"/api/v1/nasabah/{second.data['id']}",
+            {
+                "kode": "NAS-0002",
+                "nama": "Dewi Lestari",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1992-02-02",
+                "no_hp": "081999999999",
+                "alamat": "Jl. Melati No. 7",
+                "email": "dewi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(kept.status_code, 200)
+
+    def test_nasabah_invalid_email_format_returns_validation_error(self) -> None:
+        response = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "bukan-email",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertTrue(response.data["errors"]["email"])
+
+    def test_google_login_with_nasabah_email_prefills_profile(self) -> None:
+        self.client.credentials()
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Budi Santoso",
+            jenis_kelamin="laki-laki",
+            tanggal_lahir="1990-01-01",
+            alamat="Jl. Anggrek No. 3",
+            no_hp="081234567890",
+            email="budi@example.com",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/google", {"id_token": "dev:budi@example.com:B"}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+
+        user = User.objects.get(email="budi@example.com")
+        self.assertEqual(user.nama, "Budi Santoso")
+        self.assertEqual(user.no_hp, "081234567890")
+        self.assertTrue(user.is_profile_complete)
+        self.assertEqual(response.data["next_step"], "register_bank_sampah")
+
+    def test_google_login_does_not_overwrite_existing_profile(self) -> None:
+        self.client.credentials()
+        User.objects.create_user(
+            email="lengkap@example.com",
+            nama="Nama Lama",
+            no_hp="081111111111",
+            is_profile_complete=True,
+        )
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Nama Nasabah",
+            alamat="Jl. Anggrek No. 3",
+            no_hp="081234567890",
+            email="lengkap@example.com",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev:lengkap@example.com:Baru"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        user = User.objects.get(email="lengkap@example.com")
+        self.assertEqual(user.nama, "Nama Lama")
+        self.assertEqual(user.no_hp, "081111111111")
 
     def test_jenis_sampah_and_transaction_update_saldo(self) -> None:
         nasabah = Nasabah.objects.create(
@@ -834,6 +1087,261 @@ class APISpecTests(APITestCase):
                 },
             ],
         )
+
+    def test_pengelola_induk_can_sign_in(self) -> None:
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev-pengelola-induk:induk@example.com:Pengelola Induk"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["user"]["role"], "pengelola_induk")
+
+    def test_nasabah_can_sign_in(self) -> None:
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev-nasabah:nasabah@example.com:Nasabah PILAH"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["user"]["role"], "nasabah")
+
+    def test_new_role_logins_return_role_specific_states(self) -> None:
+        expected_states = {
+            "dev-pengelola-induk": "pengelola_induk_dashboard",
+            "dev-nasabah": "nasabah_dashboard",
+        }
+        for index, (token_prefix, state) in enumerate(expected_states.items(), start=1):
+            with self.subTest(role=token_prefix):
+                response = self.client.post(
+                    "/api/v1/auth/google",
+                    {"id_token": f"{token_prefix}:state{index}@example.com:State User"},
+                    format="json",
+                )
+
+                self.assertEqual(response.status_code, 200, response.data)
+                self.assertEqual(response.data["next_step"], state)
+                self.assertEqual(response.data["user"]["state"], state)
+
+    @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=True)
+    def test_google_login_uses_role_assigned_to_existing_account(self) -> None:
+        for role in (User.Role.PENGELOLA_INDUK, User.Role.NASABAH):
+            with self.subTest(role=role):
+                email = f"{role}@example.com"
+                User.objects.create_user(email=email, nama=role, role=role)
+
+                response = self.client.post(
+                    "/api/v1/auth/google",
+                    {"id_token": f"dev:{email}:Test User"},
+                    format="json",
+                )
+
+                self.assertEqual(response.status_code, 200, response.data)
+                self.assertEqual(response.data["user"]["role"], role)
+                self.assertEqual(AccessToken(response.data["access_token"])["role"], role)
+                self.assertEqual(response.data["next_step"], f"{role}_dashboard")
+
+    def test_new_roles_do_not_inherit_pengelola_endpoint_access(self) -> None:
+        for role in (User.Role.PENGELOLA_INDUK, User.Role.NASABAH):
+            with self.subTest(role=role):
+                user = User.objects.create_user(
+                    email=f"{role}@example.com",
+                    nama=role,
+                    role=role,
+                    bank_sampah=self.bank,
+                    is_profile_complete=True,
+                )
+                refresh = RefreshToken.for_user(user)
+                self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+                response = self.client.get("/api/v1/dashboard/stats")
+
+                self.assertEqual(response.status_code, 403)
+
+    @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False)
+    @patch("api.services.google_id_token.verify_oauth2_token")
+    def test_google_profile_claim_cannot_assign_pilah_role(self, verify: Mock) -> None:
+        verify.return_value = {
+            "sub": "google-123",
+            "email": "claim@example.com",
+            "name": "Claim User",
+            "role": User.Role.SUPERADMIN,
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/google", {"id_token": "signed-google-token"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["user"]["role"], User.Role.PENGELOLA)
+
+    @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False)
+    @patch("api.services.google_id_token.verify_oauth2_token")
+    def test_google_profile_without_email_is_rejected(self, verify: Mock) -> None:
+        verify.return_value = {"sub": "google-without-email", "name": "Missing Email"}
+
+        response = self.client.post(
+            "/api/v1/auth/google", {"id_token": "signed-google-token"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 401, response.data)
+        self.assertEqual(response.data["error"], "ID Token invalid atau expired")
+
+    def test_bank_induk_can_have_multiple_unit_banks(self) -> None:
+        parent = BankSampah.objects.create(
+            nama="Bank Sampah Induk",
+            alamat="Depok",
+            no_hp_pic="+628111111111",
+            jenis_organisasi=BankSampah.OrganizationType.INDUK,
+        )
+        for number in (1, 2):
+            BankSampah.objects.create(
+                nama=f"Unit {number}",
+                alamat="Depok",
+                no_hp_pic=f"+62822222222{number}",
+                jenis_organisasi=BankSampah.OrganizationType.UNIT,
+                parent=parent,
+            )
+
+        self.assertEqual(parent.units.count(), 2)
+
+    def test_mandiri_bank_can_be_validated_without_a_parent(self) -> None:
+        bank = BankSampah(
+            nama="Bank Mandiri",
+            alamat="Depok",
+            no_hp_pic="+628111111112",
+        )
+
+        bank.full_clean()
+
+    def test_bank_unit_requires_an_induk_parent(self) -> None:
+        unit = BankSampah(
+            nama="Unit without induk",
+            alamat="Depok",
+            no_hp_pic="+628222222221",
+            jenis_organisasi=BankSampah.OrganizationType.UNIT,
+            parent=self.bank,
+        )
+
+        with self.assertRaises(ValidationError):
+            unit.full_clean()
+
+    def test_induk_with_units_cannot_be_demoted(self) -> None:
+        parent = BankSampah.objects.create(
+            nama="Bank Sampah Induk",
+            alamat="Depok",
+            no_hp_pic="+628111111111",
+            jenis_organisasi=BankSampah.OrganizationType.INDUK,
+        )
+        BankSampah.objects.create(
+            nama="Unit 1",
+            alamat="Depok",
+            no_hp_pic="+628222222221",
+            jenis_organisasi=BankSampah.OrganizationType.UNIT,
+            parent=parent,
+        )
+
+        parent.jenis_organisasi = BankSampah.OrganizationType.MANDIRI
+        with self.assertRaises(ValidationError):
+            parent.save()
+
+    def test_unit_with_non_induk_parent_cannot_be_saved(self) -> None:
+        with self.assertRaises(ValidationError):
+            BankSampah.objects.create(
+                nama="Invalid Unit",
+                alamat="Depok",
+                no_hp_pic="+628222222222",
+                jenis_organisasi=BankSampah.OrganizationType.UNIT,
+                parent=self.bank,
+            )
+
+    def test_bank_unit_cannot_be_saved_without_a_parent(self) -> None:
+        with self.assertRaises(ValidationError):
+            BankSampah.objects.create(
+                nama="Unit without parent",
+                alamat="Depok",
+                no_hp_pic="+628222222222",
+                jenis_organisasi=BankSampah.OrganizationType.UNIT,
+            )
+
+    def test_nasabah_account_can_join_multiple_banks(self) -> None:
+        customer = User.objects.create_user(
+            email="multi-bank-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+        )
+        parent = BankSampah.objects.create(
+            nama="Bank Sampah Induk Membership",
+            alamat="Depok",
+            no_hp_pic="+628111111113",
+            jenis_organisasi=BankSampah.OrganizationType.INDUK,
+        )
+        banks = [
+            BankSampah.objects.create(
+                nama=f"Unit {number}",
+                alamat="Depok",
+                no_hp_pic=f"+62822222222{number}",
+                jenis_organisasi=BankSampah.OrganizationType.UNIT,
+                parent=parent,
+            )
+            for number in (1, 2)
+        ]
+        for number, bank in enumerate(banks, start=1):
+            Nasabah.objects.create(
+                user=customer,
+                bank_sampah=bank,
+                nomor=f"NAS-{number:04d}",
+                nama=customer.nama,
+                alamat="Depok",
+                no_hp=f"+62833333333{number}",
+            )
+
+        self.assertEqual(customer.keanggotaan_nasabah.count(), 2)
+
+    def test_nasabah_account_can_only_join_a_bank_once(self) -> None:
+        customer = User.objects.create_user(
+            email="single-bank-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+        )
+        Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama=customer.nama,
+            alamat="Depok",
+            no_hp="+628333333331",
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Nasabah.objects.create(
+                    user=customer,
+                    bank_sampah=self.bank,
+                    nomor="NAS-0002",
+                    nama=customer.nama,
+                    alamat="Depok",
+                    no_hp="+628333333332",
+                )
+
+    def test_nasabah_membership_requires_a_nasabah_user(self) -> None:
+        pengelola = User.objects.create_user(
+            email="membership-pengelola@example.com",
+            nama="Pengelola",
+            role=User.Role.PENGELOLA,
+        )
+
+        with self.assertRaises(ValidationError):
+            Nasabah.objects.create(
+                user=pengelola,
+                bank_sampah=self.bank,
+                nomor="NAS-0003",
+                nama=pengelola.nama,
+                alamat="Depok",
+                no_hp="+628333333333",
+            )
 
 
 class HealthzTests(TestCase):

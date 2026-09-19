@@ -49,7 +49,8 @@ class AuthService:
         email = profile["email"]
         google_id = profile["sub"]
         name = profile.get("name") or email.split("@")[0]
-        role = profile.get("role", User.Role.PENGELOLA)
+        # Google proves identity, not a user's PILAH authorization.
+        role = profile.get("_pilah_dev_role", User.Role.PENGELOLA)
 
         user = User.objects.filter(email=email).first()
         is_new_user = user is None
@@ -71,6 +72,29 @@ class AuthService:
                 updates.append("nama")
             if updates:
                 user.save(update_fields=updates)
+
+        # PIL-154: nasabah added by pengurus via email syncs with the Google
+        # account on first login — prefill empty User fields, never overwrite.
+        # On a brand-new account the nama came from the token, so the
+        # pengurus-entered nasabah record wins for it.
+        nasabah = Nasabah.objects.filter(email__iexact=user.email, is_active=True).first()
+        if nasabah:
+            profile_updates = []
+            for user_field, nasabah_field in (
+                ("nama", "nama"),
+                ("no_hp", "no_hp"),
+                ("jenis_kelamin", "jenis_kelamin"),
+                ("tanggal_lahir", "tanggal_lahir"),
+            ):
+                fillable = is_new_user and user_field == "nama"
+                if (fillable or not getattr(user, user_field)) and getattr(nasabah, nasabah_field):
+                    setattr(user, user_field, getattr(nasabah, nasabah_field))
+                    profile_updates.append(user_field)
+            if profile_updates or not user.is_profile_complete:
+                user.is_profile_complete = True
+                profile_updates.append("is_profile_complete")
+            if profile_updates:
+                user.save(update_fields=profile_updates)
 
         refresh = RefreshToken.for_user(user)
         access = refresh.access_token
@@ -108,6 +132,10 @@ class AuthService:
     def user_state(user: User) -> str:
         if user.role == User.Role.SUPERADMIN:
             return "superadmin_dashboard"
+        if user.role == User.Role.PENGELOLA_INDUK:
+            return "pengelola_induk_dashboard"
+        if user.role == User.Role.NASABAH:
+            return "nasabah_dashboard"
         if not user.is_profile_complete:
             return "complete_profile"
         bank = user.bank_sampah
@@ -121,14 +149,21 @@ class AuthService:
 
     @staticmethod
     def _verify_google_token(raw_id_token: str) -> Mapping[str, Any]:
-        if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and raw_id_token.startswith("dev-superadmin:"):
-            _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
-            return {
-                "sub": f"dev-superadmin-{email}",
-                "email": email,
-                "name": name or email.split("@")[0],
-                "role": User.Role.SUPERADMIN,
+        if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN:
+            dev_roles = {
+                "dev-superadmin:": ("dev-superadmin", User.Role.SUPERADMIN),
+                "dev-pengelola-induk:": ("dev-pengelola-induk", User.Role.PENGELOLA_INDUK),
+                "dev-nasabah:": ("dev-nasabah", User.Role.NASABAH),
             }
+            for prefix, (subject_prefix, role) in dev_roles.items():
+                if raw_id_token.startswith(prefix):
+                    _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
+                    return {
+                        "sub": f"{subject_prefix}-{email}",
+                        "email": email,
+                        "name": name or email.split("@")[0],
+                        "_pilah_dev_role": role,
+                    }
         if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and raw_id_token.startswith("dev:"):
             _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
             return {"sub": f"dev-{email}", "email": email, "name": name or email.split("@")[0]}
@@ -141,7 +176,23 @@ class AuthService:
             raise serializers.ValidationError(
                 {"id_token": ["ID Token invalid atau expired"]}
             ) from exc
-        return cast(Mapping[str, Any], profile)
+        verified_profile = cast(Mapping[str, Any], profile)
+        profile_subject = verified_profile.get("sub")
+        profile_email = verified_profile.get("email")
+        if (
+            not isinstance(profile_subject, str)
+            or not profile_subject
+            or not isinstance(profile_email, str)
+            or not profile_email
+        ):
+            raise serializers.ValidationError(
+                {"id_token": ["ID Token tidak memuat email atau subject yang diperlukan"]}
+            )
+        return {
+            "sub": profile_subject,
+            "email": profile_email,
+            "name": verified_profile.get("name"),
+        }
 
 
 class NumberingService:

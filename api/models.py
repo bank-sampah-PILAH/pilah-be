@@ -2,6 +2,7 @@ import uuid
 from typing import Any
 
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -15,6 +16,11 @@ class TimestampedModel(models.Model):
 
 
 class BankSampah(TimestampedModel):
+    class OrganizationType(models.TextChoices):
+        MANDIRI = "mandiri", "Mandiri"
+        INDUK = "induk", "Induk"
+        UNIT = "unit", "Unit"
+
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         ACTIVE = "active", "Active"
@@ -25,6 +31,16 @@ class BankSampah(TimestampedModel):
     alamat = models.TextField(blank=True)
     kota = models.CharField(max_length=100, blank=True)
     no_hp_pic = models.CharField(max_length=20)
+    jenis_organisasi = models.CharField(
+        max_length=20, choices=OrganizationType.choices, default=OrganizationType.MANDIRI
+    )
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        related_name="units",
+        blank=True,
+        null=True,
+    )
     wa_gateway_token = models.TextField(blank=True, null=True)
     wa_template = models.TextField(blank=True)
     foto_logo = models.FileField(upload_to="bank_sampah/logo/", blank=True)
@@ -37,6 +53,55 @@ class BankSampah(TimestampedModel):
     class Meta:
         db_table = "bank_sampah"
         ordering = ["nama"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        jenis_organisasi__in=["mandiri", "induk"],
+                        parent__isnull=True,
+                    )
+                    | models.Q(
+                        jenis_organisasi="unit",
+                        parent__isnull=False,
+                    )
+                ),
+                name="banksampah_type_parent_consistent",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(id=models.F("parent_id")),
+                name="banksampah_not_own_parent",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if (
+            not self._state.adding
+            and self.jenis_organisasi != self.OrganizationType.INDUK
+            and self.units.exists()
+        ):
+            raise ValidationError(
+                {"jenis_organisasi": "Bank Sampah Induk yang memiliki unit tidak dapat diturunkan."}
+            )
+        if self.jenis_organisasi == self.OrganizationType.UNIT and not self.parent_id:
+            raise ValidationError({"parent": "Unit harus berada di bawah Bank Sampah Induk."})
+        if self.jenis_organisasi != self.OrganizationType.UNIT and self.parent_id:
+            raise ValidationError({"parent": "Hanya Bank Sampah Unit yang memiliki induk."})
+        if self.parent_id:
+            parent_type = (
+                BankSampah.objects.filter(pk=self.parent_id)
+                .values_list("jenis_organisasi", flat=True)
+                .first()
+            )
+            if parent_type and parent_type != self.OrganizationType.INDUK:
+                raise ValidationError({"parent": "Unit harus berada di bawah Bank Sampah Induk."})
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        # Keep hierarchy validation on the write path without running all field
+        # validators and uniqueness queries for unrelated updates. Bulk writes
+        # still bypass model validation and must not be used for hierarchy changes.
+        self.clean()
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return self.nama
@@ -68,6 +133,8 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
 
     class Role(models.TextChoices):
         PENGELOLA = "pengelola", "Pengelola"
+        PENGELOLA_INDUK = "pengelola_induk", "Pengelola Induk"
+        NASABAH = "nasabah", "Nasabah"
         SUPERADMIN = "superadmin", "Superadmin"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -105,6 +172,13 @@ class Nasabah(TimestampedModel):
         FEMALE = "perempuan", "Perempuan"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="keanggotaan_nasabah",
+        blank=True,
+        null=True,
+    )
     bank_sampah = models.ForeignKey(BankSampah, on_delete=models.CASCADE, related_name="nasabah")
     nomor = models.CharField(max_length=30)
     nama = models.CharField(max_length=100)
@@ -112,6 +186,7 @@ class Nasabah(TimestampedModel):
     tanggal_lahir = models.DateField(blank=True, null=True)
     alamat = models.TextField()
     no_hp = models.CharField(max_length=20)
+    email = models.EmailField(blank=True, null=True, unique=True)
     tanggal_daftar = models.DateField(default=timezone.localdate)
     is_active = models.BooleanField(default=True)
 
@@ -119,6 +194,24 @@ class Nasabah(TimestampedModel):
         db_table = "nasabah"
         unique_together = (("bank_sampah", "nomor"), ("bank_sampah", "no_hp"))
         ordering = ["nomor"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["bank_sampah", "user"],
+                condition=models.Q(user__isnull=False),
+                name="nasabah_user_once_per_bank",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.user_id:
+            user_role = User.objects.filter(pk=self.user_id).values_list("role", flat=True).first()
+            if user_role != User.Role.NASABAH:
+                raise ValidationError({"user": "Keanggotaan hanya dapat dikaitkan dengan Nasabah."})
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.clean()
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return f"{self.nomor} - {self.nama}"
