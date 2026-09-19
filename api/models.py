@@ -162,6 +162,24 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
         db_table = "users"
         ordering = ["nama"]
 
+    def clean(self) -> None:
+        super().clean()
+        if self._state.adding or self.role == self.Role.NASABAH:
+            return
+        previous_role = type(self).objects.filter(pk=self.pk).values_list("role", flat=True).first()
+        if previous_role == self.Role.NASABAH and self.keanggotaan_nasabah.exists():
+            raise ValidationError(
+                {
+                    "role": "Pengguna Nasabah yang masih memiliki keanggotaan tidak dapat berganti peran."
+                }
+            )
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        update_fields = kwargs.get("update_fields")
+        if update_fields is None or "role" in update_fields:
+            self.clean()
+        super().save(*args, **kwargs)
+
     def __str__(self) -> str:
         return self.email
 
