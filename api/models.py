@@ -87,8 +87,6 @@ class BankSampah(TimestampedModel):
             raise ValidationError({"parent": "Unit harus berada di bawah Bank Sampah Induk."})
         if self.jenis_organisasi != self.OrganizationType.UNIT and self.parent_id:
             raise ValidationError({"parent": "Hanya Bank Sampah Unit yang memiliki induk."})
-        if self.parent_id == self.pk:
-            raise ValidationError({"parent": "Bank sampah tidak dapat menjadi induknya sendiri."})
         if self.parent_id:
             parent_type = (
                 BankSampah.objects.filter(pk=self.parent_id)
