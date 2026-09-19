@@ -16,6 +16,7 @@ class Migration(migrations.Migration):
                 choices=[
                     ("pengelola", "Pengelola"),
                     ("pengelola_induk", "Pengelola Induk"),
+                    ("nasabah", "Nasabah"),
                     ("superadmin", "Superadmin"),
                 ],
                 default="pengelola",

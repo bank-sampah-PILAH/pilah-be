@@ -926,6 +926,18 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["user"]["role"], User.Role.PENGELOLA)
 
+    @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False)
+    @patch("api.services.google_id_token.verify_oauth2_token")
+    def test_google_profile_without_email_is_rejected(self, verify: Mock) -> None:
+        verify.return_value = {"sub": "google-without-email", "name": "Missing Email"}
+
+        response = self.client.post(
+            "/api/v1/auth/google", {"id_token": "signed-google-token"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 401, response.data)
+        self.assertEqual(response.data["error"], "ID Token invalid atau expired")
+
     def test_bank_induk_can_have_multiple_unit_banks(self) -> None:
         parent = BankSampah.objects.create(
             nama="Bank Sampah Induk",
@@ -1062,6 +1074,23 @@ class APISpecTests(APITestCase):
                     alamat="Depok",
                     no_hp="+628333333332",
                 )
+
+    def test_nasabah_membership_requires_a_nasabah_user(self) -> None:
+        pengelola = User.objects.create_user(
+            email="membership-pengelola@example.com",
+            nama="Pengelola",
+            role=User.Role.PENGELOLA,
+        )
+
+        with self.assertRaises(ValidationError):
+            Nasabah.objects.create(
+                user=pengelola,
+                bank_sampah=self.bank,
+                nomor="NAS-0003",
+                nama=pengelola.nama,
+                alamat="Depok",
+                no_hp="+628333333333",
+            )
 
 
 class HealthzTests(TestCase):

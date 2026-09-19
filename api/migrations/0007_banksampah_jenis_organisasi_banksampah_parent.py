@@ -6,7 +6,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0006_alter_user_role"),
+        ("api", "0005_alter_user_role"),
     ]
 
     operations = [

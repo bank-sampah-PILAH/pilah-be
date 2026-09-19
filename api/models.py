@@ -99,7 +99,10 @@ class BankSampah(TimestampedModel):
                 raise ValidationError({"parent": "Unit harus berada di bawah Bank Sampah Induk."})
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        self.full_clean()
+        # Keep hierarchy validation on the write path without running all field
+        # validators and uniqueness queries for unrelated updates. Bulk writes
+        # still bypass model validation and must not be used for hierarchy changes.
+        self.clean()
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:
@@ -199,6 +202,17 @@ class Nasabah(TimestampedModel):
                 name="nasabah_user_once_per_bank",
             ),
         ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.user_id:
+            user_role = User.objects.filter(pk=self.user_id).values_list("role", flat=True).first()
+            if user_role != User.Role.NASABAH:
+                raise ValidationError({"user": "Keanggotaan hanya dapat dikaitkan dengan Nasabah."})
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.clean()
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return f"{self.nomor} - {self.nama}"

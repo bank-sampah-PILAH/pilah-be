@@ -154,9 +154,20 @@ class AuthService:
                 {"id_token": ["ID Token invalid atau expired"]}
             ) from exc
         verified_profile = cast(Mapping[str, Any], profile)
+        profile_subject = verified_profile.get("sub")
+        profile_email = verified_profile.get("email")
+        if (
+            not isinstance(profile_subject, str)
+            or not profile_subject
+            or not isinstance(profile_email, str)
+            or not profile_email
+        ):
+            raise serializers.ValidationError(
+                {"id_token": ["ID Token tidak memuat email atau subject yang diperlukan"]}
+            )
         return {
-            "sub": verified_profile["sub"],
-            "email": verified_profile["email"],
+            "sub": profile_subject,
+            "email": profile_email,
             "name": verified_profile.get("name"),
         }
 
