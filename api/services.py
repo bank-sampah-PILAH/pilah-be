@@ -73,6 +73,29 @@ class AuthService:
             if updates:
                 user.save(update_fields=updates)
 
+        # PIL-154: nasabah added by pengurus via email syncs with the Google
+        # account on first login — prefill empty User fields, never overwrite.
+        # On a brand-new account the nama came from the token, so the
+        # pengurus-entered nasabah record wins for it.
+        nasabah = Nasabah.objects.filter(email__iexact=user.email, is_active=True).first()
+        if nasabah:
+            profile_updates = []
+            for user_field, nasabah_field in (
+                ("nama", "nama"),
+                ("no_hp", "no_hp"),
+                ("jenis_kelamin", "jenis_kelamin"),
+                ("tanggal_lahir", "tanggal_lahir"),
+            ):
+                fillable = is_new_user and user_field == "nama"
+                if (fillable or not getattr(user, user_field)) and getattr(nasabah, nasabah_field):
+                    setattr(user, user_field, getattr(nasabah, nasabah_field))
+                    profile_updates.append(user_field)
+            if profile_updates or not user.is_profile_complete:
+                user.is_profile_complete = True
+                profile_updates.append("is_profile_complete")
+            if profile_updates:
+                user.save(update_fields=profile_updates)
+
         refresh = RefreshToken.for_user(user)
         access = refresh.access_token
         if user.bank_sampah_id:
