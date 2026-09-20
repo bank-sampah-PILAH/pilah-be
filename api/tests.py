@@ -1551,3 +1551,30 @@ class PencairanAPITests(APITestCase):
         self.assertEqual(detail.data["saldo_setelah_transaksi"], Decimal("140000.00"))
         detail_pertama = self.client.get(f"/api/v1/transaksi/{first.data['id']}")
         self.assertEqual(detail_pertama.data["saldo_setelah_transaksi"], Decimal("100000.00"))
+
+    def test_pencairan_list_is_filtered_by_nasabah(self) -> None:
+        other_nasabah = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0003",
+            nama="Siti Aminah",
+            no_hp="+628126666666",
+            alamat="Jl. Melati No. 2",
+        )
+        Saldo.objects.create(nasabah=other_nasabah, total_saldo=Decimal("90000.00"))
+        for nasabah, nominal in ((self.nasabah, "20000"), (other_nasabah, "30000")):
+            created = self.client.post(
+                "/api/v1/pencairan",
+                {"nasabah_id": str(nasabah.id), "nominal": nominal, "metode": "tunai"},
+                format="json",
+            )
+            self.assertEqual(created.status_code, 201, created.data)
+
+        listed = self.client.get("/api/v1/pencairan")
+        self.assertEqual(listed.status_code, 200, listed.data)
+        self.assertEqual(listed.data["count"], 2)
+
+        filtered = self.client.get(f"/api/v1/pencairan?nasabah_id={self.nasabah.id}")
+        self.assertEqual(filtered.status_code, 200, filtered.data)
+        self.assertEqual(filtered.data["count"], 1)
+        self.assertEqual(filtered.data["results"][0]["nominal"], "20000.00")
+        self.assertEqual(filtered.data["results"][0]["nasabah_nama"], "Ahmad Ridwan")
