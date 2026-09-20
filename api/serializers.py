@@ -5,8 +5,7 @@ from typing import Any
 
 from django.conf import settings
 from django.core.signing import TimestampSigner
-from django.db.models import Model, Q, Sum
-from django.db.models.functions import Coalesce
+from django.db.models import Model
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import serializers
@@ -23,6 +22,7 @@ from api.models import (
     Transaksi,
     User,
 )
+from api.services import BalanceService
 from api.validators import get_initials, normalize_indonesian_phone
 
 
@@ -508,11 +508,7 @@ class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
         ]
 
     def get_saldo_setelah_transaksi(self, obj: Any) -> Any:
-        return (
-            Transaksi.objects.filter(bank_sampah=obj.bank_sampah, nasabah=obj.nasabah)
-            .filter(Q(tanggal__lt=obj.tanggal) | Q(tanggal=obj.tanggal, id__lte=obj.id))
-            .aggregate(total=Coalesce(Sum("total_nilai"), Decimal("0.00")))["total"]
-        )
+        return BalanceService.saldo_at(obj.bank_sampah, obj.nasabah_id, obj.tanggal, obj.id)
 
 
 class TransactionListSerializer(serializers.ModelSerializer[Model]):

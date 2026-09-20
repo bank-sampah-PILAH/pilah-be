@@ -1494,7 +1494,9 @@ class PencairanAPITests(APITestCase):
         self.client.credentials(
             HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(outsider).access_token}"
         )
-        self.assertEqual(self.client.get(f"/api/v1/pencairan/{created.data['id']}").status_code, 404)
+        self.assertEqual(
+            self.client.get(f"/api/v1/pencairan/{created.data['id']}").status_code, 404
+        )
 
         superadmin = User.objects.create_user(
             email="admin@example.com", nama="Admin", role=User.Role.SUPERADMIN
