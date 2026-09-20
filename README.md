@@ -156,6 +156,10 @@ PILAH_SUPERADMIN_EMAILS=admin@example.com
 PILAH_PUBLIC_APP_URL=https://pilah.example.com
 ```
 
+The Cloud Run deployment reads `PILAH_SUPERADMIN_EMAILS` from the GitHub
+Actions repository or deployment-environment variable with the same name. Keep
+that value synchronized with the authoritative allowlist configured on Fly.
+
 WhatsApp gateway variables:
 
 ```env
@@ -228,7 +232,9 @@ PILAH_SEED_INDUK_EMAIL
 ```
 
 Set `PILAH_SUPERADMIN_EMAILS` on Fly to the comma-separated authoritative
-Superadmin Google accounts; the seeded Superadmin email must be included.
+Superadmin Google accounts; the seeded Superadmin email must be included. The
+Cloud Run workflow reads the production allowlist from the GitHub variable with
+the same name.
 Existing Superadmin accounts not present in this list cannot use Google login.
 
 Run the confirmation-gated **Seed Staging Testing Data** GitHub Actions
