@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
@@ -33,6 +34,18 @@ class PencairanCreateSerializer(serializers.Serializer[Any]):
     keterangan = serializers.CharField(
         required=False, allow_blank=True, allow_null=True, max_length=255
     )
+
+    def validate_nominal(self, value: Decimal) -> Decimal:
+        if value <= 0:
+            raise serializers.ValidationError("Nominal harus lebih dari nol")
+        if value != value.to_integral_value():
+            raise serializers.ValidationError("Nominal harus dalam rupiah bulat tanpa desimal")
+        return value
+
+    def validate_tanggal(self, value: datetime) -> datetime:
+        if value > timezone.now():
+            raise serializers.ValidationError("Tanggal pencairan tidak boleh di masa depan")
+        return value
 
 
 class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
