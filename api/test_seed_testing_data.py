@@ -103,6 +103,18 @@ class SeedTestingDataCommandTests(TestCase):
         ):
             call_command("seed_testing_data")
 
+    @override_settings(DEBUG=True)
+    def test_reseed_preserves_transaction_dates(self) -> None:
+        call_command("seed_testing_data")
+
+        dates = {item.pk: item.tanggal for item in Transaksi.objects.all()}
+        self.assertEqual(len(dates), 3)
+
+        call_command("seed_testing_data")
+
+        for pk, tanggal in dates.items():
+            self.assertEqual(Transaksi.objects.get(pk=pk).tanggal, tanggal)
+
     @override_settings(DEBUG=False)
     def test_staging_requires_explicit_confirmation(self) -> None:
         with self.assertRaisesMessage(CommandError, "SEED-PILAH-STAGING-DATA"):
