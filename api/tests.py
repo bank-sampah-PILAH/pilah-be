@@ -1578,3 +1578,38 @@ class PencairanAPITests(APITestCase):
         self.assertEqual(filtered.data["count"], 1)
         self.assertEqual(filtered.data["results"][0]["nominal"], "20000.00")
         self.assertEqual(filtered.data["results"][0]["nasabah_nama"], "Ahmad Ridwan")
+
+    def test_export_saldo_column_accounts_for_pencairan(self) -> None:
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))
+        jenis = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="PLS-001",
+            nama_sampah="Plastik PET",
+            kategori=JenisSampah.Kategori.PLASTIK,
+            harga_per_kg=Decimal("100000.00"),
+        )
+        item = {"jenis_sampah_id": str(jenis.id), "berat": "1.000"}
+        first = self.client.post(
+            "/api/v1/transaksi",
+            {"nasabah_id": str(self.nasabah.id), "items": [item]},
+            format="json",
+        )
+        self.assertEqual(first.status_code, 201, first.data)
+        pencairan = self.client.post(
+            "/api/v1/pencairan",
+            {"nasabah_id": str(self.nasabah.id), "nominal": "60000", "metode": "tunai"},
+            format="json",
+        )
+        self.assertEqual(pencairan.status_code, 201, pencairan.data)
+        second = self.client.post(
+            "/api/v1/transaksi",
+            {"nasabah_id": str(self.nasabah.id), "items": [item]},
+            format="json",
+        )
+        self.assertEqual(second.status_code, 201, second.data)
+
+        export = self.client.get("/api/v1/transaksi/export?periode=bulan_ini")
+        self.assertEqual(export.status_code, 200)
+        sheet = load_workbook(BytesIO(export.content), data_only=False)["Riwayat Transaksi"]
+        saldo_column = [sheet.cell(row, 10).value for row in (5, 6)]
+        self.assertEqual(saldo_column, [140000, 100000])
