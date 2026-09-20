@@ -14,7 +14,7 @@ from decimal import ROUND_DOWN, Decimal
 
 from api.models import JenisSampah
 
-RUPIAH = Decimal("1")
+RUPIAH = Decimal(1)
 
 
 def bulatkan_rupiah(nilai: Decimal) -> Decimal:
