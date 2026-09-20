@@ -24,6 +24,7 @@ from api.models import (
     JenisSampah,
     Nasabah,
     NasabahApprovalLog,
+    Pencairan,
     Saldo,
     User,
 )
@@ -1366,3 +1367,20 @@ class PencairanAPITests(APITestCase):
         self.assertEqual(response.data["dicatat_oleh_nama"], "Ibu Sari")
         saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
         self.assertEqual(saldo.data["total_saldo"], "265600.00")
+
+    def test_pencairan_above_saldo_is_rejected(self) -> None:
+        response = self.client.post(
+            "/api/v1/pencairan",
+            {
+                "nasabah_id": str(self.nasabah.id),
+                "nominal": "465600.01",
+                "metode": "tunai",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertEqual(response.data["errors"]["nominal"], ["Saldo nasabah tidak mencukupi"])
+        saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
+        self.assertEqual(saldo.data["total_saldo"], "465600.00")
+        self.assertEqual(Pencairan.objects.count(), 0)
