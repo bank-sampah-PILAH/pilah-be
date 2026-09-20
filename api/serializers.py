@@ -17,11 +17,49 @@ from api.models import (
     JenisSampah,
     Nasabah,
     NasabahApprovalLog,
+    Pencairan,
     Saldo,
     Transaksi,
     User,
 )
 from api.validators import get_initials, normalize_indonesian_phone
+
+
+class PencairanCreateSerializer(serializers.Serializer[Any]):
+    nasabah_id = serializers.UUIDField(required=True)
+    nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=True)
+    metode = serializers.ChoiceField(choices=Pencairan.Metode.choices, required=True)
+    tanggal = serializers.DateTimeField(required=False)
+    keterangan = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True, max_length=255
+    )
+
+
+class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
+    nasabah_id = serializers.UUIDField(source="nasabah.id")
+    nasabah_nama = serializers.CharField(source="nasabah.nama")
+    bank_sampah_id = serializers.UUIDField(source="bank_sampah.id")
+    dicatat_oleh = serializers.UUIDField(source="dicatat_oleh.id")
+    dicatat_oleh_nama = serializers.CharField(source="dicatat_oleh.nama")
+
+    class Meta:
+        model = Pencairan
+        fields = [
+            "id",
+            "nasabah_id",
+            "nasabah_nama",
+            "bank_sampah_id",
+            "dicatat_oleh",
+            "dicatat_oleh_nama",
+            "tanggal",
+            "nominal",
+            "metode",
+            "keterangan",
+            "status",
+            "saldo_sebelum",
+            "saldo_sesudah",
+            "created_at",
+        ]
 
 
 class BankSampahSerializer(serializers.ModelSerializer[Model]):

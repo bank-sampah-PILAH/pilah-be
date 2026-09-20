@@ -15,6 +15,7 @@ from api.views import (
     JenisSampahViewSet,
     LogoutView,
     NasabahViewSet,
+    PencairanViewSet,
     RefreshTokenView,
     RegisterBankSampahView,
     SaldoView,
@@ -28,6 +29,7 @@ router = DefaultRouter(trailing_slash=False)
 router.register("nasabah", NasabahViewSet, basename="nasabah")
 router.register("jenis-sampah", JenisSampahViewSet, basename="jenis-sampah")
 router.register("transaksi", TransaksiViewSet, basename="transaksi")
+router.register("pencairan", PencairanViewSet, basename="pencairan")
 router.register(
     "superadmin/bank-sampah", SuperAdminBankSampahViewSet, basename="superadmin-bank-sampah"
 )

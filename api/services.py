@@ -30,6 +30,7 @@ from api.models import (
     JenisSampah,
     Nasabah,
     NasabahApprovalLog,
+    Pencairan,
     Saldo,
     Transaksi,
     User,
@@ -398,6 +399,41 @@ class TransactionService:
         queryset: QuerySet[Transaksi], request: HttpRequest | None = None
     ) -> tuple[bytes, str]:
         return _export_excel(queryset, request)
+
+
+class PencairanService:
+    @staticmethod
+    @transaction.atomic
+    def create_pencairan(user: User, payload: Mapping[str, Any]) -> Pencairan:
+        bank = user.bank_sampah
+        assert bank is not None  # ponytail: views gate on IsActivePengelola
+        nasabah = (
+            Nasabah.objects.select_for_update()
+            .filter(id=payload["nasabah_id"], bank_sampah=bank, is_active=True)
+            .first()
+        )
+        if not nasabah:
+            raise serializers.ValidationError(
+                {"nasabah_id": ["Nasabah tidak ditemukan atau tidak aktif"]}
+            )
+
+        saldo, _ = Saldo.objects.select_for_update().get_or_create(nasabah=nasabah)
+        nominal = payload["nominal"]
+        saldo_sebelum = saldo.total_saldo
+        pencairan = Pencairan.objects.create(
+            nasabah=nasabah,
+            bank_sampah=bank,
+            dicatat_oleh=user,
+            tanggal=payload.get("tanggal") or timezone.now(),
+            nominal=nominal,
+            metode=payload["metode"],
+            keterangan=payload.get("keterangan") or "",
+            saldo_sebelum=saldo_sebelum,
+            saldo_sesudah=saldo_sebelum - nominal,
+        )
+        saldo.total_saldo = saldo_sebelum - nominal
+        saldo.save(update_fields=["total_saldo", "updated_at"])
+        return pencairan
 
 
 class TransactionFilterService:
