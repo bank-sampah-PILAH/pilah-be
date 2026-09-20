@@ -1237,3 +1237,19 @@ class KalkulasiSetoranTests(APITestCase):
             response.data["errors"]["items"][0]["harga_per_kg"],
             ["Harga diambil dari master jenis sampah dan tidak dapat dikirim"],
         )
+
+    def test_saldo_lama_bersen_ikut_dibulatkan(self) -> None:
+        # Saldo warisan PILAH 1.0 masih menyimpan sen; setoran baru merapikannya.
+        saldo = Saldo.objects.get(nasabah=self.nasabah)
+        saldo.total_saldo = Decimal("100.75")
+        saldo.save(update_fields=["total_saldo"])
+
+        response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "1.000"}])
+
+        self.assertEqual(response.status_code, 201)
+        # Rp 100,75 + Rp 3.333 = Rp 3.433,75 -> saldo tersimpan jadi Rp 3.433
+        saldo.refresh_from_db()
+        self.assertEqual(saldo.total_saldo, Decimal("3433.00"))
+
+        endpoint = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
+        self.assertEqual(endpoint.data["total_saldo"], "3433.00")
