@@ -105,9 +105,7 @@ class GoogleAuthView(APIView):
         try:
             return Response(AuthService.login_with_google(token))
         except AuthServiceError as exc:
-            return Response(
-                {"error": str(exc), "code": exc.code}, status=exc.status_code
-            )
+            return Response({"error": str(exc), "code": exc.code}, status=exc.status_code)
         except Exception:
             return Response({"error": "ID Token invalid atau expired"}, status=401)
 
@@ -126,9 +124,7 @@ class GoogleRegistrationView(APIView):
                 serializer.validated_data["role"],
             )
         except AuthServiceError as exc:
-            return Response(
-                {"error": str(exc), "code": exc.code}, status=exc.status_code
-            )
+            return Response({"error": str(exc), "code": exc.code}, status=exc.status_code)
         return Response(payload, status=201 if created else 200)
 
 

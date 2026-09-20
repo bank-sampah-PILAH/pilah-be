@@ -5,7 +5,6 @@ from rest_framework.test import APITestCase
 
 from api.models import BankSampah, Nasabah, User
 
-
 GOOGLE_PROFILE = {
     "sub": "google-new-user",
     "email": "new.user@example.com",
@@ -63,7 +62,7 @@ class GoogleRegistrationTests(APITestCase):
     @patch("api.services.google_id_token.verify_oauth2_token")
     def test_existing_account_logs_in_with_its_stored_role(self, verify: Mock) -> None:
         user = User.objects.create_user(
-            email=GOOGLE_PROFILE["email"],
+            email=str(GOOGLE_PROFILE["email"]),
             nama="Stored Name",
             role=User.Role.NASABAH,
             is_profile_complete=True,
@@ -158,7 +157,7 @@ class SuperadminWhitelistTests(APITestCase):
     @override_settings(PILAH_SUPERADMIN_EMAILS=())
     def test_existing_superadmin_removed_from_whitelist_is_rejected(self, verify: Mock) -> None:
         User.objects.create_user(
-            email=GOOGLE_PROFILE["email"],
+            email=str(GOOGLE_PROFILE["email"]),
             nama="Former Admin",
             role=User.Role.SUPERADMIN,
             is_profile_complete=True,
@@ -222,9 +221,7 @@ class RoleOnboardingStateTests(APITestCase):
                     {"id_token": f"{prefix}:role-{index}@example.com:Role User"},
                     format="json",
                 )
-                self.client.credentials(
-                    HTTP_AUTHORIZATION=f"Bearer {login.data['access_token']}"
-                )
+                self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access_token']}")
 
                 response = self.client.put(
                     "/api/v1/onboarding/profile",
