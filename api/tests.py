@@ -1365,4 +1365,4 @@ class PencairanAPITests(APITestCase):
         self.assertEqual(response.data["saldo_sesudah"], "265600.00")
         self.assertEqual(response.data["dicatat_oleh_nama"], "Ibu Sari")
         saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
-        self.assertEqual(saldo.data["total_saldo"], Decimal("265600.00"))
+        self.assertEqual(saldo.data["total_saldo"], "265600.00")
