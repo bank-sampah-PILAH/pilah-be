@@ -599,6 +599,9 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         pencairan = PencairanService.create_pencairan(_user(request), serializer.validated_data)
         return Response(PencairanDetailSerializer(pencairan).data, status=status.HTTP_201_CREATED)
 
+    def retrieve(self, request: Request, pk: str | None = None) -> Response:
+        return Response(PencairanDetailSerializer(self.get_object()).data)
+
 
 class SaldoView(APIView):
     permission_classes = [IsActivePengelola]
