@@ -403,11 +403,7 @@ class TransactionCreateSerializer(serializers.Serializer[Any]):
         raw_items = self.initial_data.get("items")
         if isinstance(raw_items, list):
             item_errors: list[dict[str, list[str]]] = [
-                {
-                    "harga_per_kg": [
-                        "Harga diambil dari master jenis sampah dan tidak dapat dikirim"
-                    ]
-                }
+                {"harga_per_kg": ["Harga diambil dari master jenis sampah dan tidak dapat dikirim"]}
                 if isinstance(item, dict) and "harga_per_kg" in item
                 else {}
                 for item in raw_items
