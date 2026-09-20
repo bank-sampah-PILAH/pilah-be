@@ -23,7 +23,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.kalkulasi import harga_berlaku, hitung_subtotal
+from api.kalkulasi import bulatkan_rupiah, harga_berlaku, hitung_subtotal
 from api.models import (
     BankSampah,
     BankSampahApprovalLog,
@@ -356,7 +356,8 @@ class TransactionService:
 
         transaksi.total_nilai = total_nilai
         transaksi.save(update_fields=["total_nilai"])
-        saldo.total_saldo += total_nilai
+        # Saldo warisan PILAH 1.0 bisa menyimpan sen; rapikan saat disentuh.
+        saldo.total_saldo = bulatkan_rupiah(saldo.total_saldo + total_nilai)
         saldo.save(update_fields=["total_saldo", "updated_at"])
         return transaksi
 
