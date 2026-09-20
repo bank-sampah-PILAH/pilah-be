@@ -1013,8 +1013,8 @@ class APISpecTests(APITestCase):
 
     def test_new_role_logins_return_role_specific_states(self) -> None:
         expected_states = {
-            "dev-pengelola-induk": "pengelola_induk_dashboard",
-            "dev-nasabah": "nasabah_dashboard",
+            "dev-pengelola-induk": "complete_profile",
+            "dev-nasabah": "complete_profile",
         }
         for index, (token_prefix, state) in enumerate(expected_states.items(), start=1):
             with self.subTest(role=token_prefix):
@@ -1044,7 +1044,7 @@ class APISpecTests(APITestCase):
                 self.assertEqual(response.status_code, 200, response.data)
                 self.assertEqual(response.data["user"]["role"], role)
                 self.assertEqual(AccessToken(response.data["access_token"])["role"], role)
-                self.assertEqual(response.data["next_step"], f"{role}_dashboard")
+                self.assertEqual(response.data["next_step"], "complete_profile")
 
     def test_new_roles_do_not_inherit_pengelola_endpoint_access(self) -> None:
         for role in (User.Role.PENGELOLA_INDUK, User.Role.NASABAH):
@@ -1078,7 +1078,8 @@ class APISpecTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data["user"]["role"], User.Role.PENGELOLA)
+        self.assertTrue(response.data["registration_required"])
+        self.assertFalse(User.objects.filter(email="claim@example.com").exists())
 
     @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False)
     @patch("api.services.google_id_token.verify_oauth2_token")
