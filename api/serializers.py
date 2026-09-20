@@ -384,9 +384,6 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
 class TransactionItemInputSerializer(serializers.Serializer[Any]):
     jenis_sampah_id = serializers.UUIDField(required=True)
     berat = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal("0.001"))
-    harga_per_kg = serializers.DecimalField(
-        max_digits=11, decimal_places=2, min_value=Decimal("0.01"), required=False
-    )
 
 
 class TransactionCreateSerializer(serializers.Serializer[Any]):
@@ -398,6 +395,26 @@ class TransactionCreateSerializer(serializers.Serializer[Any]):
         if not value:
             raise serializers.ValidationError("Minimal 1 item setoran diperlukan")
         return value
+
+    def validate(self, attrs: Any) -> Any:
+        # Harga hanya boleh berasal dari master jenis sampah. Menerima harga
+        # dari client membuat nilai setoran bisa diatur dari luar sistem, jadi
+        # request yang masih mengirimnya ditolak, bukan diabaikan diam-diam.
+        raw_items = self.initial_data.get("items")
+        if isinstance(raw_items, list):
+            item_errors: list[dict[str, list[str]]] = [
+                {
+                    "harga_per_kg": [
+                        "Harga diambil dari master jenis sampah dan tidak dapat dikirim"
+                    ]
+                }
+                if isinstance(item, dict) and "harga_per_kg" in item
+                else {}
+                for item in raw_items
+            ]
+            if any(item_errors):
+                raise serializers.ValidationError({"items": item_errors})
+        return attrs
 
 
 class DetailTransaksiSerializer(serializers.ModelSerializer[Model]):
