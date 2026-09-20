@@ -95,7 +95,13 @@ Run migrations:
 
 ```bash
 python manage.py migrate
+python manage.py seed_testing_data
 ```
+
+`seed_testing_data` is idempotent and only runs locally when `DJANGO_DEBUG=true`.
+It creates the deterministic banks, users, customers, waste types, balances,
+transactions, and approval log used by mobile E2E tests. Re-running it updates
+that fixture without deleting unrelated rows.
 
 Start the development server:
 
@@ -194,6 +200,25 @@ stored on the existing user account. Google profile claims cannot assign a
 PILAH role.
 
 Use only real Google ID tokens in production.
+
+## Staging E2E data and Google accounts
+
+Staging keeps genuine Google OAuth enabled. Add the four staging test-account
+emails to the Google OAuth consent screen's test-user list, and configure the
+same values as GitHub `staging` environment variables:
+
+```text
+PILAH_SEED_OPERATOR_EMAIL
+PILAH_SEED_CUSTOMER_EMAIL
+PILAH_SEED_SUPERADMIN_EMAIL
+PILAH_SEED_PENDING_OPERATOR_EMAIL
+```
+
+Run the confirmation-gated **Seed Staging Testing Data** GitHub Actions
+workflow and enter `SEED-PILAH-STAGING-DATA` exactly. The workflow connects to
+the documented `pilah-be-staging` Fly.io app and runs the same idempotent
+command with `--environment staging`; it never enables fake authentication.
+See [Fly.io staging](FLY_STAGING.md) for the operator setup.
 
 Bank Sampah organizations can be `mandiri`, `induk`, or `unit`. A unit must
 belong to an induk organization. A Nasabah user can have one membership per

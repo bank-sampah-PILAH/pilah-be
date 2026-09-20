@@ -22,6 +22,15 @@ docker compose exec web python manage.py createsuperadmin \
   --nama "Admin PILAH"
 ```
 
+Populate the local Docker database with deterministic E2E data:
+
+```bash
+docker compose exec web python manage.py seed_testing_data
+```
+
+The command is safe to rerun and preserves unrelated rows. It is guarded by
+`DJANGO_DEBUG=true` for local use.
+
 Run tests inside the container:
 
 ```bash
