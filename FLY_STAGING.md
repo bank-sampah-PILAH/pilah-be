@@ -33,7 +33,7 @@ https://pilah-be-staging.fly.dev/api/v1/auth/google/callback
 ```
 
 GitHub's `staging` environment must contain an app-scoped `FLY_API_TOKEN`.
-It should also contain the four non-secret variables used by the seed workflow:
+It should also contain the five non-secret variables used by the seed workflow:
 
 ```text
 PILAH_SEED_OPERATOR_EMAIL
