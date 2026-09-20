@@ -19,7 +19,13 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.models import BankSampah, JenisSampah, Nasabah, Saldo, Transaksi, User
-from api.permissions import IsActivePengelola, IsPengelola, IsPrimaryPengelola, IsSuperAdmin
+from api.permissions import (
+    IsActivePengelola,
+    IsPengelola,
+    IsPrimaryPengelola,
+    IsRegistrationRole,
+    IsSuperAdmin,
+)
 from api.serializers import (
     ApprovalDecisionSerializer,
     ApprovalLogSerializer,
@@ -28,6 +34,7 @@ from api.serializers import (
     BankSampahRegistrationSerializer,
     BankSampahSerializer,
     GoogleAuthSerializer,
+    GoogleRegistrationSerializer,
     InviteAcceptSerializer,
     JenisSampahSerializer,
     LogoutSerializer,
@@ -46,6 +53,7 @@ from api.serializers import (
 from api.services import (
     ApprovalService,
     AuthService,
+    AuthServiceError,
     DashboardService,
     OnboardingService,
     TeamService,
@@ -94,8 +102,32 @@ class GoogleAuthView(APIView):
             return Response({"errors": {"id_token": ["Google ID Token wajib diisi"]}}, status=422)
         try:
             return Response(AuthService.login_with_google(token))
+        except AuthServiceError as exc:
+            return Response(
+                {"error": str(exc), "code": exc.code}, status=exc.status_code
+            )
         except Exception:
             return Response({"error": "ID Token invalid atau expired"}, status=401)
+
+
+class GoogleRegistrationView(APIView):
+    permission_classes = [AllowAny]
+    serializer_class = GoogleRegistrationSerializer
+
+    def post(self, request: Request) -> Response:
+        serializer = GoogleRegistrationSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({"errors": serializer.errors}, status=422)
+        try:
+            payload, created = AuthService.register_with_google(
+                serializer.validated_data["registration_token"],
+                serializer.validated_data["role"],
+            )
+        except AuthServiceError as exc:
+            return Response(
+                {"error": str(exc), "code": exc.code}, status=exc.status_code
+            )
+        return Response(payload, status=201 if created else 200)
 
 
 class GoogleOAuthStartView(APIView):
@@ -236,7 +268,7 @@ class AuthMeView(APIView):
 
 
 class CompleteProfileView(APIView):
-    permission_classes = [IsPengelola]
+    permission_classes = [IsRegistrationRole]
     serializer_class = UserProfileSerializer
 
     def put(self, request: Request) -> Response:

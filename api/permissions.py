@@ -17,6 +17,17 @@ class IsPengelola(BasePermission):
         return request.user.is_authenticated and request.user.role == User.Role.PENGELOLA
 
 
+class IsRegistrationRole(BasePermission):
+    message = "Endpoint ini hanya untuk peran yang sedang mendaftar"
+
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        return request.user.is_authenticated and request.user.role in {
+            User.Role.PENGELOLA,
+            User.Role.PENGELOLA_INDUK,
+            User.Role.NASABAH,
+        }
+
+
 class IsActivePengelola(IsPengelola):
     message = "Bank sampah belum aktif"
 
