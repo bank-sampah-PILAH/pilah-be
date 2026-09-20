@@ -28,9 +28,8 @@
 
 ## Delivery
 
-- For Linear-linked work, use `feature/<issue-id>-<title>` with the lowercase
-  issue identifier and a short kebab-case title slug, for example
-  `feature/eng-123-fix-login-error`.
+- For Linear-linked work, use `feature/<issue-id>` with the lowercase issue
+  identifier, for example `feature/eng-123`.
 - Use the local `.agents/skills/ship` skill with the global `ship` workflow for
   feature or fix branches in sibling `pilah-be-worktrees` directories.
 - Use the local `.agents/skills/lgtm` skill with the global `lgtm` workflow for
