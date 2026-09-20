@@ -1226,3 +1226,14 @@ class KalkulasiSetoranTests(APITestCase):
         self.assertEqual(response.data["items"][0]["subtotal"], "7815.00")
         self.assertEqual(response.data["total_nilai"], "7815.00")
         self.assertEqual(response.data["saldo_setelah_transaksi"], Decimal("7815.00"))
+
+    def test_harga_dari_client_ditolak(self) -> None:
+        response = self._setor(
+            [{"jenis_sampah_id": str(self.jenis.id), "berat": "2.000", "harga_per_kg": "9999"}]
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data["errors"]["items"][0]["harga_per_kg"],
+            ["Harga diambil dari master jenis sampah dan tidak dapat dikirim"],
+        )
