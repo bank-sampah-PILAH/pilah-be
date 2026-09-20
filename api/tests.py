@@ -1343,6 +1343,32 @@ class APISpecTests(APITestCase):
                 no_hp="+628333333333",
             )
 
+    def test_nasabah_with_memberships_cannot_change_role(self) -> None:
+        customer = User.objects.create_user(
+            email="role-change-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+        )
+        Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0004",
+            nama=customer.nama,
+            alamat="Depok",
+            no_hp="+628333333334",
+        )
+
+        customer.role = User.Role.PENGELOLA
+        with self.assertRaises(ValidationError) as raised:
+            customer.save()
+
+        self.assertEqual(
+            raised.exception.message_dict["role"],
+            ["Pengguna Nasabah yang masih memiliki keanggotaan tidak dapat berganti peran."],
+        )
+        customer.refresh_from_db()
+        self.assertEqual(customer.role, User.Role.NASABAH)
+
 
 class HealthzTests(TestCase):
     def test_healthz_ok(self) -> None:
