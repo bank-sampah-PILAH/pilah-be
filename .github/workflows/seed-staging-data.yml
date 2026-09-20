@@ -1,0 +1,55 @@
+name: Seed Staging Testing Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type SEED-PILAH-STAGING-DATA to confirm
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    name: Seed Fly.io staging fixture
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      PILAH_SEED_OPERATOR_EMAIL: ${{ vars.PILAH_SEED_OPERATOR_EMAIL }}
+      PILAH_SEED_CUSTOMER_EMAIL: ${{ vars.PILAH_SEED_CUSTOMER_EMAIL }}
+      PILAH_SEED_SUPERADMIN_EMAIL: ${{ vars.PILAH_SEED_SUPERADMIN_EMAIL }}
+      PILAH_SEED_PENDING_OPERATOR_EMAIL: ${{ vars.PILAH_SEED_PENDING_OPERATOR_EMAIL }}
+      FLY_APP: pilah-be-staging
+
+    steps:
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Validate seed target and confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          test "${CONFIRMATION}" = "SEED-PILAH-STAGING-DATA"
+          test -n "${FLY_API_TOKEN}"
+          test "${FLY_APP}" = "pilah-be-staging"
+          for email in \
+            "${PILAH_SEED_OPERATOR_EMAIL}" \
+            "${PILAH_SEED_CUSTOMER_EMAIL}" \
+            "${PILAH_SEED_SUPERADMIN_EMAIL}" \
+            "${PILAH_SEED_PENDING_OPERATOR_EMAIL}"; do
+            test -n "${email}"
+            [[ "${email}" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]
+          done
+          echo "Confirmed seed target: ${FLY_APP}"
+
+      - name: Seed staging fixture
+        run: |
+          set -euo pipefail
+          flyctl ssh console \
+            --app "${FLY_APP}" \
+            --access-token "${FLY_API_TOKEN}" \
+            --command "cd /app && python manage.py seed_testing_data --environment staging --confirm=SEED-PILAH-STAGING-DATA --operator-email=${PILAH_SEED_OPERATOR_EMAIL} --customer-email=${PILAH_SEED_CUSTOMER_EMAIL} --superadmin-email=${PILAH_SEED_SUPERADMIN_EMAIL} --pending-operator-email=${PILAH_SEED_PENDING_OPERATOR_EMAIL}"
