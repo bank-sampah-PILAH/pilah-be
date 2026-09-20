@@ -104,6 +104,21 @@ class SeedTestingDataCommandTests(TestCase):
             call_command("seed_testing_data")
 
     @override_settings(DEBUG=True)
+    def test_seed_reuses_existing_account_for_configured_email(self) -> None:
+        User.objects.create_user(
+            email="operator.demo@example.com",
+            nama="Existing Operator",
+            role=User.Role.PENGELOLA,
+        )
+
+        call_command("seed_testing_data")
+        call_command("seed_testing_data")
+
+        users = User.objects.filter(email="operator.demo@example.com")
+        self.assertEqual(users.count(), 1)
+        self.assertEqual(users.get().nama, "Operator PILAH E2E")
+
+    @override_settings(DEBUG=True)
     def test_reseed_preserves_transaction_dates(self) -> None:
         call_command("seed_testing_data")
 

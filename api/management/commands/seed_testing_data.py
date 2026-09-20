@@ -314,22 +314,22 @@ class Command(BaseCommand):
         is_staff: bool = False,
         is_superuser: bool = False,
     ) -> User:
-        if User.objects.filter(email=email).exclude(pk=user_id).exists():
-            raise CommandError(f"Seed email is already used by another user: {email}")
-        user, _ = User.objects.get_or_create(
-            pk=user_id,
-            defaults={
-                "email": email,
-                "nama": name,
-                "role": role,
-                "is_profile_complete": True,
-                "bank_sampah": bank,
-                "is_primary_pengelola": is_primary,
-                "is_active": True,
-                "is_staff": is_staff,
-                "is_superuser": is_superuser,
-            },
-        )
+        user = User.objects.filter(email=email).first()
+        if user is None:
+            user, _ = User.objects.get_or_create(
+                pk=user_id,
+                defaults={
+                    "email": email,
+                    "nama": name,
+                    "role": role,
+                    "is_profile_complete": True,
+                    "bank_sampah": bank,
+                    "is_primary_pengelola": is_primary,
+                    "is_active": True,
+                    "is_staff": is_staff,
+                    "is_superuser": is_superuser,
+                },
+            )
         user.email = email
         user.nama = name
         user.role = role
