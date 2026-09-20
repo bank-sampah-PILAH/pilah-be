@@ -1318,3 +1318,51 @@ class ProtectedMediaTests(TestCase):
         response = self.client.get("/media/activity/not-a-valid-token")
 
         self.assertEqual(response.status_code, 404)
+
+
+class PencairanAPITests(APITestCase):
+    def setUp(self) -> None:
+        self.bank = BankSampah.objects.create(
+            nama="Bank Sampah BTH",
+            alamat="Depok",
+            kota="Depok",
+            no_hp_pic="+628123456789",
+            status=BankSampah.Status.ACTIVE,
+        )
+        self.user = User.objects.create_user(
+            email="sari@example.com",
+            nama="Ibu Sari",
+            bank_sampah=self.bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        self.nasabah = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Ahmad Ridwan",
+            no_hp="+628123456789",
+            alamat="Jl. Mawar No. 12",
+        )
+        Saldo.objects.create(nasabah=self.nasabah, total_saldo=Decimal("465600.00"))
+        refresh = RefreshToken.for_user(self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+    def test_pencairan_reduces_saldo_once(self) -> None:
+        response = self.client.post(
+            "/api/v1/pencairan",
+            {
+                "nasabah_id": str(self.nasabah.id),
+                "nominal": "200000",
+                "metode": "tunai",
+                "keterangan": "Diambil pagi",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["nominal"], "200000.00")
+        self.assertEqual(response.data["saldo_sebelum"], "465600.00")
+        self.assertEqual(response.data["saldo_sesudah"], "265600.00")
+        self.assertEqual(response.data["dicatat_oleh_nama"], "Ibu Sari")
+        saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
+        self.assertEqual(saldo.data["total_saldo"], Decimal("265600.00"))
