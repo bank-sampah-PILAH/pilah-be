@@ -23,6 +23,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from api.kalkulasi import harga_berlaku, hitung_subtotal
 from api.models import (
     BankSampah,
     BankSampahApprovalLog,
@@ -339,9 +340,9 @@ class TransactionService:
                         ]
                     }
                 )
-            harga = item_payload.get("harga_per_kg") or jenis.harga_per_kg
+            harga = harga_berlaku(jenis)
             berat = item_payload["berat"]
-            subtotal = (harga * berat).quantize(Decimal("0.01"))
+            subtotal = hitung_subtotal(harga, berat)
             DetailTransaksi.objects.create(
                 transaksi=transaksi,
                 jenis_sampah=jenis,
