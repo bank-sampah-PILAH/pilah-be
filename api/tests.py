@@ -1373,7 +1373,7 @@ class PencairanAPITests(APITestCase):
             "/api/v1/pencairan",
             {
                 "nasabah_id": str(self.nasabah.id),
-                "nominal": "465600.01",
+                "nominal": "465601",
                 "metode": "tunai",
             },
             format="json",
@@ -1383,4 +1383,43 @@ class PencairanAPITests(APITestCase):
         self.assertEqual(response.data["errors"]["nominal"], ["Saldo nasabah tidak mencukupi"])
         saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
         self.assertEqual(saldo.data["total_saldo"], "465600.00")
+        self.assertEqual(Pencairan.objects.count(), 0)
+
+    def test_pencairan_rejects_invalid_nominal_metode_and_future_tanggal(self) -> None:
+        cases: list[tuple[str, dict[str, Any], str]] = [
+            ("nominal", {"nominal": "0", "metode": "tunai"}, "Nominal harus lebih dari nol"),
+            ("nominal", {"nominal": "-1000", "metode": "tunai"}, "Nominal harus lebih dari nol"),
+            (
+                "nominal",
+                {"nominal": "1000.50", "metode": "tunai"},
+                "Nominal harus dalam rupiah bulat tanpa desimal",
+            ),
+            (
+                "tanggal",
+                {
+                    "nominal": "1000",
+                    "metode": "tunai",
+                    "tanggal": (timezone.now() + timedelta(days=1)).isoformat(),
+                },
+                "Tanggal pencairan tidak boleh di masa depan",
+            ),
+        ]
+        for field, payload, message in cases:
+            with self.subTest(field=field, payload=payload):
+                response = self.client.post(
+                    "/api/v1/pencairan",
+                    {"nasabah_id": str(self.nasabah.id), **payload},
+                    format="json",
+                )
+
+                self.assertEqual(response.status_code, 422, response.data)
+                self.assertEqual(response.data["errors"][field], [message])
+
+        invalid_metode = self.client.post(
+            "/api/v1/pencairan",
+            {"nasabah_id": str(self.nasabah.id), "nominal": "1000", "metode": "qris"},
+            format="json",
+        )
+        self.assertEqual(invalid_metode.status_code, 422, invalid_metode.data)
+        self.assertIn("metode", invalid_metode.data["errors"])
         self.assertEqual(Pencairan.objects.count(), 0)
