@@ -29,6 +29,7 @@ from api.models import (
     DetailTransaksi,
     JenisSampah,
     Nasabah,
+    NasabahApprovalLog,
     Saldo,
     Transaksi,
     User,
@@ -300,6 +301,34 @@ class TeamService:
         bank.invite_token_expires = timezone.now() + timedelta(days=3)
         bank.save(update_fields=["invite_token", "invite_token_expires", "updated_at"])
         return bank.invite_token
+
+
+class NasabahApprovalService:
+    @staticmethod
+    @transaction.atomic
+    def approve(nasabah: Nasabah, pengurus: User, catatan: str = "") -> NasabahApprovalLog:
+        nasabah.status = Nasabah.Status.APPROVED
+        nasabah.is_active = True
+        nasabah.save(update_fields=["status", "is_active", "updated_at"])
+        return NasabahApprovalLog.objects.create(
+            nasabah=nasabah,
+            pengurus=pengurus,
+            status=NasabahApprovalLog.Status.APPROVED,
+            catatan=catatan,
+        )
+
+    @staticmethod
+    @transaction.atomic
+    def reject(nasabah: Nasabah, pengurus: User, catatan: str = "") -> NasabahApprovalLog:
+        nasabah.status = Nasabah.Status.REJECTED
+        nasabah.is_active = False
+        nasabah.save(update_fields=["status", "is_active", "updated_at"])
+        return NasabahApprovalLog.objects.create(
+            nasabah=nasabah,
+            pengurus=pengurus,
+            status=NasabahApprovalLog.Status.REJECTED,
+            catatan=catatan,
+        )
 
 
 class TransactionService:
