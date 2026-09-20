@@ -420,6 +420,9 @@ class PencairanService:
         saldo, _ = Saldo.objects.select_for_update().get_or_create(nasabah=nasabah)
         nominal = payload["nominal"]
         saldo_sebelum = saldo.total_saldo
+        if nominal > saldo_sebelum:
+            raise serializers.ValidationError({"nominal": ["Saldo nasabah tidak mencukupi"]})
+
         pencairan = Pencairan.objects.create(
             nasabah=nasabah,
             bank_sampah=bank,
