@@ -239,9 +239,7 @@ class AuthService:
             return "complete_profile"
         if user.role == User.Role.PENGELOLA_INDUK:
             return (
-                "pengelola_induk_dashboard"
-                if user.bank_sampah_id
-                else "register_bank_sampah_induk"
+                "pengelola_induk_dashboard" if user.bank_sampah_id else "register_bank_sampah_induk"
             )
         if user.role == User.Role.NASABAH:
             return "nasabah_dashboard" if user.keanggotaan_nasabah.exists() else "register_nasabah"
