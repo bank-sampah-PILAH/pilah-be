@@ -18,6 +18,25 @@
   `pip install -r requirements.txt` when `uv` is unavailable.
 - Docker setup and environment variables are documented in `README.md`.
 
+## Aturan nilai uang
+
+- Rupiah adalah bilangan bulat. Satuan terkecil Rp 1; tidak ada sen maupun
+  setengah rupiah.
+- Setiap perhitungan nilai uang dibulatkan **ke bawah** ke rupiah penuh,
+  mengikuti pola `int()` yang sudah dipakai pada teks WhatsApp dan export
+  Excel.
+- Gunakan `api/kalkulasi.py` untuk semua perhitungan dan pembulatan nilai
+  setoran. Jangan memanggil `quantize()` tanpa mode pembulatan: default Python
+  adalah half-even, bukan pembulatan ke bawah.
+- Harga transaksi selalu berasal dari master `JenisSampah` lewat
+  `harga_berlaku()`. Request yang mengirim harga per item ditolak, bukan
+  diabaikan.
+- Pembulatan dilakukan per item, lalu subtotal dijumlahkan menjadi total,
+  supaya total selalu sama dengan angka yang tampil di riwayat dan notifikasi.
+- Data lama dari PILAH 1.0 dapat berisi sen. Bulatkan ke bawah saat nilainya
+  diperbarui, jangan lakukan migrasi massal atas saldo nasabah.
+- Berat (kg) bukan nilai uang: `format_kg` tetap memakai `ROUND_HALF_UP`.
+
 ## Validation
 
 - Run `uv run --with-requirements requirements.txt python manage.py test` when
