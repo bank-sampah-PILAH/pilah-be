@@ -10,7 +10,8 @@ from uuid import UUID
 
 import requests
 from django.conf import settings
-from django.db import transaction
+from django.core import signing
+from django.db import IntegrityError, transaction
 from django.db.models import QuerySet, Sum
 from django.db.models.functions import Coalesce
 from django.http import HttpRequest
@@ -42,38 +43,163 @@ DEFAULT_WA_TEMPLATE = (
     "Terima kasih! 🌿"
 )
 
+REGISTRATION_TOKEN_MAX_AGE = 600
+REGISTRATION_TOKEN_SALT = "pilah-google-registration"
+
+
+class AuthServiceError(Exception):
+    def __init__(self, message: str, *, code: str, status_code: int) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+
 
 class AuthService:
     @staticmethod
     def login_with_google(raw_id_token: str) -> dict[str, Any]:
         profile = AuthService._verify_google_token(raw_id_token)
-        email = profile["email"]
+        email = str(profile["email"]).strip().lower()
         google_id = profile["sub"]
         name = profile.get("name") or email.split("@")[0]
-        # Google proves identity, not a user's PILAH authorization.
-        role = profile.get("_pilah_dev_role", User.Role.PENGELOLA)
+        dev_role = profile.get("_pilah_dev_role")
+        user = User.objects.filter(email__iexact=email).first()
+        is_allowlisted = email in AuthService._superadmin_emails()
 
-        user = User.objects.filter(email=email).first()
-        is_new_user = user is None
+        if user is None and not is_allowlisted and dev_role is None:
+            registration_token = signing.dumps(
+                {
+                    "sub": google_id,
+                    "email": email,
+                    "name": name,
+                    "picture": profile.get("picture") or "",
+                },
+                salt=REGISTRATION_TOKEN_SALT,
+                compress=True,
+            )
+            return {
+                "registration_required": True,
+                "registration_token": registration_token,
+                "expires_in": REGISTRATION_TOKEN_MAX_AGE,
+                "google_profile": {
+                    "email": email,
+                    "name": name,
+                    "picture": profile.get("picture") or None,
+                },
+            }
+
         if user is None:
+            role = User.Role.SUPERADMIN if is_allowlisted else dev_role
             user = User.objects.create_user(
                 email=email,
                 google_id=google_id,
                 nama=name,
                 role=role,
-                is_profile_complete=False,
+                is_profile_complete=role == User.Role.SUPERADMIN,
+                is_staff=role == User.Role.SUPERADMIN,
+                is_superuser=role == User.Role.SUPERADMIN,
             )
-        else:
-            updates = []
-            if not user.google_id:
-                user.google_id = google_id
-                updates.append("google_id")
-            if not user.nama:
-                user.nama = name
-                updates.append("nama")
-            if updates:
-                user.save(update_fields=updates)
+            return AuthService._session_response(user, is_new_user=True)
 
+        is_dev_superadmin = dev_role == User.Role.SUPERADMIN
+        if user.role == User.Role.SUPERADMIN and not (is_allowlisted or is_dev_superadmin):
+            raise AuthServiceError(
+                "Email Superadmin tidak terdaftar pada whitelist",
+                code="superadmin_not_allowlisted",
+                status_code=403,
+            )
+        if is_allowlisted and user.role != User.Role.SUPERADMIN:
+            if user.bank_sampah_id or user.keanggotaan_nasabah.exists():
+                raise AuthServiceError(
+                    "Email whitelist sudah terhubung ke data operasional",
+                    code="superadmin_configuration_conflict",
+                    status_code=409,
+                )
+            user.role = User.Role.SUPERADMIN
+            user.is_staff = True
+            user.is_superuser = True
+            user.is_profile_complete = True
+            user.save(
+                update_fields=[
+                    "role",
+                    "is_staff",
+                    "is_superuser",
+                    "is_profile_complete",
+                    "updated_at",
+                ]
+            )
+
+        AuthService._update_google_identity(user, google_id, str(name))
+        return AuthService._session_response(user, is_new_user=False)
+
+    @staticmethod
+    def register_with_google(registration_token: str, role: str) -> tuple[dict[str, Any], bool]:
+        try:
+            profile = cast(
+                Mapping[str, Any],
+                signing.loads(
+                    registration_token,
+                    salt=REGISTRATION_TOKEN_SALT,
+                    max_age=REGISTRATION_TOKEN_MAX_AGE,
+                ),
+            )
+        except signing.SignatureExpired as exc:
+            raise AuthServiceError(
+                "Sesi pendaftaran kedaluwarsa. Silakan masuk dengan Google lagi.",
+                code="registration_token_expired",
+                status_code=400,
+            ) from exc
+        except signing.BadSignature as exc:
+            raise AuthServiceError(
+                "Sesi pendaftaran tidak valid. Silakan masuk dengan Google lagi.",
+                code="registration_token_invalid",
+                status_code=400,
+            ) from exc
+
+        email = str(profile.get("email") or "").strip().lower()
+        google_id = str(profile.get("sub") or "")
+        name = str(profile.get("name") or email.split("@")[0])
+        if not email or not google_id:
+            raise AuthServiceError(
+                "Sesi pendaftaran tidak valid. Silakan masuk dengan Google lagi.",
+                code="registration_token_invalid",
+                status_code=400,
+            )
+
+        user = User.objects.filter(email__iexact=email).first()
+        created = False
+        if user is None:
+            try:
+                with transaction.atomic():
+                    user = User.objects.create_user(
+                        email=email,
+                        google_id=google_id,
+                        nama=name,
+                        role=role,
+                        is_profile_complete=False,
+                    )
+                    created = True
+            except IntegrityError:
+                user = User.objects.filter(email__iexact=email).first()
+                if user is None:
+                    raise
+
+        AuthService._update_google_identity(user, google_id, name)
+        return AuthService._session_response(user, is_new_user=created), created
+
+    @staticmethod
+    def _update_google_identity(user: User, google_id: str, name: str) -> None:
+        updates = []
+        if not user.google_id:
+            user.google_id = google_id
+            updates.append("google_id")
+        if not user.nama:
+            user.nama = name
+            updates.append("nama")
+        if updates:
+            user.save(update_fields=updates)
+
+    @staticmethod
+    def _session_response(user: User, *, is_new_user: bool) -> dict[str, Any]:
         refresh = RefreshToken.for_user(user)
         access = refresh.access_token
         if user.bank_sampah_id:
@@ -110,12 +236,16 @@ class AuthService:
     def user_state(user: User) -> str:
         if user.role == User.Role.SUPERADMIN:
             return "superadmin_dashboard"
-        if user.role == User.Role.PENGELOLA_INDUK:
-            return "pengelola_induk_dashboard"
-        if user.role == User.Role.NASABAH:
-            return "nasabah_dashboard"
         if not user.is_profile_complete:
             return "complete_profile"
+        if user.role == User.Role.PENGELOLA_INDUK:
+            return (
+                "pengelola_induk_dashboard"
+                if user.bank_sampah_id
+                else "register_bank_sampah_induk"
+            )
+        if user.role == User.Role.NASABAH:
+            return "nasabah_dashboard" if user.keanggotaan_nasabah.exists() else "register_nasabah"
         bank = user.bank_sampah
         if not user.bank_sampah_id or bank is None:
             return "register_bank_sampah"
@@ -144,7 +274,12 @@ class AuthService:
                     }
         if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and raw_id_token.startswith("dev:"):
             _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
-            return {"sub": f"dev-{email}", "email": email, "name": name or email.split("@")[0]}
+            return {
+                "sub": f"dev-{email}",
+                "email": email,
+                "name": name or email.split("@")[0],
+                "_pilah_dev_role": User.Role.PENGELOLA,
+            }
         audience = settings.GOOGLE_CLIENT_ID or None
         try:
             profile = google_id_token.verify_oauth2_token(  # type: ignore[no-untyped-call]  # google-auth ships no stubs
@@ -170,7 +305,14 @@ class AuthService:
             "sub": profile_subject,
             "email": profile_email,
             "name": verified_profile.get("name"),
+            "picture": verified_profile.get("picture"),
         }
+
+    @staticmethod
+    def _superadmin_emails() -> frozenset[str]:
+        configured = settings.PILAH_SUPERADMIN_EMAILS
+        values = configured.split(",") if isinstance(configured, str) else configured
+        return frozenset(str(value).strip().lower() for value in values if str(value).strip())
 
 
 class NumberingService:

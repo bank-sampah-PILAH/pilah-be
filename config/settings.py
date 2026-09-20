@@ -207,6 +207,11 @@ PILAH_ALLOW_FAKE_GOOGLE_TOKEN = (
 )
 if PILAH_ALLOW_FAKE_GOOGLE_TOKEN and not DEBUG:
     raise ImproperlyConfigured("PILAH_ALLOW_FAKE_GOOGLE_TOKEN requires DJANGO_DEBUG=true")
+PILAH_SUPERADMIN_EMAILS = tuple(
+    email.strip().lower()
+    for email in os.getenv("PILAH_SUPERADMIN_EMAILS", "").split(",")
+    if email.strip()
+)
 WHATSAPP_GATEWAY_URL = os.getenv("WHATSAPP_GATEWAY_URL", "")
 WHATSAPP_GATEWAY_TOKEN = os.getenv("WHATSAPP_GATEWAY_TOKEN", "")
 WHATSAPP_GATEWAY_TIMEOUT = int(os.getenv("WHATSAPP_GATEWAY_TIMEOUT", "10"))
