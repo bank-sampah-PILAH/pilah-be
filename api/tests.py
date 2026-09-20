@@ -1423,3 +1423,86 @@ class PencairanAPITests(APITestCase):
         self.assertEqual(invalid_metode.status_code, 422, invalid_metode.data)
         self.assertIn("metode", invalid_metode.data["errors"])
         self.assertEqual(Pencairan.objects.count(), 0)
+
+    def test_pencairan_is_scoped_to_own_active_nasabah(self) -> None:
+        other_bank = BankSampah.objects.create(
+            nama="Bank Sampah Lain",
+            alamat="Bogor",
+            kota="Bogor",
+            no_hp_pic="+628129999999",
+            status=BankSampah.Status.ACTIVE,
+        )
+        other_nasabah = Nasabah.objects.create(
+            bank_sampah=other_bank,
+            nomor="NAS-0001",
+            nama="Nasabah Lain",
+            no_hp="+628129999999",
+            alamat="Jl. Kenanga No. 1",
+        )
+        Saldo.objects.create(nasabah=other_nasabah, total_saldo=Decimal("100000.00"))
+        inactive_nasabah = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0002",
+            nama="Nasabah Nonaktif",
+            no_hp="+628127777777",
+            alamat="Jl. Dahlia No. 5",
+            is_active=False,
+        )
+        Saldo.objects.create(nasabah=inactive_nasabah, total_saldo=Decimal("50000.00"))
+
+        for label, nasabah in (("other bank", other_nasabah), ("inactive", inactive_nasabah)):
+            with self.subTest(nasabah=label):
+                response = self.client.post(
+                    "/api/v1/pencairan",
+                    {"nasabah_id": str(nasabah.id), "nominal": "10000", "metode": "tunai"},
+                    format="json",
+                )
+
+                self.assertEqual(response.status_code, 422, response.data)
+                self.assertEqual(
+                    response.data["errors"]["nasabah_id"],
+                    ["Nasabah tidak ditemukan atau tidak aktif"],
+                )
+        self.assertEqual(Pencairan.objects.count(), 0)
+
+    def test_pencairan_detail_is_scoped_to_bank_sampah(self) -> None:
+        created = self.client.post(
+            "/api/v1/pencairan",
+            {"nasabah_id": str(self.nasabah.id), "nominal": "50000", "metode": "transfer"},
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+
+        detail = self.client.get(f"/api/v1/pencairan/{created.data['id']}")
+        self.assertEqual(detail.status_code, 200, detail.data)
+        self.assertEqual(detail.data["metode"], "transfer")
+        self.assertEqual(detail.data["status"], "tercatat")
+
+        outsider_bank = BankSampah.objects.create(
+            nama="Bank Sampah Seberang",
+            alamat="Bekasi",
+            kota="Bekasi",
+            no_hp_pic="+628128888888",
+            status=BankSampah.Status.ACTIVE,
+        )
+        outsider = User.objects.create_user(
+            email="outsider@example.com",
+            nama="Pak Outsider",
+            bank_sampah=outsider_bank,
+            is_profile_complete=True,
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(outsider).access_token}"
+        )
+        self.assertEqual(self.client.get(f"/api/v1/pencairan/{created.data['id']}").status_code, 404)
+
+        superadmin = User.objects.create_user(
+            email="admin@example.com", nama="Admin", role=User.Role.SUPERADMIN
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(superadmin).access_token}"
+        )
+        self.assertEqual(self.client.post("/api/v1/pencairan", {}, format="json").status_code, 403)
+
+        self.client.credentials()
+        self.assertEqual(self.client.post("/api/v1/pencairan", {}, format="json").status_code, 401)
