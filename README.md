@@ -91,6 +91,16 @@ Create a local `.env` from the example if needed:
 cp .env.example .env
 ```
 
+For local fake-token login, explicitly opt in after copying the example:
+
+```env
+DJANGO_DEBUG=true
+PILAH_ALLOW_FAKE_GOOGLE_TOKEN=true
+```
+
+The backend refuses to start if fake tokens are enabled while debug mode is
+off. Keep both values `false` for staging and production.
+
 Run migrations:
 
 ```bash

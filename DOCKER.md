@@ -49,3 +49,7 @@ The compose setup uses Postgres with local development credentials:
 - user: `pilah`
 - password: `pilah`
 - host from Django container: `db`
+
+Docker Compose explicitly enables fake Google tokens for local development.
+Keep that setting out of any public deployment; the backend rejects fake-token
+mode when `DJANGO_DEBUG=false`.
