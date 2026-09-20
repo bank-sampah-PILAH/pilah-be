@@ -1506,3 +1506,46 @@ class PencairanAPITests(APITestCase):
 
         self.client.credentials()
         self.assertEqual(self.client.post("/api/v1/pencairan", {}, format="json").status_code, 401)
+
+    def test_saldo_setelah_transaksi_accounts_for_pencairan(self) -> None:
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))
+        jenis = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="PLS-001",
+            nama_sampah="Plastik PET",
+            kategori=JenisSampah.Kategori.PLASTIK,
+            harga_per_kg=Decimal("100000.00"),
+        )
+        first = self.client.post(
+            "/api/v1/transaksi",
+            {
+                "nasabah_id": str(self.nasabah.id),
+                "items": [{"jenis_sampah_id": str(jenis.id), "berat": "1.000"}],
+            },
+            format="json",
+        )
+        self.assertEqual(first.status_code, 201, first.data)
+
+        pencairan = self.client.post(
+            "/api/v1/pencairan",
+            {"nasabah_id": str(self.nasabah.id), "nominal": "60000", "metode": "tunai"},
+            format="json",
+        )
+        self.assertEqual(pencairan.status_code, 201, pencairan.data)
+
+        second = self.client.post(
+            "/api/v1/transaksi",
+            {
+                "nasabah_id": str(self.nasabah.id),
+                "items": [{"jenis_sampah_id": str(jenis.id), "berat": "1.000"}],
+            },
+            format="json",
+        )
+        self.assertEqual(second.status_code, 201, second.data)
+
+        saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
+        self.assertEqual(saldo.data["total_saldo"], "140000.00")
+        detail = self.client.get(f"/api/v1/transaksi/{second.data['id']}")
+        self.assertEqual(detail.data["saldo_setelah_transaksi"], Decimal("140000.00"))
+        detail_pertama = self.client.get(f"/api/v1/transaksi/{first.data['id']}")
+        self.assertEqual(detail_pertama.data["saldo_setelah_transaksi"], Decimal("100000.00"))
