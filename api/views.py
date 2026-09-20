@@ -589,9 +589,21 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
     serializer_class = PencairanDetailSerializer
 
     def get_queryset(self) -> QuerySet[Pencairan]:
-        return Pencairan.objects.filter(bank_sampah=_bank_sampah(self.request)).select_related(
+        qs = Pencairan.objects.filter(bank_sampah=_bank_sampah(self.request)).select_related(
             "nasabah", "bank_sampah", "dicatat_oleh"
         )
+        nasabah_id = self.request.query_params.get("nasabah_id")
+        if nasabah_id:
+            qs = qs.filter(nasabah_id=nasabah_id)
+        return qs
+
+    def list(self, request: Request) -> Response:
+        qs = self.get_queryset()
+        page = self.paginate_queryset(qs)
+        serializer = PencairanDetailSerializer(page if page is not None else qs, many=True)
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
 
     def create(self, request: Request) -> Response:
         serializer = PencairanCreateSerializer(data=request.data)
