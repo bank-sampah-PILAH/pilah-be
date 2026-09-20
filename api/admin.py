@@ -7,6 +7,7 @@ from api.models import (
     DetailTransaksi,
     JenisSampah,
     Nasabah,
+    Pencairan,
     Saldo,
     Transaksi,
     User,
@@ -75,3 +76,4 @@ admin.site.register(JenisSampah)
 admin.site.register(Transaksi)
 admin.site.register(DetailTransaksi)
 admin.site.register(BankSampahApprovalLog)
+admin.site.register(Pencairan)
