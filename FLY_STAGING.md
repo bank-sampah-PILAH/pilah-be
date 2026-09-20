@@ -23,6 +23,9 @@ flyctl secrets set --app pilah-be-staging \
 
 Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, and any
 WhatsApp/Twilio secrets the staging environment needs with the same command.
+Also set `PILAH_SUPERADMIN_EMAILS` to the comma-separated Google accounts that
+are allowed to become or remain Superadmin. Include the seeded Superadmin test
+account; this whitelist is authoritative at every real Google login.
 Register this Google OAuth callback URL:
 
 ```text
@@ -37,6 +40,7 @@ PILAH_SEED_OPERATOR_EMAIL
 PILAH_SEED_CUSTOMER_EMAIL
 PILAH_SEED_SUPERADMIN_EMAIL
 PILAH_SEED_PENDING_OPERATOR_EMAIL
+PILAH_SEED_INDUK_EMAIL
 ```
 
 These addresses should be Google test accounts already listed on the OAuth
@@ -64,7 +68,7 @@ python manage.py seed_testing_data \
   --confirm=SEED-PILAH-STAGING-DATA
 ```
 
-The command is idempotent, creates the active and pending approval-flow
+The command is idempotent, creates the active Pengelola and Induk banks plus the pending approval-flow
 fixtures, and never flushes or removes unrelated staging data. For local
 SQLite or Docker Postgres, run `python manage.py migrate` followed by
 `python manage.py seed_testing_data` instead; local execution requires

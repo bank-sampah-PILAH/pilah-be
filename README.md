@@ -142,6 +142,7 @@ Auth and app variables:
 ```env
 GOOGLE_CLIENT_ID=
 PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false
+PILAH_SUPERADMIN_EMAILS=admin@example.com
 PILAH_PUBLIC_APP_URL=https://pilah.example.com
 ```
 
@@ -203,7 +204,7 @@ Use only real Google ID tokens in production.
 
 ## Staging E2E data and Google accounts
 
-Staging keeps genuine Google OAuth enabled. Add the four staging test-account
+Staging keeps genuine Google OAuth enabled. Add the five staging test-account
 emails to the Google OAuth consent screen's test-user list, and configure the
 same values as GitHub `staging` environment variables:
 
@@ -212,7 +213,12 @@ PILAH_SEED_OPERATOR_EMAIL
 PILAH_SEED_CUSTOMER_EMAIL
 PILAH_SEED_SUPERADMIN_EMAIL
 PILAH_SEED_PENDING_OPERATOR_EMAIL
+PILAH_SEED_INDUK_EMAIL
 ```
+
+Set `PILAH_SUPERADMIN_EMAILS` on Fly to the comma-separated authoritative
+Superadmin Google accounts; the seeded Superadmin email must be included.
+Existing Superadmin accounts not present in this list cannot use Google login.
 
 Run the confirmation-gated **Seed Staging Testing Data** GitHub Actions
 workflow and enter `SEED-PILAH-STAGING-DATA` exactly. The workflow connects to
@@ -258,6 +264,7 @@ SuperAdmin flow:
 Authentication:
 
 - `POST /api/v1/auth/google`
+- `POST /api/v1/auth/google/register`
 - `POST /api/v1/auth/refresh`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`

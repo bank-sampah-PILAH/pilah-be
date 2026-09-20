@@ -22,6 +22,7 @@ jobs:
       PILAH_SEED_CUSTOMER_EMAIL: ${{ vars.PILAH_SEED_CUSTOMER_EMAIL }}
       PILAH_SEED_SUPERADMIN_EMAIL: ${{ vars.PILAH_SEED_SUPERADMIN_EMAIL }}
       PILAH_SEED_PENDING_OPERATOR_EMAIL: ${{ vars.PILAH_SEED_PENDING_OPERATOR_EMAIL }}
+      PILAH_SEED_INDUK_EMAIL: ${{ vars.PILAH_SEED_INDUK_EMAIL }}
       FLY_APP: pilah-be-staging
 
     steps:
@@ -40,7 +41,8 @@ jobs:
             "${PILAH_SEED_OPERATOR_EMAIL}" \
             "${PILAH_SEED_CUSTOMER_EMAIL}" \
             "${PILAH_SEED_SUPERADMIN_EMAIL}" \
-            "${PILAH_SEED_PENDING_OPERATOR_EMAIL}"; do
+            "${PILAH_SEED_PENDING_OPERATOR_EMAIL}" \
+            "${PILAH_SEED_INDUK_EMAIL}"; do
             test -n "${email}"
             [[ "${email}" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]
           done
@@ -52,4 +54,4 @@ jobs:
           flyctl ssh console \
             --app "${FLY_APP}" \
             --access-token "${FLY_API_TOKEN}" \
-            --command "cd /app && python manage.py seed_testing_data --environment staging --confirm=SEED-PILAH-STAGING-DATA --operator-email=${PILAH_SEED_OPERATOR_EMAIL} --customer-email=${PILAH_SEED_CUSTOMER_EMAIL} --superadmin-email=${PILAH_SEED_SUPERADMIN_EMAIL} --pending-operator-email=${PILAH_SEED_PENDING_OPERATOR_EMAIL}"
+            --command "cd /app && python manage.py seed_testing_data --environment staging --confirm=SEED-PILAH-STAGING-DATA --operator-email=${PILAH_SEED_OPERATOR_EMAIL} --customer-email=${PILAH_SEED_CUSTOMER_EMAIL} --superadmin-email=${PILAH_SEED_SUPERADMIN_EMAIL} --pending-operator-email=${PILAH_SEED_PENDING_OPERATOR_EMAIL} --induk-email=${PILAH_SEED_INDUK_EMAIL}"
