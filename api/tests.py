@@ -1177,3 +1177,52 @@ class ProtectedMediaTests(TestCase):
         response = self.client.get("/media/activity/not-a-valid-token")
 
         self.assertEqual(response.status_code, 404)
+
+
+class KalkulasiSetoranTests(APITestCase):
+    """Nilai setoran memakai harga master dan dibulatkan ke bawah ke rupiah penuh."""
+
+    def setUp(self) -> None:
+        self.bank = BankSampah.objects.create(
+            nama="Bank Sampah BTH", alamat="Depok", kota="Depok", no_hp_pic="+628123456789"
+        )
+        self.user = User.objects.create_user(
+            email="sari@example.com",
+            nama="Ibu Sari",
+            bank_sampah=self.bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        refresh = RefreshToken.for_user(self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        self.nasabah = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Budi Santoso",
+            no_hp="+628123456789",
+            alamat="Jl. Mawar No. 12",
+        )
+        Saldo.objects.create(nasabah=self.nasabah)
+        self.jenis = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="PLS-001",
+            nama_sampah="Plastik PET",
+            kategori=JenisSampah.Kategori.PLASTIK,
+            harga_per_kg=Decimal("3333.00"),
+        )
+
+    def _setor(self, items: list[dict[str, Any]]) -> Any:
+        return self.client.post(
+            "/api/v1/transaksi",
+            {"nasabah_id": str(self.nasabah.id), "items": items},
+            format="json",
+        )
+
+    def test_subtotal_dibulatkan_ke_bawah_ke_rupiah_penuh(self) -> None:
+        # 2,345 kg x Rp 3.333 = Rp 7.815,885 -> dibulatkan ke bawah jadi Rp 7.815
+        response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "2.345"}])
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["items"][0]["subtotal"], "7815.00")
+        self.assertEqual(response.data["total_nilai"], "7815.00")
+        self.assertEqual(response.data["saldo_setelah_transaksi"], Decimal("7815.00"))
