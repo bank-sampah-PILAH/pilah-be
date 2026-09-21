@@ -1404,9 +1404,13 @@ class APISpecTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(response.data["next_step"], "nasabah_dashboard")
+        # A self-registration awaits pengurus approval (PIL-188) — it must not
+        # hand the user straight into the dashboard before anyone has reviewed
+        # it.
+        self.assertEqual(response.data["next_step"], "approval_pending")
 
         nasabah = Nasabah.objects.get(user=customer, bank_sampah=self.bank)
+        self.assertEqual(nasabah.status, Nasabah.Status.PENDING)
         self.assertEqual(nasabah.nama, "Nasabah PILAH")
         self.assertEqual(nasabah.jenis_kelamin, User.Gender.FEMALE)
         self.assertEqual(str(nasabah.tanggal_lahir), "1998-05-20")
@@ -1497,7 +1501,12 @@ class APISpecTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 201, response.data)
+        # A pengurus already vetted this row by entering it directly — it
+        # must not be reset to pending just because the same person later
+        # signs in and claims it.
+        self.assertEqual(response.data["next_step"], "nasabah_dashboard")
         pre_registered.refresh_from_db()
+        self.assertEqual(pre_registered.status, Nasabah.Status.APPROVED)
         self.assertEqual(pre_registered.user, customer)
         self.assertEqual(pre_registered.nama, "Nasabah PILAH")
         self.assertEqual(pre_registered.alamat, "Alamat Baru")
@@ -1524,6 +1533,63 @@ class APISpecTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+    def test_nasabah_sign_in_reflects_pending_membership(self) -> None:
+        customer = User.objects.create_user(
+            email="pending-membership@example.com",
+            nama="Nasabah Menunggu",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0600",
+            nama=customer.nama,
+            alamat="Jl. Menunggu",
+            no_hp="+628555555010",
+            status=Nasabah.Status.PENDING,
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev-nasabah:pending-membership@example.com:Nasabah Menunggu"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["next_step"], "approval_pending")
+        self.assertEqual(response.data["user"]["state"], "approval_pending")
+
+    def test_nasabah_sign_in_reflects_rejected_membership(self) -> None:
+        customer = User.objects.create_user(
+            email="rejected-membership@example.com",
+            nama="Nasabah Ditolak",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0601",
+            nama=customer.nama,
+            alamat="Jl. Ditolak",
+            no_hp="+628555555011",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev-nasabah:rejected-membership@example.com:Nasabah Ditolak"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        # No dedicated re-application screen for a rejected nasabah exists
+        # yet, so this deliberately sends them back to the bank sampah
+        # picker rather than a dashboard they were never approved for.
+        self.assertEqual(response.data["next_step"], "register_nasabah")
 
     def test_bank_sampah_directory_requires_authentication(self) -> None:
         self.client.credentials()
