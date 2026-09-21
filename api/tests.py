@@ -464,6 +464,62 @@ class APISpecTests(APITestCase):
         self.assertEqual(user.nama, "Nama Lama")
         self.assertEqual(user.no_hp, "081111111111")
 
+    def test_google_login_prefills_nama_from_nasabah_when_existing_name_empty(
+        self,
+    ) -> None:
+        """P2 regression: the token fallback must not block the nasabah name."""
+        self.client.credentials()
+        User.objects.create_user(
+            email="kosong@example.com",
+            nama="",
+            is_profile_complete=False,
+        )
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Nama Nasabah",
+            alamat="Jl. Anggrek No. 3",
+            no_hp="081234567890",
+            email="kosong@example.com",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/google", {"id_token": "dev:kosong@example.com:K"}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+
+        user = User.objects.get(email="kosong@example.com")
+        self.assertEqual(user.nama, "Nama Nasabah")
+
+    def test_google_login_partial_nasabah_keeps_profile_incomplete(self) -> None:
+        """P1 regression: a nasabah record lacking jenis_kelamin/tanggal_lahir
+        must not mark the profile complete — /onboarding/profile would reject
+        the follow-up with 'Profil sudah lengkap'."""
+        self.client.credentials()
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Budi Sebagian",
+            alamat="Jl. Anggrek No. 3",
+            no_hp="081234567890",
+            email="sebagian@example.com",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev:sebagian@example.com:S"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        user = User.objects.get(email="sebagian@example.com")
+        self.assertEqual(user.nama, "Budi Sebagian")
+        self.assertEqual(user.no_hp, "081234567890")
+        self.assertFalse(user.jenis_kelamin)
+        self.assertIsNone(user.tanggal_lahir)
+        self.assertFalse(user.is_profile_complete)
+        self.assertEqual(response.data["next_step"], "complete_profile")
+
     def test_jenis_sampah_and_transaction_update_saldo(self) -> None:
         nasabah = Nasabah.objects.create(
             bank_sampah=self.bank,
