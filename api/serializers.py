@@ -381,9 +381,19 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
         return "kg"
 
 
+# Batas berat dari PM (PIL-224): di atas angka ini hampir pasti salah ketik.
+BERAT_MAKS_PER_ITEM = Decimal(500)
+
+
 class TransactionItemInputSerializer(serializers.Serializer[Any]):
     jenis_sampah_id = serializers.UUIDField(required=True)
-    berat = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal("0.001"))
+    berat = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        min_value=Decimal("0.001"),
+        max_value=BERAT_MAKS_PER_ITEM,
+        error_messages={"max_value": "Berat maksimal 500 kg untuk satu jenis sampah"},
+    )
 
 
 class TransactionCreateSerializer(serializers.Serializer[Any]):
