@@ -1640,6 +1640,121 @@ class APISpecTests(APITestCase):
 
         self.assertEqual(response.status_code, 401)
 
+    def test_nasabah_self_view_lists_own_memberships(self) -> None:
+        customer = User.objects.create_user(
+            email="own-memberships@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        membership = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0700",
+            nama=customer.nama,
+            alamat="Jl. Melati",
+            no_hp="+628555555030",
+            status=Nasabah.Status.PENDING,
+        )
+        other_bank = BankSampah.objects.create(
+            nama="Bank Sampah Lain", alamat="Depok", kota="Depok", no_hp_pic="+628111222333"
+        )
+        Nasabah.objects.create(
+            bank_sampah=other_bank,
+            nomor="NAS-0001",
+            nama="Bukan Milik Saya",
+            alamat="Depok",
+            no_hp="+628555555031",
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get("/api/v1/nasabah/me")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data), 1)
+        entry = response.data[0]
+        self.assertEqual(entry["id"], str(membership.id))
+        self.assertEqual(entry["status"], "pending")
+        self.assertEqual(entry["bank_sampah"]["id"], str(self.bank.id))
+        self.assertEqual(entry["bank_sampah"]["nama"], self.bank.nama)
+        self.assertIsNone(entry["alasan_penolakan"])
+
+    def test_nasabah_self_view_exposes_rejection_reason(self) -> None:
+        customer = User.objects.create_user(
+            email="rejected-reason@example.com",
+            nama="Nasabah Ditolak",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        membership = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0701",
+            nama=customer.nama,
+            alamat="Jl. Melati",
+            no_hp="+628555555032",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        NasabahApprovalLog.objects.create(
+            nasabah=membership,
+            pengurus=self.user,
+            status=NasabahApprovalLog.Status.REJECTED,
+            catatan="Alamat tidak sesuai KTP",
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get("/api/v1/nasabah/me")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data[0]["alasan_penolakan"], "Alamat tidak sesuai KTP")
+
+    def test_nasabah_self_view_omits_stale_reason_after_reapplying(self) -> None:
+        customer = User.objects.create_user(
+            email="reapplied-reason@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1990-01-01",
+            no_hp="+628555555033",
+            alamat="Jl. Baru",
+            is_profile_complete=True,
+        )
+        membership = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0702",
+            nama=customer.nama,
+            alamat="Jl. Lama",
+            no_hp="+628555555033",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        NasabahApprovalLog.objects.create(
+            nasabah=membership,
+            pengurus=self.user,
+            status=NasabahApprovalLog.Status.REJECTED,
+            catatan="Data belum lengkap",
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        self.client.post(
+            "/api/v1/onboarding/nasabah", {"bank_sampah_id": str(self.bank.id)}, format="json"
+        )
+
+        response = self.client.get("/api/v1/nasabah/me")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data[0]["status"], "pending")
+        self.assertIsNone(response.data[0]["alasan_penolakan"])
+
+    def test_nasabah_self_view_requires_nasabah_role(self) -> None:
+        response = self.client.get("/api/v1/nasabah/me")
+
+        self.assertEqual(response.status_code, 403)
+
 
 class HealthzTests(TestCase):
     def test_healthz_ok(self) -> None:
