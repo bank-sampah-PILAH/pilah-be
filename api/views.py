@@ -598,12 +598,9 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         return qs
 
     def list(self, request: Request) -> Response:
-        qs = self.get_queryset()
-        page = self.paginate_queryset(qs)
-        serializer = PencairanDetailSerializer(page if page is not None else qs, many=True)
-        if page is not None:
-            return self.get_paginated_response(serializer.data)
-        return Response(serializer.data)
+        # Pagination is configured globally (PAGE_SIZE), so a page always exists.
+        page = self.paginate_queryset(self.get_queryset())
+        return self.get_paginated_response(PencairanDetailSerializer(page, many=True).data)
 
     def create(self, request: Request) -> Response:
         serializer = PencairanCreateSerializer(data=request.data)
