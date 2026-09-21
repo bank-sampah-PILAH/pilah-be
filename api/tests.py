@@ -1,13 +1,15 @@
 import json
 from datetime import timedelta
 from decimal import Decimal
-from io import BytesIO
+from io import BytesIO, StringIO
 from typing import Any, cast
 from unittest.mock import Mock, patch
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.core.signing import TimestampSigner
 from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, override_settings
@@ -1686,3 +1688,54 @@ class PencairanAPITests(APITestCase):
         self.assertEqual(response.data["saldo_sesudah"], "5000.00")
         saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
         self.assertEqual(saldo.data["total_saldo"], "5000.00")
+
+
+class ResetTestingDataCommandTests(TestCase):
+    CONFIRM = "RESET-PILAH-TEST-DATA"
+
+    def setUp(self) -> None:
+        bank = BankSampah.objects.create(
+            nama="Bank Sampah BTH",
+            alamat="Depok",
+            kota="Depok",
+            no_hp_pic="+628123456789",
+            status=BankSampah.Status.ACTIVE,
+        )
+        user = User.objects.create_user(email="sari@example.com", nama="Ibu Sari", bank_sampah=bank)
+        nasabah = Nasabah.objects.create(
+            bank_sampah=bank,
+            nomor="NAS-0001",
+            nama="Ahmad Ridwan",
+            no_hp="+628123456789",
+            alamat="Jl. Mawar No. 12",
+        )
+        Pencairan.objects.create(
+            nasabah=nasabah,
+            bank_sampah=bank,
+            dicatat_oleh=user,
+            nominal=Decimal("1000.00"),
+            metode=Pencairan.Metode.TUNAI,
+            saldo_sebelum=Decimal("5000.00"),
+            saldo_sesudah=Decimal("4000.00"),
+        )
+
+    def test_reset_clears_pencairan(self) -> None:
+        out = StringIO()
+        call_command("reset_testing_data", confirm=self.CONFIRM, stdout=out)
+
+        self.assertEqual(Pencairan.objects.count(), 0)
+        self.assertIn("Application data reset verified", out.getvalue())
+
+    def test_reset_requires_confirmation(self) -> None:
+        with self.assertRaises(CommandError):
+            call_command("reset_testing_data", confirm="wrong")
+        self.assertEqual(Pencairan.objects.count(), 1)
+
+    def test_reset_verification_reports_leftover_pencairan(self) -> None:
+        with (
+            patch("api.management.commands.reset_testing_data.call_command"),
+            self.assertRaises(CommandError) as raised,
+        ):
+            call_command("reset_testing_data", confirm=self.CONFIRM)
+
+        self.assertIn("'pencairan': 1", str(raised.exception))
