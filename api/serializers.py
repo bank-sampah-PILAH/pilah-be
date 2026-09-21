@@ -49,6 +49,21 @@ class BankSampahSerializer(serializers.ModelSerializer[Model]):
             raise serializers.ValidationError("Nama bank sampah wajib diisi")
         return value.strip()
 
+    def validate_no_hp_pic(self, value: Any) -> Any:
+        try:
+            return normalize_indonesian_phone(value)
+        except serializers.ValidationError as err:
+            raise serializers.ValidationError("Format nomor tidak valid") from err
+
+    def validate_foto_logo(self, value: Any) -> Any:
+        return validate_image_upload(value, "Foto logo")
+
+    def get_pengelola(self, obj: Any) -> Any:
+        user = obj.users.filter(role="pengelola", is_active=True).first()
+        if not user:
+            return None
+        return {"id": str(user.id), "nama": user.nama, "email": user.email}
+
 
 class BankSampahDirectorySerializer(serializers.ModelSerializer[Model]):
     """Public-facing listing for the calon-nasabah bank-sampah picker.
@@ -62,15 +77,6 @@ class BankSampahDirectorySerializer(serializers.ModelSerializer[Model]):
         model = BankSampah
         fields = ["id", "nama", "alamat", "kota", "foto_logo"]
         read_only_fields = fields
-
-    def validate_no_hp_pic(self, value: Any) -> Any:
-        try:
-            return normalize_indonesian_phone(value)
-        except serializers.ValidationError as err:
-            raise serializers.ValidationError("Format nomor tidak valid") from err
-
-    def validate_foto_logo(self, value: Any) -> Any:
-        return validate_image_upload(value, "Foto logo")
 
     def get_pengelola(self, obj: Any) -> Any:
         user = obj.users.filter(role="pengelola", is_active=True).first()
