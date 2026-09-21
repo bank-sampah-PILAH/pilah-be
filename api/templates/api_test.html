@@ -365,6 +365,33 @@
       els.runToken.disabled = !state.token;
     }
 
+    async function completeGoogleRegistration(data) {
+      if (!data.registration_required) return data;
+      const role = window.prompt(
+        "Pilih role: pengelola, pengelola_induk, atau nasabah",
+        "pengelola",
+      );
+      if (!['pengelola', 'pengelola_induk', 'nasabah'].includes(role)) {
+        throw new Error('Role pendaftaran Google tidak valid atau dibatalkan');
+      }
+      const response = await fetch(`${normalizeBaseUrl()}/auth/google/register`, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          registration_token: data.registration_token,
+          role,
+        }),
+      });
+      const registered = await response.json();
+      if (!response.ok) {
+        throw new Error(registered.error || `HTTP ${response.status}`);
+      }
+      return registered;
+    }
+
     window.handleGoogleCredential = function handleGoogleCredential(response) {
       if (!response || !response.credential) {
         state.googleCredential = null;
@@ -406,9 +433,10 @@
         if (!response.ok) {
           throw new Error(data.error || `HTTP ${response.status}`);
         }
-        applyAuthData(data);
+        const authData = await completeGoogleRegistration(data);
+        applyAuthData(authData);
         setGoogleState("PASSED", "passed");
-        writeGoogleOutput(data);
+        writeGoogleOutput(authData);
       } catch (error) {
         setGoogleState("FAILED", "failed");
         writeGoogleOutput({ error: error.message });
@@ -431,7 +459,7 @@
       }
     }
 
-    window.addEventListener("message", event => {
+    window.addEventListener("message", async event => {
       if (event.origin !== window.location.origin) {
         return;
       }
@@ -444,9 +472,15 @@
         writeGoogleOutput(message.payload || { error: "Google OAuth failed" });
         return;
       }
-      applyAuthData(message.payload);
-      setGoogleState("PASSED", "passed");
-      writeGoogleOutput(message.payload);
+      try {
+        const authData = await completeGoogleRegistration(message.payload);
+        applyAuthData(authData);
+        setGoogleState("PASSED", "passed");
+        writeGoogleOutput(authData);
+      } catch (error) {
+        setGoogleState("FAILED", "failed");
+        writeGoogleOutput({ error: error.message });
+      }
     });
 
     window.addEventListener("load", () => {

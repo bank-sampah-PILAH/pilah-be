@@ -929,6 +929,7 @@ class APISpecTests(APITestCase):
         verify.return_value = {
             "sub": "google-123",
             "email": "claim@example.com",
+            "email_verified": True,
             "name": "Claim User",
             "role": User.Role.SUPERADMIN,
         }

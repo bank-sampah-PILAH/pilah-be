@@ -300,6 +300,10 @@ class AuthService:
             raise serializers.ValidationError(
                 {"id_token": ["ID Token tidak memuat email atau subject yang diperlukan"]}
             )
+        if verified_profile.get("email_verified") is not True:
+            raise serializers.ValidationError(
+                {"id_token": ["Email Google belum terverifikasi"]}
+            )
         return {
             "sub": profile_subject,
             "email": profile_email,

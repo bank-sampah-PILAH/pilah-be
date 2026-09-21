@@ -172,6 +172,22 @@ class SuperadminWhitelistTests(APITestCase):
         self.assertEqual(response.data["next_step"], "superadmin_dashboard")
 
     @patch("api.services.google_id_token.verify_oauth2_token")
+    @override_settings(PILAH_SUPERADMIN_EMAILS=("admin@example.com",))
+    def test_unverified_google_email_cannot_use_the_allowlist(self, verify: Mock) -> None:
+        verify.return_value = {
+            **GOOGLE_PROFILE,
+            "email": "admin@example.com",
+            "email_verified": False,
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/google", {"id_token": "signed-google-token"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 401, response.data)
+        self.assertFalse(User.objects.filter(email="admin@example.com").exists())
+
+    @patch("api.services.google_id_token.verify_oauth2_token")
     @override_settings(PILAH_SUPERADMIN_EMAILS=())
     def test_existing_superadmin_removed_from_whitelist_is_rejected(self, verify: Mock) -> None:
         User.objects.create_user(
