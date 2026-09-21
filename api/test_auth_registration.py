@@ -136,7 +136,7 @@ class GoogleRegistrationTests(APITestCase):
     def test_registration_rejects_an_existing_unallowlisted_superadmin(self) -> None:
         token = self._registration_token()
         User.objects.create_user(
-            email=GOOGLE_PROFILE["email"],
+            email=str(GOOGLE_PROFILE["email"]),
             nama="Existing Admin",
             role=User.Role.SUPERADMIN,
             is_profile_complete=True,
