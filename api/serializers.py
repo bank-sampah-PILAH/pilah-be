@@ -383,6 +383,7 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
 
 # Batas berat dari PM (PIL-224): di atas angka ini hampir pasti salah ketik.
 BERAT_MAKS_PER_ITEM = Decimal(500)
+BERAT_MAKS_PER_SETORAN = Decimal(1000)
 
 
 class TransactionItemInputSerializer(serializers.Serializer[Any]):
@@ -404,6 +405,8 @@ class TransactionCreateSerializer(serializers.Serializer[Any]):
     def validate_items(self, value: Any) -> Any:
         if not value:
             raise serializers.ValidationError("Minimal 1 item setoran diperlukan")
+        if sum(item["berat"] for item in value) > BERAT_MAKS_PER_SETORAN:
+            raise serializers.ValidationError("Total berat satu setoran maksimal 1.000 kg")
         return value
 
     def validate(self, attrs: Any) -> Any:
