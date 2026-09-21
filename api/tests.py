@@ -1418,6 +1418,56 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["user"]["role"], "nasabah")
 
+    def test_login_session_exposes_profile_fields_for_prefill(self) -> None:
+        """The mobile complete_profile screen needs these to prefill a
+        partially-synced nasabah (PIL-154) instead of showing a blank form
+        for fields the backend already knows."""
+        customer = User.objects.create_user(
+            email="prefill-fields@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            no_hp="+628123456789",
+            jenis_kelamin=User.Gender.FEMALE,
+            tanggal_lahir="1998-05-20",
+            alamat="Jl. Melati No. 5",
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev-nasabah:prefill-fields@example.com:Nasabah PILAH"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        user_data = response.data["user"]
+        self.assertEqual(user_data["no_hp"], "+628123456789")
+        self.assertEqual(user_data["jenis_kelamin"], "perempuan")
+        self.assertEqual(user_data["tanggal_lahir"], "1998-05-20")
+        self.assertEqual(user_data["alamat"], "Jl. Melati No. 5")
+
+    def test_auth_me_exposes_profile_fields_for_prefill(self) -> None:
+        customer = User.objects.create_user(
+            email="me-prefill@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            no_hp="+628123456789",
+            jenis_kelamin=User.Gender.FEMALE,
+            tanggal_lahir="1998-05-20",
+            alamat="Jl. Melati No. 5",
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get("/api/v1/auth/me")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["no_hp"], "+628123456789")
+        self.assertEqual(response.data["jenis_kelamin"], "perempuan")
+        self.assertEqual(response.data["tanggal_lahir"], "1998-05-20")
+        self.assertEqual(response.data["alamat"], "Jl. Melati No. 5")
+
     def test_new_role_logins_return_role_specific_states(self) -> None:
         expected_states = {
             "dev-pengelola-induk": "complete_profile",
