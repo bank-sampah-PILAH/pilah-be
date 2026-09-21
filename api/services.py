@@ -716,6 +716,10 @@ class TransactionService:
                     }
                 )
             harga = harga_berlaku(jenis)
+            if harga <= 0:
+                raise serializers.ValidationError(
+                    {f"items[{index}].jenis_sampah_id": ["Harga jenis sampah belum diatur"]}
+                )
             berat = item_payload["berat"]
             subtotal = hitung_subtotal(harga, berat)
             DetailTransaksi.objects.create(
