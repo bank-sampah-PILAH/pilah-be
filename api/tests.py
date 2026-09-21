@@ -26,6 +26,7 @@ from api.models import (
     NasabahApprovalLog,
     Pencairan,
     Saldo,
+    Transaksi,
     User,
 )
 from api.serializers import BankSampahApprovalListSerializer
@@ -1633,3 +1634,40 @@ class PencairanAPITests(APITestCase):
         saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
         self.assertEqual(saldo.data["total_saldo"], "465600.00")
         self.assertEqual(Pencairan.objects.count(), 0)
+
+    def test_same_instant_pencairan_is_ordered_after_setoran(self) -> None:
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))
+        jenis = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="PLS-001",
+            nama_sampah="Plastik PET",
+            kategori=JenisSampah.Kategori.PLASTIK,
+            harga_per_kg=Decimal("100000.00"),
+        )
+        setoran = self.client.post(
+            "/api/v1/transaksi",
+            {
+                "nasabah_id": str(self.nasabah.id),
+                "items": [{"jenis_sampah_id": str(jenis.id), "berat": "1.000"}],
+            },
+            format="json",
+        )
+        self.assertEqual(setoran.status_code, 201, setoran.data)
+        same_instant = Transaksi.objects.get(id=setoran.data["id"]).tanggal
+        pencairan = self.client.post(
+            "/api/v1/pencairan",
+            {
+                "nasabah_id": str(self.nasabah.id),
+                "nominal": "40000",
+                "metode": "tunai",
+                "tanggal": same_instant.isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(pencairan.status_code, 201, pencairan.data)
+
+        detail = self.client.get(f"/api/v1/transaksi/{setoran.data['id']}")
+        self.assertEqual(detail.data["saldo_setelah_transaksi"], Decimal("100000.00"))
+        export = self.client.get("/api/v1/transaksi/export?periode=bulan_ini")
+        sheet = load_workbook(BytesIO(export.content), data_only=False)["Riwayat Transaksi"]
+        self.assertEqual(sheet.cell(5, 10).value, 100000)
