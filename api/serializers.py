@@ -383,6 +383,41 @@ class NasabahSelfRegistrationSerializer(serializers.Serializer[Any]):
     bank_sampah_id = serializers.UUIDField()
 
 
+class NasabahSelfBankSampahSerializer(serializers.ModelSerializer[Model]):
+    """The bank sampah facet of a nasabah's own membership listing.
+
+    Deliberately smaller than `BankSampahSerializer` — a nasabah viewing
+    their own membership has no use for the owning pengelola's contact
+    details, only enough to identify which bank the row belongs to.
+    """
+
+    class Meta:
+        model = BankSampah
+        fields = ["id", "nama", "kota"]
+        read_only_fields = fields
+
+
+class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
+    """A calon/active nasabah's own membership row (PIL-204's beranda-first
+    onboarding): status, and — only while rejected — the pengurus's reason,
+    so the beranda can show it and let the user appeal by reapplying.
+    """
+
+    bank_sampah = NasabahSelfBankSampahSerializer(read_only=True)
+    alasan_penolakan = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Nasabah
+        fields = ["id", "bank_sampah", "status", "is_active", "alasan_penolakan"]
+        read_only_fields = fields
+
+    def get_alasan_penolakan(self, obj: Nasabah) -> str | None:
+        if obj.status != Nasabah.Status.REJECTED:
+            return None
+        log = obj.approval_logs.filter(status=NasabahApprovalLog.Status.REJECTED).first()
+        return log.catatan if log else None
+
+
 class NasabahDetailSerializer(NasabahSerializer):
     ringkasan_transaksi = serializers.SerializerMethodField()
 

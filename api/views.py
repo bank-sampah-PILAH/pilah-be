@@ -43,6 +43,7 @@ from api.serializers import (
     NasabahApprovalLogSerializer,
     NasabahDetailSerializer,
     NasabahSelfRegistrationSerializer,
+    NasabahSelfViewSerializer,
     NasabahSerializer,
     RefreshTokenSerializer,
     SaldoSerializer,
@@ -319,6 +320,21 @@ class RegisterNasabahView(APIView):
         data = NasabahSerializer(nasabah).data
         data["next_step"] = AuthService.user_state(_user(request))
         return Response(data, status=201)
+
+
+class NasabahSelfView(APIView):
+    """A nasabah's own membership rows (beranda-first onboarding, PIL-204):
+    status, and the pengurus's reason when rejected, so the app can show
+    it and let the user appeal by reapplying via `RegisterNasabahView`
+    rather than being stalled on a blocking approval screen.
+    """
+
+    permission_classes = [IsNasabah]
+    serializer_class = NasabahSelfViewSerializer
+
+    def get(self, request: Request) -> Response:
+        memberships = Nasabah.objects.filter(user=_user(request)).select_related("bank_sampah")
+        return Response(NasabahSelfViewSerializer(memberships, many=True).data)
 
 
 class AcceptInviteView(APIView):
