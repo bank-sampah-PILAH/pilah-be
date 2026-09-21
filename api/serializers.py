@@ -16,6 +16,7 @@ from api.models import (
     DetailTransaksi,
     JenisSampah,
     Nasabah,
+    NasabahApprovalLog,
     Saldo,
     Transaksi,
     User,
@@ -245,6 +246,14 @@ class ApprovalLogSerializer(serializers.ModelSerializer[Model]):
         fields = ["id", "bank_sampah_id", "superadmin_email", "status", "catatan", "created_at"]
 
 
+class NasabahApprovalLogSerializer(serializers.ModelSerializer[Model]):
+    pengurus_email = serializers.EmailField(source="pengurus.email")
+
+    class Meta:
+        model = NasabahApprovalLog
+        fields = ["id", "nasabah_id", "pengurus_email", "status", "catatan", "created_at"]
+
+
 class GoogleAuthSerializer(serializers.Serializer[Any]):
     id_token = serializers.CharField(required=True)
 
@@ -273,10 +282,18 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
             "alamat",
             "tanggal_daftar",
             "is_active",
+            "status",
             "total_saldo",
             "created_at",
         ]
-        read_only_fields = ["id", "tanggal_daftar", "is_active", "total_saldo", "created_at"]
+        read_only_fields = [
+            "id",
+            "tanggal_daftar",
+            "is_active",
+            "status",
+            "total_saldo",
+            "created_at",
+        ]
 
     def validate_kode(self, value: Any) -> Any:
         value = value.strip()

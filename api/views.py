@@ -31,6 +31,7 @@ from api.serializers import (
     InviteAcceptSerializer,
     JenisSampahSerializer,
     LogoutSerializer,
+    NasabahApprovalLogSerializer,
     NasabahDetailSerializer,
     NasabahSerializer,
     RefreshTokenSerializer,
@@ -47,6 +48,7 @@ from api.services import (
     ApprovalService,
     AuthService,
     DashboardService,
+    NasabahApprovalService,
     OnboardingService,
     TeamService,
     TransactionFilterService,
@@ -325,9 +327,13 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             qs = qs.filter(Q(nama__icontains=search) | Q(no_hp__icontains=search))
         if self.action == "list":
             if status_filter == "aktif":
-                qs = qs.filter(is_active=True)
+                qs = qs.filter(is_active=True, status=Nasabah.Status.APPROVED)
             elif status_filter == "tidak_aktif":
-                qs = qs.filter(is_active=False)
+                qs = qs.filter(is_active=False, status=Nasabah.Status.APPROVED)
+            elif status_filter == "menunggu":
+                qs = qs.filter(status=Nasabah.Status.PENDING)
+            elif status_filter == "ditolak":
+                qs = qs.filter(status=Nasabah.Status.REJECTED)
         return qs.order_by("nomor")
 
     def get_serializer_class(self) -> type[NasabahSerializer | NasabahDetailSerializer]:
@@ -392,6 +398,48 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
                 "id": str(nasabah.id),
                 "is_active": nasabah.is_active,
                 "message": f"Nasabah berhasil {state}",
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="approve")
+    def approve(self, request: Request, pk: str | None = None) -> Response:
+        nasabah = self.get_object()
+        if nasabah.status != Nasabah.Status.PENDING:
+            return Response(
+                {"error": "Hanya pengajuan berstatus menunggu yang dapat diproses"}, status=400
+            )
+        serializer = ApprovalDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        log = NasabahApprovalService.approve(
+            nasabah, _user(request), serializer.validated_data.get("catatan", "")
+        )
+        return Response(
+            {
+                "nasabah": NasabahDetailSerializer(
+                    nasabah, context=self.get_serializer_context()
+                ).data,
+                "approval_log": NasabahApprovalLogSerializer(log).data,
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="reject")
+    def reject(self, request: Request, pk: str | None = None) -> Response:
+        nasabah = self.get_object()
+        if nasabah.status != Nasabah.Status.PENDING:
+            return Response(
+                {"error": "Hanya pengajuan berstatus menunggu yang dapat diproses"}, status=400
+            )
+        serializer = ApprovalDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        log = NasabahApprovalService.reject(
+            nasabah, _user(request), serializer.validated_data.get("catatan", "")
+        )
+        return Response(
+            {
+                "nasabah": NasabahDetailSerializer(
+                    nasabah, context=self.get_serializer_context()
+                ).data,
+                "approval_log": NasabahApprovalLogSerializer(log).data,
             }
         )
 
