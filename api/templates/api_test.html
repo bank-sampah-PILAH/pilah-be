@@ -813,6 +813,7 @@
           ],
           catatan: "Setoran from browser E2E runner"
         }, data => {
+          // Harga master Rp 3.600 (di-update di atas): 2,5 kg = 9.000 + 1,2 kg = 4.320.
           assert(money(data.total_nilai) === "13320.00", "Unexpected total nilai");
           assert(money(data.saldo_setelah_transaksi) === "13320.00", "Unexpected saldo after transaction");
           assert(data.items.length === 2, "Expected two transaction items");
@@ -1040,6 +1041,7 @@
           ],
           catatan: "Setoran from Google token E2E runner"
         }, data => {
+          // Harga master Rp 3.500 (saat dibuat): 2,5 kg = 8.750 + 1,2 kg = 4.200.
           assert(money(data.total_nilai) === "12950.00", "Unexpected total nilai");
           assert(money(data.saldo_setelah_transaksi) === "12950.00", "Unexpected saldo after transaction");
           state.ids.transaksi = data.id;
