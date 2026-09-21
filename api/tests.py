@@ -1028,6 +1028,74 @@ class APISpecTests(APITestCase):
                 self.assertEqual(response.data["next_step"], state)
                 self.assertEqual(response.data["user"]["state"], state)
 
+    def test_complete_profile_requires_alamat_for_nasabah(self) -> None:
+        customer = User.objects.create_user(
+            email="alamat-required@example.com", nama="Calon Nasabah", role=User.Role.NASABAH
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.put(
+            "/api/v1/onboarding/profile",
+            {
+                "nama": "Calon Nasabah",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1997-07-07",
+                "no_hp": "081234567895",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("alamat", response.data["errors"])
+        customer.refresh_from_db()
+        self.assertFalse(customer.is_profile_complete)
+
+    def test_complete_profile_saves_alamat_for_nasabah(self) -> None:
+        customer = User.objects.create_user(
+            email="alamat-saved@example.com", nama="Calon Nasabah", role=User.Role.NASABAH
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.put(
+            "/api/v1/onboarding/profile",
+            {
+                "nama": "Calon Nasabah",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1997-07-07",
+                "no_hp": "081234567895",
+                "alamat": "Jl. Kenanga No. 2",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["next_step"], "register_nasabah")
+        customer.refresh_from_db()
+        self.assertEqual(customer.alamat, "Jl. Kenanga No. 2")
+
+    def test_complete_profile_does_not_require_alamat_for_pengelola(self) -> None:
+        pengelola = User.objects.create_user(
+            email="pengelola-no-alamat@example.com", nama="Pengelola Baru", role=User.Role.PENGELOLA
+        )
+        refresh = RefreshToken.for_user(pengelola)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.put(
+            "/api/v1/onboarding/profile",
+            {
+                "nama": "Pengelola Baru",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1985-03-03",
+                "no_hp": "081234567896",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["next_step"], "register_bank_sampah")
+
     @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=True)
     def test_google_login_uses_role_assigned_to_existing_account(self) -> None:
         for role in (User.Role.PENGELOLA_INDUK, User.Role.NASABAH):
@@ -1323,6 +1391,7 @@ class APISpecTests(APITestCase):
             jenis_kelamin=User.Gender.FEMALE,
             tanggal_lahir="1998-05-20",
             no_hp="+628555555001",
+            alamat="Jl. Melati No. 5",
             is_profile_complete=True,
         )
         refresh = RefreshToken.for_user(customer)
@@ -1330,7 +1399,7 @@ class APISpecTests(APITestCase):
 
         response = self.client.post(
             "/api/v1/onboarding/nasabah",
-            {"bank_sampah_id": str(self.bank.id), "alamat": "Jl. Melati No. 5"},
+            {"bank_sampah_id": str(self.bank.id)},
             format="json",
         )
 
@@ -1347,6 +1416,28 @@ class APISpecTests(APITestCase):
         self.assertTrue(hasattr(nasabah, "saldo"))
         self.assertEqual(nasabah.saldo.total_saldo, 0)
 
+    def test_nasabah_self_registration_requires_profile_alamat(self) -> None:
+        customer = User.objects.create_user(
+            email="no-alamat-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.FEMALE,
+            tanggal_lahir="1998-05-20",
+            no_hp="+628555555099",
+            is_profile_complete=True,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            "/api/v1/onboarding/nasabah",
+            {"bank_sampah_id": str(self.bank.id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Nasabah.objects.filter(user=customer).exists())
+
     def test_nasabah_self_registration_rejects_duplicate_membership(self) -> None:
         customer = User.objects.create_user(
             email="repeat-nasabah@example.com",
@@ -1355,6 +1446,7 @@ class APISpecTests(APITestCase):
             jenis_kelamin=User.Gender.MALE,
             tanggal_lahir="1990-01-01",
             no_hp="+628555555002",
+            alamat="Jl. Baru",
             is_profile_complete=True,
         )
         Nasabah.objects.create(
@@ -1370,7 +1462,7 @@ class APISpecTests(APITestCase):
 
         response = self.client.post(
             "/api/v1/onboarding/nasabah",
-            {"bank_sampah_id": str(self.bank.id), "alamat": "Jl. Baru"},
+            {"bank_sampah_id": str(self.bank.id)},
             format="json",
         )
 
@@ -1392,6 +1484,7 @@ class APISpecTests(APITestCase):
             jenis_kelamin=User.Gender.MALE,
             tanggal_lahir="1995-03-10",
             no_hp="+628555555003",
+            alamat="Alamat Baru",
             is_profile_complete=True,
         )
         refresh = RefreshToken.for_user(customer)
@@ -1399,7 +1492,7 @@ class APISpecTests(APITestCase):
 
         response = self.client.post(
             "/api/v1/onboarding/nasabah",
-            {"bank_sampah_id": str(self.bank.id), "alamat": "Alamat Baru"},
+            {"bank_sampah_id": str(self.bank.id)},
             format="json",
         )
 
@@ -1426,7 +1519,7 @@ class APISpecTests(APITestCase):
 
         response = self.client.post(
             "/api/v1/onboarding/nasabah",
-            {"bank_sampah_id": str(self.bank.id), "alamat": "Jl. Mawar"},
+            {"bank_sampah_id": str(self.bank.id)},
             format="json",
         )
 
