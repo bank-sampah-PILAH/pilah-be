@@ -398,6 +398,43 @@ class APISpecTests(APITestCase):
             self.client.get(f"/api/v1/jadwal/{created.data['id']}").data["penerima_ids"]
         )
 
+    def test_pengelola_can_publish_cancel_and_complete_schedules(self) -> None:
+        starts_at = timezone.now() + timedelta(days=4)
+
+        def create_schedule() -> str:
+            response = self.client.post(
+                "/api/v1/jadwal",
+                {
+                    "jenis_kegiatan": "penimbangan",
+                    "mulai_pada": starts_at.isoformat(),
+                    "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+                    "lokasi": "Balai Warga RW 04",
+                    "keterangan": "",
+                    "cakupan_penerima": "semua_nasabah",
+                },
+                format="json",
+            )
+            self.assertEqual(response.status_code, 201)
+            return str(response.data["id"])
+
+        cancelled_id = create_schedule()
+        published = self.client.post(f"/api/v1/jadwal/{cancelled_id}/terbitkan")
+        cancelled = self.client.post(f"/api/v1/jadwal/{cancelled_id}/batalkan")
+        invalid_completion = self.client.post(f"/api/v1/jadwal/{cancelled_id}/selesaikan")
+
+        self.assertEqual(published.status_code, 200)
+        self.assertEqual(published.data["status"], "diterbitkan")
+        self.assertEqual(cancelled.status_code, 200)
+        self.assertEqual(cancelled.data["status"], "dibatalkan")
+        self.assertEqual(invalid_completion.status_code, 400)
+
+        completed_id = create_schedule()
+        self.client.post(f"/api/v1/jadwal/{completed_id}/terbitkan")
+        completed = self.client.post(f"/api/v1/jadwal/{completed_id}/selesaikan")
+
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(completed.data["status"], "selesai")
+
     @override_settings(
         ALLOWED_HOSTS=["admin.example.com"],
         CSRF_TRUSTED_ORIGINS=["https://admin.example.com"],
