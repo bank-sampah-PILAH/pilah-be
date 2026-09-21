@@ -642,6 +642,46 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
         if hasattr(instance, "_peringatan_jadwal_bertumpuk"):
             delattr(instance, "_peringatan_jadwal_bertumpuk")
 
+    def _transition(
+        self,
+        jadwal: JadwalKegiatan,
+        *,
+        allowed_from: set[str],
+        target: str,
+    ) -> Response:
+        if jadwal.status not in allowed_from:
+            return Response(
+                {"error": "Perubahan status jadwal tidak diizinkan"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        jadwal.status = target
+        jadwal.save(update_fields=["status", "updated_at"])
+        return Response(self.get_serializer(jadwal).data)
+
+    @action(detail=True, methods=["post"], url_path="terbitkan")
+    def terbitkan(self, request: Request, pk: str | None = None) -> Response:
+        return self._transition(
+            self.get_object(),
+            allowed_from={JadwalKegiatan.Status.DRAFT},
+            target=JadwalKegiatan.Status.DITERBITKAN,
+        )
+
+    @action(detail=True, methods=["post"], url_path="batalkan")
+    def batalkan(self, request: Request, pk: str | None = None) -> Response:
+        return self._transition(
+            self.get_object(),
+            allowed_from={JadwalKegiatan.Status.DRAFT, JadwalKegiatan.Status.DITERBITKAN},
+            target=JadwalKegiatan.Status.DIBATALKAN,
+        )
+
+    @action(detail=True, methods=["post"], url_path="selesaikan")
+    def selesaikan(self, request: Request, pk: str | None = None) -> Response:
+        return self._transition(
+            self.get_object(),
+            allowed_from={JadwalKegiatan.Status.DITERBITKAN},
+            target=JadwalKegiatan.Status.SELESAI,
+        )
+
 
 class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
     permission_classes = [IsActivePengelola]
