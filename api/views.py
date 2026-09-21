@@ -9,7 +9,7 @@ from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.db.models import Q, QuerySet
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.http import urlencode
-from rest_framework import status, viewsets
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -578,7 +578,7 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
             .prefetch_related("penerima")
         )
 
-    def perform_create(self, serializer: JadwalKegiatanSerializer) -> None:
+    def perform_create(self, serializer: serializers.BaseSerializer[Any]) -> None:
         serializer.save(bank_sampah=_bank_sampah(self.request), dibuat_oleh=_user(self.request))
 
 

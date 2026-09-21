@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from django.conf import settings
 from django.core.signing import TimestampSigner
@@ -565,7 +565,7 @@ class JadwalKegiatanSerializer(serializers.ModelSerializer[Model]):
         ]
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        instance = self.instance
+        instance = cast(JadwalKegiatan | None, self.instance)
         mulai_pada = attrs.get("mulai_pada", getattr(instance, "mulai_pada", None))
         selesai_pada = attrs.get("selesai_pada", getattr(instance, "selesai_pada", None))
         if mulai_pada and selesai_pada and selesai_pada <= mulai_pada:
