@@ -386,6 +386,11 @@ BERAT_MAKS_PER_ITEM = Decimal(500)
 BERAT_MAKS_PER_SETORAN = Decimal(1000)
 
 
+def _ribuan(nilai: Decimal) -> str:
+    """Tulis bilangan bulat dengan pemisah ribuan Indonesia, mis. 1000 -> "1.000"."""
+    return f"{int(nilai):,}".replace(",", ".")
+
+
 class TransactionItemInputSerializer(serializers.Serializer[Any]):
     jenis_sampah_id = serializers.UUIDField(required=True)
     berat = serializers.DecimalField(
@@ -393,7 +398,9 @@ class TransactionItemInputSerializer(serializers.Serializer[Any]):
         decimal_places=3,
         min_value=Decimal("0.001"),
         max_value=BERAT_MAKS_PER_ITEM,
-        error_messages={"max_value": "Berat maksimal 500 kg untuk satu jenis sampah"},
+        error_messages={
+            "max_value": f"Berat maksimal {_ribuan(BERAT_MAKS_PER_ITEM)} kg untuk satu jenis sampah"
+        },
     )
 
 
@@ -406,7 +413,9 @@ class TransactionCreateSerializer(serializers.Serializer[Any]):
         if not value:
             raise serializers.ValidationError("Minimal 1 item setoran diperlukan")
         if sum(item["berat"] for item in value) > BERAT_MAKS_PER_SETORAN:
-            raise serializers.ValidationError("Total berat satu setoran maksimal 1.000 kg")
+            raise serializers.ValidationError(
+                f"Total berat satu setoran maksimal {_ribuan(BERAT_MAKS_PER_SETORAN)} kg"
+            )
         return value
 
     def validate(self, attrs: Any) -> Any:
