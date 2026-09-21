@@ -339,7 +339,12 @@ class TransactionService:
         assert bank is not None  # ponytail: views gate on IsActivePengelola
         nasabah = (
             Nasabah.objects.select_for_update()
-            .filter(id=payload["nasabah_id"], bank_sampah=bank, is_active=True)
+            .filter(
+                id=payload["nasabah_id"],
+                bank_sampah=bank,
+                is_active=True,
+                status=Nasabah.Status.APPROVED,
+            )
             .first()
         )
         if not nasabah:
@@ -460,7 +465,9 @@ class DashboardService:
             "bank_sampah_nama": bank.nama,
             "pengelola_nama": user.nama,
             "periode": today.strftime("%Y-%m"),
-            "nasabah_aktif": Nasabah.objects.filter(bank_sampah=bank, is_active=True).count(),
+            "nasabah_aktif": Nasabah.objects.filter(
+                bank_sampah=bank, is_active=True, status=Nasabah.Status.APPROVED
+            ).count(),
             "transaksi_bulan_ini": transaksi.count(),
             "total_sampah_kg_bulan_ini": totals["total_kg"],
             "total_nilai_bulan_ini": nilai,
