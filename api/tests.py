@@ -74,6 +74,60 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.data["no_hp_pic"], "+6281234567890")
         self.assertEqual(response.data["pengelola"]["email"], "sari@example.com")
 
+    def test_pengelola_can_create_and_update_organization_schedule(self) -> None:
+        starts_at = timezone.now() + timedelta(days=2)
+        create_response = self.client.post(
+            "/api/v1/jadwal",
+            {
+                "jenis_kegiatan": "penimbangan",
+                "mulai_pada": starts_at.isoformat(),
+                "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+                "lokasi": "Balai Warga RW 04",
+                "keterangan": "Bawa sampah yang sudah dipilah",
+                "cakupan_penerima": "semua_nasabah",
+            },
+            format="json",
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        self.assertEqual(create_response.data["status"], "draft")
+        self.assertEqual(create_response.data["bank_sampah_id"], str(self.bank.id))
+        self.assertFalse(create_response.data["peringatan_jadwal_bertumpuk"])
+
+        update_response = self.client.patch(
+            f"/api/v1/jadwal/{create_response.data['id']}",
+            {"lokasi": "Kantor Bank Sampah BTH"},
+            format="json",
+        )
+
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.data["lokasi"], "Kantor Bank Sampah BTH")
+
+    def test_schedule_overlap_warns_without_blocking_creation(self) -> None:
+        starts_at = timezone.now() + timedelta(days=3)
+        payload = {
+            "jenis_kegiatan": "penimbangan",
+            "mulai_pada": starts_at.isoformat(),
+            "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+            "lokasi": "Balai Warga RW 04",
+            "keterangan": "",
+            "cakupan_penerima": "semua_nasabah",
+        }
+        first = self.client.post("/api/v1/jadwal", payload, format="json")
+        second = self.client.post(
+            "/api/v1/jadwal",
+            {
+                **payload,
+                "mulai_pada": (starts_at + timedelta(minutes=30)).isoformat(),
+                "selesai_pada": (starts_at + timedelta(hours=1)).isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 201)
+        self.assertTrue(second.data["peringatan_jadwal_bertumpuk"])
+
     @override_settings(
         ALLOWED_HOSTS=["admin.example.com"],
         CSRF_TRUSTED_ORIGINS=["https://admin.example.com"],
