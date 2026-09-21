@@ -4,11 +4,9 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('api', '0011_nasabah_status_nasabahapprovallog'),
-        ('api', '0011_user_alamat'),
+        ("api", "0011_nasabah_status_nasabahapprovallog"),
+        ("api", "0011_user_alamat"),
     ]
 
-    operations = [
-    ]
+    operations = []
