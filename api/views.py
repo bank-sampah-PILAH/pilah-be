@@ -21,6 +21,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from api.models import BankSampah, JenisSampah, Nasabah, Saldo, Transaksi, User
 from api.permissions import (
     IsActivePengelola,
+    IsNasabah,
     IsPengelola,
     IsPrimaryPengelola,
     IsRegistrationRole,
@@ -41,6 +42,7 @@ from api.serializers import (
     LogoutSerializer,
     NasabahApprovalLogSerializer,
     NasabahDetailSerializer,
+    NasabahSelfRegistrationSerializer,
     NasabahSerializer,
     RefreshTokenSerializer,
     SaldoSerializer,
@@ -297,6 +299,26 @@ class RegisterBankSampahView(APIView):
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         data = BankSampahSerializer(bank).data
+        data["next_step"] = AuthService.user_state(_user(request))
+        return Response(data, status=201)
+
+
+class RegisterNasabahView(APIView):
+    permission_classes = [IsNasabah]
+    serializer_class = NasabahSelfRegistrationSerializer
+
+    def post(self, request: Request) -> Response:
+        serializer = NasabahSelfRegistrationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            nasabah = OnboardingService.register_nasabah(
+                _user(request), serializer.validated_data
+            )
+        except PermissionError as exc:
+            return Response({"error": str(exc)}, status=403)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
+        data = NasabahSerializer(nasabah).data
         data["next_step"] = AuthService.user_state(_user(request))
         return Response(data, status=201)
 

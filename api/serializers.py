@@ -351,6 +351,25 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
         return getattr(getattr(obj, "saldo", None), "total_saldo", Decimal("0.00"))
 
 
+class NasabahSelfRegistrationSerializer(serializers.Serializer[Any]):
+    """Input for a calon nasabah applying to join a bank sampah (PIL-204).
+
+    Only `bank_sampah_id` and `alamat` are asked for here: `nama`,
+    `jenis_kelamin`, `tanggal_lahir`, and `no_hp` were already collected on
+    the shared `complete_profile` onboarding step and are copied from the
+    User by the service.
+    """
+
+    bank_sampah_id = serializers.UUIDField()
+    alamat = serializers.CharField()
+
+    def validate_alamat(self, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Alamat wajib diisi")
+        return value
+
+
 class NasabahDetailSerializer(NasabahSerializer):
     ringkasan_transaksi = serializers.SerializerMethodField()
 

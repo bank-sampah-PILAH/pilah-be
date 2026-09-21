@@ -374,6 +374,77 @@ class OnboardingService:
 
     @staticmethod
     @transaction.atomic
+    def register_nasabah(user: User, payload: Mapping[str, Any]) -> Nasabah:
+        if user.role != User.Role.NASABAH:
+            raise PermissionError("Hanya nasabah yang dapat mengajukan keanggotaan")
+
+        bank = BankSampah.objects.filter(id=payload["bank_sampah_id"]).first()
+        if (
+            not bank
+            or bank.status != BankSampah.Status.ACTIVE
+            or not bank.is_active
+            or bank.jenis_organisasi == BankSampah.OrganizationType.INDUK
+        ):
+            raise ValueError("Bank sampah tidak ditemukan atau belum tersedia")
+
+        if Nasabah.objects.filter(bank_sampah=bank, user=user).exists():
+            raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
+
+        # Converge onto a pengurus-entered record for the same phone number
+        # rather than colliding with it on the (bank_sampah, no_hp) constraint:
+        # PIL-154 lets a pengurus register a nasabah by phone before that
+        # person ever signs in themselves.
+        existing = Nasabah.objects.filter(
+            bank_sampah=bank, no_hp=user.no_hp, user__isnull=True
+        ).first()
+        if existing is not None:
+            existing.user = user
+            existing.nama = user.nama
+            existing.jenis_kelamin = user.jenis_kelamin
+            existing.tanggal_lahir = user.tanggal_lahir
+            existing.alamat = payload["alamat"]
+            existing.save(
+                update_fields=[
+                    "user",
+                    "nama",
+                    "jenis_kelamin",
+                    "tanggal_lahir",
+                    "alamat",
+                    "updated_at",
+                ]
+            )
+            Saldo.objects.get_or_create(nasabah=existing)
+            return existing
+
+        nasabah = Nasabah(
+            bank_sampah=bank,
+            user=user,
+            nomor=OnboardingService._next_nasabah_nomor(bank),
+            nama=user.nama,
+            jenis_kelamin=user.jenis_kelamin,
+            tanggal_lahir=user.tanggal_lahir,
+            no_hp=user.no_hp,
+            alamat=payload["alamat"],
+        )
+        for _ in range(5):
+            try:
+                with transaction.atomic():
+                    nasabah.save()
+                break
+            except IntegrityError:
+                nasabah.nomor = OnboardingService._next_nasabah_nomor(bank)
+        else:
+            raise ValueError("Gagal membuat nomor nasabah, silakan coba lagi")
+        Saldo.objects.create(nasabah=nasabah)
+        return nasabah
+
+    @staticmethod
+    def _next_nasabah_nomor(bank: BankSampah) -> str:
+        count = Nasabah.objects.filter(bank_sampah=bank).count()
+        return f"NAS-{count + 1:04d}"
+
+    @staticmethod
+    @transaction.atomic
     def accept_invite(user: User, token: str) -> tuple[BankSampah, str]:
         bank = BankSampah.objects.filter(
             invite_token=token, invite_token_expires__gt=timezone.now()
