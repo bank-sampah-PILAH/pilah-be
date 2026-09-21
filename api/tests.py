@@ -1279,3 +1279,30 @@ class ValidasiInputSetoranTests(SetoranTestBase):
         response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "500.000"}])
 
         self.assertEqual(response.status_code, 201)
+
+    def test_total_berat_setoran_di_atas_1000_kg_ditolak(self) -> None:
+        jenis_id = str(self.jenis.id)
+        response = self._setor(
+            [
+                {"jenis_sampah_id": jenis_id, "berat": "500.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "500.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "0.001"},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data["errors"]["items"], ["Total berat satu setoran maksimal 1.000 kg"]
+        )
+        self.assertEqual(self._saldo(), "0.00")
+
+    def test_total_berat_tepat_1000_kg_diterima(self) -> None:
+        jenis_id = str(self.jenis.id)
+        response = self._setor(
+            [
+                {"jenis_sampah_id": jenis_id, "berat": "500.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "500.000"},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 201)
