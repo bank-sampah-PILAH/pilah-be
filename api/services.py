@@ -411,8 +411,10 @@ class BalanceService:
         setoran = Transaksi.objects.filter(bank_sampah=bank_sampah, nasabah_id=nasabah_id).filter(
             Q(tanggal__lt=until) | Q(tanggal=until, id__lte=until_id)
         )
+        # At an equal tanggal a pencairan is ordered after the setoran, so it is
+        # excluded here; the export's merge below applies the same rule.
         pencairan = Pencairan.objects.filter(
-            bank_sampah=bank_sampah, nasabah_id=nasabah_id, tanggal__lte=until
+            bank_sampah=bank_sampah, nasabah_id=nasabah_id, tanggal__lt=until
         )
         masuk = setoran.aggregate(total=Coalesce(Sum("total_nilai"), Decimal("0.00")))["total"]
         keluar = pencairan.aggregate(total=Coalesce(Sum("nominal"), Decimal("0.00")))["total"]
@@ -946,7 +948,7 @@ def _saldo_after_by_transaction(queryset: QuerySet[Transaksi]) -> dict[UUID, Dec
     events.extend(
         (cair.nasabah_id, cair.tanggal, cair.id, -cair.nominal, False) for cair in pencairan
     )
-    events.sort(key=lambda event: (str(event[0]), event[1], str(event[2])))
+    events.sort(key=lambda event: (str(event[0]), event[1], not event[4], str(event[2])))
     for nasabah_id, _tanggal, event_id, delta, is_transaksi in events:
         running_balances[nasabah_id] += delta
         if is_transaksi and event_id in target_ids:
