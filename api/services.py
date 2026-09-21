@@ -403,8 +403,31 @@ class OnboardingService:
         ):
             raise ValueError("Bank sampah tidak ditemukan atau belum tersedia")
 
-        if Nasabah.objects.filter(bank_sampah=bank, user=user).exists():
-            raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
+        own_record = Nasabah.objects.filter(bank_sampah=bank, user=user).first()
+        if own_record is not None:
+            if own_record.status != Nasabah.Status.REJECTED:
+                raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
+            # A rejection is correctable, not a permanent lockout: resubmit
+            # the same row as a fresh application rather than raising.
+            own_record.nama = user.nama
+            own_record.jenis_kelamin = user.jenis_kelamin
+            own_record.tanggal_lahir = user.tanggal_lahir
+            own_record.alamat = user.alamat
+            own_record.status = Nasabah.Status.PENDING
+            own_record.is_active = True
+            own_record.save(
+                update_fields=[
+                    "nama",
+                    "jenis_kelamin",
+                    "tanggal_lahir",
+                    "alamat",
+                    "status",
+                    "is_active",
+                    "updated_at",
+                ]
+            )
+            Saldo.objects.get_or_create(nasabah=own_record)
+            return own_record
 
         # Converge onto a pengurus-entered record for the same phone number
         # rather than colliding with it on the (bank_sampah, no_hp) constraint:
