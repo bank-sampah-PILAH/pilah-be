@@ -340,6 +340,7 @@ class OnboardingService:
                 "no_hp",
                 "jenis_kelamin",
                 "tanggal_lahir",
+                "alamat",
                 "is_profile_complete",
                 "updated_at",
             ]
@@ -377,6 +378,8 @@ class OnboardingService:
     def register_nasabah(user: User, payload: Mapping[str, Any]) -> Nasabah:
         if user.role != User.Role.NASABAH:
             raise PermissionError("Hanya nasabah yang dapat mengajukan keanggotaan")
+        if not user.alamat.strip():
+            raise ValueError("Lengkapi alamat pada profil Anda terlebih dahulu")
 
         bank = BankSampah.objects.filter(id=payload["bank_sampah_id"]).first()
         if (
@@ -402,7 +405,7 @@ class OnboardingService:
             existing.nama = user.nama
             existing.jenis_kelamin = user.jenis_kelamin
             existing.tanggal_lahir = user.tanggal_lahir
-            existing.alamat = payload["alamat"]
+            existing.alamat = user.alamat
             existing.save(
                 update_fields=[
                     "user",
@@ -424,7 +427,7 @@ class OnboardingService:
             jenis_kelamin=user.jenis_kelamin,
             tanggal_lahir=user.tanggal_lahir,
             no_hp=user.no_hp,
-            alamat=payload["alamat"],
+            alamat=user.alamat,
         )
         for _ in range(5):
             try:

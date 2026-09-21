@@ -89,11 +89,13 @@ class UserProfileSerializer(serializers.ModelSerializer[Model]):
             "no_hp",
             "jenis_kelamin",
             "tanggal_lahir",
+            "alamat",
             "role",
             "is_profile_complete",
             "is_primary_pengelola",
         ]
         read_only_fields = ["id", "email", "role", "is_profile_complete", "is_primary_pengelola"]
+        extra_kwargs = {"alamat": {"required": False, "allow_blank": True}}
 
     def validate_nama(self, value: Any) -> Any:
         value = value.strip()
@@ -113,6 +115,18 @@ class UserProfileSerializer(serializers.ModelSerializer[Model]):
         if value > timezone.localdate():
             raise serializers.ValidationError("Tanggal lahir tidak boleh di masa depan")
         return value
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        # alamat is only meaningful (and required) for nasabah accounts —
+        # pengelola/pengelola induk give their organization's address on a
+        # separate step and have no use for a personal one here.
+        instance = self.instance
+        if isinstance(instance, User) and instance.role == User.Role.NASABAH:
+            alamat = attrs.get("alamat", instance.alamat).strip()
+            if not alamat:
+                raise serializers.ValidationError({"alamat": "Alamat wajib diisi"})
+            attrs["alamat"] = alamat
+        return attrs
 
 
 class BankSampahRegistrationSerializer(serializers.Serializer[Any]):
@@ -354,20 +368,13 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
 class NasabahSelfRegistrationSerializer(serializers.Serializer[Any]):
     """Input for a calon nasabah applying to join a bank sampah (PIL-204).
 
-    Only `bank_sampah_id` and `alamat` are asked for here: `nama`,
-    `jenis_kelamin`, `tanggal_lahir`, and `no_hp` were already collected on
-    the shared `complete_profile` onboarding step and are copied from the
-    User by the service.
+    Only `bank_sampah_id` is asked for here: `nama`, `jenis_kelamin`,
+    `tanggal_lahir`, `no_hp`, and `alamat` were already collected on the
+    shared `complete_profile` onboarding step and are copied from the User
+    by the service.
     """
 
     bank_sampah_id = serializers.UUIDField()
-    alamat = serializers.CharField()
-
-    def validate_alamat(self, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise serializers.ValidationError("Alamat wajib diisi")
-        return value
 
 
 class NasabahDetailSerializer(NasabahSerializer):
