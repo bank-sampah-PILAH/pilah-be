@@ -1613,3 +1613,23 @@ class PencairanAPITests(APITestCase):
         sheet = load_workbook(BytesIO(export.content), data_only=False)["Riwayat Transaksi"]
         saldo_column = [sheet.cell(row, 10).value for row in (5, 6)]
         self.assertEqual(saldo_column, [140000, 100000])
+
+    def test_pencairan_requires_approved_membership(self) -> None:
+        for status_value in (Nasabah.Status.PENDING, Nasabah.Status.REJECTED):
+            with self.subTest(status=status_value):
+                Nasabah.objects.filter(id=self.nasabah.id).update(status=status_value)
+
+                response = self.client.post(
+                    "/api/v1/pencairan",
+                    {"nasabah_id": str(self.nasabah.id), "nominal": "10000", "metode": "tunai"},
+                    format="json",
+                )
+
+                self.assertEqual(response.status_code, 422, response.data)
+                self.assertEqual(
+                    response.data["errors"]["nasabah_id"],
+                    ["Nasabah tidak ditemukan atau tidak aktif"],
+                )
+        saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
+        self.assertEqual(saldo.data["total_saldo"], "465600.00")
+        self.assertEqual(Pencairan.objects.count(), 0)
