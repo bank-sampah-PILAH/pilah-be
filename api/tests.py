@@ -1273,6 +1273,48 @@ class APISpecTests(APITestCase):
         customer.refresh_from_db()
         self.assertEqual(customer.role, User.Role.NASABAH)
 
+    def test_bank_sampah_directory_lists_only_joinable_active_banks(self) -> None:
+        customer = User.objects.create_user(
+            email="browsing-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        pending_bank = BankSampah.objects.create(
+            nama="Bank Sampah Menunggu",
+            alamat="Depok",
+            no_hp_pic="+628444444441",
+            status=BankSampah.Status.PENDING,
+            is_active=False,
+        )
+        induk = BankSampah.objects.create(
+            nama="Bank Sampah Induk Pusat",
+            alamat="Depok",
+            no_hp_pic="+628444444442",
+            jenis_organisasi=BankSampah.OrganizationType.INDUK,
+        )
+        unit = BankSampah.objects.create(
+            nama="Bank Sampah Unit A",
+            alamat="Depok",
+            no_hp_pic="+628444444443",
+            jenis_organisasi=BankSampah.OrganizationType.UNIT,
+            parent=induk,
+        )
+
+        response = self.client.get("/api/v1/bank-sampah")
+
+        self.assertEqual(response.status_code, 200)
+        names = {item["nama"] for item in response.data}
+        self.assertIn(self.bank.nama, names)
+        self.assertIn(unit.nama, names)
+        self.assertNotIn(pending_bank.nama, names)
+        self.assertNotIn(induk.nama, names)
+        listed = next(item for item in response.data if item["nama"] == unit.nama)
+        self.assertEqual(set(listed.keys()), {"id", "nama", "alamat", "kota", "foto_logo"})
+
 
 class HealthzTests(TestCase):
     def test_healthz_ok(self) -> None:
