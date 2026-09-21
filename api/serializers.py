@@ -49,6 +49,20 @@ class BankSampahSerializer(serializers.ModelSerializer[Model]):
             raise serializers.ValidationError("Nama bank sampah wajib diisi")
         return value.strip()
 
+
+class BankSampahDirectorySerializer(serializers.ModelSerializer[Model]):
+    """Public-facing listing for the calon-nasabah bank-sampah picker.
+
+    Deliberately excludes `pengelola`, `no_hp_pic`, and `wa_gateway_token` —
+    `BankSampahSerializer` carries those for the owning pengelola, not for a
+    prospective member browsing banks to join.
+    """
+
+    class Meta:
+        model = BankSampah
+        fields = ["id", "nama", "alamat", "kota", "foto_logo"]
+        read_only_fields = fields
+
     def validate_no_hp_pic(self, value: Any) -> Any:
         try:
             return normalize_indonesian_phone(value)

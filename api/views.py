@@ -31,6 +31,7 @@ from api.serializers import (
     ApprovalLogSerializer,
     AuthUserSerializer,
     BankSampahApprovalListSerializer,
+    BankSampahDirectorySerializer,
     BankSampahRegistrationSerializer,
     BankSampahSerializer,
     GoogleAuthSerializer,
@@ -340,6 +341,26 @@ class BankSampahMeView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class BankSampahDirectoryView(APIView):
+    """Lists bank sampah a calon nasabah can apply to join.
+
+    Excludes `induk` organizations — they are administrative parents with no
+    direct membership of their own; a nasabah joins one of their `unit`
+    branches, or a standalone `mandiri` bank sampah, instead.
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = BankSampahDirectorySerializer
+
+    def get(self, request: Request) -> Response:
+        banks = (
+            BankSampah.objects.filter(status=BankSampah.Status.ACTIVE, is_active=True)
+            .exclude(jenis_organisasi=BankSampah.OrganizationType.INDUK)
+            .order_by("nama")
+        )
+        return Response(BankSampahDirectorySerializer(banks, many=True).data)
 
 
 class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
