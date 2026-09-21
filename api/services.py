@@ -98,6 +98,10 @@ class AuthService:
                 is_staff=role == User.Role.SUPERADMIN,
                 is_superuser=role == User.Role.SUPERADMIN,
             )
+            # name_fillable=True: the token just supplied `nama`, but a
+            # pengurus-entered nasabah name is still the more authoritative
+            # one to prefer over it on a fresh account.
+            AuthService._sync_nasabah_prefill(user, name_fillable=True)
             return AuthService._session_response(user, is_new_user=True)
 
         is_dev_superadmin = dev_role == User.Role.SUPERADMIN
@@ -128,8 +132,48 @@ class AuthService:
                 ]
             )
 
+        nama_was_empty = not user.nama
         AuthService._update_google_identity(user, google_id, str(name))
+        AuthService._sync_nasabah_prefill(user, name_fillable=nama_was_empty)
+
         return AuthService._session_response(user, is_new_user=False)
+
+    @staticmethod
+    def _sync_nasabah_prefill(user: User, *, name_fillable: bool) -> None:
+        """PIL-154: a nasabah added by pengurus via email syncs with the
+        Google account — prefill empty `User` fields from the matching
+        `Nasabah` row, never overwrite ones already set.
+
+        [name_fillable] additionally lets the pengurus-entered name win over
+        `nama` even when it isn't empty: true for a brand-new account (its
+        `nama` just came from the Google token, which is less authoritative
+        than a name a pengurus actually typed in) and for a returning user
+        whose `nama` was empty before this login.
+        """
+        nasabah = Nasabah.objects.filter(email__iexact=user.email, is_active=True).first()
+        if nasabah is None:
+            return
+        profile_updates = []
+        for user_field, nasabah_field in (
+            ("nama", "nama"),
+            ("no_hp", "no_hp"),
+            ("jenis_kelamin", "jenis_kelamin"),
+            ("tanggal_lahir", "tanggal_lahir"),
+        ):
+            fillable = user_field == "nama" and name_fillable
+            if (fillable or not getattr(user, user_field)) and getattr(nasabah, nasabah_field):
+                setattr(user, user_field, getattr(nasabah, nasabah_field))
+                profile_updates.append(user_field)
+        # Only a fully-populated profile counts as complete — a nasabah
+        # record may itself be missing jenis_kelamin/tanggal_lahir, and
+        # flagging complete here would lock /onboarding/profile out.
+        if profile_updates and all(
+            getattr(user, f) for f in ("nama", "no_hp", "jenis_kelamin", "tanggal_lahir")
+        ):
+            user.is_profile_complete = True
+            profile_updates.append("is_profile_complete")
+        if profile_updates:
+            user.save(update_fields=profile_updates)
 
     @staticmethod
     def register_with_google(registration_token: str, role: str) -> tuple[dict[str, Any], bool]:
