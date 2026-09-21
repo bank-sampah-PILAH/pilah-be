@@ -1473,6 +1473,46 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Nasabah.objects.filter(user=customer, bank_sampah=self.bank).count(), 1)
 
+    def test_nasabah_can_reapply_to_the_same_bank_after_rejection(self) -> None:
+        customer = User.objects.create_user(
+            email="reapplying-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1990-01-01",
+            no_hp="+628555555020",
+            alamat="Jl. Baru No. 2",
+            is_profile_complete=True,
+        )
+        rejected = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-9002",
+            nama=customer.nama,
+            alamat="Jl. Lama",
+            no_hp="+628555555020",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            "/api/v1/onboarding/nasabah",
+            {"bank_sampah_id": str(self.bank.id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["next_step"], "approval_pending")
+        rejected.refresh_from_db()
+        self.assertEqual(rejected.status, Nasabah.Status.PENDING)
+        self.assertTrue(rejected.is_active)
+        self.assertEqual(rejected.alamat, "Jl. Baru No. 2")
+        # Re-uses the row rather than creating a second one for the same
+        # (bank, user) pair.
+        self.assertEqual(Nasabah.objects.filter(user=customer, bank_sampah=self.bank).count(), 1)
+
     def test_nasabah_self_registration_converges_onto_pengurus_entered_record(self) -> None:
         pre_registered = Nasabah.objects.create(
             bank_sampah=self.bank,
