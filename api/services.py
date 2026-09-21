@@ -87,6 +87,8 @@ class AuthService:
             }
 
         if user is None:
+            if dev_role == User.Role.SUPERADMIN and not is_allowlisted:
+                raise AuthService._superadmin_not_allowlisted()
             role = User.Role.SUPERADMIN if is_allowlisted else dev_role
             user = User.objects.create_user(
                 email=email,
@@ -99,34 +101,7 @@ class AuthService:
             )
             return AuthService._session_response(user, is_new_user=True)
 
-        is_dev_superadmin = dev_role == User.Role.SUPERADMIN
-        if user.role == User.Role.SUPERADMIN and not (is_allowlisted or is_dev_superadmin):
-            raise AuthServiceError(
-                "Email Superadmin tidak terdaftar pada whitelist",
-                code="superadmin_not_allowlisted",
-                status_code=403,
-            )
-        if is_allowlisted and user.role != User.Role.SUPERADMIN:
-            if user.bank_sampah_id or user.keanggotaan_nasabah.exists():
-                raise AuthServiceError(
-                    "Email whitelist sudah terhubung ke data operasional",
-                    code="superadmin_configuration_conflict",
-                    status_code=409,
-                )
-            user.role = User.Role.SUPERADMIN
-            user.is_staff = True
-            user.is_superuser = True
-            user.is_profile_complete = True
-            user.save(
-                update_fields=[
-                    "role",
-                    "is_staff",
-                    "is_superuser",
-                    "is_profile_complete",
-                    "updated_at",
-                ]
-            )
-
+        AuthService._apply_superadmin_policy(user, email)
         AuthService._update_google_identity(user, google_id, str(name))
         return AuthService._session_response(user, is_new_user=False)
 
@@ -182,8 +157,35 @@ class AuthService:
                 if user is None:
                     raise
 
+        AuthService._apply_superadmin_policy(user, email)
         AuthService._update_google_identity(user, google_id, name)
         return AuthService._session_response(user, is_new_user=created), created
+
+    @staticmethod
+    def _superadmin_not_allowlisted() -> AuthServiceError:
+        return AuthServiceError(
+            "Email Superadmin tidak terdaftar pada whitelist",
+            code="superadmin_not_allowlisted",
+            status_code=403,
+        )
+
+    @staticmethod
+    def _apply_superadmin_policy(user: User, email: str) -> None:
+        is_allowlisted = email in AuthService._superadmin_emails()
+        if user.role == User.Role.SUPERADMIN and not is_allowlisted:
+            raise AuthService._superadmin_not_allowlisted()
+        if not is_allowlisted or user.role == User.Role.SUPERADMIN:
+            return
+        if user.bank_sampah_id or user.keanggotaan_nasabah.exists():
+            raise AuthServiceError(
+                "Email whitelist sudah terhubung ke data operasional",
+                code="superadmin_configuration_conflict",
+                status_code=409,
+            )
+        user.role = User.Role.SUPERADMIN
+        user.is_staff = True
+        user.is_superuser = True
+        user.save(update_fields=["role", "is_staff", "is_superuser", "updated_at"])
 
     @staticmethod
     def _update_google_identity(user: User, google_id: str, name: str) -> None:

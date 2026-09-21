@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -212,6 +213,10 @@ PILAH_SUPERADMIN_EMAILS = tuple(
     for email in os.getenv("PILAH_SUPERADMIN_EMAILS", "").split(",")
     if email.strip()
 )
+if not DEBUG and not PILAH_SUPERADMIN_EMAILS:
+    logging.getLogger(__name__).warning(
+        "PILAH_SUPERADMIN_EMAILS is empty; all Superadmin logins will be rejected"
+    )
 WHATSAPP_GATEWAY_URL = os.getenv("WHATSAPP_GATEWAY_URL", "")
 WHATSAPP_GATEWAY_TOKEN = os.getenv("WHATSAPP_GATEWAY_TOKEN", "")
 WHATSAPP_GATEWAY_TIMEOUT = int(os.getenv("WHATSAPP_GATEWAY_TIMEOUT", "10"))

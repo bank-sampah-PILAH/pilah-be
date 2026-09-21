@@ -776,6 +776,7 @@ class APISpecTests(APITestCase):
             ).exists()
         )
 
+    @override_settings(PILAH_SUPERADMIN_EMAILS=("root@example.com",))
     def test_superadmin_cannot_use_pengelola_endpoints(self) -> None:
         self.client.credentials()
         response = self.client.post(
