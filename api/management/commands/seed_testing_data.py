@@ -1,9 +1,8 @@
 import os
 from argparse import ArgumentParser
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Any
 from uuid import UUID
 
 from django.conf import settings
@@ -57,6 +56,7 @@ APPROVAL_LOG_ID = UUID("00000000-0000-4000-8000-000000000071")
 class SeedIdentities:
     operator_email: str
     customer_email: str
+    customer_two_email: str
     superadmin_email: str
     pending_operator_email: str
     induk_email: str
@@ -75,6 +75,10 @@ class Command(BaseCommand):
         parser.add_argument(
             "--customer-email",
             default=os.getenv("PILAH_SEED_CUSTOMER_EMAIL", "customer.demo@example.com"),
+        )
+        parser.add_argument(
+            "--customer-two-email",
+            default=os.getenv("PILAH_SEED_CUSTOMER_TWO_EMAIL", "customer.two.demo@example.com"),
         )
         parser.add_argument(
             "--superadmin-email",
@@ -102,6 +106,7 @@ class Command(BaseCommand):
         identities = SeedIdentities(
             operator_email=self._normalize_email(options["operator_email"]),
             customer_email=self._normalize_email(options["customer_email"]),
+            customer_two_email=self._normalize_email(options["customer_two_email"]),
             superadmin_email=self._normalize_email(options["superadmin_email"]),
             pending_operator_email=self._normalize_email(options["pending_operator_email"]),
             induk_email=self._normalize_email(options["induk_email"]),
@@ -227,7 +232,7 @@ class Command(BaseCommand):
         )
         customer_two_user = self._upsert_user(
             user_id=CUSTOMER_TWO_USER_ID,
-            email="customer.two.demo@example.com",
+            email=identities.customer_two_email,
             name="Nasabah Kedua PILAH E2E",
             role=User.Role.NASABAH,
             bank=None,
@@ -346,22 +351,42 @@ class Command(BaseCommand):
         is_staff: bool = False,
         is_superuser: bool = False,
     ) -> User:
-        user = User.objects.filter(email=email).first()
+        user = User.objects.filter(pk=user_id).first()
         if user is None:
-            user, _ = User.objects.get_or_create(
-                pk=user_id,
-                defaults={
-                    "email": email,
-                    "nama": name,
-                    "role": role,
-                    "is_profile_complete": True,
-                    "bank_sampah": bank,
-                    "is_primary_pengelola": is_primary,
-                    "is_active": True,
-                    "is_staff": is_staff,
-                    "is_superuser": is_superuser,
-                },
-            )
+            user = User.objects.filter(email=email).first()
+            if user is None:
+                user = User(
+                    pk=user_id,
+                    email=email,
+                    nama=name,
+                    role=role,
+                    is_profile_complete=True,
+                    bank_sampah=bank,
+                    is_primary_pengelola=is_primary,
+                    is_active=True,
+                    is_staff=is_staff,
+                    is_superuser=is_superuser,
+                )
+            else:
+                same_fixture = (
+                    user.nama == name
+                    and user.role == role
+                    and user.bank_sampah_id == (bank.pk if bank else None)
+                    and user.is_primary_pengelola == is_primary
+                    and user.is_staff == is_staff
+                    and user.is_superuser == is_superuser
+                )
+                bare_account = (
+                    not user.is_profile_complete
+                    and user.bank_sampah_id is None
+                    and not user.keanggotaan_nasabah.exists()
+                    and not user.is_staff
+                    and not user.is_superuser
+                )
+                if not same_fixture and not bare_account:
+                    raise CommandError(
+                        f"Seed email {email} belongs to an existing non-fixture account"
+                    )
         user.email = email
         user.nama = name
         user.role = role
@@ -448,7 +473,7 @@ class Command(BaseCommand):
         bank: BankSampah,
         operator: User,
         customer: Nasabah,
-        transaction_time: Any,
+        transaction_time: datetime,
         note: str,
         items: tuple[tuple[JenisSampah, Decimal], ...],
     ) -> None:
