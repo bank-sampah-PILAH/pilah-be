@@ -1315,6 +1315,38 @@ class APISpecTests(APITestCase):
         listed = next(item for item in response.data if item["nama"] == unit.nama)
         self.assertEqual(set(listed.keys()), {"id", "nama", "alamat", "kota", "foto_logo"})
 
+    def test_nasabah_self_registration_creates_membership(self) -> None:
+        customer = User.objects.create_user(
+            email="joining-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.FEMALE,
+            tanggal_lahir="1998-05-20",
+            no_hp="+628555555001",
+            is_profile_complete=True,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            "/api/v1/onboarding/nasabah",
+            {"bank_sampah_id": str(self.bank.id), "alamat": "Jl. Melati No. 5"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["next_step"], "nasabah_dashboard")
+
+        nasabah = Nasabah.objects.get(user=customer, bank_sampah=self.bank)
+        self.assertEqual(nasabah.nama, "Nasabah PILAH")
+        self.assertEqual(nasabah.jenis_kelamin, User.Gender.FEMALE)
+        self.assertEqual(str(nasabah.tanggal_lahir), "1998-05-20")
+        self.assertEqual(nasabah.no_hp, "+628555555001")
+        self.assertEqual(nasabah.alamat, "Jl. Melati No. 5")
+        self.assertTrue(nasabah.is_active)
+        self.assertTrue(hasattr(nasabah, "saldo"))
+        self.assertEqual(nasabah.saldo.total_saldo, 0)
+
 
 class HealthzTests(TestCase):
     def test_healthz_ok(self) -> None:
