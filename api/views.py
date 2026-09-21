@@ -18,7 +18,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import BankSampah, JenisSampah, Nasabah, Saldo, Transaksi, User
+from api.models import BankSampah, JadwalKegiatan, JenisSampah, Nasabah, Saldo, Transaksi, User
 from api.permissions import (
     IsActivePengelola,
     IsPengelola,
@@ -36,6 +36,7 @@ from api.serializers import (
     GoogleAuthSerializer,
     GoogleRegistrationSerializer,
     InviteAcceptSerializer,
+    JadwalKegiatanSerializer,
     JenisSampahSerializer,
     LogoutSerializer,
     NasabahApprovalLogSerializer,
@@ -563,6 +564,22 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
                 "message": f"Jenis sampah berhasil {state}",
             }
         )
+
+
+class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
+    permission_classes = [IsActivePengelola]
+    serializer_class = JadwalKegiatanSerializer
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+
+    def get_queryset(self) -> QuerySet[JadwalKegiatan]:
+        return (
+            JadwalKegiatan.objects.filter(bank_sampah=_bank_sampah(self.request))
+            .select_related("bank_sampah", "dibuat_oleh")
+            .prefetch_related("penerima")
+        )
+
+    def perform_create(self, serializer: JadwalKegiatanSerializer) -> None:
+        serializer.save(bank_sampah=_bank_sampah(self.request), dibuat_oleh=_user(self.request))
 
 
 class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
