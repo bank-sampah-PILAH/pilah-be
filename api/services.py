@@ -427,7 +427,12 @@ class PencairanService:
         assert bank is not None  # ponytail: views gate on IsActivePengelola
         nasabah = (
             Nasabah.objects.select_for_update()
-            .filter(id=payload["nasabah_id"], bank_sampah=bank, is_active=True)
+            .filter(
+                id=payload["nasabah_id"],
+                bank_sampah=bank,
+                is_active=True,
+                status=Nasabah.Status.APPROVED,
+            )
             .first()
         )
         if not nasabah:
