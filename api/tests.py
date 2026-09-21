@@ -1306,3 +1306,18 @@ class ValidasiInputSetoranTests(SetoranTestBase):
         )
 
         self.assertEqual(response.status_code, 201)
+
+    def test_jenis_sampah_tanpa_harga_berlaku_ditolak(self) -> None:
+        # Data lama bisa menyimpan harga di bawah Rp 1; setelah dibulatkan ke
+        # bawah harganya jadi Rp 0 sehingga setoran tidak bernilai apa-apa.
+        self.jenis.harga_per_kg = Decimal("0.50")
+        self.jenis.save(update_fields=["harga_per_kg"])
+
+        response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "2.000"}])
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data["errors"]["items[0].jenis_sampah_id"],
+            ["Harga jenis sampah belum diatur"],
+        )
+        self.assertEqual(self._saldo(), "0.00")
