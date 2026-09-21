@@ -3,7 +3,7 @@ import secrets
 from calendar import monthrange
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from io import BytesIO
 from typing import Any, cast
 from uuid import UUID
@@ -448,6 +448,9 @@ class PencairanService:
         if nominal > saldo_sebelum:
             raise serializers.ValidationError({"nominal": ["Saldo nasabah tidak mencukupi"]})
 
+        # Whole rupiah, rounded down: drops sen left in PILAH 1.0 saldo, matching
+        # the setoran rule. Swap for kalkulasi.bulatkan_rupiah once PR #22 lands.
+        saldo_sesudah = (saldo_sebelum - nominal).quantize(Decimal(1), rounding=ROUND_DOWN)
         pencairan = Pencairan.objects.create(
             nasabah=nasabah,
             bank_sampah=bank,
@@ -457,9 +460,9 @@ class PencairanService:
             metode=payload["metode"],
             keterangan=payload.get("keterangan") or "",
             saldo_sebelum=saldo_sebelum,
-            saldo_sesudah=saldo_sebelum - nominal,
+            saldo_sesudah=saldo_sesudah,
         )
-        saldo.total_saldo = saldo_sebelum - nominal
+        saldo.total_saldo = saldo_sesudah
         saldo.save(update_fields=["total_saldo", "updated_at"])
         return pencairan
 
