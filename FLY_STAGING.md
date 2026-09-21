@@ -30,11 +30,12 @@ https://pilah-be-staging.fly.dev/api/v1/auth/google/callback
 ```
 
 GitHub's `staging` environment must contain an app-scoped `FLY_API_TOKEN`.
-It should also contain the four non-secret variables used by the seed workflow:
+It should also contain the five non-secret variables used by the seed workflow:
 
 ```text
 PILAH_SEED_OPERATOR_EMAIL
 PILAH_SEED_CUSTOMER_EMAIL
+PILAH_SEED_CUSTOMER_TWO_EMAIL
 PILAH_SEED_SUPERADMIN_EMAIL
 PILAH_SEED_PENDING_OPERATOR_EMAIL
 ```
@@ -56,7 +57,7 @@ flyctl logs --app pilah-be-staging
 
 Use the repository's **Seed Staging Testing Data** GitHub Actions workflow.
 Enter `SEED-PILAH-STAGING-DATA` in its confirmation field. The workflow checks
-the target app and all four configured emails, then runs:
+the target app and all five configured emails, then runs:
 
 ```bash
 python manage.py seed_testing_data \

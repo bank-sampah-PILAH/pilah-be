@@ -213,13 +213,14 @@ Use only real Google ID tokens in production.
 
 ## Staging E2E data and Google accounts
 
-Staging keeps genuine Google OAuth enabled. Add the four staging test-account
+Staging keeps genuine Google OAuth enabled. Add the five staging test-account
 emails to the Google OAuth consent screen's test-user list, and configure the
 same values as GitHub `staging` environment variables:
 
 ```text
 PILAH_SEED_OPERATOR_EMAIL
 PILAH_SEED_CUSTOMER_EMAIL
+PILAH_SEED_CUSTOMER_TWO_EMAIL
 PILAH_SEED_SUPERADMIN_EMAIL
 PILAH_SEED_PENDING_OPERATOR_EMAIL
 ```

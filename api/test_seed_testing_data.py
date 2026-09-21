@@ -85,6 +85,7 @@ class SeedTestingDataCommandTests(TestCase):
             "seed_testing_data",
             operator_email="staging.operator@example.com",
             customer_email="staging.customer@example.com",
+            customer_two_email="staging.customer.two@example.com",
             superadmin_email="staging.admin@example.com",
             pending_operator_email="staging.pending@example.com",
         )
@@ -93,6 +94,7 @@ class SeedTestingDataCommandTests(TestCase):
         self.assertEqual(unrelated_bank.nama, "Bank Sampah Manual")
         self.assertTrue(User.objects.filter(email="staging.operator@example.com").exists())
         self.assertTrue(User.objects.filter(email="staging.customer@example.com").exists())
+        self.assertTrue(User.objects.filter(email="staging.customer.two@example.com").exists())
         self.assertTrue(User.objects.filter(email="staging.admin@example.com").exists())
         self.assertTrue(User.objects.filter(email="staging.pending@example.com").exists())
 
@@ -102,6 +104,21 @@ class SeedTestingDataCommandTests(TestCase):
             CommandError, "Local testing data requires DJANGO_DEBUG=true"
         ):
             call_command("seed_testing_data")
+
+    @override_settings(DEBUG=True)
+    def test_seed_rejects_non_fixture_email_collision(self) -> None:
+        user = User.objects.create_user(
+            email="operator.demo@example.com",
+            nama="Existing Operator",
+            role=User.Role.PENGELOLA,
+            is_profile_complete=True,
+        )
+
+        with self.assertRaisesMessage(CommandError, "non-fixture account"):
+            call_command("seed_testing_data")
+
+        user.refresh_from_db()
+        self.assertEqual(user.nama, "Existing Operator")
 
     @override_settings(DEBUG=True)
     def test_seed_reuses_existing_account_for_configured_email(self) -> None:
