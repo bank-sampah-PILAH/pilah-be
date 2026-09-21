@@ -670,9 +670,109 @@ class APISpecTests(APITestCase):
         self.assertEqual(user.nama, "Budi Sebagian")
         self.assertEqual(user.no_hp, "081234567890")
         self.assertFalse(user.jenis_kelamin)
-        self.assertIsNone(user.tanggal_lahir)
+
+    def test_google_login_syncs_alamat_from_nasabah_record(self) -> None:
+        """PIL-204 needs `alamat` too — otherwise a nasabah synced this way
+        would be marked profile-complete without one, skip complete_profile
+        entirely, and hit a bank-sampah picker with no field to fix it."""
+        self.client.credentials()
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Budi Santoso",
+            jenis_kelamin="laki-laki",
+            tanggal_lahir="1990-01-01",
+            alamat="Jl. Anggrek No. 3",
+            no_hp="081234567890",
+            email="budi-alamat@example.com",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev-nasabah:budi-alamat@example.com:B"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        user = User.objects.get(email="budi-alamat@example.com")
+        self.assertEqual(user.alamat, "Jl. Anggrek No. 3")
+        self.assertTrue(user.is_profile_complete)
+
+    def test_google_login_keeps_profile_incomplete_without_alamat(self) -> None:
+        self.client.credentials()
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Budi Tanpa Alamat",
+            jenis_kelamin="laki-laki",
+            tanggal_lahir="1990-01-01",
+            no_hp="081234567891",
+            email="budi-no-alamat@example.com",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev-nasabah:budi-no-alamat@example.com:B"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        user = User.objects.get(email="budi-no-alamat@example.com")
         self.assertFalse(user.is_profile_complete)
-        self.assertEqual(response.data["next_step"], "complete_profile")
+
+    def test_google_login_links_nasabah_membership_for_nasabah_role(self) -> None:
+        nasabah = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Budi Santoso",
+            jenis_kelamin="laki-laki",
+            tanggal_lahir="1990-01-01",
+            alamat="Jl. Anggrek No. 3",
+            no_hp="081234567892",
+            email="budi-link@example.com",
+        )
+        self.client.credentials()
+
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev-nasabah:budi-link@example.com:B"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        nasabah.refresh_from_db()
+        user = User.objects.get(email="budi-link@example.com")
+        self.assertEqual(nasabah.user_id, user.id)
+        # The membership is now linked, so a subsequent login (or this same
+        # response) sends the user straight to their beranda instead of the
+        # bank-sampah picker.
+        self.assertEqual(response.data["next_step"], "nasabah_dashboard")
+
+    def test_google_login_does_not_link_nasabah_membership_for_other_roles(self) -> None:
+        """A pengurus-added nasabah record matching a pengelola's email is
+        still useful for prefilling shared profile fields, but must not be
+        claimed as that pengelola's own membership."""
+        nasabah = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Budi Santoso",
+            jenis_kelamin="laki-laki",
+            tanggal_lahir="1990-01-01",
+            alamat="Jl. Anggrek No. 3",
+            no_hp="081234567893",
+            email="budi-pengelola@example.com",
+        )
+        self.client.credentials()
+
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev:budi-pengelola@example.com:B"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        nasabah.refresh_from_db()
+        self.assertIsNone(nasabah.user_id)
 
     def test_jenis_sampah_and_transaction_update_saldo(self) -> None:
         nasabah = Nasabah.objects.create(
