@@ -243,20 +243,12 @@ class AuthService:
                 "pengelola_induk_dashboard" if user.bank_sampah_id else "register_bank_sampah_induk"
             )
         if user.role == User.Role.NASABAH:
-            # A membership can be pending or rejected (PIL-188) as well as
-            # approved, and PIL-144 lets one account hold several — so any
-            # approved membership grants the dashboard even while others are
-            # still pending, and a pending one blocks it only when nothing
-            # is approved yet.
-            statuses = set(user.keanggotaan_nasabah.values_list("status", flat=True))
-            if Nasabah.Status.APPROVED in statuses:
-                return "nasabah_dashboard"
-            if Nasabah.Status.PENDING in statuses:
-                return "approval_pending"
-            # No membership, or every one on record was rejected: back to
-            # the bank sampah picker (no dedicated re-application screen
-            # exists yet for a rejected nasabah).
-            return "register_nasabah"
+            # Routing doesn't gate on approval: a membership application, once
+            # submitted, sends the user straight to their own beranda
+            # regardless of status. Pending/rejected states — and appealing a
+            # rejection by reapplying — are handled there (GET /nasabah/me),
+            # not by stalling onboarding on a blocking screen.
+            return "nasabah_dashboard" if user.keanggotaan_nasabah.exists() else "register_nasabah"
         bank = user.bank_sampah
         if not user.bank_sampah_id or bank is None:
             return "register_bank_sampah"

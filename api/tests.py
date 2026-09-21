@@ -1404,10 +1404,11 @@ class APISpecTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 201, response.data)
-        # A self-registration awaits pengurus approval (PIL-188) — it must not
-        # hand the user straight into the dashboard before anyone has reviewed
-        # it.
-        self.assertEqual(response.data["next_step"], "approval_pending")
+        # Routing doesn't gate on approval — a self-registered nasabah lands
+        # on their own beranda immediately, where the pending/rejected status
+        # and appeal live (see GET /nasabah/me). Only the row's own status
+        # tracks the pengurus decision.
+        self.assertEqual(response.data["next_step"], "nasabah_dashboard")
 
         nasabah = Nasabah.objects.get(user=customer, bank_sampah=self.bank)
         self.assertEqual(nasabah.status, Nasabah.Status.PENDING)
@@ -1504,7 +1505,7 @@ class APISpecTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(response.data["next_step"], "approval_pending")
+        self.assertEqual(response.data["next_step"], "nasabah_dashboard")
         rejected.refresh_from_db()
         self.assertEqual(rejected.status, Nasabah.Status.PENDING)
         self.assertTrue(rejected.is_active)
@@ -1598,8 +1599,10 @@ class APISpecTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data["next_step"], "approval_pending")
-        self.assertEqual(response.data["user"]["state"], "approval_pending")
+        # Pending doesn't block the dashboard — the beranda itself shows the
+        # status and, if rejected, the appeal path (GET /nasabah/me).
+        self.assertEqual(response.data["next_step"], "nasabah_dashboard")
+        self.assertEqual(response.data["user"]["state"], "nasabah_dashboard")
 
     def test_nasabah_sign_in_reflects_rejected_membership(self) -> None:
         customer = User.objects.create_user(
@@ -1626,10 +1629,9 @@ class APISpecTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200, response.data)
-        # No dedicated re-application screen for a rejected nasabah exists
-        # yet, so this deliberately sends them back to the bank sampah
-        # picker rather than a dashboard they were never approved for.
-        self.assertEqual(response.data["next_step"], "register_nasabah")
+        # Same reasoning as the pending case: a rejection is visible and
+        # appealable from the beranda, not a routing dead end.
+        self.assertEqual(response.data["next_step"], "nasabah_dashboard")
 
     def test_bank_sampah_directory_requires_authentication(self) -> None:
         self.client.credentials()
