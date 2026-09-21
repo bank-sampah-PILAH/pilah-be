@@ -1347,6 +1347,98 @@ class APISpecTests(APITestCase):
         self.assertTrue(hasattr(nasabah, "saldo"))
         self.assertEqual(nasabah.saldo.total_saldo, 0)
 
+    def test_nasabah_self_registration_rejects_duplicate_membership(self) -> None:
+        customer = User.objects.create_user(
+            email="repeat-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1990-01-01",
+            no_hp="+628555555002",
+            is_profile_complete=True,
+        )
+        Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-9001",
+            nama=customer.nama,
+            alamat="Jl. Lama",
+            no_hp="+628555555002",
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            "/api/v1/onboarding/nasabah",
+            {"bank_sampah_id": str(self.bank.id), "alamat": "Jl. Baru"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Nasabah.objects.filter(user=customer, bank_sampah=self.bank).count(), 1)
+
+    def test_nasabah_self_registration_converges_onto_pengurus_entered_record(self) -> None:
+        pre_registered = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0500",
+            nama="Nama Lama",
+            alamat="Alamat Lama",
+            no_hp="+628555555003",
+        )
+        customer = User.objects.create_user(
+            email="preregistered-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1995-03-10",
+            no_hp="+628555555003",
+            is_profile_complete=True,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            "/api/v1/onboarding/nasabah",
+            {"bank_sampah_id": str(self.bank.id), "alamat": "Alamat Baru"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        pre_registered.refresh_from_db()
+        self.assertEqual(pre_registered.user, customer)
+        self.assertEqual(pre_registered.nama, "Nasabah PILAH")
+        self.assertEqual(pre_registered.alamat, "Alamat Baru")
+        self.assertEqual(pre_registered.nomor, "NAS-0500")
+        self.assertTrue(hasattr(pre_registered, "saldo"))
+        self.assertEqual(
+            Nasabah.objects.filter(bank_sampah=self.bank, no_hp="+628555555003").count(), 1
+        )
+
+    def test_nasabah_self_registration_rejects_non_nasabah_role(self) -> None:
+        pengelola = User.objects.create_user(
+            email="pengelola-trying-nasabah@example.com",
+            nama="Pengelola",
+            role=User.Role.PENGELOLA,
+            is_profile_complete=True,
+        )
+        refresh = RefreshToken.for_user(pengelola)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            "/api/v1/onboarding/nasabah",
+            {"bank_sampah_id": str(self.bank.id), "alamat": "Jl. Mawar"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_bank_sampah_directory_requires_authentication(self) -> None:
+        self.client.credentials()
+
+        response = self.client.get("/api/v1/bank-sampah")
+
+        self.assertEqual(response.status_code, 401)
+
 
 class HealthzTests(TestCase):
     def test_healthz_ok(self) -> None:

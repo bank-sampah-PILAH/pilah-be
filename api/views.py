@@ -311,9 +311,7 @@ class RegisterNasabahView(APIView):
         serializer = NasabahSelfRegistrationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            nasabah = OnboardingService.register_nasabah(
-                _user(request), serializer.validated_data
-            )
+            nasabah = OnboardingService.register_nasabah(_user(request), serializer.validated_data)
         except PermissionError as exc:
             return Response({"error": str(exc)}, status=403)
         except ValueError as exc:
