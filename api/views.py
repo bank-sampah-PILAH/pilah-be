@@ -24,6 +24,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from api.models import BankSampah, JadwalKegiatan, JenisSampah, Nasabah, Saldo, Transaksi, User
 from api.permissions import (
     IsActivePengelola,
+    IsJadwalViewer,
     IsPengelola,
     IsPrimaryPengelola,
     IsRegistrationRole,
@@ -574,6 +575,12 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
     serializer_class = JadwalKegiatanSerializer
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
+    def get_permissions(self) -> list[Any]:
+        permission_classes = (
+            [IsJadwalViewer] if self.action in {"list", "retrieve"} else [IsActivePengelola]
+        )
+        return [permission() for permission in permission_classes]
+
     def get_queryset(self) -> QuerySet[JadwalKegiatan]:
         overlapping_schedules = (
             JadwalKegiatan.objects.filter(
@@ -586,11 +593,30 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
             .exclude(status=JadwalKegiatan.Status.DIBATALKAN)
         )
         queryset = (
-            JadwalKegiatan.objects.filter(bank_sampah=_bank_sampah(self.request))
-            .select_related("bank_sampah", "dibuat_oleh")
+            JadwalKegiatan.objects.select_related("bank_sampah", "dibuat_oleh")
             .prefetch_related("penerima")
             .annotate(_peringatan_jadwal_bertumpuk=Exists(overlapping_schedules))
         )
+        user = _user(self.request)
+        if user.role == User.Role.NASABAH:
+            queryset = (
+                queryset.filter(
+                    bank_sampah__status=BankSampah.Status.ACTIVE,
+                    bank_sampah__is_active=True,
+                    bank_sampah__nasabah__user=user,
+                    bank_sampah__nasabah__is_active=True,
+                    bank_sampah__nasabah__status=Nasabah.Status.APPROVED,
+                    status=JadwalKegiatan.Status.DITERBITKAN,
+                    selesai_pada__gte=timezone.now(),
+                )
+                .filter(
+                    Q(cakupan_penerima=JadwalKegiatan.CakupanPenerima.SEMUA_NASABAH)
+                    | Q(penerima__user=user, penerima__is_active=True)
+                )
+                .distinct()
+            )
+        else:
+            queryset = queryset.filter(bank_sampah=_bank_sampah(self.request))
         if self.action == "list":
             date_value = self.request.query_params.get("date")
             if isinstance(date_value, str) and date_value:
