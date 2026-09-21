@@ -2,7 +2,7 @@ import json
 from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 from unittest.mock import Mock, patch
 
 from django.conf import settings
@@ -23,6 +23,19 @@ from api.serializers import BankSampahApprovalListSerializer
 
 
 class APISpecTests(APITestCase):
+    _fake_tokens: ClassVar[Any]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        cls._fake_tokens = override_settings(DEBUG=True, PILAH_ALLOW_FAKE_GOOGLE_TOKEN=True)
+        cls._fake_tokens.enable()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._fake_tokens.disable()
+        super().tearDownClass()
+
     def setUp(self) -> None:
         self.bank = BankSampah.objects.create(
             nama="Bank Sampah BTH", alamat="Depok", kota="Depok", no_hp_pic="+628123456789"

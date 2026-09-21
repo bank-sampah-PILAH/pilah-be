@@ -346,22 +346,22 @@ class Command(BaseCommand):
         is_staff: bool = False,
         is_superuser: bool = False,
     ) -> User:
-        if User.objects.filter(email=email).exclude(pk=user_id).exists():
-            raise CommandError(f"Seed email is already used by another user: {email}")
-        user, _ = User.objects.get_or_create(
-            pk=user_id,
-            defaults={
-                "email": email,
-                "nama": name,
-                "role": role,
-                "is_profile_complete": True,
-                "bank_sampah": bank,
-                "is_primary_pengelola": is_primary,
-                "is_active": True,
-                "is_staff": is_staff,
-                "is_superuser": is_superuser,
-            },
-        )
+        user = User.objects.filter(email=email).first()
+        if user is None:
+            user, _ = User.objects.get_or_create(
+                pk=user_id,
+                defaults={
+                    "email": email,
+                    "nama": name,
+                    "role": role,
+                    "is_profile_complete": True,
+                    "bank_sampah": bank,
+                    "is_primary_pengelola": is_primary,
+                    "is_active": True,
+                    "is_staff": is_staff,
+                    "is_superuser": is_superuser,
+                },
+            )
         user.email = email
         user.nama = name
         user.role = role
@@ -456,7 +456,7 @@ class Command(BaseCommand):
             (jenis.harga_per_kg * weight for jenis, weight in items),
             Decimal("0.00"),
         ).quantize(Decimal("0.01"))
-        transaksi, _ = Transaksi.objects.update_or_create(
+        transaksi, created = Transaksi.objects.get_or_create(
             pk=transaction_id,
             defaults={
                 "nasabah": customer,
@@ -469,6 +469,26 @@ class Command(BaseCommand):
                 "status_wa": Transaksi.StatusWA.BELUM_DIKIRIM,
             },
         )
+        if not created:
+            transaksi.nasabah = customer
+            transaksi.bank_sampah = bank
+            transaksi.dicatat_oleh = operator
+            transaksi.total_nilai = total
+            transaksi.tipe = Transaksi.Tipe.SETORAN
+            transaksi.catatan = note
+            transaksi.status_wa = Transaksi.StatusWA.BELUM_DIKIRIM
+            transaksi.save(
+                update_fields=[
+                    "nasabah",
+                    "bank_sampah",
+                    "dicatat_oleh",
+                    "total_nilai",
+                    "tipe",
+                    "catatan",
+                    "status_wa",
+                    "updated_at",
+                ]
+            )
         for detail_id, (jenis, weight) in zip(detail_ids, items, strict=True):
             subtotal = (jenis.harga_per_kg * weight).quantize(Decimal("0.01"))
             DetailTransaksi.objects.update_or_create(
