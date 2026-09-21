@@ -37,6 +37,19 @@
   diperbarui, jangan lakukan migrasi massal atas saldo nasabah.
 - Berat (kg) bukan nilai uang: `format_kg` tetap memakai `ROUND_HALF_UP`.
 
+## Aturan input setoran
+
+- Berat boleh desimal hingga 3 angka di belakang koma dan harus lebih dari
+  0 kg.
+- Berat satu item maksimal 500 kg (`BERAT_MAKS_PER_ITEM`) dan total satu
+  setoran maksimal 1.000 kg (`BERAT_MAKS_PER_SETORAN`). Input di atas batas
+  ditolak dengan 422; ubah angkanya hanya lewat konstanta di
+  `api/serializers.py`.
+- Jenis sampah yang harga berlakunya Rp 0 setelah dibulatkan ditolak, supaya
+  tidak ada setoran yang tercatat tanpa nilai.
+- Peringatan untuk item di atas 100 kg belum dikerjakan; jika dibuat, tempatnya
+  di layar tinjauan setoran pada aplikasi, bukan penolakan di backend.
+
 ## Validation
 
 - Run `uv run --with-requirements requirements.txt python manage.py test` when
