@@ -435,8 +435,74 @@ class APISpecTests(APITestCase):
         self.assertEqual(completed.status_code, 200)
         self.assertEqual(completed.data["status"], "selesai")
 
+    def test_nasabah_only_sees_active_published_schedules_for_their_memberships(self) -> None:
+        nasabah_user = User.objects.create_user(
+            email="nasabah@example.com",
+            nama="Budi Nasabah",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        membership = Nasabah.objects.create(
+            user=nasabah_user,
+            bank_sampah=self.bank,
+            nomor="NAS-0100",
+            nama="Budi Nasabah",
+            alamat="Jl. Kenanga No. 10",
+            no_hp="+628123450100",
+            status=Nasabah.Status.APPROVED,
+        )
+        another_bank = BankSampah.objects.create(
+            nama="Bank Lain", alamat="Bogor", kota="Bogor", no_hp_pic="+628123456700"
+        )
+        now = timezone.now()
+
+        visible = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=now + timedelta(days=1),
+            selesai_pada=now + timedelta(days=1, hours=2),
+            lokasi="Balai Warga",
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+        selected = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENCAIRAN,
+            mulai_pada=now + timedelta(days=2),
+            selesai_pada=now + timedelta(days=2, hours=1),
+            lokasi="Kantor BTH",
+            cakupan_penerima=JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH,
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+        selected.penerima.add(membership)
+        JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=now + timedelta(days=3),
+            selesai_pada=now + timedelta(days=3, hours=1),
+            lokasi="Masih Draft",
+        )
+        JadwalKegiatan.objects.create(
+            bank_sampah=another_bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=now + timedelta(days=4),
+            selesai_pada=now + timedelta(days=4, hours=1),
+            lokasi="Organisasi Lain",
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+
+        refresh = RefreshToken.for_user(nasabah_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        response = self.client.get("/api/v1/jadwal")
+
+        self.assertEqual(response.status_code, 200)
+        ids = {item["id"] for item in response.data["results"]}
+        self.assertEqual(ids, {str(visible.id), str(selected.id)})
+
     def test_transition_does_not_overwrite_a_concurrent_status_change(self) -> None:
-        from api.models import JadwalKegiatan
         from api.views import JadwalKegiatanViewSet
 
         starts_at = timezone.now() + timedelta(days=4)
