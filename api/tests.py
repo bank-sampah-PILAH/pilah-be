@@ -1671,3 +1671,18 @@ class PencairanAPITests(APITestCase):
         export = self.client.get("/api/v1/transaksi/export?periode=bulan_ini")
         sheet = load_workbook(BytesIO(export.content), data_only=False)["Riwayat Transaksi"]
         self.assertEqual(sheet.cell(5, 10).value, 100000)
+
+    def test_pencairan_drops_legacy_sen_from_saldo(self) -> None:
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("10000.50"))
+
+        response = self.client.post(
+            "/api/v1/pencairan",
+            {"nasabah_id": str(self.nasabah.id), "nominal": "5000", "metode": "tunai"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["saldo_sebelum"], "10000.50")
+        self.assertEqual(response.data["saldo_sesudah"], "5000.00")
+        saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
+        self.assertEqual(saldo.data["total_saldo"], "5000.00")
