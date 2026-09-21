@@ -159,21 +159,31 @@ class AuthService:
             ("no_hp", "no_hp"),
             ("jenis_kelamin", "jenis_kelamin"),
             ("tanggal_lahir", "tanggal_lahir"),
+            ("alamat", "alamat"),
         ):
             fillable = user_field == "nama" and name_fillable
             if (fillable or not getattr(user, user_field)) and getattr(nasabah, nasabah_field):
                 setattr(user, user_field, getattr(nasabah, nasabah_field))
                 profile_updates.append(user_field)
         # Only a fully-populated profile counts as complete — a nasabah
-        # record may itself be missing jenis_kelamin/tanggal_lahir, and
-        # flagging complete here would lock /onboarding/profile out.
+        # record may itself be missing jenis_kelamin/tanggal_lahir/alamat,
+        # and flagging complete here would lock /onboarding/profile out
+        # (PIL-204 requires alamat specifically for a nasabah account).
         if profile_updates and all(
-            getattr(user, f) for f in ("nama", "no_hp", "jenis_kelamin", "tanggal_lahir")
+            getattr(user, f) for f in ("nama", "no_hp", "jenis_kelamin", "tanggal_lahir", "alamat")
         ):
             user.is_profile_complete = True
             profile_updates.append("is_profile_complete")
         if profile_updates:
             user.save(update_fields=profile_updates)
+
+        # PIL-204: claim the membership itself, not just the profile data —
+        # gated on role because a pengurus-entered email can coincidentally
+        # match an account that registered as something other than nasabah,
+        # and that account must not be silently turned into a member.
+        if user.role == User.Role.NASABAH and nasabah.user_id is None:
+            nasabah.user = user
+            nasabah.save(update_fields=["user", "updated_at"])
 
     @staticmethod
     def register_with_google(registration_token: str, role: str) -> tuple[dict[str, Any], bool]:
