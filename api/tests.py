@@ -1754,3 +1754,76 @@ class ResetTestingDataCommandTests(TransactionTestCase):
             call_command("reset_testing_data", confirm=self.CONFIRM)
 
         self.assertIn("'pencairan': 1", str(raised.exception))
+
+
+class PencairanRiwayatTests(APITestCase):
+    def setUp(self) -> None:
+        self.bank = BankSampah.objects.create(
+            nama="Bank Sampah BTH",
+            alamat="Depok",
+            kota="Depok",
+            no_hp_pic="+628123456789",
+            status=BankSampah.Status.ACTIVE,
+        )
+        self.user = User.objects.create_user(
+            email="sari@example.com",
+            nama="Ibu Sari",
+            bank_sampah=self.bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        self.ahmad = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Ahmad Ridwan",
+            no_hp="+628123456789",
+            alamat="Jl. Mawar No. 12",
+        )
+        self.siti = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0002",
+            nama="Siti Aminah",
+            no_hp="+628126666666",
+            alamat="Jl. Melati No. 2",
+        )
+        refresh = RefreshToken.for_user(self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+    def _pencairan(self, nasabah: Nasabah, tanggal: Any, nominal: str = "10000") -> Pencairan:
+        return Pencairan.objects.create(
+            nasabah=nasabah,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.user,
+            tanggal=tanggal,
+            nominal=Decimal(nominal),
+            metode=Pencairan.Metode.TUNAI,
+            saldo_sebelum=Decimal("100000.00"),
+            saldo_sesudah=Decimal("90000.00"),
+        )
+
+    def _ids(self, query: str = "") -> set[str]:
+        response = self.client.get(f"/api/v1/pencairan{query}")
+        self.assertEqual(response.status_code, 200, response.data)
+        return {row["id"] for row in response.data["results"]}
+
+    def test_riwayat_filters_by_periode_and_defaults_to_all_time(self) -> None:
+        now = timezone.now()
+        today = self._pencairan(self.ahmad, now)
+        last_week = self._pencairan(self.ahmad, now - timedelta(days=8))
+        last_month = self._pencairan(self.siti, now - timedelta(days=40))
+
+        self.assertEqual(self._ids(), {str(today.id), str(last_week.id), str(last_month.id)})
+        # Expected sets follow the period definitions directly, so the test holds
+        # on any date (month starts, year boundaries).
+        this_month = now.date().replace(day=1)
+        prev_month = (this_month - timedelta(days=1)).replace(day=1)
+        made = (today, last_week, last_month)
+        cases = {
+            "hari_ini": {today},
+            "minggu_ini": {today},
+            "bulan_ini": {p for p in made if p.tanggal.date() >= this_month},
+            "bulan_lalu": {p for p in made if prev_month <= p.tanggal.date() < this_month},
+        }
+        for periode, expected in cases.items():
+            with self.subTest(periode=periode):
+                self.assertEqual(self._ids(f"?periode={periode}"), {str(p.id) for p in expected})
