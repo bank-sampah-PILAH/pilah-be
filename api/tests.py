@@ -1971,6 +1971,76 @@ class APISpecTests(APITestCase):
         # (bank, user) pair.
         self.assertEqual(Nasabah.objects.filter(user=customer, bank_sampah=self.bank).count(), 1)
 
+    def _nasabah_client(self, email: str) -> User:
+        """Backfill helper: an authenticated, profile-complete nasabah with
+        no membership yet, credentials already set on self.client."""
+        customer = User.objects.create_user(
+            email=email,
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1990-01-01",
+            no_hp="+628555555099",
+            alamat="Jl. Backfill",
+            is_profile_complete=True,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        return customer
+
+    def test_nasabah_self_registration_rejects_nonexistent_bank(self) -> None:
+        """Backfill: covers the bank-lookup guard in register_nasabah, which
+        had no direct test despite being implemented since PIL-204's first
+        commit — found via a coverage review, not written test-first."""
+        self._nasabah_client("backfill-nonexistent@example.com")
+
+        response = self.client.post(
+            "/api/v1/onboarding/nasabah",
+            {"bank_sampah_id": "00000000-0000-0000-0000-000000000000"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["error"], "Bank sampah tidak ditemukan atau belum tersedia")
+
+    def test_nasabah_self_registration_rejects_inactive_bank(self) -> None:
+        inactive_bank = BankSampah.objects.create(
+            nama="Bank Sampah Nonaktif",
+            alamat="Depok",
+            kota="Depok",
+            no_hp_pic="+628111222444",
+            is_active=False,
+        )
+        self._nasabah_client("backfill-inactive@example.com")
+
+        response = self.client.post(
+            "/api/v1/onboarding/nasabah",
+            {"bank_sampah_id": str(inactive_bank.id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["error"], "Bank sampah tidak ditemukan atau belum tersedia")
+
+    def test_nasabah_self_registration_rejects_induk_bank(self) -> None:
+        induk_bank = BankSampah.objects.create(
+            nama="Bank Sampah Induk",
+            alamat="Depok",
+            kota="Depok",
+            no_hp_pic="+628111222555",
+            jenis_organisasi=BankSampah.OrganizationType.INDUK,
+        )
+        self._nasabah_client("backfill-induk@example.com")
+
+        response = self.client.post(
+            "/api/v1/onboarding/nasabah",
+            {"bank_sampah_id": str(induk_bank.id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["error"], "Bank sampah tidak ditemukan atau belum tersedia")
+
     def test_nasabah_self_registration_converges_onto_pengurus_entered_record(self) -> None:
         pre_registered = Nasabah.objects.create(
             bank_sampah=self.bank,
