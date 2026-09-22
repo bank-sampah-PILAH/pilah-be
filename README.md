@@ -340,7 +340,7 @@ Transaksi:
 Pencairan:
 
 - `GET /api/v1/pencairan`
-- `GET /api/v1/pencairan?nasabah_id=:id`
+- `GET /api/v1/pencairan?nasabah_id=:id&periode=:periode&search=:nama`
 - `POST /api/v1/pencairan`
 - `GET /api/v1/pencairan/:id`
 
@@ -390,6 +390,19 @@ export) debits `saldo_sebelum - saldo_sesudah`, so it matches the stored saldo.
 Only pengurus record pencairan. `GET /api/v1/pencairan` and
 `GET /api/v1/pencairan/:id` also accept nasabah accounts, which see only the
 pencairan on their own memberships. Django admin shows pencairan read-only.
+
+### Riwayat pencairan filters
+
+`GET /api/v1/pencairan` accepts, in any combination:
+
+| Parameter | Values | Notes |
+| --- | --- | --- |
+| `periode` | `hari_ini`, `minggu_ini`, `bulan_ini`, `bulan_lalu`, `custom` | Same values as the transaksi list. Omitted means the whole history (transaksi defaults to `hari_ini` instead). |
+| `dari_tanggal`, `sampai_tanggal` | `YYYY-MM-DD` | Required with `periode=custom`: missing returns 422, an end before the start returns 400. |
+| `nasabah_id` | UUID | One nasabah's riwayat. |
+| `search` | 2+ characters | Case-insensitive match on the nasabah name. |
+
+Results are always limited to the pengurus' own bank sampah, newest first, paginated.
 
 ## Report Export
 
