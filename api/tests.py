@@ -1827,3 +1827,26 @@ class PencairanRiwayatTests(APITestCase):
         for periode, expected in cases.items():
             with self.subTest(periode=periode):
                 self.assertEqual(self._ids(f"?periode={periode}"), {str(p.id) for p in expected})
+
+    def test_riwayat_custom_range_and_its_errors(self) -> None:
+        inside = self._pencairan(self.ahmad, timezone.now() - timedelta(days=3))
+        self._pencairan(self.ahmad, timezone.now() - timedelta(days=10))
+        dari = (timezone.now() - timedelta(days=5)).date().isoformat()
+        sampai = timezone.now().date().isoformat()
+
+        self.assertEqual(
+            self._ids(f"?periode=custom&dari_tanggal={dari}&sampai_tanggal={sampai}"),
+            {str(inside.id)},
+        )
+
+        missing = self.client.get("/api/v1/pencairan?periode=custom")
+        self.assertEqual(missing.status_code, 422, missing.data)
+
+        reversed_range = self.client.get(
+            f"/api/v1/pencairan?periode=custom&dari_tanggal={sampai}&sampai_tanggal={dari}"
+        )
+        self.assertEqual(reversed_range.status_code, 400, reversed_range.data)
+        self.assertEqual(
+            reversed_range.data["error"],
+            "Tanggal akhir tidak boleh lebih awal dari tanggal awal",
+        )
