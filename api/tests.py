@@ -1862,3 +1862,33 @@ class PencairanRiwayatTests(APITestCase):
             self._ids(f"?search=siti&nasabah_id={self.ahmad.id}"),
             set(),
         )
+
+    def test_riwayat_never_shows_another_bank(self) -> None:
+        other_bank = BankSampah.objects.create(
+            nama="Bank Sampah Lain",
+            alamat="Bogor",
+            kota="Bogor",
+            no_hp_pic="+628129999999",
+            status=BankSampah.Status.ACTIVE,
+        )
+        other_nasabah = Nasabah.objects.create(
+            bank_sampah=other_bank,
+            nomor="NAS-0001",
+            nama="Siti Lain",
+            no_hp="+628129999999",
+            alamat="Jl. Kenanga No. 1",
+        )
+        Pencairan.objects.create(
+            nasabah=other_nasabah,
+            bank_sampah=other_bank,
+            dicatat_oleh=self.user,
+            nominal=Decimal("5000.00"),
+            metode=Pencairan.Metode.TUNAI,
+            saldo_sebelum=Decimal("5000.00"),
+            saldo_sesudah=Decimal("0.00"),
+        )
+        own = self._pencairan(self.siti, timezone.now())
+
+        for query in ("", "?search=siti", "?periode=hari_ini"):
+            with self.subTest(query=query):
+                self.assertEqual(self._ids(query), {str(own.id)})
