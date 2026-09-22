@@ -1850,3 +1850,15 @@ class PencairanRiwayatTests(APITestCase):
             reversed_range.data["error"],
             "Tanggal akhir tidak boleh lebih awal dari tanggal awal",
         )
+
+    def test_riwayat_searches_by_nasabah_name(self) -> None:
+        ahmad = self._pencairan(self.ahmad, timezone.now())
+        siti = self._pencairan(self.siti, timezone.now())
+
+        self.assertEqual(self._ids("?search=siti"), {str(siti.id)})
+        self.assertEqual(self._ids("?search=RIDWAN"), {str(ahmad.id)})
+        self.assertEqual(self._ids("?search=a"), {str(ahmad.id), str(siti.id)})
+        self.assertEqual(
+            self._ids(f"?search=siti&nasabah_id={self.ahmad.id}"),
+            set(),
+        )
