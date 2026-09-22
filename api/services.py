@@ -5,13 +5,13 @@ from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from io import BytesIO
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 from uuid import UUID
 
 import requests
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q, QuerySet, Sum
+from django.db.models import Model, Q, QuerySet, Sum
 from django.db.models.functions import Coalesce
 from django.http import HttpRequest
 from django.utils import timezone
@@ -467,10 +467,23 @@ class PencairanService:
         return pencairan
 
 
+_Dated = TypeVar("_Dated", bound=Model)
+
+
 class TransactionFilterService:
     @staticmethod
-    def apply_period(queryset: QuerySet[Transaksi], request: HttpRequest) -> QuerySet[Transaksi]:
-        periode = request.GET.get("periode", "hari_ini")
+    def apply_period(
+        queryset: QuerySet[_Dated],
+        request: HttpRequest,
+        default: str | None = "hari_ini",
+    ) -> QuerySet[_Dated]:
+        """Filter a queryset with a `tanggal` field by the `periode` query param.
+
+        Without `periode`, [default] applies; `None` means no date filter.
+        """
+        periode = request.GET.get("periode", default)
+        if periode is None:
+            return queryset
         today = timezone.localdate()
         if periode == "hari_ini":
             start, end = today, today

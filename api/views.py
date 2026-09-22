@@ -598,8 +598,13 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         return qs
 
     def list(self, request: Request) -> Response:
+        # Unlike transaksi, no periode means the whole history (per-nasabah riwayat).
+        try:
+            qs = TransactionFilterService.apply_period(self.get_queryset(), request, default=None)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
         # Pagination is configured globally (PAGE_SIZE), so a page always exists.
-        page = self.paginate_queryset(self.get_queryset())
+        page = self.paginate_queryset(qs)
         return self.get_paginated_response(PencairanDetailSerializer(page, many=True).data)
 
     def create(self, request: Request) -> Response:
