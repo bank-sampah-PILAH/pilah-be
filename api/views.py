@@ -894,8 +894,11 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
             qs = Pencairan.objects.filter(bank_sampah=_bank_sampah(self.request))
         qs = qs.select_related("nasabah", "bank_sampah", "dicatat_oleh")
         nasabah_id = self.request.query_params.get("nasabah_id")
+        search = self.request.query_params.get("search", "")
         if nasabah_id:
             qs = qs.filter(nasabah_id=nasabah_id)
+        if len(search) >= 2:
+            qs = qs.filter(nasabah__nama__icontains=search)
         return qs
 
     def list(self, request: Request) -> Response:
