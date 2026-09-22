@@ -12,7 +12,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.core.signing import TimestampSigner
 from django.db import IntegrityError, connection, transaction
-from django.test import Client, TestCase, override_settings
+from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import Resolver404, resolve
 from django.utils import timezone
@@ -4310,7 +4310,9 @@ class PencairanAPITests(APITestCase):
         self.assertEqual(saldo.data["total_saldo"], "5000.00")
 
 
-class ResetTestingDataCommandTests(TestCase):
+class ResetTestingDataCommandTests(TransactionTestCase):
+    # The command runs a real flush (TRUNCATE). Postgres rejects that inside the
+    # transaction TestCase wraps each test in, so this class runs without one.
     CONFIRM = "RESET-PILAH-TEST-DATA"
 
     def setUp(self) -> None:
