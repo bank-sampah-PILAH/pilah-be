@@ -564,7 +564,7 @@ class JadwalKegiatanSerializer(serializers.ModelSerializer[Model]):
             "updated_at",
         ]
 
-    def to_representation(self, instance: JadwalKegiatan) -> dict[str, Any]:
+    def to_representation(self, instance: Model) -> dict[str, Any]:
         representation = super().to_representation(instance)
         request = self.context.get("request")
         if getattr(getattr(request, "user", None), "role", None) == User.Role.NASABAH:
