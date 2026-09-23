@@ -58,7 +58,7 @@ class IsJadwalViewer(BasePermission):
         if not request.user.is_authenticated:
             return False
         user = _auth_user(request)
-        return user.role == User.Role.NASABAH and user.is_active and user.is_profile_complete
+        return user.role == User.Role.NASABAH and user.is_active
 
 
 class IsSuperAdmin(BasePermission):
