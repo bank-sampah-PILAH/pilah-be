@@ -3,10 +3,10 @@ from django.http import HttpRequest, JsonResponse
 
 
 def healthz(request: HttpRequest) -> JsonResponse:
-    """Liveness/readiness probe for Cloud Run / orchestrators.
+    """Liveness/readiness probe for container orchestrators.
 
     DB round-trip on every probe: cheap enough here, and catches the
-    "app is up but Cloud SQL connection is dead" failure mode.
+    "app is up but its database connection is dead" failure mode.
     """
     try:
         with connection.cursor() as cursor:

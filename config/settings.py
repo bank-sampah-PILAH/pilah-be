@@ -2,6 +2,7 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -10,7 +11,7 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-local-pilah-dev-key")
-DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
+DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() == "true"
 ALLOWED_HOSTS = [
     host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()
 ]
@@ -95,6 +96,15 @@ DATABASES = {
         "PASSWORD": os.getenv("DB_PASSWORD", ""),
         "HOST": os.getenv("DB_HOST", ""),
         "PORT": os.getenv("DB_PORT", ""),
+        "CONN_HEALTH_CHECKS": True,
+        "OPTIONS": {
+            option: os.environ[variable]
+            for option, variable in (
+                ("sslmode", "DB_SSLMODE"),
+                ("channel_binding", "DB_CHANNEL_BINDING"),
+            )
+            if variable in os.environ
+        },
     }
 }
 
@@ -137,6 +147,8 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+SERVE_MEDIA = os.getenv("DJANGO_SERVE_MEDIA", str(DEBUG)).lower() == "true"
+MEDIA_SIGNED_URL_MAX_AGE = int(os.getenv("MEDIA_SIGNED_URL_MAX_AGE", "600"))
 GS_BUCKET_NAME = os.getenv("GS_BUCKET_NAME", "")
 GS_LOCATION = os.getenv("GS_LOCATION", "media")
 GS_DEFAULT_ACL = None
@@ -191,8 +203,10 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "")
 PILAH_ALLOW_FAKE_GOOGLE_TOKEN = (
-    os.getenv("PILAH_ALLOW_FAKE_GOOGLE_TOKEN", str(DEBUG)).lower() == "true"
+    os.getenv("PILAH_ALLOW_FAKE_GOOGLE_TOKEN", "false").lower() == "true"
 )
+if PILAH_ALLOW_FAKE_GOOGLE_TOKEN and not DEBUG:
+    raise ImproperlyConfigured("PILAH_ALLOW_FAKE_GOOGLE_TOKEN requires DJANGO_DEBUG=true")
 WHATSAPP_GATEWAY_URL = os.getenv("WHATSAPP_GATEWAY_URL", "")
 WHATSAPP_GATEWAY_TOKEN = os.getenv("WHATSAPP_GATEWAY_TOKEN", "")
 WHATSAPP_GATEWAY_TIMEOUT = int(os.getenv("WHATSAPP_GATEWAY_TIMEOUT", "10"))

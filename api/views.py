@@ -1,11 +1,13 @@
 import json
+import mimetypes
 from typing import Any
 
 import requests
 from django.conf import settings
+from django.core.files.storage import default_storage
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.db.models import Q, QuerySet
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.http import urlencode
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -29,6 +31,7 @@ from api.serializers import (
     InviteAcceptSerializer,
     JenisSampahSerializer,
     LogoutSerializer,
+    NasabahApprovalLogSerializer,
     NasabahDetailSerializer,
     NasabahSerializer,
     RefreshTokenSerializer,
@@ -45,12 +48,31 @@ from api.services import (
     ApprovalService,
     AuthService,
     DashboardService,
+    NasabahApprovalService,
     OnboardingService,
     TeamService,
     TransactionFilterService,
     TransactionService,
     WhatsAppService,
 )
+
+
+def bank_sampah_activity_media(request: HttpRequest, token: str) -> FileResponse:
+    try:
+        name = TimestampSigner(salt="bank-sampah-kegiatan").unsign(
+            token, max_age=settings.MEDIA_SIGNED_URL_MAX_AGE
+        )
+    except (BadSignature, SignatureExpired):
+        raise Http404 from None
+
+    if not name.startswith("bank_sampah/kegiatan/"):
+        raise Http404
+    try:
+        media_file = default_storage.open(name, "rb")
+    except FileNotFoundError:
+        raise Http404 from None
+    content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    return FileResponse(media_file, content_type=content_type)
 
 
 def _user(request: Request) -> User:
@@ -305,9 +327,13 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             qs = qs.filter(Q(nama__icontains=search) | Q(no_hp__icontains=search))
         if self.action == "list":
             if status_filter == "aktif":
-                qs = qs.filter(is_active=True)
+                qs = qs.filter(is_active=True, status=Nasabah.Status.APPROVED)
             elif status_filter == "tidak_aktif":
-                qs = qs.filter(is_active=False)
+                qs = qs.filter(is_active=False, status=Nasabah.Status.APPROVED)
+            elif status_filter == "menunggu":
+                qs = qs.filter(status=Nasabah.Status.PENDING)
+            elif status_filter == "ditolak":
+                qs = qs.filter(status=Nasabah.Status.REJECTED)
         return qs.order_by("nomor")
 
     def get_serializer_class(self) -> type[NasabahSerializer | NasabahDetailSerializer]:
@@ -372,6 +398,48 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
                 "id": str(nasabah.id),
                 "is_active": nasabah.is_active,
                 "message": f"Nasabah berhasil {state}",
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="approve")
+    def approve(self, request: Request, pk: str | None = None) -> Response:
+        nasabah = self.get_object()
+        if nasabah.status != Nasabah.Status.PENDING:
+            return Response(
+                {"error": "Hanya pengajuan berstatus menunggu yang dapat diproses"}, status=400
+            )
+        serializer = ApprovalDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        log = NasabahApprovalService.approve(
+            nasabah, _user(request), serializer.validated_data.get("catatan", "")
+        )
+        return Response(
+            {
+                "nasabah": NasabahDetailSerializer(
+                    nasabah, context=self.get_serializer_context()
+                ).data,
+                "approval_log": NasabahApprovalLogSerializer(log).data,
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="reject")
+    def reject(self, request: Request, pk: str | None = None) -> Response:
+        nasabah = self.get_object()
+        if nasabah.status != Nasabah.Status.PENDING:
+            return Response(
+                {"error": "Hanya pengajuan berstatus menunggu yang dapat diproses"}, status=400
+            )
+        serializer = ApprovalDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        log = NasabahApprovalService.reject(
+            nasabah, _user(request), serializer.validated_data.get("catatan", "")
+        )
+        return Response(
+            {
+                "nasabah": NasabahDetailSerializer(
+                    nasabah, context=self.get_serializer_context()
+                ).data,
+                "approval_log": NasabahApprovalLogSerializer(log).data,
             }
         )
 

@@ -17,7 +17,8 @@ PILAH is a Django REST Framework backend for a digital bank sampah management sy
 
 - Google OAuth token verification with JWT session issuance
 - Development auth token support for local testing
-- Role-based access for `pengelola` and `superadmin`
+- Login roles for `pengelola`, `pengelola_induk`, `nasabah`, and `superadmin`
+- Role-based API access remains scoped to `pengelola` and `superadmin`
 - Bank sampah registration with pending, active, and rejected states
 - SuperAdmin approval and rejection workflow
 - Pengelola utama invitation links for additional team members
@@ -67,7 +68,7 @@ Reset local Docker data:
 docker compose down -v
 ```
 
-For Google Cloud Run deployment, see [CLOUD_RUN.md](CLOUD_RUN.md).
+For deployment, see [Google Cloud Run](CLOUD_RUN.md) or [Fly.io staging](FLY_STAGING.md).
 
 ## Direct Local Setup
 
@@ -90,11 +91,27 @@ Create a local `.env` from the example if needed:
 cp .env.example .env
 ```
 
+For local fake-token login, explicitly opt in after copying the example:
+
+```env
+DJANGO_DEBUG=true
+PILAH_ALLOW_FAKE_GOOGLE_TOKEN=true
+```
+
+The backend refuses to start if fake tokens are enabled while debug mode is
+off. Keep both values `false` for staging and production.
+
 Run migrations:
 
 ```bash
 python manage.py migrate
+python manage.py seed_testing_data
 ```
+
+`seed_testing_data` is idempotent and only runs locally when `DJANGO_DEBUG=true`.
+It creates the deterministic banks, users, customers, waste types, balances,
+transactions, and approval log used by mobile E2E tests. Re-running it updates
+that fixture without deleting unrelated rows.
 
 Start the development server:
 
@@ -173,7 +190,50 @@ SuperAdmin:
 }
 ```
 
+Pengelola Induk and Nasabah:
+
+```json
+{
+  "id_token": "dev-pengelola-induk:induk@example.com:Pengelola Induk"
+}
+```
+
+```json
+{
+  "id_token": "dev-nasabah:nasabah@example.com:Nasabah PILAH"
+}
+```
+
+These role-specific token prefixes are local test helpers and work only while
+`PILAH_ALLOW_FAKE_GOOGLE_TOKEN=true`. For Google Sign-In, PILAH uses the role
+stored on the existing user account. Google profile claims cannot assign a
+PILAH role.
+
 Use only real Google ID tokens in production.
+
+## Staging E2E data and Google accounts
+
+Staging keeps genuine Google OAuth enabled. Add the five staging test-account
+emails to the Google OAuth consent screen's test-user list, and configure the
+same values as GitHub `staging` environment variables:
+
+```text
+PILAH_SEED_OPERATOR_EMAIL
+PILAH_SEED_CUSTOMER_EMAIL
+PILAH_SEED_CUSTOMER_TWO_EMAIL
+PILAH_SEED_SUPERADMIN_EMAIL
+PILAH_SEED_PENDING_OPERATOR_EMAIL
+```
+
+Run the confirmation-gated **Seed Staging Testing Data** GitHub Actions
+workflow and enter `SEED-PILAH-STAGING-DATA` exactly. The workflow connects to
+the documented `pilah-be-staging` Fly.io app and runs the same idempotent
+command with `--environment staging`; it never enables fake authentication.
+See [Fly.io staging](FLY_STAGING.md) for the operator setup.
+
+Bank Sampah organizations can be `mandiri`, `induk`, or `unit`. A unit must
+belong to an induk organization. A Nasabah user can have one membership per
+bank and can belong to multiple banks.
 
 ## Role Flow
 
@@ -397,6 +457,41 @@ Run tests:
 ```bash
 python manage.py test
 ```
+
+## Nasabah home API (PIL-225)
+
+All endpoints require a Bearer JWT for an active user with role `nasabah`.
+
+| GET endpoint | Response |
+| --- | --- |
+| `/api/v1/nasabah/me/beranda` | `user`, `keanggotaan`, `bank_sampah`, `saldo`, and up to five `aktivitas_terbaru` |
+| `/api/v1/nasabah/me/saldo` | `total_saldo` (decimal string), `updated_at` |
+| `/api/v1/nasabah/me/bank-sampah` | Public details of the selected membership's bank |
+| `/api/v1/nasabah/me/riwayat` | Paginated `count`, `next`, `previous`, `results`; newest transactions first |
+
+The membership must belong to the authenticated user, have status `approved`,
+and be active. Its bank must also have status `active` and be active.
+No request can select another user's data. Bank credentials and invite tokens
+are excluded from responses. Reads never create or update balances.
+
+Pass `?keanggotaan_id=<UUID>` to select a membership. When omitted, the API uses
+the user's only eligible membership. If several are eligible, it returns 422
+with `errors.keanggotaan_id` and `errors.pilihan` containing the available IDs
+and bank names. Invalid UUIDs also return 422, another user's or missing
+membership returns 404, and ineligible memberships return 403.
+History supports `page` and `page_size` (default 20, maximum 100); retain the
+membership selection when requesting subsequent pages.
+
+Balances without a row return `"0.00"` and `updated_at: null`; empty history
+returns an empty list. Activity fields are `id`, `tanggal`, `tipe`, and
+`total_nilai`. These represent the transactions available in staging
+(currently deposits); this change does not implement withdrawals.
+
+Mobile integration must handle staging's `next_step: "nasabah_dashboard"`,
+then load this API to check membership eligibility. Bank status from the
+login payload alone is not proof of active membership. The existing mobile
+preview is still mock data until its repository/state layer calls these APIs.
+This backend branch does not modify the mobile application or login contract.
 
 ## Notes
 
