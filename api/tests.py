@@ -130,6 +130,42 @@ class APISpecTests(APITestCase):
         self.assertEqual(second.status_code, 201)
         self.assertTrue(second.data["peringatan_jadwal_bertumpuk"])
 
+    def test_schedule_requires_end_after_start_on_create_and_update(self) -> None:
+        starts_at = timezone.now() + timedelta(days=3)
+        payload = {
+            "jenis_kegiatan": "penimbangan",
+            "mulai_pada": (starts_at + timedelta(hours=3)).isoformat(),
+            "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+            "lokasi": "Balai Warga",
+            "cakupan_penerima": "semua_nasabah",
+        }
+        invalid_create = self.client.post("/api/v1/jadwal", payload, format="json")
+
+        self.assertEqual(invalid_create.status_code, 422)
+        self.assertEqual(
+            invalid_create.data["errors"]["selesai_pada"],
+            ["Waktu selesai harus setelah waktu mulai"],
+        )
+
+        payload["mulai_pada"] = starts_at.isoformat()
+        created = self.client.post("/api/v1/jadwal", payload, format="json")
+        invalid_update = self.client.patch(
+            f"/api/v1/jadwal/{created.data['id']}",
+            {"mulai_pada": (starts_at + timedelta(hours=3)).isoformat()},
+            format="json",
+        )
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(invalid_update.status_code, 422)
+        self.assertEqual(
+            invalid_update.data["errors"]["selesai_pada"],
+            ["Waktu selesai harus setelah waktu mulai"],
+        )
+        self.assertEqual(
+            JadwalKegiatan.objects.get(pk=created.data["id"]).mulai_pada,
+            starts_at,
+        )
+
     def test_schedule_update_recomputes_overlap_warning(self) -> None:
         starts_at = timezone.now() + timedelta(days=3)
         JadwalKegiatan.objects.create(
