@@ -656,7 +656,7 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         if getattr(instance, "_prefetched_objects_cache", None):
-            setattr(instance, "_prefetched_objects_cache", {})
+            instance._prefetched_objects_cache = {}
         return Response(serializer.data)
 
     def _transition(
@@ -666,9 +666,9 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
         allowed_from: set[str],
         target: str,
     ) -> Response:
-        updated = JadwalKegiatan.objects.filter(
-            pk=jadwal.pk, status__in=allowed_from
-        ).update(status=target, updated_at=timezone.now())
+        updated = JadwalKegiatan.objects.filter(pk=jadwal.pk, status__in=allowed_from).update(
+            status=target, updated_at=timezone.now()
+        )
         if not updated:
             return Response(
                 {"error": "Perubahan status jadwal tidak diizinkan"},
