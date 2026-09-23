@@ -364,10 +364,10 @@ The response carries `status` (`tercatat`) plus the `saldo_sebelum` and
 
 | Parameter | Values | Notes |
 | --- | --- | --- |
-| `periode` | `hari_ini`, `minggu_ini`, `bulan_ini`, `bulan_lalu`, `custom` | Same values as the transaksi list. Omitted means the whole history (transaksi defaults to `hari_ini` instead). |
+| `periode` | `hari_ini`, `minggu_ini`, `bulan_ini`, `bulan_lalu`, `custom` | Same values as the transaksi list. Omitted means the whole history (transaksi defaults to `hari_ini` instead). An unrecognized value is ignored rather than rejected, also as on the transaksi list, so it reads as the whole history too. |
 | `dari_tanggal`, `sampai_tanggal` | `YYYY-MM-DD` | Required with `periode=custom`: missing returns 422, an end before the start returns 400. |
 | `nasabah_id` | UUID | One nasabah's riwayat. |
-| `search` | 2+ characters | Case-insensitive match on the nasabah name. |
+| `search` | 2+ characters | Case-insensitive match on the nasabah name. A shorter value is ignored, so clients should not send one. |
 
 Results are always limited to the pengurus' own bank sampah, newest first, paginated.
 
