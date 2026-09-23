@@ -592,6 +592,11 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
     def perform_create(self, serializer: serializers.BaseSerializer[Any]) -> None:
         serializer.save(bank_sampah=_bank_sampah(self.request), dibuat_oleh=_user(self.request))
 
+    def perform_update(self, serializer: serializers.BaseSerializer[Any]) -> None:
+        instance = serializer.save()
+        if hasattr(instance, "_peringatan_jadwal_bertumpuk"):
+            delattr(instance, "_peringatan_jadwal_bertumpuk")
+
 
 class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
     permission_classes = [IsActivePengelola]
