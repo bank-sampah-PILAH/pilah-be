@@ -1425,3 +1425,48 @@ class ProfilNasabahBerakunTests(APITestCase):
         self.nasabah.refresh_from_db()
         self.assertEqual(self.nasabah.nomor, "NAS-0003")
         self.assertEqual(self.nasabah.no_hp, "+628111111111")
+
+    def test_nasabah_tanpa_akun_tetap_bisa_diubah_penuh(self) -> None:
+        tanpa_akun = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0009",
+            nama="Siti Aminah",
+            no_hp="+628222222222",
+            alamat="Jl. Kenanga No. 5",
+        )
+
+        response = self.client.put(
+            f"/api/v1/nasabah/{tanpa_akun.id}",
+            {
+                "kode": "NAS-0009",
+                "nama": "Siti Aminah Putri",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1992-05-17",
+                "no_hp": "081222222222",
+                "alamat": "Jl. Kenanga No. 7",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        tanpa_akun.refresh_from_db()
+        self.assertEqual(tanpa_akun.nama, "Siti Aminah Putri")
+        self.assertEqual(tanpa_akun.alamat, "Jl. Kenanga No. 7")
+
+    def test_ubah_no_hp_nasabah_berakun_ditolak(self) -> None:
+        response = self._ubah(no_hp="082333333333")
+
+        self.assertEqual(response.status_code, 403)
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.no_hp, "+628111111111")
+
+    def test_nasabah_berakun_nonaktif_menolak_dengan_pesan_nonaktif(self) -> None:
+        # Dua penolakan bertumpuk; pesan yang muncul harus yang paling
+        # mendasar, yaitu nasabahnya nonaktif.
+        self.nasabah.is_active = False
+        self.nasabah.save(update_fields=["is_active"])
+
+        response = self._ubah(nama="Budi Santosa")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data["error"], "Nasabah nonaktif tidak bisa diedit")
