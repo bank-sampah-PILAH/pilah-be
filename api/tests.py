@@ -130,6 +130,37 @@ class APISpecTests(APITestCase):
         self.assertEqual(second.status_code, 201)
         self.assertTrue(second.data["peringatan_jadwal_bertumpuk"])
 
+    def test_schedule_update_recomputes_overlap_warning(self) -> None:
+        starts_at = timezone.now() + timedelta(days=3)
+        JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=starts_at,
+            selesai_pada=starts_at + timedelta(hours=2),
+            lokasi="Balai Warga",
+        )
+        moving_schedule = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=starts_at,
+            selesai_pada=starts_at + timedelta(hours=2),
+            lokasi="Kantor",
+        )
+
+        overlapping = self.client.patch(
+            f"/api/v1/jadwal/{moving_schedule.id}", {"lokasi": "Balai Warga"}, format="json"
+        )
+        self.assertEqual(overlapping.status_code, 200)
+        self.assertTrue(overlapping.data["peringatan_jadwal_bertumpuk"])
+
+        separated = self.client.patch(
+            f"/api/v1/jadwal/{moving_schedule.id}", {"lokasi": "Kantor"}, format="json"
+        )
+        self.assertEqual(separated.status_code, 200)
+        self.assertFalse(separated.data["peringatan_jadwal_bertumpuk"])
+
     def test_schedule_list_overlap_warnings_do_not_add_queries_per_row(self) -> None:
         starts_at = timezone.now() + timedelta(days=3)
 
