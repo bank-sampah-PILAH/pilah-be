@@ -435,6 +435,39 @@ class APISpecTests(APITestCase):
         self.assertEqual(completed.status_code, 200)
         self.assertEqual(completed.data["status"], "selesai")
 
+    def test_terminal_schedules_cannot_be_edited(self) -> None:
+        starts_at = timezone.now() + timedelta(days=4)
+
+        def create_schedule() -> str:
+            response = self.client.post(
+                "/api/v1/jadwal",
+                {
+                    "jenis_kegiatan": "penimbangan",
+                    "mulai_pada": starts_at.isoformat(),
+                    "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+                    "lokasi": "Balai Warga RW 04",
+                    "cakupan_penerima": "semua_nasabah",
+                },
+                format="json",
+            )
+            self.assertEqual(response.status_code, 201)
+            return str(response.data["id"])
+
+        cancelled_id = create_schedule()
+        self.client.post(f"/api/v1/jadwal/{cancelled_id}/batalkan")
+        completed_id = create_schedule()
+        self.client.post(f"/api/v1/jadwal/{completed_id}/terbitkan")
+        self.client.post(f"/api/v1/jadwal/{completed_id}/selesaikan")
+
+        for schedule_id in (cancelled_id, completed_id):
+            response = self.client.patch(
+                f"/api/v1/jadwal/{schedule_id}", {"lokasi": "Lokasi Baru"}, format="json"
+            )
+
+            self.assertEqual(response.status_code, 400)
+            schedule = self.client.get(f"/api/v1/jadwal/{schedule_id}")
+            self.assertEqual(schedule.data["lokasi"], "Balai Warga RW 04")
+
     @override_settings(
         ALLOWED_HOSTS=["admin.example.com"],
         CSRF_TRUSTED_ORIGINS=["https://admin.example.com"],
