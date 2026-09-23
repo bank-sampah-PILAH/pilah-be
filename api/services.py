@@ -479,31 +479,14 @@ class OnboardingService:
             Saldo.objects.get_or_create(nasabah=own_record)
             return own_record
 
-        # Converge onto a pengurus-entered record for the same phone number
-        # rather than colliding with it on the (bank_sampah, no_hp) constraint:
-        # PIL-154 lets a pengurus register a nasabah by phone before that
-        # person ever signs in themselves.
-        existing = Nasabah.objects.filter(
-            bank_sampah=bank, no_hp=user.no_hp, user__isnull=True
-        ).first()
-        if existing is not None:
-            existing.user = user
-            existing.nama = user.nama
-            existing.jenis_kelamin = user.jenis_kelamin
-            existing.tanggal_lahir = user.tanggal_lahir
-            existing.alamat = user.alamat
-            existing.save(
-                update_fields=[
-                    "user",
-                    "nama",
-                    "jenis_kelamin",
-                    "tanggal_lahir",
-                    "alamat",
-                    "updated_at",
-                ]
+        # A pengurus-entered record for this same person converges onto
+        # `own_record` above at first Google login (AuthService matches on
+        # verified `email`, not on this self-declared `no_hp`), so reaching
+        # here with a phone collision means it belongs to someone else.
+        if Nasabah.objects.filter(bank_sampah=bank, no_hp=user.no_hp).exists():
+            raise ValueError(
+                "Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus"
             )
-            Saldo.objects.get_or_create(nasabah=existing)
-            return existing
 
         nasabah = Nasabah(
             bank_sampah=bank,
@@ -513,6 +496,7 @@ class OnboardingService:
             jenis_kelamin=user.jenis_kelamin,
             tanggal_lahir=user.tanggal_lahir,
             no_hp=user.no_hp,
+            email=user.email,
             alamat=user.alamat,
             # A self-registration awaits pengurus review (PIL-188); the model
             # default of APPROVED is for records a pengurus enters directly,

@@ -436,6 +436,7 @@ class Command(BaseCommand):
                 "tanggal_lahir": birth_date,
                 "alamat": address,
                 "no_hp": phone,
+                "email": user.email,
                 "is_active": True,
             },
         )

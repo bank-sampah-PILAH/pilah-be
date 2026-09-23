@@ -190,6 +190,7 @@ class SuperadminWhitelistTests(APITestCase):
             nama="Member",
             alamat="Depok",
             no_hp="+628111111112",
+            email="member@example.com",
         )
         verify.return_value = {**GOOGLE_PROFILE, "email": "MEMBER@example.com"}
 
