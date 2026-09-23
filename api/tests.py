@@ -385,7 +385,10 @@ class APISpecTests(APITestCase):
         self.assertEqual(created.data["email"], "budi@example.com")
         self.assertTrue(Saldo.objects.filter(nasabah_id=created.data["id"]).exists())
 
-    def test_nasabah_create_without_email_still_works(self) -> None:
+    def test_nasabah_create_without_email_is_rejected(self) -> None:
+        """Email is the identity-linking key for AuthService._sync_nasabah_prefill
+        (matched against verified Google logins), so a pengurus-entered
+        record without one can never be safely claimed by its owner."""
         created = self.client.post(
             "/api/v1/nasabah",
             {
@@ -398,8 +401,8 @@ class APISpecTests(APITestCase):
             },
             format="json",
         )
-        self.assertEqual(created.status_code, 201)
-        self.assertIsNone(created.data["email"])
+        self.assertEqual(created.status_code, 422)
+        self.assertEqual(created.data["errors"]["email"], ["Bidang ini harus diisi."])
 
     def test_nasabah_duplicate_email_same_bank_returns_validation_error(self) -> None:
         first = self.client.post(
@@ -2083,6 +2086,52 @@ class APISpecTests(APITestCase):
         self.assertEqual(
             Nasabah.objects.filter(bank_sampah=self.bank, no_hp="+628555555003").count(), 1
         )
+
+    def test_nasabah_self_registration_rejects_phone_collision_with_unrelated_record(
+        self,
+    ) -> None:
+        """A `no_hp` match alone must never grant access to someone else's
+        pending/unlinked record: `no_hp` is a self-declared profile field
+        with no verification behind it (unlike `email`, which is only ever
+        set from a Google-verified login via `_sync_nasabah_prefill`).
+        Trusting it for identity-claiming lets anyone hijack a
+        pre-registered nasabah's membership by simply typing in their phone
+        number."""
+        other_persons_record = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0500",
+            nama="Nama Lama",
+            alamat="Alamat Lama",
+            no_hp="+628555555003",
+            email="the-real-owner@example.com",
+        )
+        attacker = User.objects.create_user(
+            email="attacker@example.com",
+            nama="Attacker",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1995-03-10",
+            no_hp="+628555555003",
+            alamat="Alamat Attacker",
+            is_profile_complete=True,
+        )
+        refresh = RefreshToken.for_user(attacker)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            "/api/v1/onboarding/nasabah",
+            {"bank_sampah_id": str(self.bank.id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["error"],
+            "Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus",
+        )
+        other_persons_record.refresh_from_db()
+        self.assertIsNone(other_persons_record.user)
+        self.assertEqual(other_persons_record.nama, "Nama Lama")
 
     def test_nasabah_self_registration_rejects_non_nasabah_role(self) -> None:
         pengelola = User.objects.create_user(
