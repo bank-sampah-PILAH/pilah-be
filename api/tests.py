@@ -200,9 +200,7 @@ class APISpecTests(APITestCase):
 
         self.assertEqual(created.status_code, 201)
         self.assertEqual(response.status_code, 422)
-        self.assertEqual(
-            response.data["errors"]["penerima_ids"], ["Pilih minimal satu nasabah"]
-        )
+        self.assertEqual(response.data["errors"]["penerima_ids"], ["Pilih minimal satu nasabah"])
         self.assertTrue(
             self.client.get(f"/api/v1/jadwal/{created.data['id']}").data["penerima_ids"]
         )
