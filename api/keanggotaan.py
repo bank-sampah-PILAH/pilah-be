@@ -39,6 +39,5 @@ def profil_terkunci(nasabah: Nasabah, data: Mapping[str, Any]) -> bool:
     if not punya_akun(nasabah):
         return False
     return any(
-        field in data and data[field] != getattr(nasabah, field)
-        for field in FIELD_PROFIL_GLOBAL
+        field in data and data[field] != getattr(nasabah, field) for field in FIELD_PROFIL_GLOBAL
     )

@@ -1417,9 +1417,7 @@ class ProfilNasabahBerakunTests(APITestCase):
         self.nasabah.tanggal_lahir = date(1990, 1, 1)
         self.nasabah.save(update_fields=["tanggal_lahir"])
 
-        response = self._ubah(
-            kode="NAS-0003", no_hp="08111111111", tanggal_lahir="1990-01-01"
-        )
+        response = self._ubah(kode="NAS-0003", no_hp="08111111111", tanggal_lahir="1990-01-01")
 
         self.assertEqual(response.status_code, 200)
         self.nasabah.refresh_from_db()

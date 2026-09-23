@@ -18,9 +18,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from api.keanggotaan import profil_terkunci
 from api.models import BankSampah, JenisSampah, Nasabah, Saldo, Transaksi, User
 from api.permissions import IsActivePengelola, IsPengelola, IsPrimaryPengelola, IsSuperAdmin
-from api.keanggotaan import profil_terkunci
 from api.serializers import (
     ApprovalDecisionSerializer,
     ApprovalLogSerializer,
