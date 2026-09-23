@@ -362,11 +362,6 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         instance = self.get_object()
         if not instance.is_active:
             return Response({"error": "Nasabah nonaktif tidak bisa diedit"}, status=403)
-        if profil_terkunci(instance, request.data):  # type: ignore[arg-type]  # DRF types request.data as dict | list; this payload is an object
-            return Response(
-                {"error": "Nasabah dengan akun hanya bisa diubah pada data keanggotaan"},
-                status=403,
-            )
         nomor = request.data.get("kode")  # type: ignore[union-attr]  # DRF types request.data as dict | list; these payloads are objects
         bank = _bank_sampah(request)
         if (
@@ -380,6 +375,11 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             instance, data=request.data, partial=kwargs.pop("partial", False)
         )
         serializer.is_valid(raise_exception=True)
+        if profil_terkunci(instance, serializer.validated_data):
+            return Response(
+                {"error": "Nasabah dengan akun hanya bisa diubah pada data keanggotaan"},
+                status=403,
+            )
         no_hp = serializer.validated_data.get("no_hp")
         if (
             no_hp

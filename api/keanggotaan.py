@@ -24,8 +24,13 @@ def punya_akun(nasabah: Nasabah) -> bool:
     return nasabah.user_id is not None
 
 
-def profil_terkunci(nasabah: Nasabah, payload: Mapping[str, Any]) -> bool:
-    """``True`` bila ``payload`` mengubah profil global nasabah berakun.
+def profil_terkunci(nasabah: Nasabah, data: Mapping[str, Any]) -> bool:
+    """``True`` bila ``data`` mengubah profil global nasabah berakun.
+
+    ``data`` harus berupa ``validated_data`` serializer, bukan payload mentah,
+    karena nomor HP dinormalisasi ke bentuk +62 dan tanggal lahir dikonversi
+    menjadi ``date``. Membandingkan payload mentah membuat form yang mengirim
+    ulang nilai yang sama ditolak tanpa alasan.
 
     Yang dibandingkan adalah nilainya, bukan keberadaan field, supaya form yang
     mengirim seluruh data nasabah tetap dapat menyimpan perubahan pada data
@@ -34,6 +39,6 @@ def profil_terkunci(nasabah: Nasabah, payload: Mapping[str, Any]) -> bool:
     if not punya_akun(nasabah):
         return False
     return any(
-        field in payload and payload[field] != getattr(nasabah, field)
+        field in data and data[field] != getattr(nasabah, field)
         for field in FIELD_PROFIL_GLOBAL
     )
