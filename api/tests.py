@@ -657,6 +657,45 @@ class APISpecTests(APITestCase):
             schedule = self.client.get(f"/api/v1/jadwal/{schedule_id}")
             self.assertEqual(schedule.data["lokasi"], "Balai Warga RW 04")
 
+    def test_nasabah_cannot_see_schedules_from_inactive_bank(self) -> None:
+        nasabah_user = User.objects.create_user(
+            email="inactive-bank-nasabah@example.com",
+            nama="Nasabah Bank Nonaktif",
+            role=User.Role.NASABAH,
+            is_profile_complete=False,
+        )
+        Nasabah.objects.create(
+            user=nasabah_user,
+            bank_sampah=self.bank,
+            nomor="NAS-0101",
+            nama=nasabah_user.nama,
+            alamat="Jl. Kenanga No. 11",
+            no_hp="+628123450101",
+            status=Nasabah.Status.APPROVED,
+        )
+        now = timezone.now()
+        schedule = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=now + timedelta(days=1),
+            selesai_pada=now + timedelta(days=1, hours=2),
+            lokasi="Balai Warga",
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+        self.bank.status = BankSampah.Status.REJECTED
+        self.bank.is_active = False
+        self.bank.save(update_fields=["status", "is_active", "updated_at"])
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(nasabah_user).access_token}"
+        )
+
+        response = self.client.get("/api/v1/jadwal")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["results"], [])
+        self.assertNotIn(str(schedule.id), {item["id"] for item in response.data["results"]})
+
     @override_settings(
         ALLOWED_HOSTS=["admin.example.com"],
         CSRF_TRUSTED_ORIGINS=["https://admin.example.com"],
