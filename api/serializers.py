@@ -611,6 +611,9 @@ class JadwalKegiatanSerializer(serializers.ModelSerializer[Model]):
         return attrs
 
     def get_peringatan_jadwal_bertumpuk(self, obj: JadwalKegiatan) -> bool:
+        annotated = getattr(obj, "_peringatan_jadwal_bertumpuk", None)
+        if annotated is not None:
+            return bool(annotated)
         return (
             JadwalKegiatan.objects.filter(
                 bank_sampah=obj.bank_sampah,

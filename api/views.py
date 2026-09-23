@@ -6,7 +6,7 @@ import requests
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
-from django.db.models import Q, QuerySet
+from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.http import urlencode
 from rest_framework import serializers, status, viewsets
@@ -572,10 +572,21 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_queryset(self) -> QuerySet[JadwalKegiatan]:
+        overlapping_schedules = (
+            JadwalKegiatan.objects.filter(
+                bank_sampah=OuterRef("bank_sampah"),
+                lokasi__iexact=OuterRef("lokasi"),
+                mulai_pada__lt=OuterRef("selesai_pada"),
+                selesai_pada__gt=OuterRef("mulai_pada"),
+            )
+            .exclude(pk=OuterRef("pk"))
+            .exclude(status=JadwalKegiatan.Status.DIBATALKAN)
+        )
         return (
             JadwalKegiatan.objects.filter(bank_sampah=_bank_sampah(self.request))
             .select_related("bank_sampah", "dibuat_oleh")
             .prefetch_related("penerima")
+            .annotate(_peringatan_jadwal_bertumpuk=Exists(overlapping_schedules))
         )
 
     def perform_create(self, serializer: serializers.BaseSerializer[Any]) -> None:
