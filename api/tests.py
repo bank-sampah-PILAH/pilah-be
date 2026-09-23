@@ -1391,3 +1391,22 @@ class ProfilNasabahBerakunTests(APITestCase):
         )
         self.nasabah.refresh_from_db()
         self.assertEqual(self.nasabah.nama, "Budi Santoso")
+
+    def test_ubah_kode_nasabah_berakun_diterima(self) -> None:
+        # Form pengurus mengirim seluruh data nasabah; yang berubah hanya nomor
+        # anggota, sehingga penyimpanan tidak boleh ditolak.
+        response = self._ubah(kode="NAS-0002")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["kode"], "NAS-0002")
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.nomor, "NAS-0002")
+        self.assertEqual(self.nasabah.nama, "Budi Santoso")
+
+    def test_status_keanggotaan_nasabah_berakun_tetap_bisa_diubah(self) -> None:
+        response = self.client.patch(
+            f"/api/v1/nasabah/{self.nasabah.id}/status", {"is_active": False}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data["is_active"])
