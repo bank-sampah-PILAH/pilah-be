@@ -87,7 +87,10 @@ class NasabahHomeTests(APITestCase):
         self.assertEqual(
             self.client.get(self.url, {"keanggotaan_id": str(member.id)}).status_code, 404
         )
-        self.assertEqual(self.client.get(self.url, {"keanggotaan_id": "invalid"}).status_code, 422)
+        for identifier in ("invalid", ""):
+            with self.subTest(identifier=identifier):
+                response = self.client.get(self.url, {"keanggotaan_id": identifier})
+                self.assertEqual(response.status_code, 422)
 
     def test_multiple_memberships_require_explicit_selection(self) -> None:
         bank = BankSampah.objects.create(nama="Mawar", no_hp_pic="0899999")

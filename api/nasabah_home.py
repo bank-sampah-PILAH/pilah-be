@@ -6,22 +6,12 @@ from django.db.models import QuerySet
 from rest_framework import serializers
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.generics import GenericAPIView, ListAPIView
-from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from api.models import BankSampah, Nasabah, Transaksi, User
 from api.pagination import StandardPagination
-
-
-class IsNasabah(BasePermission):
-    def has_permission(self, request: Request, view: APIView) -> bool:
-        return bool(
-            request.user.is_authenticated
-            and request.user.is_active
-            and request.user.role == User.Role.NASABAH
-        )
+from api.permissions import IsActiveNasabah
 
 
 class BankUnitSerializer(serializers.ModelSerializer[BankSampah]):
@@ -71,12 +61,19 @@ class HomeSerializer(serializers.Serializer[Any]):
     aktivitas_terbaru = ActivitySerializer(many=True)
 
 
-def active_membership(request: Request) -> Nasabah:
-    memberships = Nasabah.objects.filter(user=cast(User, request.user)).select_related(
-        "bank_sampah", "saldo"
-    )
-    identifier = request.query_params.get("keanggotaan_id")
-    if identifier is not None:
+class MembershipService:
+    @staticmethod
+    def get_active_membership(request: Request) -> Nasabah:
+        memberships = Nasabah.objects.filter(user=cast(User, request.user)).select_related(
+            "bank_sampah", "saldo"
+        )
+        identifier = request.query_params.get("keanggotaan_id")
+        if identifier is not None:
+            return MembershipService._get_selected_membership(memberships, identifier)
+        return MembershipService._get_default_membership(memberships)
+
+    @staticmethod
+    def _get_selected_membership(memberships: QuerySet[Nasabah], identifier: str) -> Nasabah:
         try:
             member_id = UUID(identifier)
         except (ValueError, TypeError, AttributeError) as exc:
@@ -84,36 +81,40 @@ def active_membership(request: Request) -> Nasabah:
         member = memberships.filter(pk=member_id).first()
         if member is None:
             raise NotFound("Keanggotaan tidak ditemukan.")
-        if not (
-            member.status == Nasabah.Status.APPROVED
-            and member.is_active
-            and member.bank_sampah.is_active
-            and member.bank_sampah.status == BankSampah.Status.ACTIVE
-        ):
-            raise PermissionDenied("Keanggotaan dan bank sampah harus aktif.")
+        MembershipService._validate_active(member)
         return member
 
-    eligible = list(
-        memberships.filter(
-            status=Nasabah.Status.APPROVED,
-            is_active=True,
-            bank_sampah__is_active=True,
-            bank_sampah__status=BankSampah.Status.ACTIVE,
+    @staticmethod
+    def _get_default_membership(memberships: QuerySet[Nasabah]) -> Nasabah:
+        eligible = list(
+            memberships.filter(
+                status=Nasabah.Status.APPROVED,
+                is_active=True,
+                bank_sampah__is_active=True,
+                bank_sampah__status=BankSampah.Status.ACTIVE,
+            )
         )
-    )
-    if not eligible:
-        raise PermissionDenied("Keanggotaan aktif diperlukan.")
-    if len(eligible) > 1:
-        raise ValidationError(
-            {
-                "keanggotaan_id": "Pilih keanggotaan untuk melihat beranda.",
-                "pilihan": [
-                    {"id": str(member.id), "bank_sampah_nama": member.bank_sampah.nama}
-                    for member in eligible
-                ],
-            }
-        )
-    return eligible[0]
+        if not eligible:
+            raise PermissionDenied("Keanggotaan aktif diperlukan.")
+        if len(eligible) > 1:
+            raise ValidationError(
+                {
+                    "keanggotaan_id": "Pilih keanggotaan untuk melihat beranda.",
+                    "pilihan": [
+                        {"id": str(member.id), "bank_sampah_nama": member.bank_sampah.nama}
+                        for member in eligible
+                    ],
+                }
+            )
+        return eligible[0]
+
+    @staticmethod
+    def _validate_active(member: Nasabah) -> None:
+        membership_is_active = member.status == Nasabah.Status.APPROVED and member.is_active
+        bank = member.bank_sampah
+        bank_is_active = bank.is_active and bank.status == BankSampah.Status.ACTIVE
+        if not (membership_is_active and bank_is_active):
+            raise PermissionDenied("Keanggotaan dan bank sampah harus aktif.")
 
 
 def balance_data(member: Nasabah) -> dict[str, Any]:
@@ -131,11 +132,11 @@ def activities(member: Nasabah) -> QuerySet[Transaksi]:
 
 
 class NasabahHomeView(GenericAPIView[Nasabah]):
-    permission_classes = [IsNasabah]
+    permission_classes = [IsActiveNasabah]
     serializer_class = HomeSerializer
 
     def get(self, request: Request) -> Response:
-        member = active_membership(request)
+        member = MembershipService.get_active_membership(request)
         return Response(
             self.get_serializer(
                 {
@@ -150,25 +151,29 @@ class NasabahHomeView(GenericAPIView[Nasabah]):
 
 
 class NasabahBalanceView(GenericAPIView[Nasabah]):
-    permission_classes = [IsNasabah]
+    permission_classes = [IsActiveNasabah]
     serializer_class = BalanceSerializer
 
     def get(self, request: Request) -> Response:
-        return Response(self.get_serializer(balance_data(active_membership(request))).data)
+        return Response(
+            self.get_serializer(balance_data(MembershipService.get_active_membership(request))).data
+        )
 
 
 class NasabahBankView(GenericAPIView[BankSampah]):
-    permission_classes = [IsNasabah]
+    permission_classes = [IsActiveNasabah]
     serializer_class = BankUnitSerializer
 
     def get(self, request: Request) -> Response:
-        return Response(self.get_serializer(active_membership(request).bank_sampah).data)
+        return Response(
+            self.get_serializer(MembershipService.get_active_membership(request).bank_sampah).data
+        )
 
 
 class NasabahHistoryView(ListAPIView[Transaksi]):
-    permission_classes = [IsNasabah]
+    permission_classes = [IsActiveNasabah]
     serializer_class = ActivitySerializer
     pagination_class = StandardPagination
 
     def get_queryset(self) -> QuerySet[Transaksi]:
-        return activities(active_membership(self.request))
+        return activities(MembershipService.get_active_membership(self.request))
