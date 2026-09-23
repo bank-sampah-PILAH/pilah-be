@@ -128,6 +128,26 @@ class APISpecTests(APITestCase):
         self.assertEqual(second.status_code, 201)
         self.assertTrue(second.data["peringatan_jadwal_bertumpuk"])
 
+    def test_schedule_rejects_unapproved_recipients(self) -> None:
+        recipient = self._create_pending_nasabah()
+        starts_at = timezone.now() + timedelta(days=3)
+
+        response = self.client.post(
+            "/api/v1/jadwal",
+            {
+                "jenis_kegiatan": "penimbangan",
+                "mulai_pada": starts_at.isoformat(),
+                "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+                "lokasi": "Balai Warga RW 04",
+                "cakupan_penerima": "nasabah_terpilih",
+                "penerima_ids": [str(recipient.id)],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("penerima_ids", response.data["errors"])
+
     def test_schedule_rejects_explicitly_clearing_selected_recipients(self) -> None:
         recipient = self._create_pending_nasabah()
         recipient.status = Nasabah.Status.APPROVED
