@@ -564,6 +564,14 @@ class JadwalKegiatanSerializer(serializers.ModelSerializer[Model]):
             "updated_at",
         ]
 
+    def to_representation(self, instance: JadwalKegiatan) -> dict[str, Any]:
+        representation = super().to_representation(instance)
+        request = self.context.get("request")
+        if getattr(getattr(request, "user", None), "role", None) == User.Role.NASABAH:
+            representation.pop("penerima_ids", None)
+            representation.pop("peringatan_jadwal_bertumpuk", None)
+        return representation
+
     def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:
         fields = super().get_fields()
         request = self.context.get("request")
