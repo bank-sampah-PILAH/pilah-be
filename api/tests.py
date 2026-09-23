@@ -662,6 +662,90 @@ class APISpecTests(APITestCase):
             schedule = self.client.get(f"/api/v1/jadwal/{schedule_id}")
             self.assertEqual(schedule.data["lokasi"], "Balai Warga RW 04")
 
+    def test_nasabah_sees_only_unexpired_schedules_for_their_membership(self) -> None:
+        def create_member(
+            email: str, number: str, status: str, active: bool = True
+        ) -> tuple[User, Nasabah]:
+            user = User.objects.create_user(
+                email=email,
+                nama=email,
+                role=User.Role.NASABAH,
+                is_profile_complete=False,
+            )
+            member = Nasabah.objects.create(
+                user=user,
+                bank_sampah=self.bank,
+                nomor=f"NAS-{number}",
+                nama=email,
+                alamat="Jl. Kenanga",
+                no_hp=f"+62812345{number}",
+                status=status,
+                is_active=active,
+            )
+            return user, member
+
+        recipient_user, recipient = create_member(
+            "recipient@example.com", "0102", Nasabah.Status.APPROVED
+        )
+        other_user, _ = create_member("other@example.com", "0103", Nasabah.Status.APPROVED)
+        pending_user, _ = create_member("pending@example.com", "0104", Nasabah.Status.PENDING)
+        rejected_user, _ = create_member(
+            "rejected@example.com", "0105", Nasabah.Status.REJECTED, active=False
+        )
+        now = timezone.now()
+        public_schedule = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=now + timedelta(days=1),
+            selesai_pada=now + timedelta(days=1, hours=1),
+            lokasi="Balai Warga",
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+        selected_schedule = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENCAIRAN,
+            mulai_pada=now + timedelta(days=2),
+            selesai_pada=now + timedelta(days=2, hours=1),
+            lokasi="Kantor BTH",
+            cakupan_penerima=JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH,
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+        selected_schedule.penerima.add(recipient)
+        expired_schedule = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=now - timedelta(days=2),
+            selesai_pada=now - timedelta(days=1),
+            lokasi="Kegiatan Lama",
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(other_user).access_token}"
+        )
+        other_response = self.client.get("/api/v1/jadwal")
+
+        self.assertEqual(other_response.status_code, 200)
+        other_ids = {item["id"] for item in other_response.data["results"]}
+        self.assertEqual(other_ids, {str(public_schedule.id)})
+        self.assertNotIn(str(selected_schedule.id), other_ids)
+        self.assertNotIn(str(expired_schedule.id), other_ids)
+
+        for member_user in (recipient_user, pending_user, rejected_user):
+            self.client.credentials(
+                HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(member_user).access_token}"
+            )
+            response = self.client.get("/api/v1/jadwal")
+            self.assertEqual(response.status_code, 200)
+            if member_user == recipient_user:
+                ids = {item["id"] for item in response.data["results"]}
+                self.assertEqual(ids, {str(public_schedule.id), str(selected_schedule.id)})
+            else:
+                self.assertEqual(response.data["results"], [])
+
     def test_nasabah_cannot_see_schedules_from_inactive_bank(self) -> None:
         nasabah_user = User.objects.create_user(
             email="inactive-bank-nasabah@example.com",
