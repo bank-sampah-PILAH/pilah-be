@@ -1331,3 +1331,63 @@ class ProtectedMediaTests(TestCase):
         response = self.client.get("/media/activity/not-a-valid-token")
 
         self.assertEqual(response.status_code, 404)
+
+
+class ProfilNasabahBerakunTests(APITestCase):
+    """Nasabah yang sudah punya akun hanya bisa diubah pada data keanggotaan."""
+
+    def setUp(self) -> None:
+        self.bank = BankSampah.objects.create(
+            nama="Bank Sampah BTH", alamat="Depok", kota="Depok", no_hp_pic="+628123456789"
+        )
+        self.pengurus = User.objects.create_user(
+            email="sari@example.com",
+            nama="Ibu Sari",
+            bank_sampah=self.bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        refresh = RefreshToken.for_user(self.pengurus)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        self.pemilik_akun = User.objects.create_user(
+            email="budi@example.com",
+            nama="Budi Santoso",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        self.nasabah = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            user=self.pemilik_akun,
+            nomor="NAS-0001",
+            nama="Budi Santoso",
+            jenis_kelamin=Nasabah.Gender.MALE,
+            no_hp="+628111111111",
+            alamat="Jl. Mawar No. 12",
+        )
+
+    def _payload(self, **ubah: Any) -> dict[str, Any]:
+        payload = {
+            "kode": self.nasabah.nomor,
+            "nama": self.nasabah.nama,
+            "jenis_kelamin": self.nasabah.jenis_kelamin,
+            "no_hp": self.nasabah.no_hp,
+            "alamat": self.nasabah.alamat,
+        }
+        payload.update(ubah)
+        return payload
+
+    def _ubah(self, **ubah: Any) -> Any:
+        return self.client.put(
+            f"/api/v1/nasabah/{self.nasabah.id}", self._payload(**ubah), format="json"
+        )
+
+    def test_ubah_nama_nasabah_berakun_ditolak(self) -> None:
+        response = self._ubah(nama="Budi Santosa")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.data["error"],
+            "Nasabah dengan akun hanya bisa diubah pada data keanggotaan",
+        )
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.nama, "Budi Santoso")
