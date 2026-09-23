@@ -9,8 +9,9 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.signing import TimestampSigner
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.test import Client, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import Resolver404, resolve
 from django.utils import timezone
 from django.views.static import serve
@@ -21,6 +22,7 @@ from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from api.models import (
     BankSampah,
     BankSampahApprovalLog,
+    JadwalKegiatan,
     JenisSampah,
     Nasabah,
     NasabahApprovalLog,
@@ -127,6 +129,33 @@ class APISpecTests(APITestCase):
         self.assertEqual(first.status_code, 201)
         self.assertEqual(second.status_code, 201)
         self.assertTrue(second.data["peringatan_jadwal_bertumpuk"])
+
+    def test_schedule_list_overlap_warnings_do_not_add_queries_per_row(self) -> None:
+        starts_at = timezone.now() + timedelta(days=3)
+
+        def create_schedule(index: int) -> None:
+            begins = starts_at + timedelta(minutes=index)
+            JadwalKegiatan.objects.create(
+                bank_sampah=self.bank,
+                dibuat_oleh=self.user,
+                jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+                mulai_pada=begins,
+                selesai_pada=begins + timedelta(hours=2),
+                lokasi="Balai Warga RW 04",
+            )
+
+        create_schedule(0)
+        with CaptureQueriesContext(connection) as one_schedule_queries:
+            one_schedule = self.client.get("/api/v1/jadwal?page_size=100")
+
+        for index in range(1, 5):
+            create_schedule(index)
+        with CaptureQueriesContext(connection) as five_schedule_queries:
+            five_schedules = self.client.get("/api/v1/jadwal?page_size=100")
+
+        self.assertEqual(one_schedule.data["count"], 1)
+        self.assertEqual(five_schedules.data["count"], 5)
+        self.assertEqual(len(one_schedule_queries), len(five_schedule_queries))
 
     def test_schedule_rejects_unapproved_recipients(self) -> None:
         recipient = self._create_pending_nasabah()
