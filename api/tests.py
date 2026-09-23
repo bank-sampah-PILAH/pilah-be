@@ -468,6 +468,42 @@ class APISpecTests(APITestCase):
             self.client.get(f"/api/v1/jadwal/{created.data['id']}").data["status"], "dibatalkan"
         )
 
+    def test_edit_does_not_overwrite_a_concurrent_terminal_transition(self) -> None:
+        from api.views import JadwalKegiatanViewSet
+
+        starts_at = timezone.now() + timedelta(days=4)
+        created = self.client.post(
+            "/api/v1/jadwal",
+            {
+                "jenis_kegiatan": "penimbangan",
+                "mulai_pada": starts_at.isoformat(),
+                "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+                "lokasi": "Balai Warga RW 04",
+                "cakupan_penerima": "semua_nasabah",
+            },
+            format="json",
+        )
+        original_get_object = JadwalKegiatanViewSet.get_object
+
+        def cancel_after_read(view: Any) -> Any:
+            schedule = original_get_object(view)
+            JadwalKegiatan.objects.filter(pk=schedule.pk).update(
+                status=JadwalKegiatan.Status.DIBATALKAN
+            )
+            return schedule
+
+        with patch.object(JadwalKegiatanViewSet, "get_object", cancel_after_read):
+            response = self.client.patch(
+                f"/api/v1/jadwal/{created.data['id']}",
+                {"lokasi": "Lokasi Baru"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        schedule = JadwalKegiatan.objects.get(pk=created.data["id"])
+        self.assertEqual(schedule.status, JadwalKegiatan.Status.DIBATALKAN)
+        self.assertEqual(schedule.lokasi, "Balai Warga RW 04")
+
     def test_terminal_schedules_cannot_be_edited(self) -> None:
         starts_at = timezone.now() + timedelta(days=4)
 
