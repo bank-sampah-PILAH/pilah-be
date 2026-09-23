@@ -564,7 +564,7 @@ class JadwalKegiatanSerializer(serializers.ModelSerializer[Model]):
             "updated_at",
         ]
 
-    def get_fields(self) -> dict[str, serializers.Field]:
+    def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:
         fields = super().get_fields()
         request = self.context.get("request")
         bank = getattr(getattr(request, "user", None), "bank_sampah", None)
@@ -577,9 +577,11 @@ class JadwalKegiatanSerializer(serializers.ModelSerializer[Model]):
             if bank is not None
             else Nasabah.objects.none()
         )
-        recipients = cast(serializers.ManyRelatedField, fields["penerima_ids"])
-        cast(serializers.PrimaryKeyRelatedField, recipients.child_relation).queryset = (
-            eligible_recipients
+        fields["penerima_ids"] = serializers.PrimaryKeyRelatedField(
+            source="penerima",
+            queryset=eligible_recipients,
+            many=True,
+            required=False,
         )
         return fields
 
