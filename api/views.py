@@ -582,22 +582,8 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
         return [permission() for permission in permission_classes]
 
     def get_queryset(self) -> QuerySet[JadwalKegiatan]:
-        overlapping_schedules = (
-            JadwalKegiatan.objects.filter(
-                bank_sampah=OuterRef("bank_sampah"),
-                lokasi__iexact=OuterRef("lokasi"),
-                mulai_pada__lt=OuterRef("selesai_pada"),
-                selesai_pada__gt=OuterRef("mulai_pada"),
-            )
-            .exclude(pk=OuterRef("pk"))
-            .exclude(status=JadwalKegiatan.Status.DIBATALKAN)
-        )
-        queryset = (
-            JadwalKegiatan.objects.select_related("bank_sampah", "dibuat_oleh")
-            .prefetch_related("penerima")
-            .annotate(_peringatan_jadwal_bertumpuk=Exists(overlapping_schedules))
-        )
         user = _user(self.request)
+        queryset = JadwalKegiatan.objects.select_related("bank_sampah", "dibuat_oleh")
         if user.role == User.Role.NASABAH:
             queryset = (
                 queryset.filter(
@@ -616,7 +602,21 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
                 .distinct()
             )
         else:
-            queryset = queryset.filter(bank_sampah=_bank_sampah(self.request))
+            overlapping_schedules = (
+                JadwalKegiatan.objects.filter(
+                    bank_sampah=OuterRef("bank_sampah"),
+                    lokasi__iexact=OuterRef("lokasi"),
+                    mulai_pada__lt=OuterRef("selesai_pada"),
+                    selesai_pada__gt=OuterRef("mulai_pada"),
+                )
+                .exclude(pk=OuterRef("pk"))
+                .exclude(status=JadwalKegiatan.Status.DIBATALKAN)
+            )
+            queryset = (
+                queryset.filter(bank_sampah=_bank_sampah(self.request))
+                .prefetch_related("penerima")
+                .annotate(_peringatan_jadwal_bertumpuk=Exists(overlapping_schedules))
+            )
         if self.action == "list":
             date_value = self.request.query_params.get("date")
             if isinstance(date_value, str) and date_value:

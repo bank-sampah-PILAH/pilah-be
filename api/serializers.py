@@ -564,18 +564,16 @@ class JadwalKegiatanSerializer(serializers.ModelSerializer[Model]):
             "updated_at",
         ]
 
-    def to_representation(self, instance: Model) -> dict[str, Any]:
-        representation = super().to_representation(instance)
-        request = self.context.get("request")
-        if getattr(getattr(request, "user", None), "role", None) == User.Role.NASABAH:
-            representation.pop("penerima_ids", None)
-            representation.pop("peringatan_jadwal_bertumpuk", None)
-        return representation
-
     def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:
         fields = super().get_fields()
         request = self.context.get("request")
-        bank = getattr(getattr(request, "user", None), "bank_sampah", None)
+        user = getattr(request, "user", None)
+        if getattr(user, "role", None) == User.Role.NASABAH:
+            fields.pop("penerima_ids", None)
+            fields.pop("peringatan_jadwal_bertumpuk", None)
+            return fields
+
+        bank = getattr(user, "bank_sampah", None)
         eligible_recipients = (
             Nasabah.objects.filter(
                 bank_sampah=bank,
