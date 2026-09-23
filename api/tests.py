@@ -440,7 +440,7 @@ class APISpecTests(APITestCase):
             email="nasabah@example.com",
             nama="Budi Nasabah",
             role=User.Role.NASABAH,
-            is_profile_complete=True,
+            is_profile_complete=False,
         )
         membership = Nasabah.objects.create(
             user=nasabah_user,
