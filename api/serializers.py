@@ -564,6 +564,25 @@ class JadwalKegiatanSerializer(serializers.ModelSerializer[Model]):
             "updated_at",
         ]
 
+    def get_fields(self) -> dict[str, serializers.Field]:
+        fields = super().get_fields()
+        request = self.context.get("request")
+        bank = getattr(getattr(request, "user", None), "bank_sampah", None)
+        eligible_recipients = (
+            Nasabah.objects.filter(
+                bank_sampah=bank,
+                is_active=True,
+                status=Nasabah.Status.APPROVED,
+            )
+            if bank is not None
+            else Nasabah.objects.none()
+        )
+        recipients = cast(serializers.ManyRelatedField, fields["penerima_ids"])
+        cast(serializers.PrimaryKeyRelatedField, recipients.child_relation).queryset = (
+            eligible_recipients
+        )
+        return fields
+
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         instance = cast(JadwalKegiatan | None, self.instance)
         mulai_pada = attrs.get("mulai_pada", getattr(instance, "mulai_pada", None))
