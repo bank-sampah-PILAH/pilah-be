@@ -435,6 +435,39 @@ class APISpecTests(APITestCase):
         self.assertEqual(completed.status_code, 200)
         self.assertEqual(completed.data["status"], "selesai")
 
+    def test_transition_does_not_overwrite_a_concurrent_status_change(self) -> None:
+        from api.models import JadwalKegiatan
+        from api.views import JadwalKegiatanViewSet
+
+        starts_at = timezone.now() + timedelta(days=4)
+        created = self.client.post(
+            "/api/v1/jadwal",
+            {
+                "jenis_kegiatan": "penimbangan",
+                "mulai_pada": starts_at.isoformat(),
+                "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+                "lokasi": "Balai Warga RW 04",
+                "cakupan_penerima": "semua_nasabah",
+            },
+            format="json",
+        )
+        original_get_object = JadwalKegiatanViewSet.get_object
+
+        def change_state_after_read(view: Any) -> Any:
+            schedule = original_get_object(view)
+            JadwalKegiatan.objects.filter(pk=schedule.pk).update(
+                status=JadwalKegiatan.Status.DIBATALKAN
+            )
+            return schedule
+
+        with patch.object(JadwalKegiatanViewSet, "get_object", change_state_after_read):
+            response = self.client.post(f"/api/v1/jadwal/{created.data['id']}/terbitkan")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            self.client.get(f"/api/v1/jadwal/{created.data['id']}").data["status"], "dibatalkan"
+        )
+
     def test_terminal_schedules_cannot_be_edited(self) -> None:
         starts_at = timezone.now() + timedelta(days=4)
 
