@@ -642,6 +642,22 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
         if hasattr(instance, "_peringatan_jadwal_bertumpuk"):
             delattr(instance, "_peringatan_jadwal_bertumpuk")
 
+    def update(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        if instance.status in {JadwalKegiatan.Status.DIBATALKAN, JadwalKegiatan.Status.SELESAI}:
+            return Response(
+                {"error": "Jadwal yang dibatalkan atau selesai tidak dapat diubah"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        if getattr(instance, "_prefetched_objects_cache", None):
+            setattr(instance, "_prefetched_objects_cache", {})
+        return Response(serializer.data)
+
     def _transition(
         self,
         jadwal: JadwalKegiatan,
