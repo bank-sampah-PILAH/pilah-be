@@ -6,6 +6,7 @@ import requests
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
+from django.db import transaction
 from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils import timezone
@@ -600,6 +601,8 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
                     )
                 queryset = queryset.filter(mulai_pada__date=date)
             queryset = queryset.order_by("mulai_pada", "pk")
+        if self.action in {"update", "partial_update"}:
+            queryset = queryset.select_for_update()
         return queryset
 
     @action(detail=False, methods=["get"], url_path="calendar-dates")
@@ -643,9 +646,11 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
         if hasattr(instance, "_peringatan_jadwal_bertumpuk"):
             delattr(instance, "_peringatan_jadwal_bertumpuk")
 
+    @transaction.atomic
     def update(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         partial = kwargs.pop("partial", False)
         instance = self.get_object()
+        instance.refresh_from_db(fields=["status"])
         if instance.status in {JadwalKegiatan.Status.DIBATALKAN, JadwalKegiatan.Status.SELESAI}:
             return Response(
                 {"error": "Jadwal yang dibatalkan atau selesai tidak dapat diubah"},
