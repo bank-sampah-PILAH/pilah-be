@@ -1,5 +1,5 @@
 import json
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO
 from typing import Any, ClassVar, cast
@@ -1410,3 +1410,18 @@ class ProfilNasabahBerakunTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.data["is_active"])
+
+    def test_nilai_sama_dengan_format_berbeda_tidak_dianggap_perubahan(self) -> None:
+        # Nomor HP dinormalisasi ke +62 dan tanggal lahir dikonversi menjadi
+        # date, jadi payload apa adanya dari form tidak boleh dianggap berubah.
+        self.nasabah.tanggal_lahir = date(1990, 1, 1)
+        self.nasabah.save(update_fields=["tanggal_lahir"])
+
+        response = self._ubah(
+            kode="NAS-0003", no_hp="08111111111", tanggal_lahir="1990-01-01"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.nomor, "NAS-0003")
+        self.assertEqual(self.nasabah.no_hp, "+628111111111")
