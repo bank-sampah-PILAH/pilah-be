@@ -8,6 +8,7 @@ from django.core.files.storage import default_storage
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseRedirect
+from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.utils.http import urlencode
 from rest_framework import serializers, status, viewsets
@@ -665,13 +666,15 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
         allowed_from: set[str],
         target: str,
     ) -> Response:
-        if jadwal.status not in allowed_from:
+        updated = JadwalKegiatan.objects.filter(
+            pk=jadwal.pk, status__in=allowed_from
+        ).update(status=target, updated_at=timezone.now())
+        if not updated:
             return Response(
                 {"error": "Perubahan status jadwal tidak diizinkan"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        jadwal.status = target
-        jadwal.save(update_fields=["status", "updated_at"])
+        jadwal.refresh_from_db(fields=["status", "updated_at"])
         return Response(self.get_serializer(jadwal).data)
 
     @action(detail=True, methods=["post"], url_path="terbitkan")
