@@ -585,7 +585,7 @@ class JadwalKegiatanSerializer(serializers.ModelSerializer[Model]):
                 {"penerima_ids": "Penerima harus berasal dari bank sampah yang sama"}
             )
         if cakupan == JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH and not penerima:
-            if instance is None or not instance.penerima.exists():
+            if "penerima" in attrs or instance is None or not instance.penerima.exists():
                 raise serializers.ValidationError({"penerima_ids": "Pilih minimal satu nasabah"})
         if cakupan == JadwalKegiatan.CakupanPenerima.SEMUA_NASABAH:
             attrs["penerima"] = []
