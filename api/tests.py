@@ -244,6 +244,45 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 422)
         self.assertIn("penerima_ids", response.data["errors"])
 
+    def test_schedule_rejects_recipients_from_another_bank(self) -> None:
+        other_bank = BankSampah.objects.create(
+            nama="Bank Sampah Lain",
+            alamat="Bogor",
+            kota="Bogor",
+            no_hp_pic="+6281234567891",
+        )
+        other_user = User.objects.create_user(
+            email="nasabah-other-bank@example.com",
+            nama="Nasabah Bank Lain",
+            role=User.Role.NASABAH,
+            is_profile_complete=False,
+        )
+        other_recipient = Nasabah.objects.create(
+            user=other_user,
+            bank_sampah=other_bank,
+            nomor="NAS-1000",
+            nama=other_user.nama,
+            alamat="Jl. Kenanga",
+            no_hp="+628123451000",
+            status=Nasabah.Status.APPROVED,
+        )
+        starts_at = timezone.now() + timedelta(days=3)
+        response = self.client.post(
+            "/api/v1/jadwal",
+            {
+                "jenis_kegiatan": "penimbangan",
+                "mulai_pada": starts_at.isoformat(),
+                "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+                "lokasi": "Balai Warga RW 04",
+                "cakupan_penerima": "nasabah_terpilih",
+                "penerima_ids": [str(other_recipient.id)],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("penerima_ids", response.data["errors"])
+
     def test_schedule_rejects_explicitly_clearing_selected_recipients(self) -> None:
         recipient = self._create_pending_nasabah()
         recipient.status = Nasabah.Status.APPROVED
