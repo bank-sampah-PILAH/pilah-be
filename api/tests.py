@@ -507,6 +507,64 @@ class APISpecTests(APITestCase):
         self.assertNotIn("penerima_ids", selected_data)
         self.assertNotIn("peringatan_jadwal_bertumpuk", selected_data)
 
+    def test_nasabah_serializer_omits_manager_fields_before_serializing(self) -> None:
+        from api.serializers import JadwalKegiatanSerializer
+
+        nasabah_user = User.objects.create_user(
+            email="serializer-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            is_profile_complete=False,
+        )
+        membership = Nasabah.objects.create(
+            user=nasabah_user,
+            bank_sampah=self.bank,
+            nomor="NAS-0106",
+            nama=nasabah_user.nama,
+            alamat="Jl. Kenanga",
+            no_hp="+628123450106",
+            status=Nasabah.Status.APPROVED,
+        )
+        starts_at = timezone.now() + timedelta(days=1)
+        schedule = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=starts_at,
+            selesai_pada=starts_at + timedelta(hours=1),
+            lokasi="Balai Warga",
+            cakupan_penerima=JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH,
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+        schedule.penerima.add(membership)
+        serializer = JadwalKegiatanSerializer(
+            schedule,
+            context={"request": Mock(user=nasabah_user)},
+        )
+
+        self.assertNotIn("penerima_ids", serializer.fields)
+        self.assertNotIn("peringatan_jadwal_bertumpuk", serializer.fields)
+        self.assertNotIn("penerima_ids", serializer.data)
+        self.assertNotIn("peringatan_jadwal_bertumpuk", serializer.data)
+
+    def test_nasabah_queryset_skips_manager_only_work(self) -> None:
+        from api.views import JadwalKegiatanViewSet
+
+        nasabah_user = User.objects.create_user(
+            email="queryset-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            is_profile_complete=False,
+        )
+        view = cast(Any, JadwalKegiatanViewSet())
+        view.request = Mock(user=nasabah_user)
+        view.action = "list"
+
+        queryset = view.get_queryset()
+
+        self.assertNotIn("penerima", queryset._prefetch_related_lookups)
+        self.assertNotIn("_peringatan_jadwal_bertumpuk", queryset.query.annotations)
+
     def test_transition_does_not_overwrite_a_concurrent_status_change(self) -> None:
         from api.views import JadwalKegiatanViewSet
 
