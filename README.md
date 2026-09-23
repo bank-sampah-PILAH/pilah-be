@@ -492,6 +492,23 @@ then load this API to check membership eligibility. Bank status from the
 login payload alone is not proof of active membership. The existing mobile
 preview is still mock data until its repository/state layer calls these APIs.
 This backend branch does not modify the mobile application or login contract.
+## Nasabah profile API (PIL-226)
+
+`GET /api/v1/nasabah/me/profil` requires a Bearer JWT for an active user with
+role `nasabah`. It returns only `id`, `nama`, `email`, and `role` from the
+authenticated account. Query parameters cannot select a different user.
+Profile access does not require active bank membership.
+
+Anonymous or invalid-token requests return 401; management roles return 403.
+POST, PUT, PATCH, and DELETE return 405. This endpoint does not expose bank
+management settings and does not implement profile editing or logout.
+
+Mobile may load this endpoint to refresh the read-only profile; the existing
+login response and `GET /api/v1/auth/me` remain unchanged. Staging returns
+`nasabah_dashboard` as the nasabah login state, which must be handled by the
+mobile router. This backend branch does not modify the mobile application.
+PIL-226 is based directly on staging and can be integrated independently of
+the PIL-225 backend branch.
 
 ## Notes
 
