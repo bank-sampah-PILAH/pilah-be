@@ -501,6 +501,11 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         ids = {item["id"] for item in response.data["results"]}
         self.assertEqual(ids, {str(visible.id), str(selected.id)})
+        selected_data = next(
+            item for item in response.data["results"] if item["id"] == str(selected.id)
+        )
+        self.assertNotIn("penerima_ids", selected_data)
+        self.assertNotIn("peringatan_jadwal_bertumpuk", selected_data)
 
     def test_transition_does_not_overwrite_a_concurrent_status_change(self) -> None:
         from api.views import JadwalKegiatanViewSet
