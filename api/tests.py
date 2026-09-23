@@ -565,6 +565,13 @@ class APISpecTests(APITestCase):
         self.assertNotIn("penerima", queryset._prefetch_related_lookups)
         self.assertNotIn("_peringatan_jadwal_bertumpuk", queryset.query.annotations)
 
+    def test_anonymous_users_cannot_view_schedules(self) -> None:
+        self.client.credentials()
+
+        response = self.client.get("/api/v1/jadwal")
+
+        self.assertEqual(response.status_code, 401)
+
     def test_transition_does_not_overwrite_a_concurrent_status_change(self) -> None:
         from api.views import JadwalKegiatanViewSet
 
