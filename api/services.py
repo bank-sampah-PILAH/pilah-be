@@ -484,9 +484,7 @@ class OnboardingService:
         # verified `email`, not on this self-declared `no_hp`), so reaching
         # here with a phone collision means it belongs to someone else.
         if Nasabah.objects.filter(bank_sampah=bank, no_hp=user.no_hp).exists():
-            raise ValueError(
-                "Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus"
-            )
+            raise ValueError("Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus")
 
         nasabah = Nasabah(
             bank_sampah=bank,

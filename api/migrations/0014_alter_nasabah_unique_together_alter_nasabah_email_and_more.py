@@ -4,23 +4,26 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('api', '0013_nasabah_email'),
+        ("api", "0013_nasabah_email"),
     ]
 
     operations = [
         migrations.AlterUniqueTogether(
-            name='nasabah',
-            unique_together={('bank_sampah', 'no_hp'), ('bank_sampah', 'nomor')},
+            name="nasabah",
+            unique_together={("bank_sampah", "no_hp"), ("bank_sampah", "nomor")},
         ),
         migrations.AlterField(
-            model_name='nasabah',
-            name='email',
+            model_name="nasabah",
+            name="email",
             field=models.EmailField(max_length=254),
         ),
         migrations.AlterUniqueTogether(
-            name='nasabah',
-            unique_together={('bank_sampah', 'email'), ('bank_sampah', 'no_hp'), ('bank_sampah', 'nomor')},
+            name="nasabah",
+            unique_together={
+                ("bank_sampah", "email"),
+                ("bank_sampah", "no_hp"),
+                ("bank_sampah", "nomor"),
+            },
         ),
     ]
