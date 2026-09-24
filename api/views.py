@@ -22,6 +22,7 @@ from api.models import BankSampah, JenisSampah, Nasabah, Saldo, Transaksi, User
 from api.permissions import (
     IsActivePengelola,
     IsNasabah,
+    IsNasabahRole,
     IsPengelola,
     IsPrimaryPengelola,
     IsRegistrationRole,
@@ -329,7 +330,7 @@ class NasabahSelfView(APIView):
     rather than being stalled on a blocking approval screen.
     """
 
-    permission_classes = [IsNasabah]
+    permission_classes = [IsNasabahRole]
     serializer_class = NasabahSelfViewSerializer
 
     def get(self, request: Request) -> Response:
