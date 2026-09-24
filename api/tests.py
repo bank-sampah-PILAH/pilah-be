@@ -468,6 +468,60 @@ class APISpecTests(APITestCase):
             self.client.get(f"/api/v1/jadwal/{created.data['id']}").data["status"], "dibatalkan"
         )
 
+    def test_transition_response_uses_fresh_schedule_after_concurrent_edit(self) -> None:
+        from api.views import JadwalKegiatanViewSet
+
+        recipient_before = self._create_pending_nasabah()
+        recipient_before.status = Nasabah.Status.APPROVED
+        recipient_before.save(update_fields=["status"])
+        recipient_after = self._create_pending_nasabah()
+        recipient_after.status = Nasabah.Status.APPROVED
+        recipient_after.save(update_fields=["status"])
+        starts_at = timezone.now() + timedelta(days=4)
+        JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=starts_at,
+            selesai_pada=starts_at + timedelta(hours=2),
+            lokasi="Balai Warga Baru",
+        )
+        schedule = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=starts_at,
+            selesai_pada=starts_at + timedelta(hours=2),
+            lokasi="Balai Warga Lama",
+            cakupan_penerima=JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH,
+        )
+        schedule.penerima.add(recipient_before)
+        original_get_object = JadwalKegiatanViewSet.get_object
+        changed_after_read = False
+
+        def edit_after_read(view: Any) -> Any:
+            nonlocal changed_after_read
+            instance = original_get_object(view)
+            if not changed_after_read:
+                changed_after_read = True
+                JadwalKegiatan.objects.filter(pk=instance.pk).update(lokasi="Balai Warga Baru")
+                through = JadwalKegiatan.penerima.through
+                through.objects.filter(jadwalkegiatan_id=instance.pk).delete()
+                through.objects.create(
+                    jadwalkegiatan_id=instance.pk,
+                    nasabah_id=recipient_after.pk,
+                )
+            return instance
+
+        with patch.object(JadwalKegiatanViewSet, "get_object", edit_after_read):
+            response = self.client.post(f"/api/v1/jadwal/{schedule.id}/batalkan")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "dibatalkan")
+        self.assertEqual(response.data["lokasi"], "Balai Warga Baru")
+        self.assertEqual(response.data["penerima_ids"], [str(recipient_after.id)])
+        self.assertTrue(response.data["peringatan_jadwal_bertumpuk"])
+
     def test_edit_does_not_overwrite_a_concurrent_terminal_transition(self) -> None:
         from api.views import JadwalKegiatanViewSet
 
