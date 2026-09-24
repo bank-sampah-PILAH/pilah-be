@@ -679,8 +679,7 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
                 {"error": "Perubahan status jadwal tidak diizinkan"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        jadwal.refresh_from_db(fields=["status", "updated_at"])
-        return Response(self.get_serializer(jadwal).data)
+        return Response(self.get_serializer(self.get_object()).data)
 
     @action(detail=True, methods=["post"], url_path="terbitkan")
     def terbitkan(self, request: Request, pk: str | None = None) -> Response:
