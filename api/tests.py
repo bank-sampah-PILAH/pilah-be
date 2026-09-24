@@ -2269,6 +2269,37 @@ class APISpecTests(APITestCase):
         self.assertEqual(entry["bank_sampah"]["nama"], self.bank.nama)
         self.assertIsNone(entry["alasan_penolakan"])
 
+    def test_nasabah_self_view_accessible_before_profile_is_complete(self) -> None:
+        """PIL-204's redesign lets a pengurus-entered record auto-link on
+        login while the profile is still incomplete (the user always fills
+        it in themselves afterwards). The bank-sampah picker needs to see
+        that membership before the profile step ever posts to the backend,
+        so this endpoint can't gate on is_profile_complete the way IsNasabah
+        normally does."""
+        customer = User.objects.create_user(
+            email="incomplete-profile@example.com",
+            nama="",
+            role=User.Role.NASABAH,
+            is_profile_complete=False,
+        )
+        membership = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0703",
+            nama="Nama Dari Pengurus",
+            alamat="Jl. Melati",
+            no_hp="+628555555034",
+            email="incomplete-profile@example.com",
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get("/api/v1/nasabah/me")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], str(membership.id))
+
     def test_nasabah_self_view_exposes_rejection_reason(self) -> None:
         customer = User.objects.create_user(
             email="rejected-reason@example.com",
