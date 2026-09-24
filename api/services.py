@@ -459,23 +459,25 @@ class OnboardingService:
                 raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
             # A rejection is correctable, not a permanent lockout: resubmit
             # the same row as a fresh application rather than raising.
-            own_record.nama = user.nama
-            own_record.jenis_kelamin = user.jenis_kelamin
-            own_record.tanggal_lahir = user.tanggal_lahir
-            own_record.alamat = user.alamat
-            own_record.status = Nasabah.Status.PENDING
-            own_record.is_active = True
-            own_record.save(
-                update_fields=[
-                    "nama",
-                    "jenis_kelamin",
-                    "tanggal_lahir",
-                    "alamat",
-                    "status",
-                    "is_active",
-                    "updated_at",
-                ]
+            #
+            # Conditional UPDATE, not own_record.save(): guards against two
+            # concurrent reapply requests both passing the check above.
+            # A losing request affects 0 rows and falls through to the
+            # error below instead of silently double-applying.
+            updated = Nasabah.objects.filter(
+                pk=own_record.pk, status=Nasabah.Status.REJECTED
+            ).update(
+                nama=user.nama,
+                jenis_kelamin=user.jenis_kelamin,
+                tanggal_lahir=user.tanggal_lahir,
+                alamat=user.alamat,
+                status=Nasabah.Status.PENDING,
+                is_active=True,
+                updated_at=timezone.now(),
             )
+            if updated == 0:
+                raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
+            own_record.refresh_from_db()
             Saldo.objects.get_or_create(nasabah=own_record)
             return own_record
 
