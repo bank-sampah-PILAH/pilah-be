@@ -1,6 +1,13 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from api.nasabah_home import (
+    NasabahBalanceView,
+    NasabahBankView,
+    NasabahHistoryView,
+    NasabahHomeView,
+)
+from api.nasabah_profile import NasabahProfileView
 from api.views import (
     AcceptInviteView,
     AuthMeView,
@@ -33,6 +40,11 @@ router.register(
 )
 
 urlpatterns = [
+    path("nasabah/me/beranda", NasabahHomeView.as_view(), name="nasabah-home"),
+    path("nasabah/me/saldo", NasabahBalanceView.as_view(), name="nasabah-own-balance"),
+    path("nasabah/me/bank-sampah", NasabahBankView.as_view(), name="nasabah-own-bank"),
+    path("nasabah/me/riwayat", NasabahHistoryView.as_view(), name="nasabah-own-history"),
+    path("nasabah/me/profil", NasabahProfileView.as_view(), name="nasabah-own-profile"),
     path("auth/google", GoogleAuthView.as_view(), name="auth-google"),
     path("auth/google/start", GoogleOAuthStartView.as_view(), name="auth-google-start"),
     path("auth/google/callback", GoogleOAuthCallbackView.as_view(), name="auth-google-callback"),
