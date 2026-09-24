@@ -605,7 +605,9 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 200)
 
         user = User.objects.get(email="budi@example.com")
-        self.assertEqual(user.nama, "")
+        # nama is still filled from the Google token by _update_google_identity
+        # (unrelated to the Nasabah-prefill mechanism this test covers).
+        self.assertEqual(user.nama, "B")
         self.assertEqual(user.no_hp, "")
         self.assertEqual(user.alamat, "")
         self.assertFalse(user.jenis_kelamin)
@@ -738,7 +740,7 @@ class APISpecTests(APITestCase):
         self.assertEqual(nasabah.nama, "Nama Dari User")
         self.assertEqual(nasabah.jenis_kelamin, "laki-laki")
         self.assertEqual(str(nasabah.tanggal_lahir), "1995-06-06")
-        self.assertEqual(nasabah.no_hp, "081234500002")
+        self.assertEqual(nasabah.no_hp, "+6281234500002")
         self.assertEqual(nasabah.alamat, "Alamat Dari User")
 
     def test_complete_profile_rejects_no_hp_collision_with_unrelated_nasabah_record(
@@ -761,7 +763,7 @@ class APISpecTests(APITestCase):
             nomor="NAS-0002",
             nama="Nasabah Lain",
             alamat="Alamat Lain",
-            no_hp="081234500099",
+            no_hp="+6281234500099",
             email="unrelated@example.com",
         )
         self.client.credentials()

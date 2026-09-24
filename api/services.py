@@ -98,10 +98,7 @@ class AuthService:
                 is_staff=role == User.Role.SUPERADMIN,
                 is_superuser=role == User.Role.SUPERADMIN,
             )
-            # name_fillable=True: the token just supplied `nama`, but a
-            # pengurus-entered nasabah name is still the more authoritative
-            # one to prefer over it on a fresh account.
-            AuthService._sync_nasabah_prefill(user, name_fillable=True)
+            AuthService._sync_nasabah_prefill(user)
             return AuthService._session_response(user, is_new_user=True)
 
         is_dev_superadmin = dev_role == User.Role.SUPERADMIN
@@ -132,58 +129,34 @@ class AuthService:
                 ]
             )
 
-        nama_was_empty = not user.nama
         AuthService._update_google_identity(user, google_id, str(name))
-        AuthService._sync_nasabah_prefill(user, name_fillable=nama_was_empty)
+        AuthService._sync_nasabah_prefill(user)
 
         return AuthService._session_response(user, is_new_user=False)
 
     @staticmethod
-    def _sync_nasabah_prefill(user: User, *, name_fillable: bool) -> None:
-        """PIL-154: a nasabah added by pengurus via email syncs with the
-        Google account — prefill empty `User` fields from the matching
-        `Nasabah` row, never overwrite ones already set.
+    def _sync_nasabah_prefill(user: User) -> None:
+        """Claim a pengurus-entered membership on first matching,
+        Google-verified login — but never copy its profile fields onto the
+        user. The user's own identity data is authoritative: they always
+        fill it in themselves via complete_profile, which then overrides
+        the Nasabah record (see
+        OnboardingService._propagate_profile_to_memberships), not the other
+        way around.
 
-        [name_fillable] additionally lets the pengurus-entered name win over
-        `nama` even when it isn't empty: true for a brand-new account (its
-        `nama` just came from the Google token, which is less authoritative
-        than a name a pengurus actually typed in) and for a returning user
-        whose `nama` was empty before this login.
+        Gated on role because a pengurus-entered email can coincidentally
+        match an account that registered as something other than nasabah,
+        and that account must not be silently turned into a member.
         """
-        nasabah = Nasabah.objects.filter(email__iexact=user.email, is_active=True).first()
+        if user.role != User.Role.NASABAH:
+            return
+        nasabah = Nasabah.objects.filter(
+            email__iexact=user.email, is_active=True, user__isnull=True
+        ).first()
         if nasabah is None:
             return
-        profile_updates = []
-        for user_field, nasabah_field in (
-            ("nama", "nama"),
-            ("no_hp", "no_hp"),
-            ("jenis_kelamin", "jenis_kelamin"),
-            ("tanggal_lahir", "tanggal_lahir"),
-            ("alamat", "alamat"),
-        ):
-            fillable = user_field == "nama" and name_fillable
-            if (fillable or not getattr(user, user_field)) and getattr(nasabah, nasabah_field):
-                setattr(user, user_field, getattr(nasabah, nasabah_field))
-                profile_updates.append(user_field)
-        # Only a fully-populated profile counts as complete — a nasabah
-        # record may itself be missing jenis_kelamin/tanggal_lahir/alamat,
-        # and flagging complete here would lock /onboarding/profile out
-        # (PIL-204 requires alamat specifically for a nasabah account).
-        if profile_updates and all(
-            getattr(user, f) for f in ("nama", "no_hp", "jenis_kelamin", "tanggal_lahir", "alamat")
-        ):
-            user.is_profile_complete = True
-            profile_updates.append("is_profile_complete")
-        if profile_updates:
-            user.save(update_fields=profile_updates)
-
-        # PIL-204: claim the membership itself, not just the profile data —
-        # gated on role because a pengurus-entered email can coincidentally
-        # match an account that registered as something other than nasabah,
-        # and that account must not be silently turned into a member.
-        if user.role == User.Role.NASABAH and nasabah.user_id is None:
-            nasabah.user = user
-            nasabah.save(update_fields=["user", "updated_at"])
+        nasabah.user = user
+        nasabah.save(update_fields=["user", "updated_at"])
 
     @staticmethod
     def register_with_google(registration_token: str, role: str) -> tuple[dict[str, Any], bool]:
@@ -408,7 +381,38 @@ class OnboardingService:
                 "updated_at",
             ]
         )
+        if user.role == User.Role.NASABAH:
+            OnboardingService._propagate_profile_to_memberships(user)
         return user
+
+    @staticmethod
+    def _propagate_profile_to_memberships(user: User) -> None:
+        """The user's own profile is authoritative: whatever they just
+        entered overrides any pengurus-entered data on their linked
+        Nasabah record(s) — the opposite direction from PIL-154's original
+        design, where the Nasabah record won."""
+        for nasabah in user.keanggotaan_nasabah.all():
+            nasabah.nama = user.nama
+            nasabah.jenis_kelamin = user.jenis_kelamin
+            nasabah.tanggal_lahir = user.tanggal_lahir
+            nasabah.alamat = user.alamat
+            nasabah.no_hp = user.no_hp
+            try:
+                with transaction.atomic():
+                    nasabah.save(
+                        update_fields=[
+                            "nama",
+                            "jenis_kelamin",
+                            "tanggal_lahir",
+                            "alamat",
+                            "no_hp",
+                            "updated_at",
+                        ]
+                    )
+            except IntegrityError as exc:
+                raise ValueError(
+                    "Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus"
+                ) from exc
 
     @staticmethod
     @transaction.atomic
