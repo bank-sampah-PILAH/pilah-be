@@ -2,8 +2,11 @@ from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
+from django.conf import settings
+from django.core.signing import TimestampSigner
 from django.db.models import Model, Q, Sum
 from django.db.models.functions import Coalesce
+from django.urls import reverse
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -13,6 +16,7 @@ from api.models import (
     DetailTransaksi,
     JenisSampah,
     Nasabah,
+    NasabahApprovalLog,
     Saldo,
     Transaksi,
     User,
@@ -182,6 +186,7 @@ class InviteAcceptSerializer(serializers.Serializer[Any]):
 
 class BankSampahApprovalListSerializer(serializers.ModelSerializer[Model]):
     pengelola_utama = serializers.SerializerMethodField()
+    foto_kegiatan = serializers.SerializerMethodField()
 
     class Meta:
         model = BankSampah
@@ -203,6 +208,22 @@ class BankSampahApprovalListSerializer(serializers.ModelSerializer[Model]):
             return None
         return {"id": str(user.id), "nama": user.nama, "email": user.email, "no_hp": user.no_hp}
 
+    def get_foto_kegiatan(self, obj: Any) -> str | None:
+        if not obj.foto_kegiatan:
+            return None
+        if settings.GS_BUCKET_NAME:
+            return str(obj.foto_kegiatan.url)
+
+        request = self.context.get("request")
+        if request is None:
+            return None
+        token = TimestampSigner(salt="bank-sampah-kegiatan").sign(obj.foto_kegiatan.name)
+        return str(
+            request.build_absolute_uri(
+                reverse("bank-sampah-activity-media", kwargs={"token": token})
+            )
+        )
+
 
 def validate_image_upload(value: Any, label: str) -> Any:
     name = getattr(value, "name", str(value)).lower()
@@ -223,6 +244,14 @@ class ApprovalLogSerializer(serializers.ModelSerializer[Model]):
     class Meta:
         model = BankSampahApprovalLog
         fields = ["id", "bank_sampah_id", "superadmin_email", "status", "catatan", "created_at"]
+
+
+class NasabahApprovalLogSerializer(serializers.ModelSerializer[Model]):
+    pengurus_email = serializers.EmailField(source="pengurus.email")
+
+    class Meta:
+        model = NasabahApprovalLog
+        fields = ["id", "nasabah_id", "pengurus_email", "status", "catatan", "created_at"]
 
 
 class GoogleAuthSerializer(serializers.Serializer[Any]):
@@ -253,10 +282,18 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
             "alamat",
             "tanggal_daftar",
             "is_active",
+            "status",
             "total_saldo",
             "created_at",
         ]
-        read_only_fields = ["id", "tanggal_daftar", "is_active", "total_saldo", "created_at"]
+        read_only_fields = [
+            "id",
+            "tanggal_daftar",
+            "is_active",
+            "status",
+            "total_saldo",
+            "created_at",
+        ]
 
     def validate_kode(self, value: Any) -> Any:
         value = value.strip()
