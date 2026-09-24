@@ -519,7 +519,7 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["status"], "dibatalkan")
         self.assertEqual(response.data["lokasi"], "Balai Warga Baru")
-        self.assertEqual(response.data["penerima_ids"], [str(recipient_after.id)])
+        self.assertEqual(response.data["penerima_ids"], [recipient_after.id])
         self.assertTrue(response.data["peringatan_jadwal_bertumpuk"])
 
     def test_edit_does_not_overwrite_a_concurrent_terminal_transition(self) -> None:
