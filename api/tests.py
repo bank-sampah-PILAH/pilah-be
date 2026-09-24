@@ -577,7 +577,14 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 422)
         self.assertTrue(response.data["errors"]["email"])
 
-    def test_google_login_with_nasabah_email_prefills_profile(self) -> None:
+    def test_google_login_never_prefills_profile_from_nasabah_record(self) -> None:
+        """The user's own profile is authoritative, not the pengurus-entered
+        Nasabah record: even a fully-populated matching record must not
+        prefill or auto-complete the user's profile on login. They still go
+        through complete_profile themselves (see
+        OnboardingService._propagate_profile_to_memberships for the
+        opposite, intended direction: user data overrides the Nasabah
+        record, once they submit it)."""
         self.client.credentials()
         Nasabah.objects.create(
             bank_sampah=self.bank,
@@ -591,15 +598,20 @@ class APISpecTests(APITestCase):
         )
 
         response = self.client.post(
-            "/api/v1/auth/google", {"id_token": "dev:budi@example.com:B"}, format="json"
+            "/api/v1/auth/google",
+            {"id_token": "dev-nasabah:budi@example.com:B"},
+            format="json",
         )
         self.assertEqual(response.status_code, 200)
 
         user = User.objects.get(email="budi@example.com")
-        self.assertEqual(user.nama, "Budi Santoso")
-        self.assertEqual(user.no_hp, "081234567890")
-        self.assertTrue(user.is_profile_complete)
-        self.assertEqual(response.data["next_step"], "register_bank_sampah")
+        self.assertEqual(user.nama, "")
+        self.assertEqual(user.no_hp, "")
+        self.assertEqual(user.alamat, "")
+        self.assertFalse(user.jenis_kelamin)
+        self.assertIsNone(user.tanggal_lahir)
+        self.assertFalse(user.is_profile_complete)
+        self.assertEqual(response.data["next_step"], "complete_profile")
 
     def test_google_login_does_not_overwrite_existing_profile(self) -> None:
         self.client.credentials()
@@ -629,108 +641,6 @@ class APISpecTests(APITestCase):
         self.assertEqual(user.nama, "Nama Lama")
         self.assertEqual(user.no_hp, "081111111111")
 
-    def test_google_login_prefills_nama_from_nasabah_when_existing_name_empty(
-        self,
-    ) -> None:
-        """P2 regression: the token fallback must not block the nasabah name."""
-        self.client.credentials()
-        User.objects.create_user(
-            email="kosong@example.com",
-            nama="",
-            is_profile_complete=False,
-        )
-        Nasabah.objects.create(
-            bank_sampah=self.bank,
-            nomor="NAS-0001",
-            nama="Nama Nasabah",
-            alamat="Jl. Anggrek No. 3",
-            no_hp="081234567890",
-            email="kosong@example.com",
-        )
-
-        response = self.client.post(
-            "/api/v1/auth/google", {"id_token": "dev:kosong@example.com:K"}, format="json"
-        )
-        self.assertEqual(response.status_code, 200)
-
-        user = User.objects.get(email="kosong@example.com")
-        self.assertEqual(user.nama, "Nama Nasabah")
-
-    def test_google_login_partial_nasabah_keeps_profile_incomplete(self) -> None:
-        """P1 regression: a nasabah record lacking jenis_kelamin/tanggal_lahir
-        must not mark the profile complete — /onboarding/profile would reject
-        the follow-up with 'Profil sudah lengkap'."""
-        self.client.credentials()
-        Nasabah.objects.create(
-            bank_sampah=self.bank,
-            nomor="NAS-0001",
-            nama="Budi Sebagian",
-            alamat="Jl. Anggrek No. 3",
-            no_hp="081234567890",
-            email="sebagian@example.com",
-        )
-
-        response = self.client.post(
-            "/api/v1/auth/google",
-            {"id_token": "dev:sebagian@example.com:S"},
-            format="json",
-        )
-        self.assertEqual(response.status_code, 200)
-
-        user = User.objects.get(email="sebagian@example.com")
-        self.assertEqual(user.nama, "Budi Sebagian")
-        self.assertEqual(user.no_hp, "081234567890")
-        self.assertFalse(user.jenis_kelamin)
-
-    def test_google_login_syncs_alamat_from_nasabah_record(self) -> None:
-        """PIL-204 needs `alamat` too — otherwise a nasabah synced this way
-        would be marked profile-complete without one, skip complete_profile
-        entirely, and hit a bank-sampah picker with no field to fix it."""
-        self.client.credentials()
-        Nasabah.objects.create(
-            bank_sampah=self.bank,
-            nomor="NAS-0001",
-            nama="Budi Santoso",
-            jenis_kelamin="laki-laki",
-            tanggal_lahir="1990-01-01",
-            alamat="Jl. Anggrek No. 3",
-            no_hp="081234567890",
-            email="budi-alamat@example.com",
-        )
-
-        response = self.client.post(
-            "/api/v1/auth/google",
-            {"id_token": "dev-nasabah:budi-alamat@example.com:B"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        user = User.objects.get(email="budi-alamat@example.com")
-        self.assertEqual(user.alamat, "Jl. Anggrek No. 3")
-        self.assertTrue(user.is_profile_complete)
-
-    def test_google_login_keeps_profile_incomplete_without_alamat(self) -> None:
-        self.client.credentials()
-        Nasabah.objects.create(
-            bank_sampah=self.bank,
-            nomor="NAS-0001",
-            nama="Budi Tanpa Alamat",
-            jenis_kelamin="laki-laki",
-            tanggal_lahir="1990-01-01",
-            no_hp="081234567891",
-            email="budi-no-alamat@example.com",
-        )
-
-        response = self.client.post(
-            "/api/v1/auth/google",
-            {"id_token": "dev-nasabah:budi-no-alamat@example.com:B"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        user = User.objects.get(email="budi-no-alamat@example.com")
-        self.assertFalse(user.is_profile_complete)
-
     def test_google_login_links_nasabah_membership_for_nasabah_role(self) -> None:
         nasabah = Nasabah.objects.create(
             bank_sampah=self.bank,
@@ -754,15 +664,14 @@ class APISpecTests(APITestCase):
         nasabah.refresh_from_db()
         user = User.objects.get(email="budi-link@example.com")
         self.assertEqual(nasabah.user_id, user.id)
-        # The membership is now linked, so a subsequent login (or this same
-        # response) sends the user straight to their beranda instead of the
-        # bank-sampah picker.
-        self.assertEqual(response.data["next_step"], "nasabah_dashboard")
+        # Linking the membership doesn't skip the user's own onboarding —
+        # they still fill in their own profile before reaching their beranda
+        # (see test_google_login_never_prefills_profile_from_nasabah_record).
+        self.assertEqual(response.data["next_step"], "complete_profile")
 
     def test_google_login_does_not_link_nasabah_membership_for_other_roles(self) -> None:
-        """A pengurus-added nasabah record matching a pengelola's email is
-        still useful for prefilling shared profile fields, but must not be
-        claimed as that pengelola's own membership."""
+        """A pengurus-added nasabah record matching a pengelola's email must
+        not be claimed as that pengelola's own membership."""
         nasabah = Nasabah.objects.create(
             bank_sampah=self.bank,
             nomor="NAS-0001",
@@ -784,6 +693,103 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         nasabah.refresh_from_db()
         self.assertIsNone(nasabah.user_id)
+
+    def test_complete_profile_overrides_linked_nasabah_record_with_users_own_data(
+        self,
+    ) -> None:
+        """The redesign's whole point: once linked, the user's own
+        complete_profile submission overrides whatever the pengurus
+        originally typed in, not the other way around."""
+        nasabah = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Nama Dari Pengurus",
+            jenis_kelamin="perempuan",
+            tanggal_lahir="1980-05-05",
+            alamat="Alamat Dari Pengurus",
+            no_hp="081234500001",
+            email="override-me@example.com",
+        )
+        self.client.credentials()
+        login = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev-nasabah:override-me@example.com:Nama Baru"},
+            format="json",
+        )
+        self.assertEqual(login.status_code, 200)
+        nasabah.refresh_from_db()
+        self.assertEqual(nasabah.user.email, "override-me@example.com")
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access_token']}")
+        response = self.client.put(
+            "/api/v1/onboarding/profile",
+            {
+                "nama": "Nama Dari User",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1995-06-06",
+                "no_hp": "081234500002",
+                "alamat": "Alamat Dari User",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        nasabah.refresh_from_db()
+        self.assertEqual(nasabah.nama, "Nama Dari User")
+        self.assertEqual(nasabah.jenis_kelamin, "laki-laki")
+        self.assertEqual(str(nasabah.tanggal_lahir), "1995-06-06")
+        self.assertEqual(nasabah.no_hp, "081234500002")
+        self.assertEqual(nasabah.alamat, "Alamat Dari User")
+
+    def test_complete_profile_rejects_no_hp_collision_with_unrelated_nasabah_record(
+        self,
+    ) -> None:
+        """Propagating the user's own no_hp onto their linked Nasabah record
+        must not silently violate the (bank_sampah, no_hp) constraint by
+        colliding with someone else's unrelated record — same reasoning as
+        register_nasabah's phone-collision guard."""
+        nasabah = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Nama Dari Pengurus",
+            alamat="Alamat Dari Pengurus",
+            no_hp="081234500003",
+            email="collision-me@example.com",
+        )
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0002",
+            nama="Nasabah Lain",
+            alamat="Alamat Lain",
+            no_hp="081234500099",
+            email="unrelated@example.com",
+        )
+        self.client.credentials()
+        login = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev-nasabah:collision-me@example.com:Collision User"},
+            format="json",
+        )
+        self.assertEqual(login.status_code, 200)
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access_token']}")
+        response = self.client.put(
+            "/api/v1/onboarding/profile",
+            {
+                "nama": "Collision User",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1995-06-06",
+                "no_hp": "081234500099",
+                "alamat": "Alamat User",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        nasabah.refresh_from_db()
+        self.assertEqual(nasabah.no_hp, "081234500003")
+        user = User.objects.get(email="collision-me@example.com")
+        self.assertFalse(user.is_profile_complete)
 
     def test_jenis_sampah_and_transaction_update_saldo(self) -> None:
         nasabah = Nasabah.objects.create(
