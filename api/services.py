@@ -64,7 +64,7 @@ class AuthService:
         dev_role = profile.get("_pilah_dev_role")
         user = AuthService._user_for_email(email)
         nasabah = Nasabah.objects.filter(email__iexact=email, is_active=True).first()
-        is_allowlisted = email in AuthService._superadmin_emails()
+        is_allowlisted = AuthService.is_superadmin_allowlisted(email)
 
         if user is None and nasabah is None and not is_allowlisted and dev_role is None:
             registration_token = signing.dumps(
@@ -201,11 +201,7 @@ class AuthService:
 
     @staticmethod
     def _enforce_superadmin_allowlist(user: User, email: str) -> None:
-        normalized_email = email.strip().lower()
-        if (
-            user.role != User.Role.SUPERADMIN
-            or normalized_email in AuthService._superadmin_emails()
-        ):
+        if user.role != User.Role.SUPERADMIN or AuthService.is_superadmin_allowlisted(email):
             return
         if user.is_staff or user.is_superuser:
             user.is_staff = False
@@ -355,6 +351,10 @@ class AuthService:
         configured = settings.PILAH_SUPERADMIN_EMAILS
         values = configured.split(",") if isinstance(configured, str) else configured
         return frozenset(str(value).strip().lower() for value in values if str(value).strip())
+
+    @staticmethod
+    def is_superadmin_allowlisted(email: str) -> bool:
+        return email.strip().lower() in AuthService._superadmin_emails()
 
 
 class NumberingService:

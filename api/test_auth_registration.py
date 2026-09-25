@@ -233,6 +233,25 @@ class SuperadminWhitelistTests(APITestCase):
         self.assertFalse(former_admin.is_staff)
         self.assertFalse(former_admin.is_superuser)
 
+    @override_settings(PILAH_SUPERADMIN_EMAILS=("admin@example.com",))
+    def test_active_access_token_is_rejected_after_superadmin_allowlist_removal(self) -> None:
+        admin = User.objects.create_user(
+            email="admin@example.com",
+            nama="Admin",
+            role=User.Role.SUPERADMIN,
+            is_profile_complete=True,
+        )
+        access_token = RefreshToken.for_user(admin).access_token
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access_token}")
+
+        allowed_response = self.client.get("/api/v1/superadmin/bank-sampah")
+        self.assertEqual(allowed_response.status_code, 200, allowed_response.data)
+
+        with override_settings(PILAH_SUPERADMIN_EMAILS=()):
+            revoked_response = self.client.get("/api/v1/superadmin/bank-sampah")
+
+        self.assertEqual(revoked_response.status_code, 403, revoked_response.data)
+
     @patch("api.services.google_id_token.verify_oauth2_token")
     def test_case_variant_duplicate_emails_are_rejected(self, verify: Mock) -> None:
         User.objects.create_user(email="Case@example.com", nama="First")
