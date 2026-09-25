@@ -623,7 +623,7 @@
       const runStart = performance.now();
       const unique = nowStamp();
       const email = els.email.value || `e2e-page-${unique}@example.com`;
-      const superEmail = `super-${unique}@example.com`;
+      const superEmail = "{{ test_superadmin_email|escapejs }}";
       const invitedEmail = `invited-${unique}@example.com`;
       const name = els.name.value || "E2E Runner";
       state.report.started_at = new Date().toISOString();
@@ -637,6 +637,12 @@
       renderReport();
 
       try {
+        if (!superEmail) {
+          throw new Error(
+            "Set PILAH_SUPERADMIN_EMAILS to a test Superadmin account before running the full flow."
+          );
+        }
+
         const auth = await call("Pengelola Google dev auth", "POST", "/auth/google", 200, {
           id_token: `dev-pengelola:${email}:${name}`
         }, data => {

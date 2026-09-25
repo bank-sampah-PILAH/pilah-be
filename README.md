@@ -196,6 +196,10 @@ SuperAdmin:
 }
 ```
 
+The `/api-test/` Run Full Flow runner uses the first address in
+`PILAH_SUPERADMIN_EMAILS` as its stable SuperAdmin identity. For local fake-auth
+runs, use an address that is allowlisted and belongs to a SuperAdmin test account.
+
 Pengelola Induk and Nasabah:
 
 ```json

@@ -347,6 +347,19 @@ class SuperadminWhitelistTests(APITestCase):
         self.assertEqual(user.role, User.Role.NASABAH)
 
 
+@override_settings(
+    DEBUG=True,
+    PILAH_ALLOW_FAKE_GOOGLE_TOKEN=True,
+    PILAH_SUPERADMIN_EMAILS=("browser-admin@example.com",),
+)
+class ApiTestPageTests(APITestCase):
+    def test_full_flow_uses_a_configured_superadmin_identity(self) -> None:
+        response = self.client.get("/api-test/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'const superEmail = "browser\\u002Dadmin@example.com";')
+
+
 @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=True)
 class RoleOnboardingStateTests(APITestCase):
     def test_all_registration_roles_can_complete_shared_profile(self) -> None:
