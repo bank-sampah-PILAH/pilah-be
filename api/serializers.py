@@ -78,12 +78,6 @@ class BankSampahDirectorySerializer(serializers.ModelSerializer[Model]):
         fields = ["id", "nama", "alamat", "kota", "foto_logo"]
         read_only_fields = fields
 
-    def get_pengelola(self, obj: Any) -> Any:
-        user = obj.users.filter(role="pengelola", is_active=True).first()
-        if not user:
-            return None
-        return {"id": str(user.id), "nama": user.nama, "email": user.email}
-
 
 class UserProfileSerializer(serializers.ModelSerializer[Model]):
     class Meta:
