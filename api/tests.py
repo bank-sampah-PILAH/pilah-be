@@ -1,5 +1,5 @@
 import json
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO
 from typing import Any, ClassVar, cast
@@ -1638,3 +1638,140 @@ class ProtectedMediaTests(TestCase):
         response = self.client.get("/media/activity/not-a-valid-token")
 
         self.assertEqual(response.status_code, 404)
+
+
+class ProfilNasabahBerakunTests(APITestCase):
+    """Nasabah yang sudah punya akun hanya bisa diubah pada data keanggotaan."""
+
+    def setUp(self) -> None:
+        self.bank = BankSampah.objects.create(
+            nama="Bank Sampah BTH", alamat="Depok", kota="Depok", no_hp_pic="+628123456789"
+        )
+        self.pengurus = User.objects.create_user(
+            email="sari@example.com",
+            nama="Ibu Sari",
+            bank_sampah=self.bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        refresh = RefreshToken.for_user(self.pengurus)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        self.pemilik_akun = User.objects.create_user(
+            email="budi@example.com",
+            nama="Budi Santoso",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        self.nasabah = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            user=self.pemilik_akun,
+            nomor="NAS-0001",
+            nama="Budi Santoso",
+            jenis_kelamin=Nasabah.Gender.MALE,
+            no_hp="+628111111111",
+            alamat="Jl. Mawar No. 12",
+        )
+
+    def _payload(self, **ubah: Any) -> dict[str, Any]:
+        payload = {
+            "kode": self.nasabah.nomor,
+            "nama": self.nasabah.nama,
+            "jenis_kelamin": self.nasabah.jenis_kelamin,
+            "no_hp": self.nasabah.no_hp,
+            "alamat": self.nasabah.alamat,
+        }
+        payload.update(ubah)
+        return payload
+
+    def _ubah(self, **ubah: Any) -> Any:
+        return self.client.put(
+            f"/api/v1/nasabah/{self.nasabah.id}", self._payload(**ubah), format="json"
+        )
+
+    def test_ubah_nama_nasabah_berakun_ditolak(self) -> None:
+        response = self._ubah(nama="Budi Santosa")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.data["error"],
+            "Nasabah dengan akun hanya bisa diubah pada data keanggotaan",
+        )
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.nama, "Budi Santoso")
+
+    def test_ubah_kode_nasabah_berakun_diterima(self) -> None:
+        # Form pengurus mengirim seluruh data nasabah; yang berubah hanya nomor
+        # anggota, sehingga penyimpanan tidak boleh ditolak.
+        response = self._ubah(kode="NAS-0002")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["kode"], "NAS-0002")
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.nomor, "NAS-0002")
+        self.assertEqual(self.nasabah.nama, "Budi Santoso")
+
+    def test_status_keanggotaan_nasabah_berakun_tetap_bisa_diubah(self) -> None:
+        response = self.client.patch(
+            f"/api/v1/nasabah/{self.nasabah.id}/status", {"is_active": False}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data["is_active"])
+
+    def test_nilai_sama_dengan_format_berbeda_tidak_dianggap_perubahan(self) -> None:
+        # Nomor HP dinormalisasi ke +62 dan tanggal lahir dikonversi menjadi
+        # date, jadi payload apa adanya dari form tidak boleh dianggap berubah.
+        self.nasabah.tanggal_lahir = date(1990, 1, 1)
+        self.nasabah.save(update_fields=["tanggal_lahir"])
+
+        response = self._ubah(kode="NAS-0003", no_hp="08111111111", tanggal_lahir="1990-01-01")
+
+        self.assertEqual(response.status_code, 200)
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.nomor, "NAS-0003")
+        self.assertEqual(self.nasabah.no_hp, "+628111111111")
+
+    def test_nasabah_tanpa_akun_tetap_bisa_diubah_penuh(self) -> None:
+        tanpa_akun = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0009",
+            nama="Siti Aminah",
+            no_hp="+628222222222",
+            alamat="Jl. Kenanga No. 5",
+        )
+
+        response = self.client.put(
+            f"/api/v1/nasabah/{tanpa_akun.id}",
+            {
+                "kode": "NAS-0009",
+                "nama": "Siti Aminah Putri",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1992-05-17",
+                "no_hp": "081222222222",
+                "alamat": "Jl. Kenanga No. 7",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        tanpa_akun.refresh_from_db()
+        self.assertEqual(tanpa_akun.nama, "Siti Aminah Putri")
+        self.assertEqual(tanpa_akun.alamat, "Jl. Kenanga No. 7")
+
+    def test_ubah_no_hp_nasabah_berakun_ditolak(self) -> None:
+        response = self._ubah(no_hp="082333333333")
+
+        self.assertEqual(response.status_code, 403)
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.no_hp, "+628111111111")
+
+    def test_nasabah_berakun_nonaktif_menolak_dengan_pesan_nonaktif(self) -> None:
+        # Dua penolakan bertumpuk; pesan yang muncul harus yang paling
+        # mendasar, yaitu nasabahnya nonaktif.
+        self.nasabah.is_active = False
+        self.nasabah.save(update_fields=["is_active"])
+
+        response = self._ubah(nama="Budi Santosa")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data["error"], "Nasabah nonaktif tidak bisa diedit")

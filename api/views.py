@@ -18,6 +18,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from api.keanggotaan import profil_terkunci
 from api.models import BankSampah, JenisSampah, Nasabah, Saldo, Transaksi, User
 from api.permissions import IsActivePengelola, IsPengelola, IsPrimaryPengelola, IsSuperAdmin
 from api.serializers import (
@@ -389,6 +390,11 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             instance, data=request.data, partial=kwargs.pop("partial", False)
         )
         serializer.is_valid(raise_exception=True)
+        if profil_terkunci(instance, serializer.validated_data):
+            return Response(
+                {"error": "Nasabah dengan akun hanya bisa diubah pada data keanggotaan"},
+                status=403,
+            )
         no_hp = serializer.validated_data.get("no_hp")
         if (
             no_hp
