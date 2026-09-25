@@ -201,13 +201,19 @@ class AuthService:
 
     @staticmethod
     def _enforce_superadmin_allowlist(user: User, email: str) -> None:
-        if user.role != User.Role.SUPERADMIN or AuthService.is_superadmin_allowlisted(email):
+        if user.role != User.Role.SUPERADMIN:
             return
-        if user.is_staff or user.is_superuser:
-            user.is_staff = False
-            user.is_superuser = False
+        if not AuthService._sync_superadmin_admin_flags(user, email):
+            raise AuthService._superadmin_not_allowlisted()
+
+    @staticmethod
+    def _sync_superadmin_admin_flags(user: User, email: str) -> bool:
+        is_allowlisted = AuthService.is_superadmin_allowlisted(email)
+        if user.is_staff != is_allowlisted or user.is_superuser != is_allowlisted:
+            user.is_staff = is_allowlisted
+            user.is_superuser = is_allowlisted
             user.save(update_fields=["is_staff", "is_superuser", "updated_at"])
-        raise AuthService._superadmin_not_allowlisted()
+        return is_allowlisted
 
     @staticmethod
     def _update_google_identity(user: User, google_id: str, name: str) -> None:

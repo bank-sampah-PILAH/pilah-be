@@ -1,9 +1,11 @@
 from unittest.mock import Mock, patch
 
+from django.contrib.auth.models import AnonymousUser
 from django.test import override_settings
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from api.backends import AllowlistedSuperadminBackend
 from api.models import BankSampah, Nasabah, User
 
 GOOGLE_PROFILE = {
@@ -155,6 +157,27 @@ class GoogleRegistrationTests(APITestCase):
 
 @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False)
 class SuperadminWhitelistTests(APITestCase):
+    def test_admin_backend_rejects_inactive_and_non_user_sessions(self) -> None:
+        backend = AllowlistedSuperadminBackend()
+        self.assertFalse(backend.user_can_authenticate(None))
+        self.assertFalse(backend.user_can_authenticate(AnonymousUser()))
+        self.assertFalse(
+            backend.user_can_authenticate(
+                User(
+                    email="inactive@example.com",
+                    role=User.Role.SUPERADMIN,
+                    is_active=False,
+                    is_staff=True,
+                    is_superuser=True,
+                )
+            )
+        )
+        self.assertTrue(
+            backend.user_can_authenticate(
+                User(email="member@example.com", role=User.Role.NASABAH, is_active=True)
+            )
+        )
+
     @patch("api.services.google_id_token.verify_oauth2_token")
     @override_settings(PILAH_SUPERADMIN_EMAILS=("admin@example.com",))
     def test_whitelist_is_case_insensitive_and_provisions_superadmin(self, verify: Mock) -> None:
@@ -211,6 +234,46 @@ class SuperadminWhitelistTests(APITestCase):
         self.assertFalse(former_admin.is_staff)
         self.assertFalse(former_admin.is_superuser)
 
+    @patch("api.services.google_id_token.verify_oauth2_token")
+    @override_settings(
+        STORAGES={
+            "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+            "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+        }
+    )
+    def test_reallowlisted_superadmin_recovers_django_admin_access(self, verify: Mock) -> None:
+        email = str(GOOGLE_PROFILE["email"])
+        admin = User.objects.create_user(
+            email=email,
+            nama="Former Admin",
+            role=User.Role.SUPERADMIN,
+            is_profile_complete=True,
+            is_staff=True,
+            is_superuser=True,
+            password="correct horse battery staple",
+        )
+        verify.return_value = GOOGLE_PROFILE
+
+        with override_settings(PILAH_SUPERADMIN_EMAILS=()):
+            removed = self.client.post(
+                "/api/v1/auth/google", {"id_token": "signed-google-token"}, format="json"
+            )
+
+        self.assertEqual(removed.status_code, 403, removed.data)
+        admin.refresh_from_db()
+        self.assertFalse(admin.is_staff)
+        self.assertFalse(admin.is_superuser)
+
+        with override_settings(PILAH_SUPERADMIN_EMAILS=(email,)):
+            self.assertTrue(
+                self.client.login(username=email, password="correct horse battery staple")
+            )
+            self.assertEqual(self.client.get("/admin/").status_code, 200)
+
+        admin.refresh_from_db()
+        self.assertTrue(admin.is_staff)
+        self.assertTrue(admin.is_superuser)
+
     @override_settings(PILAH_SUPERADMIN_EMAILS=())
     def test_refresh_rejects_removed_superadmin_and_clears_admin_flags(self) -> None:
         former_admin = User.objects.create_user(
@@ -251,6 +314,43 @@ class SuperadminWhitelistTests(APITestCase):
             revoked_response = self.client.get("/api/v1/superadmin/bank-sampah")
 
         self.assertEqual(revoked_response.status_code, 403, revoked_response.data)
+
+    @override_settings(
+        STORAGES={
+            "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+            "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+        }
+    )
+    def test_admin_session_and_login_are_revoked_when_superadmin_is_removed_from_allowlist(
+        self,
+    ) -> None:
+        email = "admin@example.com"
+        User.objects.create_user(
+            email=email,
+            nama="Admin",
+            role=User.Role.SUPERADMIN,
+            is_profile_complete=True,
+            is_staff=True,
+            is_superuser=True,
+            password="correct horse battery staple",
+        )
+
+        with override_settings(PILAH_SUPERADMIN_EMAILS=(email,)):
+            self.assertTrue(
+                self.client.login(username=email, password="correct horse battery staple")
+            )
+            self.assertEqual(self.client.get("/admin/").status_code, 200)
+
+        with override_settings(PILAH_SUPERADMIN_EMAILS=()):
+            response = self.client.get("/admin/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/admin/login/", response.headers["Location"])
+        self.client.logout()
+        with override_settings(PILAH_SUPERADMIN_EMAILS=()):
+            self.assertFalse(
+                self.client.login(username=email, password="correct horse battery staple")
+            )
 
     @patch("api.services.google_id_token.verify_oauth2_token")
     def test_case_variant_duplicate_emails_are_rejected(self, verify: Mock) -> None:

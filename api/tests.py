@@ -960,6 +960,7 @@ class APISpecTests(APITestCase):
         self.assertIn("registration_token", response.data)
         self.assertFalse(User.objects.filter(email="new@example.com").exists())
 
+    @override_settings(PILAH_SUPERADMIN_EMAILS=("super@example.com",))
     def test_onboarding_superadmin_approval_and_invite_flow(self) -> None:
         self.client.credentials()
         login = self.client.post(
@@ -1241,6 +1242,7 @@ class APISpecTests(APITestCase):
         approvals = self.client.get("/api/v1/superadmin/bank-sampah")
         self.assertEqual(approvals.status_code, 200)
 
+    @override_settings(PILAH_SUPERADMIN_EMAILS=("queue-admin@example.com",))
     def test_superadmin_bank_queue_sorts_oldest_first(self) -> None:
         self.client.credentials()
         superadmin = User.objects.create_user(
