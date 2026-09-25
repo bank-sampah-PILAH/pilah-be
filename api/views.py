@@ -429,12 +429,6 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             return NasabahDetailSerializer
         return NasabahSerializer
 
-    @staticmethod
-    def _email_duplicate_error(nasabah: Nasabah, bank_id: Any) -> str:
-        if nasabah.bank_sampah_id == bank_id:
-            return "Email sudah terdaftar sebagai nasabah di bank sampah ini"
-        return "Email sudah terdaftar sebagai nasabah di bank sampah lain"
-
     def create(self, request: Request) -> Response:
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -446,10 +440,12 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         if Nasabah.objects.filter(bank_sampah=bank, no_hp=no_hp).exists():
             return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
         email = serializer.validated_data.get("email")
-        existing_by_email = Nasabah.objects.filter(email=email).first() if email else None
+        existing_by_email = (
+            Nasabah.objects.filter(bank_sampah=bank, email=email).first() if email else None
+        )
         if existing_by_email:
             return Response(
-                {"errors": {"email": [self._email_duplicate_error(existing_by_email, bank.id)]}},
+                {"errors": {"email": ["Email sudah terdaftar sebagai nasabah di bank sampah ini"]}},
                 status=422,
             )
         nasabah = serializer.save(
@@ -485,11 +481,13 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
         email = serializer.validated_data.get("email")
         existing_by_email = (
-            Nasabah.objects.filter(email=email).exclude(id=instance.id).first() if email else None
+            Nasabah.objects.filter(bank_sampah=bank, email=email).exclude(id=instance.id).first()
+            if email
+            else None
         )
         if existing_by_email:
             return Response(
-                {"errors": {"email": [self._email_duplicate_error(existing_by_email, bank.id)]}},
+                {"errors": {"email": ["Email sudah terdaftar sebagai nasabah di bank sampah ini"]}},
                 status=422,
             )
         self.perform_update(serializer)
