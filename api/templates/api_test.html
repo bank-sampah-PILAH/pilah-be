@@ -234,7 +234,7 @@
           <button id="clear" type="button">Clear Report</button>
           <button id="download" type="button" disabled>Download JSON</button>
         </div>
-        <p class="muted small">The runner creates unique test data every run. It uses local dev auth tokens in the form <code>dev:email:name</code>.</p>
+        <p class="muted small">The runner creates unique test data every run. It uses local Pengurus tokens in the form <code>dev-pengelola:email:name</code>.</p>
       </div>
     </section>
 
@@ -638,7 +638,7 @@
 
       try {
         const auth = await call("Pengelola Google dev auth", "POST", "/auth/google", 200, {
-          id_token: `dev:${email}:${name}`
+          id_token: `dev-pengelola:${email}:${name}`
         }, data => {
           assert(data.token_type === "Bearer", "Missing Bearer token type");
           assert(data.user.role === "pengelola", "Unexpected user role");
@@ -727,7 +727,7 @@
         });
 
         const invitedAuth = await call("Invited pengelola auth", "POST", "/auth/google", 200, {
-          id_token: `dev:${invitedEmail}:Invited Runner`
+          id_token: `dev-pengelola:${invitedEmail}:Invited Runner`
         }, data => {
           assert(data.next_step === "complete_profile", "Invited user starts at profile completion");
           state.token = data.access_token;

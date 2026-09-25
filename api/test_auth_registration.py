@@ -2,6 +2,7 @@ from unittest.mock import Mock, patch
 
 from django.test import override_settings
 from rest_framework.test import APITestCase
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.models import BankSampah, Nasabah, User
 
@@ -195,6 +196,8 @@ class SuperadminWhitelistTests(APITestCase):
             nama="Former Admin",
             role=User.Role.SUPERADMIN,
             is_profile_complete=True,
+            is_staff=True,
+            is_superuser=True,
         )
         verify.return_value = GOOGLE_PROFILE
 
@@ -204,6 +207,44 @@ class SuperadminWhitelistTests(APITestCase):
 
         self.assertEqual(response.status_code, 403, response.data)
         self.assertEqual(response.data["code"], "superadmin_not_allowlisted")
+        former_admin = User.objects.get(email=GOOGLE_PROFILE["email"])
+        self.assertFalse(former_admin.is_staff)
+        self.assertFalse(former_admin.is_superuser)
+
+    @override_settings(PILAH_SUPERADMIN_EMAILS=())
+    def test_refresh_rejects_removed_superadmin_and_clears_admin_flags(self) -> None:
+        former_admin = User.objects.create_user(
+            email=str(GOOGLE_PROFILE["email"]),
+            nama="Former Admin",
+            role=User.Role.SUPERADMIN,
+            is_profile_complete=True,
+            is_staff=True,
+            is_superuser=True,
+        )
+        refresh = RefreshToken.for_user(former_admin)
+
+        response = self.client.post(
+            "/api/v1/auth/refresh", {"refresh_token": str(refresh)}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 403, response.data)
+        self.assertEqual(response.data["code"], "superadmin_not_allowlisted")
+        former_admin.refresh_from_db()
+        self.assertFalse(former_admin.is_staff)
+        self.assertFalse(former_admin.is_superuser)
+
+    @patch("api.services.google_id_token.verify_oauth2_token")
+    def test_case_variant_duplicate_emails_are_rejected(self, verify: Mock) -> None:
+        User.objects.create_user(email="Case@example.com", nama="First")
+        User.objects.create_user(email="case@example.com", nama="Second")
+        verify.return_value = {**GOOGLE_PROFILE, "email": "CASE@example.com"}
+
+        response = self.client.post(
+            "/api/v1/auth/google", {"id_token": "signed-google-token"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 409, response.data)
+        self.assertEqual(response.data["code"], "ambiguous_email_match")
 
     @override_settings(
         DEBUG=True,
@@ -219,6 +260,18 @@ class SuperadminWhitelistTests(APITestCase):
 
         self.assertEqual(response.status_code, 403, response.data)
         self.assertEqual(response.data["code"], "superadmin_not_allowlisted")
+
+    @override_settings(DEBUG=True, PILAH_ALLOW_FAKE_GOOGLE_TOKEN=True)
+    def test_bare_dev_token_uses_role_selection_for_unknown_email(self) -> None:
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev:unknown@example.com:Unknown"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertTrue(response.data["registration_required"])
+        self.assertFalse(User.objects.filter(email="unknown@example.com").exists())
 
     @patch("api.services.google_id_token.verify_oauth2_token")
     @override_settings(PILAH_SUPERADMIN_EMAILS=("admin@example.com",))
@@ -279,7 +332,7 @@ class SuperadminWhitelistTests(APITestCase):
 class RoleOnboardingStateTests(APITestCase):
     def test_all_registration_roles_can_complete_shared_profile(self) -> None:
         expected = {
-            User.Role.PENGELOLA: ("dev", "register_bank_sampah"),
+            User.Role.PENGELOLA: ("dev-pengelola", "register_bank_sampah"),
             User.Role.PENGELOLA_INDUK: (
                 "dev-pengelola-induk",
                 "register_bank_sampah_induk",

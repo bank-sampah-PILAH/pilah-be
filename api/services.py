@@ -30,6 +30,7 @@ from api.models import (
     DetailTransaksi,
     JenisSampah,
     Nasabah,
+    NasabahApprovalLog,
     Saldo,
     Transaksi,
     User,
@@ -61,10 +62,11 @@ class AuthService:
         google_id = profile["sub"]
         name = profile.get("name") or email.split("@")[0]
         dev_role = profile.get("_pilah_dev_role")
-        user = User.objects.filter(email__iexact=email).first()
+        user = AuthService._user_for_email(email)
+        nasabah = Nasabah.objects.filter(email__iexact=email, is_active=True).first()
         is_allowlisted = email in AuthService._superadmin_emails()
 
-        if user is None and not is_allowlisted and dev_role is None:
+        if user is None and nasabah is None and not is_allowlisted and dev_role is None:
             registration_token = signing.dumps(
                 {
                     "sub": google_id,
@@ -86,10 +88,14 @@ class AuthService:
                 },
             }
 
+        is_new_user = user is None
         if user is None:
             if dev_role == User.Role.SUPERADMIN and not is_allowlisted:
                 raise AuthService._superadmin_not_allowlisted()
-            role = User.Role.SUPERADMIN if is_allowlisted else dev_role
+            # A pre-existing Nasabah row is already a known account; preserve
+            # the legacy Pengelola profile bootstrap until the Nasabah flow is
+            # completed by its owning onboarding work.
+            role = User.Role.SUPERADMIN if is_allowlisted else dev_role or User.Role.PENGELOLA
             user = User.objects.create_user(
                 email=email,
                 google_id=google_id,
@@ -99,11 +105,20 @@ class AuthService:
                 is_staff=role == User.Role.SUPERADMIN,
                 is_superuser=role == User.Role.SUPERADMIN,
             )
-            return AuthService._session_response(user, is_new_user=True)
+            nama_was_empty = True
+        else:
+            nama_was_empty = not user.nama
+            AuthService._enforce_superadmin_allowlist(user, email)
+            AuthService._update_google_identity(user, google_id, str(name))
 
-        AuthService._enforce_superadmin_allowlist(user, email)
-        AuthService._update_google_identity(user, google_id, str(name))
-        return AuthService._session_response(user, is_new_user=False)
+        # PIL-154: a Nasabah row created by a Pengurus can prefill the matching
+        # Google account. Existing profile values remain authoritative.
+        if nasabah:
+            AuthService._sync_nasabah_profile(
+                user, nasabah, is_new_user=is_new_user, nama_was_empty=nama_was_empty
+            )
+
+        return AuthService._session_response(user, is_new_user=is_new_user)
 
     @staticmethod
     def register_with_google(registration_token: str, role: str) -> tuple[dict[str, Any], bool]:
@@ -139,7 +154,7 @@ class AuthService:
                 status_code=400,
             )
 
-        user = User.objects.filter(email__iexact=email).first()
+        user = AuthService._user_for_email(email)
         created = False
         if user is None:
             is_allowlisted = email in AuthService._superadmin_emails()
@@ -157,13 +172,24 @@ class AuthService:
                     )
                     created = True
             except IntegrityError:
-                user = User.objects.filter(email__iexact=email).first()
+                user = AuthService._user_for_email(email)
                 if user is None:
                     raise
 
         AuthService._enforce_superadmin_allowlist(user, email)
         AuthService._update_google_identity(user, google_id, name)
         return AuthService._session_response(user, is_new_user=created), created
+
+    @staticmethod
+    def _user_for_email(email: str) -> User | None:
+        matches = list(User.objects.filter(email__iexact=email)[:2])
+        if len(matches) > 1:
+            raise AuthServiceError(
+                "Beberapa akun menggunakan alamat email ini. Hubungi dukungan untuk memperbaikinya.",
+                code="ambiguous_email_match",
+                status_code=409,
+            )
+        return matches[0] if matches else None
 
     @staticmethod
     def _superadmin_not_allowlisted() -> AuthServiceError:
@@ -175,9 +201,14 @@ class AuthService:
 
     @staticmethod
     def _enforce_superadmin_allowlist(user: User, email: str) -> None:
-        is_allowlisted = email in AuthService._superadmin_emails()
-        if user.role == User.Role.SUPERADMIN and not is_allowlisted:
-            raise AuthService._superadmin_not_allowlisted()
+        normalized_email = email.strip().lower()
+        if user.role != User.Role.SUPERADMIN or normalized_email in AuthService._superadmin_emails():
+            return
+        if user.is_staff or user.is_superuser:
+            user.is_staff = False
+            user.is_superuser = False
+            user.save(update_fields=["is_staff", "is_superuser", "updated_at"])
+        raise AuthService._superadmin_not_allowlisted()
 
     @staticmethod
     def _update_google_identity(user: User, google_id: str, name: str) -> None:
@@ -190,6 +221,25 @@ class AuthService:
             updates.append("nama")
         if updates:
             user.save(update_fields=updates)
+
+    @staticmethod
+    def _sync_nasabah_profile(
+        user: User, nasabah: Nasabah, *, is_new_user: bool, nama_was_empty: bool
+    ) -> None:
+        profile_updates = []
+        for user_field in ("nama", "no_hp", "jenis_kelamin", "tanggal_lahir"):
+            fillable = user_field == "nama" and (is_new_user or nama_was_empty)
+            nasabah_value = getattr(nasabah, user_field)
+            if (fillable or not getattr(user, user_field)) and nasabah_value:
+                setattr(user, user_field, nasabah_value)
+                profile_updates.append(user_field)
+        if profile_updates and all(
+            getattr(user, field) for field in ("nama", "no_hp", "jenis_kelamin", "tanggal_lahir")
+        ):
+            user.is_profile_complete = True
+            profile_updates.append("is_profile_complete")
+        if profile_updates:
+            user.save(update_fields=profile_updates)
 
     @staticmethod
     def _session_response(user: User, *, is_new_user: bool) -> dict[str, Any]:
@@ -251,6 +301,7 @@ class AuthService:
         if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN:
             dev_roles = {
                 "dev-superadmin:": ("dev-superadmin", User.Role.SUPERADMIN),
+                "dev-pengelola:": ("dev-pengelola", User.Role.PENGELOLA),
                 "dev-pengelola-induk:": ("dev-pengelola-induk", User.Role.PENGELOLA_INDUK),
                 "dev-nasabah:": ("dev-nasabah", User.Role.NASABAH),
             }
@@ -265,12 +316,7 @@ class AuthService:
                     }
         if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and raw_id_token.startswith("dev:"):
             _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
-            return {
-                "sub": f"dev-{email}",
-                "email": email,
-                "name": name or email.split("@")[0],
-                "_pilah_dev_role": User.Role.PENGELOLA,
-            }
+            return {"sub": f"dev-{email}", "email": email, "name": name or email.split("@")[0]}
         audience = settings.GOOGLE_CLIENT_ID or None
         try:
             profile = google_id_token.verify_oauth2_token(  # type: ignore[no-untyped-call]  # google-auth ships no stubs
@@ -438,6 +484,34 @@ class TeamService:
         return bank.invite_token
 
 
+class NasabahApprovalService:
+    @staticmethod
+    @transaction.atomic
+    def approve(nasabah: Nasabah, pengurus: User, catatan: str = "") -> NasabahApprovalLog:
+        nasabah.status = Nasabah.Status.APPROVED
+        nasabah.is_active = True
+        nasabah.save(update_fields=["status", "is_active", "updated_at"])
+        return NasabahApprovalLog.objects.create(
+            nasabah=nasabah,
+            pengurus=pengurus,
+            status=NasabahApprovalLog.Status.APPROVED,
+            catatan=catatan,
+        )
+
+    @staticmethod
+    @transaction.atomic
+    def reject(nasabah: Nasabah, pengurus: User, catatan: str = "") -> NasabahApprovalLog:
+        nasabah.status = Nasabah.Status.REJECTED
+        nasabah.is_active = False
+        nasabah.save(update_fields=["status", "is_active", "updated_at"])
+        return NasabahApprovalLog.objects.create(
+            nasabah=nasabah,
+            pengurus=pengurus,
+            status=NasabahApprovalLog.Status.REJECTED,
+            catatan=catatan,
+        )
+
+
 class TransactionService:
     @staticmethod
     @transaction.atomic
@@ -446,7 +520,12 @@ class TransactionService:
         assert bank is not None  # ponytail: views gate on IsActivePengelola
         nasabah = (
             Nasabah.objects.select_for_update()
-            .filter(id=payload["nasabah_id"], bank_sampah=bank, is_active=True)
+            .filter(
+                id=payload["nasabah_id"],
+                bank_sampah=bank,
+                is_active=True,
+                status=Nasabah.Status.APPROVED,
+            )
             .first()
         )
         if not nasabah:
@@ -567,7 +646,9 @@ class DashboardService:
             "bank_sampah_nama": bank.nama,
             "pengelola_nama": user.nama,
             "periode": today.strftime("%Y-%m"),
-            "nasabah_aktif": Nasabah.objects.filter(bank_sampah=bank, is_active=True).count(),
+            "nasabah_aktif": Nasabah.objects.filter(
+                bank_sampah=bank, is_active=True, status=Nasabah.Status.APPROVED
+            ).count(),
             "transaksi_bulan_ini": transaksi.count(),
             "total_sampah_kg_bulan_ini": totals["total_kg"],
             "total_nilai_bulan_ini": nilai,

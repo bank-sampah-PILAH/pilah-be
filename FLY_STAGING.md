@@ -23,9 +23,6 @@ flyctl secrets set --app pilah-be-staging \
 
 Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, and any
 WhatsApp/Twilio secrets the staging environment needs with the same command.
-Also set `PILAH_SUPERADMIN_EMAILS` to the comma-separated Google accounts that
-are allowed to become or remain Superadmin. Include the seeded Superadmin test
-account; this whitelist is authoritative at every real Google login.
 Register this Google OAuth callback URL:
 
 ```text
@@ -33,21 +30,26 @@ https://pilah-be-staging.fly.dev/api/v1/auth/google/callback
 ```
 
 GitHub's `staging` environment must contain an app-scoped `FLY_API_TOKEN`.
-It should also contain the five non-secret variables used by the seed workflow:
+It should also contain the non-secret variables used by the seed workflow:
 
 ```text
-PILAH_SEED_OPERATOR_EMAIL
+PILAH_SEED_PENGURUS_EMAIL
 PILAH_SEED_CUSTOMER_EMAIL
 PILAH_SEED_CUSTOMER_TWO_EMAIL
 PILAH_SEED_SUPERADMIN_EMAIL
-PILAH_SEED_PENDING_OPERATOR_EMAIL
+PILAH_SEED_PENDING_PENGURUS_EMAIL
 PILAH_SEED_INDUK_EMAIL
 ```
 
-These addresses should be Google test accounts already listed on the OAuth
-consent screen. Staging uses real Google ID tokens; `PILAH_ALLOW_FAKE_GOOGLE_TOKEN`
-must remain `false` and the mobile staging build does not show the local demo
-login.
+`PILAH_SEED_INDUK_EMAIL` is optional; it defaults to
+`induk.demo@example.com` when unset.
+
+The old `PILAH_SEED_OPERATOR_EMAIL` and
+`PILAH_SEED_PENDING_OPERATOR_EMAIL` variables remain temporary fallbacks so
+existing GitHub environment settings keep working. These addresses should be
+Google test accounts already listed on the OAuth consent screen. Staging uses
+real Google ID tokens; `PILAH_ALLOW_FAKE_GOOGLE_TOKEN` must remain `false`, and
+the mobile staging build does not show the local demo login.
 
 ## Operations
 
@@ -69,7 +71,7 @@ python manage.py seed_testing_data \
   --confirm=SEED-PILAH-STAGING-DATA
 ```
 
-The command is idempotent, creates the active Pengelola and Induk banks plus the pending approval-flow
+The command is idempotent, creates the active and pending approval-flow
 fixtures, and never flushes or removes unrelated staging data. For local
 SQLite or Docker Postgres, run `python manage.py migrate` followed by
 `python manage.py seed_testing_data` instead; local execution requires

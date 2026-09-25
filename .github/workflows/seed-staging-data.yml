@@ -18,12 +18,12 @@ jobs:
     environment: staging
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      PILAH_SEED_OPERATOR_EMAIL: ${{ vars.PILAH_SEED_OPERATOR_EMAIL }}
+      PILAH_SEED_PENGURUS_EMAIL: ${{ vars.PILAH_SEED_PENGURUS_EMAIL || vars.PILAH_SEED_OPERATOR_EMAIL }}
       PILAH_SEED_CUSTOMER_EMAIL: ${{ vars.PILAH_SEED_CUSTOMER_EMAIL }}
       PILAH_SEED_CUSTOMER_TWO_EMAIL: ${{ vars.PILAH_SEED_CUSTOMER_TWO_EMAIL }}
       PILAH_SEED_SUPERADMIN_EMAIL: ${{ vars.PILAH_SEED_SUPERADMIN_EMAIL }}
-      PILAH_SEED_PENDING_OPERATOR_EMAIL: ${{ vars.PILAH_SEED_PENDING_OPERATOR_EMAIL }}
-      PILAH_SEED_INDUK_EMAIL: ${{ vars.PILAH_SEED_INDUK_EMAIL }}
+      PILAH_SEED_PENDING_PENGURUS_EMAIL: ${{ vars.PILAH_SEED_PENDING_PENGURUS_EMAIL || vars.PILAH_SEED_PENDING_OPERATOR_EMAIL }}
+      PILAH_SEED_INDUK_EMAIL: ${{ vars.PILAH_SEED_INDUK_EMAIL || 'induk.demo@example.com' }}
       FLY_APP: pilah-be-staging
 
     steps:
@@ -39,11 +39,11 @@ jobs:
           test -n "${FLY_API_TOKEN}"
           test "${FLY_APP}" = "pilah-be-staging"
           for email in \
-            "${PILAH_SEED_OPERATOR_EMAIL}" \
+            "${PILAH_SEED_PENGURUS_EMAIL}" \
             "${PILAH_SEED_CUSTOMER_EMAIL}" \
             "${PILAH_SEED_CUSTOMER_TWO_EMAIL}" \
             "${PILAH_SEED_SUPERADMIN_EMAIL}" \
-            "${PILAH_SEED_PENDING_OPERATOR_EMAIL}" \
+            "${PILAH_SEED_PENDING_PENGURUS_EMAIL}" \
             "${PILAH_SEED_INDUK_EMAIL}"; do
             test -n "${email}"
             [[ "${email}" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]
@@ -56,4 +56,4 @@ jobs:
           flyctl ssh console \
             --app "${FLY_APP}" \
             --access-token "${FLY_API_TOKEN}" \
-            --command "cd /app && python manage.py seed_testing_data --environment staging --confirm=SEED-PILAH-STAGING-DATA --operator-email='${PILAH_SEED_OPERATOR_EMAIL}' --customer-email='${PILAH_SEED_CUSTOMER_EMAIL}' --customer-two-email='${PILAH_SEED_CUSTOMER_TWO_EMAIL}' --superadmin-email='${PILAH_SEED_SUPERADMIN_EMAIL}' --pending-operator-email='${PILAH_SEED_PENDING_OPERATOR_EMAIL}' --induk-email='${PILAH_SEED_INDUK_EMAIL}'"
+            --command "cd /app && python manage.py seed_testing_data --environment staging --confirm=SEED-PILAH-STAGING-DATA --pengurus-email='${PILAH_SEED_PENGURUS_EMAIL}' --customer-email='${PILAH_SEED_CUSTOMER_EMAIL}' --customer-two-email='${PILAH_SEED_CUSTOMER_TWO_EMAIL}' --superadmin-email='${PILAH_SEED_SUPERADMIN_EMAIL}' --pending-pengurus-email='${PILAH_SEED_PENDING_PENGURUS_EMAIL}' --induk-email='${PILAH_SEED_INDUK_EMAIL}'"

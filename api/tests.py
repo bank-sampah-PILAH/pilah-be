@@ -18,7 +18,15 @@ from openpyxl import load_workbook
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
-from api.models import BankSampah, BankSampahApprovalLog, JenisSampah, Nasabah, Saldo, User
+from api.models import (
+    BankSampah,
+    BankSampahApprovalLog,
+    JenisSampah,
+    Nasabah,
+    NasabahApprovalLog,
+    Saldo,
+    User,
+)
 from api.serializers import BankSampahApprovalListSerializer
 
 
@@ -163,6 +171,139 @@ class APISpecTests(APITestCase):
         )
         self.assertEqual(inactive_update.status_code, 403)
 
+    def test_nasabah_created_by_pengurus_is_approved(self) -> None:
+        created = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+            },
+            format="json",
+        )
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.data["status"], "approved")
+        self.nasabah = Nasabah.objects.get(id=created.data["id"])
+        self.assertEqual(self.nasabah.status, Nasabah.Status.APPROVED)
+
+    def _create_pending_nasabah(self, kode: str = "NAS-0001") -> Nasabah:
+        no_hp = "081234567891"
+        counter = getattr(self, "_pending_counter", 0)
+        if counter:
+            no_hp = f"08123456789{counter + 1}"
+            kode = f"NAS-{counter + 1:04d}"
+        self._pending_counter = counter + 1
+        return Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor=kode,
+            nama="Citra Lestari",
+            jenis_kelamin="perempuan",
+            alamat="Jl. Melati No. 7",
+            no_hp=no_hp,
+            is_active=True,
+            status=Nasabah.Status.PENDING,
+        )
+
+    def test_nasabah_list_status_filter_includes_menunggu_and_ditolak(self) -> None:
+        pending = self._create_pending_nasabah("NAS-0001")
+        rejected = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0002",
+            nama="Dedi Pratama",
+            jenis_kelamin="laki-laki",
+            alamat="Jl. Kenanga No. 2",
+            no_hp="081234567892",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+
+        menunggu = self.client.get("/api/v1/nasabah?status=menunggu")
+        self.assertEqual(menunggu.status_code, 200)
+        self.assertEqual(menunggu.data["count"], 1)
+        self.assertEqual(str(menunggu.data["results"][0]["id"]), str(pending.id))
+
+        aktif = self.client.get("/api/v1/nasabah?status=aktif")
+        self.assertEqual(aktif.data["count"], 0)
+
+        ditolak = self.client.get("/api/v1/nasabah?status=ditolak")
+        self.assertEqual(ditolak.status_code, 200)
+        self.assertEqual(ditolak.data["count"], 1)
+        self.assertEqual(str(ditolak.data["results"][0]["id"]), str(rejected.id))
+
+        semua = self.client.get("/api/v1/nasabah?status=semua")
+        self.assertEqual(semua.data["count"], 2)
+
+    def test_nasabah_approve_pending_sets_approved_and_active(self) -> None:
+        pending = self._create_pending_nasabah()
+
+        response = self.client.post(
+            f"/api/v1/nasabah/{pending.id}/approve", {"catatan": "Data lengkap"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, Nasabah.Status.APPROVED)
+        self.assertTrue(pending.is_active)
+        log = pending.approval_logs.get()
+        self.assertEqual(log.status, NasabahApprovalLog.Status.APPROVED)
+        self.assertEqual(log.catatan, "Data lengkap")
+        self.assertEqual(log.pengurus, self.user)
+        self.assertEqual(response.data["approval_log"]["status"], "approved")
+
+    def test_nasabah_reject_pending_keeps_row_with_alasan(self) -> None:
+        pending = self._create_pending_nasabah()
+
+        response = self.client.post(
+            f"/api/v1/nasabah/{pending.id}/reject", {"catatan": "Alamat tidak valid"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, Nasabah.Status.REJECTED)
+        self.assertFalse(pending.is_active)
+        log = pending.approval_logs.get()
+        self.assertEqual(log.status, NasabahApprovalLog.Status.REJECTED)
+        self.assertEqual(log.catatan, "Alamat tidak valid")
+        self.assertEqual(log.pengurus, self.user)
+
+    def test_nasabah_approve_non_pending_returns_400(self) -> None:
+        approved = self._create_pending_nasabah()
+        approved.status = Nasabah.Status.APPROVED
+        approved.save(update_fields=["status"])
+
+        response = self.client.post(f"/api/v1/nasabah/{approved.id}/approve", format="json")
+
+        self.assertEqual(response.status_code, 400)
+
+        rejected = self._create_pending_nasabah()
+        rejected.status = Nasabah.Status.REJECTED
+        rejected.save(update_fields=["status"])
+
+        reject_response = self.client.post(f"/api/v1/nasabah/{rejected.id}/reject", format="json")
+        self.assertEqual(reject_response.status_code, 400)
+
+    def test_nasabah_other_bank_pending_not_accessible(self) -> None:
+        other_bank = BankSampah.objects.create(
+            nama="Bank Sampah Lain", alamat="Bogor", kota="Bogor", no_hp_pic="+628129876543"
+        )
+        pending = Nasabah.objects.create(
+            bank_sampah=other_bank,
+            nomor="NAS-0001",
+            nama="Eko Widodo",
+            jenis_kelamin="laki-laki",
+            alamat="Jl. Cendana No. 9",
+            no_hp="081234567893",
+            status=Nasabah.Status.PENDING,
+        )
+
+        response = self.client.post(f"/api/v1/nasabah/{pending.id}/approve", format="json")
+
+        self.assertEqual(response.status_code, 404)
+
     def test_nasabah_duplicate_phone_returns_validation_error(self) -> None:
         first = self.client.post(
             "/api/v1/nasabah",
@@ -225,6 +366,313 @@ class APISpecTests(APITestCase):
         self.assertEqual(
             duplicate_update.data["errors"]["no_hp"], ["Nomor HP nasabah sudah digunakan"]
         )
+
+    def test_nasabah_create_with_email(self) -> None:
+        created = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "Budi@Example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.data["email"], "budi@example.com")
+        self.assertTrue(Saldo.objects.filter(nasabah_id=created.data["id"]).exists())
+
+    def test_nasabah_create_without_email_still_works(self) -> None:
+        created = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertIsNone(created.data["email"])
+
+    def test_nasabah_duplicate_email_same_bank_returns_validation_error(self) -> None:
+        first = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(first.status_code, 201)
+
+        duplicate = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0002",
+                "nama": "Dewi Lestari",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1992-02-02",
+                "no_hp": "081999999999",
+                "alamat": "Jl. Melati No. 7",
+                "email": "Budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(duplicate.status_code, 422)
+        self.assertEqual(
+            duplicate.data["errors"]["email"],
+            ["Email sudah terdaftar sebagai nasabah di bank sampah ini"],
+        )
+
+    def test_nasabah_duplicate_email_other_bank_returns_validation_error(self) -> None:
+        created = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+
+        other_bank = BankSampah.objects.create(
+            nama="Bank Sampah Lain", alamat="Jakarta", kota="Jakarta", no_hp_pic="+628123456788"
+        )
+        other_user = User.objects.create_user(
+            email="pengelola-lain@example.com",
+            nama="Pengelola Lain",
+            bank_sampah=other_bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        refresh = RefreshToken.for_user(other_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        duplicate = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NSL-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(duplicate.status_code, 422)
+        self.assertEqual(
+            duplicate.data["errors"]["email"],
+            ["Email sudah terdaftar sebagai nasabah di bank sampah lain"],
+        )
+
+    def test_nasabah_email_on_update(self) -> None:
+        first = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(first.status_code, 201)
+
+        second = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0002",
+                "nama": "Dewi Lestari",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1992-02-02",
+                "no_hp": "081999999999",
+                "alamat": "Jl. Melati No. 7",
+                "email": "dewi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(second.status_code, 201)
+
+        stolen = self.client.put(
+            f"/api/v1/nasabah/{second.data['id']}",
+            {
+                "kode": "NAS-0002",
+                "nama": "Dewi Lestari",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1992-02-02",
+                "no_hp": "081999999999",
+                "alamat": "Jl. Melati No. 7",
+                "email": "budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(stolen.status_code, 422)
+        self.assertEqual(
+            stolen.data["errors"]["email"],
+            ["Email sudah terdaftar sebagai nasabah di bank sampah ini"],
+        )
+
+        kept = self.client.put(
+            f"/api/v1/nasabah/{second.data['id']}",
+            {
+                "kode": "NAS-0002",
+                "nama": "Dewi Lestari",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1992-02-02",
+                "no_hp": "081999999999",
+                "alamat": "Jl. Melati No. 7",
+                "email": "dewi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(kept.status_code, 200)
+
+    def test_nasabah_invalid_email_format_returns_validation_error(self) -> None:
+        response = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "bukan-email",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertTrue(response.data["errors"]["email"])
+
+    def test_google_login_with_nasabah_email_prefills_profile(self) -> None:
+        self.client.credentials()
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Budi Santoso",
+            jenis_kelamin="laki-laki",
+            tanggal_lahir="1990-01-01",
+            alamat="Jl. Anggrek No. 3",
+            no_hp="081234567890",
+            email="budi@example.com",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/google", {"id_token": "dev:budi@example.com:B"}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+
+        user = User.objects.get(email="budi@example.com")
+        self.assertEqual(user.nama, "Budi Santoso")
+        self.assertEqual(user.no_hp, "081234567890")
+        self.assertTrue(user.is_profile_complete)
+        self.assertEqual(response.data["next_step"], "register_bank_sampah")
+
+    def test_google_login_does_not_overwrite_existing_profile(self) -> None:
+        self.client.credentials()
+        User.objects.create_user(
+            email="lengkap@example.com",
+            nama="Nama Lama",
+            no_hp="081111111111",
+            is_profile_complete=True,
+        )
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Nama Nasabah",
+            alamat="Jl. Anggrek No. 3",
+            no_hp="081234567890",
+            email="lengkap@example.com",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev:lengkap@example.com:Baru"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        user = User.objects.get(email="lengkap@example.com")
+        self.assertEqual(user.nama, "Nama Lama")
+        self.assertEqual(user.no_hp, "081111111111")
+
+    def test_google_login_prefills_nama_from_nasabah_when_existing_name_empty(
+        self,
+    ) -> None:
+        """P2 regression: the token fallback must not block the nasabah name."""
+        self.client.credentials()
+        User.objects.create_user(
+            email="kosong@example.com",
+            nama="",
+            is_profile_complete=False,
+        )
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Nama Nasabah",
+            alamat="Jl. Anggrek No. 3",
+            no_hp="081234567890",
+            email="kosong@example.com",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/google", {"id_token": "dev:kosong@example.com:K"}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+
+        user = User.objects.get(email="kosong@example.com")
+        self.assertEqual(user.nama, "Nama Nasabah")
+
+    def test_google_login_partial_nasabah_keeps_profile_incomplete(self) -> None:
+        """P1 regression: a nasabah record lacking jenis_kelamin/tanggal_lahir
+        must not mark the profile complete — /onboarding/profile would reject
+        the follow-up with 'Profil sudah lengkap'."""
+        self.client.credentials()
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Budi Sebagian",
+            alamat="Jl. Anggrek No. 3",
+            no_hp="081234567890",
+            email="sebagian@example.com",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev:sebagian@example.com:S"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        user = User.objects.get(email="sebagian@example.com")
+        self.assertEqual(user.nama, "Budi Sebagian")
+        self.assertEqual(user.no_hp, "081234567890")
+        self.assertFalse(user.jenis_kelamin)
+        self.assertIsNone(user.tanggal_lahir)
+        self.assertFalse(user.is_profile_complete)
+        self.assertEqual(response.data["next_step"], "complete_profile")
 
     def test_jenis_sampah_and_transaction_update_saldo(self) -> None:
         nasabah = Nasabah.objects.create(
@@ -508,16 +956,15 @@ class APISpecTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["token_type"], "Bearer")
-        self.assertTrue(response.data["is_new_user"])
-        self.assertIsNone(response.data["user"]["bank_sampah_id"])
-        self.assertEqual(response.data["next_step"], "complete_profile")
+        self.assertTrue(response.data["registration_required"])
+        self.assertIn("registration_token", response.data)
+        self.assertFalse(User.objects.filter(email="new@example.com").exists())
 
     def test_onboarding_superadmin_approval_and_invite_flow(self) -> None:
         self.client.credentials()
         login = self.client.post(
             "/api/v1/auth/google",
-            {"id_token": "dev:onboard@example.com:Onboard User"},
+            {"id_token": "dev-pengelola:onboard@example.com:Onboard User"},
             format="json",
         )
         self.assertEqual(login.status_code, 200)
@@ -626,7 +1073,7 @@ class APISpecTests(APITestCase):
         self.client.credentials()
         invited_login = self.client.post(
             "/api/v1/auth/google",
-            {"id_token": "dev:invited@example.com:Invited User"},
+            {"id_token": "dev-pengelola:invited@example.com:Invited User"},
             format="json",
         )
         self.assertEqual(invited_login.status_code, 200)
