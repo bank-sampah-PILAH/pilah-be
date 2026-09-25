@@ -1,0 +1,87 @@
+# Prod-state migration gate: restores the anonymized prod snapshot (which sits
+# at the real prod migration state) and migrates it to the current leaves.
+# Catches forward-migration breakage that `migrate` on an empty DB cannot see.
+#
+# The fixture is generated locally by scripts/scrub-prod-dump.py from a real
+# prod dump and contains no PII or secrets. If this job reports the fixture
+# is stale (prod drifted past its django_migrations state), re-scrub from a
+# fresh dump — do not touch the raw dump handling.
+name: Prod migration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - staging
+      - main
+
+concurrency:
+  group: prod-migration-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Placeholders only — restores a scrubbed fixture, never real prod data.
+  DJANGO_SECRET_KEY: ci-placeholder-secret-key
+  DJANGO_DEBUG: "true"
+  DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+  PILAH_ALLOW_FAKE_GOOGLE_TOKEN: "true"
+  CORS_ALLOW_ALL_ORIGINS: "true"
+
+jobs:
+  migrate-prod-state:
+    name: Migrate anonymized prod snapshot
+    runs-on: ubuntu-latest
+    # Postgres service container (postgres:16 = what prod Cloud SQL runs).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: pilah
+          POSTGRES_USER: pilah
+          POSTGRES_PASSWORD: pilah
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pilah"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: pilah
+      DB_USER: pilah
+      DB_PASSWORD: pilah
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      PGPASSWORD: pilah
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # The fixture pins prod's real django_migrations state; restoring it
+      # first is what makes the migrate below exercise the prod upgrade path.
+      # The fixture pins prod's real django_migrations state; restoring it
+      # first is what makes the migrate below exercise the prod upgrade path.
+      # Plain .sql (not gzipped) so secret scanners can inspect the fixture.
+      - name: Restore anonymized prod snapshot
+        run: psql -h 127.0.0.1 -U pilah -d pilah -v ON_ERROR_STOP=1 -f db/fixtures/prod-anonymized.sql
+
+      - name: Migrate prod state to current
+        run: python manage.py migrate --noinput
+
+      # No unapplied migrations left and pre-existing rows survived the trip.
+      - name: Verify migrated state
+        run: |
+          python manage.py showmigrations --plan | grep -E "\[ \]" && { echo "unapplied migrations remain"; exit 1; } || true
+          test "$(psql -h 127.0.0.1 -U pilah -d pilah -tAc 'SELECT COUNT(*) FROM users')" = "15"
+          test "$(psql -h 127.0.0.1 -U pilah -d pilah -tAc 'SELECT COUNT(*) FROM bank_sampah')" = "3"
+          python manage.py check
