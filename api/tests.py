@@ -720,6 +720,7 @@ class APISpecTests(APITestCase):
         )
         self.assertEqual(login.status_code, 200)
         nasabah.refresh_from_db()
+        assert nasabah.user is not None
         self.assertEqual(nasabah.user.email, "override-me@example.com")
 
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access_token']}")
