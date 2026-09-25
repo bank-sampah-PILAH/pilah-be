@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0013_nasabah_email"),
+        ("api", "0011_nasabah_email"),
     ]
 
     operations = [

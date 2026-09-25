@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0012_merge_20260921_1833"),
+        ("api", "0010_nasabah_nasabah_user_once_per_bank"),
     ]
 
     operations = [
