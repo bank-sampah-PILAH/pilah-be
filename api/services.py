@@ -202,7 +202,10 @@ class AuthService:
     @staticmethod
     def _enforce_superadmin_allowlist(user: User, email: str) -> None:
         normalized_email = email.strip().lower()
-        if user.role != User.Role.SUPERADMIN or normalized_email in AuthService._superadmin_emails():
+        if (
+            user.role != User.Role.SUPERADMIN
+            or normalized_email in AuthService._superadmin_emails()
+        ):
             return
         if user.is_staff or user.is_superuser:
             user.is_staff = False
