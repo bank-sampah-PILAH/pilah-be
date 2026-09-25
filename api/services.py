@@ -101,7 +101,7 @@ class AuthService:
             )
             return AuthService._session_response(user, is_new_user=True)
 
-        AuthService._apply_superadmin_policy(user, email)
+        AuthService._enforce_superadmin_allowlist(user, email)
         AuthService._update_google_identity(user, google_id, str(name))
         return AuthService._session_response(user, is_new_user=False)
 
@@ -142,14 +142,18 @@ class AuthService:
         user = User.objects.filter(email__iexact=email).first()
         created = False
         if user is None:
+            is_allowlisted = email in AuthService._superadmin_emails()
+            registered_role = User.Role.SUPERADMIN if is_allowlisted else role
             try:
                 with transaction.atomic():
                     user = User.objects.create_user(
                         email=email,
                         google_id=google_id,
                         nama=name,
-                        role=role,
-                        is_profile_complete=False,
+                        role=registered_role,
+                        is_profile_complete=is_allowlisted,
+                        is_staff=is_allowlisted,
+                        is_superuser=is_allowlisted,
                     )
                     created = True
             except IntegrityError:
@@ -157,7 +161,7 @@ class AuthService:
                 if user is None:
                     raise
 
-        AuthService._apply_superadmin_policy(user, email)
+        AuthService._enforce_superadmin_allowlist(user, email)
         AuthService._update_google_identity(user, google_id, name)
         return AuthService._session_response(user, is_new_user=created), created
 
@@ -170,22 +174,10 @@ class AuthService:
         )
 
     @staticmethod
-    def _apply_superadmin_policy(user: User, email: str) -> None:
+    def _enforce_superadmin_allowlist(user: User, email: str) -> None:
         is_allowlisted = email in AuthService._superadmin_emails()
         if user.role == User.Role.SUPERADMIN and not is_allowlisted:
             raise AuthService._superadmin_not_allowlisted()
-        if not is_allowlisted or user.role == User.Role.SUPERADMIN:
-            return
-        if user.bank_sampah_id or user.keanggotaan_nasabah.exists():
-            raise AuthServiceError(
-                "Email whitelist sudah terhubung ke data operasional",
-                code="superadmin_configuration_conflict",
-                status_code=409,
-            )
-        user.role = User.Role.SUPERADMIN
-        user.is_staff = True
-        user.is_superuser = True
-        user.save(update_fields=["role", "is_staff", "is_superuser", "updated_at"])
 
     @staticmethod
     def _update_google_identity(user: User, google_id: str, name: str) -> None:

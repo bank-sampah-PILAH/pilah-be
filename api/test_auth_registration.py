@@ -222,7 +222,7 @@ class SuperadminWhitelistTests(APITestCase):
 
     @patch("api.services.google_id_token.verify_oauth2_token")
     @override_settings(PILAH_SUPERADMIN_EMAILS=("admin@example.com",))
-    def test_allowlist_promotion_preserves_incomplete_profile(self, verify: Mock) -> None:
+    def test_allowlisted_existing_account_keeps_its_database_role(self, verify: Mock) -> None:
         user = User.objects.create_user(
             email="admin@example.com",
             nama="Incomplete Admin",
@@ -237,12 +237,15 @@ class SuperadminWhitelistTests(APITestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         user.refresh_from_db()
-        self.assertEqual(user.role, User.Role.SUPERADMIN)
+        self.assertEqual(response.data["user"]["role"], User.Role.PENGELOLA)
+        self.assertEqual(user.role, User.Role.PENGELOLA)
         self.assertFalse(user.is_profile_complete)
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
 
     @patch("api.services.google_id_token.verify_oauth2_token")
     @override_settings(PILAH_SUPERADMIN_EMAILS=("member@example.com",))
-    def test_whitelist_conflict_does_not_promote_nasabah_membership(self, verify: Mock) -> None:
+    def test_allowlisted_nasabah_keeps_role_and_membership(self, verify: Mock) -> None:
         bank = BankSampah.objects.create(
             nama="Bank Membership", alamat="Depok", no_hp_pic="+628111111111"
         )
@@ -266,8 +269,8 @@ class SuperadminWhitelistTests(APITestCase):
             "/api/v1/auth/google", {"id_token": "signed-google-token"}, format="json"
         )
 
-        self.assertEqual(response.status_code, 409, response.data)
-        self.assertEqual(response.data["code"], "superadmin_configuration_conflict")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["user"]["role"], User.Role.NASABAH)
         user.refresh_from_db()
         self.assertEqual(user.role, User.Role.NASABAH)
 

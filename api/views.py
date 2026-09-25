@@ -92,6 +92,10 @@ def _bank_sampah(request: Request) -> BankSampah:
     return bank
 
 
+def _auth_service_error_response(error: AuthServiceError) -> Response:
+    return Response({"error": str(error), "code": error.code}, status=error.status_code)
+
+
 class GoogleAuthView(APIView):
     permission_classes = [AllowAny]
     serializer_class = GoogleAuthSerializer
@@ -103,7 +107,7 @@ class GoogleAuthView(APIView):
         try:
             return Response(AuthService.login_with_google(token))
         except AuthServiceError as exc:
-            return Response({"error": str(exc), "code": exc.code}, status=exc.status_code)
+            return _auth_service_error_response(exc)
         except Exception:
             return Response({"error": "ID Token invalid atau expired"}, status=401)
 
@@ -122,7 +126,7 @@ class GoogleRegistrationView(APIView):
                 serializer.validated_data["role"],
             )
         except AuthServiceError as exc:
-            return Response({"error": str(exc), "code": exc.code}, status=exc.status_code)
+            return _auth_service_error_response(exc)
         return Response(payload, status=201 if created else 200)
 
 
