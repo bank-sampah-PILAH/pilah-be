@@ -28,8 +28,8 @@ CONFIRMATION = "SEED-PILAH-STAGING-DATA"
 ACTIVE_BANK_ID = UUID("00000000-0000-4000-8000-000000000001")
 PENDING_BANK_ID = UUID("00000000-0000-4000-8000-000000000002")
 INDUK_BANK_ID = UUID("00000000-0000-4000-8000-000000000003")
-OPERATOR_ID = UUID("00000000-0000-4000-8000-000000000011")
-PENDING_OPERATOR_ID = UUID("00000000-0000-4000-8000-000000000012")
+PENGURUS_ID = UUID("00000000-0000-4000-8000-000000000011")
+PENDING_PENGURUS_ID = UUID("00000000-0000-4000-8000-000000000012")
 SUPERADMIN_ID = UUID("00000000-0000-4000-8000-000000000013")
 INDUK_OPERATOR_ID = UUID("00000000-0000-4000-8000-000000000014")
 CUSTOMER_ONE_USER_ID = UUID("00000000-0000-4000-8000-000000000021")
@@ -54,11 +54,11 @@ APPROVAL_LOG_ID = UUID("00000000-0000-4000-8000-000000000071")
 
 @dataclass(frozen=True)
 class SeedIdentities:
-    operator_email: str
+    pengurus_email: str
     customer_email: str
     customer_two_email: str
     superadmin_email: str
-    pending_operator_email: str
+    pending_pengurus_email: str
     induk_email: str
 
 
@@ -69,8 +69,14 @@ class Command(BaseCommand):
         parser.add_argument("--environment", choices=("local", "staging"), default="local")
         parser.add_argument("--confirm")
         parser.add_argument(
+            "--pengurus-email",
             "--operator-email",
-            default=os.getenv("PILAH_SEED_OPERATOR_EMAIL", "operator.demo@example.com"),
+            dest="pengurus_email",
+            default=(
+                os.getenv("PILAH_SEED_PENGURUS_EMAIL")
+                or os.getenv("PILAH_SEED_OPERATOR_EMAIL")
+                or "pengurus.demo@example.com"
+            ),
         )
         parser.add_argument(
             "--customer-email",
@@ -85,9 +91,13 @@ class Command(BaseCommand):
             default=os.getenv("PILAH_SEED_SUPERADMIN_EMAIL", "superadmin.demo@example.com"),
         )
         parser.add_argument(
+            "--pending-pengurus-email",
             "--pending-operator-email",
-            default=os.getenv(
-                "PILAH_SEED_PENDING_OPERATOR_EMAIL", "pending.operator.demo@example.com"
+            dest="pending_pengurus_email",
+            default=(
+                os.getenv("PILAH_SEED_PENDING_PENGURUS_EMAIL")
+                or os.getenv("PILAH_SEED_PENDING_OPERATOR_EMAIL")
+                or "pending.pengurus.demo@example.com"
             ),
         )
         parser.add_argument(
@@ -104,11 +114,11 @@ class Command(BaseCommand):
             raise CommandError(f"Pass --confirm={CONFIRMATION} to seed staging data")
 
         identities = SeedIdentities(
-            operator_email=self._normalize_email(options["operator_email"]),
+            pengurus_email=self._normalize_email(options["pengurus_email"]),
             customer_email=self._normalize_email(options["customer_email"]),
             customer_two_email=self._normalize_email(options["customer_two_email"]),
             superadmin_email=self._normalize_email(options["superadmin_email"]),
-            pending_operator_email=self._normalize_email(options["pending_operator_email"]),
+            pending_pengurus_email=self._normalize_email(options["pending_pengurus_email"]),
             induk_email=self._normalize_email(options["induk_email"]),
         )
 
@@ -179,18 +189,18 @@ class Command(BaseCommand):
             },
         )[0]
 
-        operator = self._upsert_user(
-            user_id=OPERATOR_ID,
-            email=identities.operator_email,
-            name="Operator PILAH E2E",
+        pengurus = self._upsert_user(
+            user_id=PENGURUS_ID,
+            email=identities.pengurus_email,
+            name="Pengurus PILAH E2E",
             role=User.Role.PENGELOLA,
             bank=active_bank,
             is_primary=True,
         )
         self._upsert_user(
-            user_id=PENDING_OPERATOR_ID,
-            email=identities.pending_operator_email,
-            name="Operator Pending PILAH E2E",
+            user_id=PENDING_PENGURUS_ID,
+            email=identities.pending_pengurus_email,
+            name="Pengurus Pending PILAH E2E",
             role=User.Role.PENGELOLA,
             bank=pending_bank,
             is_primary=True,
@@ -311,7 +321,7 @@ class Command(BaseCommand):
             transaction_id=TRANSACTION_ONE_ID,
             detail_ids=(DETAIL_ONE_ID, DETAIL_TWO_ID),
             bank=active_bank,
-            operator=operator,
+            pengurus=pengurus,
             customer=customer_one,
             transaction_time=now - timedelta(days=3),
             note="Setoran E2E pertama",
@@ -324,7 +334,7 @@ class Command(BaseCommand):
             transaction_id=TRANSACTION_TWO_ID,
             detail_ids=(DETAIL_THREE_ID,),
             bank=active_bank,
-            operator=operator,
+            pengurus=pengurus,
             customer=customer_one,
             transaction_time=now - timedelta(days=1),
             note="Setoran E2E kedua",
@@ -334,7 +344,7 @@ class Command(BaseCommand):
             transaction_id=TRANSACTION_THREE_ID,
             detail_ids=(DETAIL_FOUR_ID,),
             bank=active_bank,
-            operator=operator,
+            pengurus=pengurus,
             customer=customer_two,
             transaction_time=now - timedelta(hours=4),
             note="Setoran E2E nasabah kedua",
@@ -497,7 +507,7 @@ class Command(BaseCommand):
         transaction_id: UUID,
         detail_ids: tuple[UUID, ...],
         bank: BankSampah,
-        operator: User,
+        pengurus: User,
         customer: Nasabah,
         transaction_time: datetime,
         note: str,
@@ -512,7 +522,7 @@ class Command(BaseCommand):
             defaults={
                 "nasabah": customer,
                 "bank_sampah": bank,
-                "dicatat_oleh": operator,
+                "dicatat_oleh": pengurus,
                 "tanggal": transaction_time,
                 "total_nilai": total,
                 "tipe": Transaksi.Tipe.SETORAN,
@@ -523,7 +533,7 @@ class Command(BaseCommand):
         if not created:
             transaksi.nasabah = customer
             transaksi.bank_sampah = bank
-            transaksi.dicatat_oleh = operator
+            transaksi.dicatat_oleh = pengurus
             transaksi.total_nilai = total
             transaksi.tipe = Transaksi.Tipe.SETORAN
             transaksi.catatan = note
