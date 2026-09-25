@@ -365,7 +365,11 @@ class OnboardingService:
     @staticmethod
     @transaction.atomic
     def complete_profile(user: User, profile_data: Mapping[str, Any]) -> User:
-        if user.is_profile_complete:
+        # One-shot, except a nasabah can still fix it while pengurus hasn't
+        # decided on their registration yet.
+        if user.is_profile_complete and not OnboardingService._has_pending_nasabah_registration(
+            user
+        ):
             raise ValueError("Profil sudah lengkap")
         for field, value in profile_data.items():
             setattr(user, field, value)
@@ -384,6 +388,13 @@ class OnboardingService:
         if user.role == User.Role.NASABAH:
             OnboardingService._propagate_profile_to_memberships(user)
         return user
+
+    @staticmethod
+    def _has_pending_nasabah_registration(user: User) -> bool:
+        return (
+            user.role == User.Role.NASABAH
+            and user.keanggotaan_nasabah.filter(status=Nasabah.Status.PENDING).exists()
+        )
 
     @staticmethod
     def _propagate_profile_to_memberships(user: User) -> None:
