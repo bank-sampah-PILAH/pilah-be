@@ -447,7 +447,10 @@ class APISpecTests(APITestCase):
             ["Email sudah terdaftar sebagai nasabah di bank sampah ini"],
         )
 
-    def test_nasabah_duplicate_email_other_bank_returns_validation_error(self) -> None:
+    def test_nasabah_duplicate_email_other_bank_is_allowed(self) -> None:
+        """Nasabah.email uniqueness is scoped per (bank_sampah, email), same
+        as self-registration allows one person to join several banks. A
+        pengurus create/update must not reject a cross-bank match either."""
         created = self.client.post(
             "/api/v1/nasabah",
             {
@@ -476,7 +479,7 @@ class APISpecTests(APITestCase):
         refresh = RefreshToken.for_user(other_user)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
-        duplicate = self.client.post(
+        joined_other_bank = self.client.post(
             "/api/v1/nasabah",
             {
                 "kode": "NSL-0001",
@@ -489,11 +492,7 @@ class APISpecTests(APITestCase):
             },
             format="json",
         )
-        self.assertEqual(duplicate.status_code, 422)
-        self.assertEqual(
-            duplicate.data["errors"]["email"],
-            ["Email sudah terdaftar sebagai nasabah di bank sampah lain"],
-        )
+        self.assertEqual(joined_other_bank.status_code, 201)
 
     def test_nasabah_email_on_update(self) -> None:
         first = self.client.post(
