@@ -41,7 +41,8 @@ class SeedTestingDataCommandTests(TestCase):
                 status=BankSampah.Status.ACTIVE,
             ).exists()
         )
-        self.assertTrue(User.objects.filter(email="operator.demo@example.com").exists())
+        self.assertTrue(User.objects.filter(email="pengurus.demo@example.com").exists())
+        self.assertTrue(User.objects.filter(email="nasabah.demo@example.com").exists())
         self.assertTrue(
             User.objects.filter(
                 email="induk.demo@example.com", role=User.Role.PENGELOLA_INDUK
@@ -122,7 +123,7 @@ class SeedTestingDataCommandTests(TestCase):
     @override_settings(DEBUG=True)
     def test_seed_rejects_non_fixture_email_collision(self) -> None:
         user = User.objects.create_user(
-            email="operator.demo@example.com",
+            email="pengurus.demo@example.com",
             nama="Existing Operator",
             role=User.Role.PENGELOLA,
             is_profile_complete=True,
@@ -137,7 +138,7 @@ class SeedTestingDataCommandTests(TestCase):
     @override_settings(DEBUG=True)
     def test_seed_reuses_existing_account_for_configured_email(self) -> None:
         User.objects.create_user(
-            email="operator.demo@example.com",
+            email="pengurus.demo@example.com",
             nama="Existing Operator",
             role=User.Role.PENGELOLA,
         )
@@ -145,7 +146,7 @@ class SeedTestingDataCommandTests(TestCase):
         call_command("seed_testing_data")
         call_command("seed_testing_data")
 
-        users = User.objects.filter(email="operator.demo@example.com")
+        users = User.objects.filter(email="pengurus.demo@example.com")
         self.assertEqual(users.count(), 1)
         self.assertEqual(users.get().nama, "Operator PILAH E2E")
 

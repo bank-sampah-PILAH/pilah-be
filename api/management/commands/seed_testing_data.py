@@ -70,11 +70,11 @@ class Command(BaseCommand):
         parser.add_argument("--confirm")
         parser.add_argument(
             "--operator-email",
-            default=os.getenv("PILAH_SEED_OPERATOR_EMAIL", "operator.demo@example.com"),
+            default=os.getenv("PILAH_SEED_OPERATOR_EMAIL", "pengurus.demo@example.com"),
         )
         parser.add_argument(
             "--customer-email",
-            default=os.getenv("PILAH_SEED_CUSTOMER_EMAIL", "customer.demo@example.com"),
+            default=os.getenv("PILAH_SEED_CUSTOMER_EMAIL", "nasabah.demo@example.com"),
         )
         parser.add_argument(
             "--customer-two-email",
