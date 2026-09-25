@@ -65,6 +65,7 @@ class AuthService:
             )
         else:
             updates = []
+            nama_was_empty = not user.nama
             if not user.google_id:
                 user.google_id = google_id
                 updates.append("google_id")
@@ -73,6 +74,34 @@ class AuthService:
                 updates.append("nama")
             if updates:
                 user.save(update_fields=updates)
+
+        # PIL-154: nasabah added by pengurus via email syncs with the Google
+        # account on first login — prefill empty User fields, never overwrite.
+        # The token-derived nama yields to the pengurus-entered nasabah name
+        # whenever it was empty before this sync (new accounts included).
+        nasabah = Nasabah.objects.filter(email__iexact=user.email, is_active=True).first()
+        if nasabah:
+            profile_updates = []
+            for user_field, nasabah_field in (
+                ("nama", "nama"),
+                ("no_hp", "no_hp"),
+                ("jenis_kelamin", "jenis_kelamin"),
+                ("tanggal_lahir", "tanggal_lahir"),
+            ):
+                fillable = user_field == "nama" and (is_new_user or nama_was_empty)
+                if (fillable or not getattr(user, user_field)) and getattr(nasabah, nasabah_field):
+                    setattr(user, user_field, getattr(nasabah, nasabah_field))
+                    profile_updates.append(user_field)
+            # Only a fully-populated profile counts as complete — a nasabah
+            # record may itself be missing jenis_kelamin/tanggal_lahir, and
+            # flagging complete here would lock /onboarding/profile out.
+            if profile_updates and all(
+                getattr(user, f) for f in ("nama", "no_hp", "jenis_kelamin", "tanggal_lahir")
+            ):
+                user.is_profile_complete = True
+                profile_updates.append("is_profile_complete")
+            if profile_updates:
+                user.save(update_fields=profile_updates)
 
         refresh = RefreshToken.for_user(user)
         access = refresh.access_token
