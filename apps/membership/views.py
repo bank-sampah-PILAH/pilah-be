@@ -7,7 +7,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.models import BankSampah, Nasabah, Saldo, User
+from api.models import Nasabah, Saldo
 from apps.membership.serializers import (
     NasabahApprovalLogSerializer,
     NasabahDetailSerializer,
@@ -18,19 +18,7 @@ from apps.membership.serializers import (
 from apps.membership.services import NasabahApprovalService
 from apps.organization.serializers import ApprovalDecisionSerializer
 from shared_kernel.permissions import IsActivePengelola
-
-
-def _user(request: Request) -> User:
-    # ponytail: dup of api.views._user; the close phase extracts one shared
-    # request helper once all views have moved.
-    assert isinstance(request.user, User)
-    return request.user
-
-
-def _bank_sampah(request: Request) -> BankSampah:
-    bank = _user(request).bank_sampah
-    assert bank is not None
-    return bank
+from shared_kernel.scoping import current_bank, current_user
 
 
 class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
@@ -39,7 +27,7 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_queryset(self) -> QuerySet[Nasabah]:
-        qs = Nasabah.objects.filter(bank_sampah=_bank_sampah(self.request)).select_related("saldo")
+        qs = Nasabah.objects.filter(bank_sampah=current_bank(self.request)).select_related("saldo")
         search = self.request.query_params.get("search", "")
         status_filter = self.request.query_params.get("status", "aktif")
         if self.action == "list" and len(search) >= 2:
@@ -73,7 +61,7 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         serializer.is_valid(raise_exception=True)
         nomor = serializer.validated_data["nomor"]
         no_hp = serializer.validated_data["no_hp"]
-        bank = _bank_sampah(request)
+        bank = current_bank(request)
         if Nasabah.objects.filter(bank_sampah=bank, nomor=nomor).exists():
             return Response({"errors": {"kode": ["ID Nasabah sudah digunakan"]}}, status=422)
         if Nasabah.objects.filter(bank_sampah=bank, no_hp=no_hp).exists():
@@ -96,7 +84,7 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         if not instance.is_active:
             return Response({"error": "Nasabah nonaktif tidak bisa diedit"}, status=403)
         nomor = request.data.get("kode")  # type: ignore[union-attr]  # DRF types request.data as dict | list; these payloads are objects
-        bank = _bank_sampah(request)
+        bank = current_bank(request)
         if (
             nomor
             and Nasabah.objects.filter(bank_sampah=bank, nomor=nomor)
@@ -154,7 +142,7 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         serializer = ApprovalDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         log = NasabahApprovalService.approve(
-            nasabah, _user(request), serializer.validated_data.get("catatan", "")
+            nasabah, current_user(request), serializer.validated_data.get("catatan", "")
         )
         return Response(
             {
@@ -175,7 +163,7 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         serializer = ApprovalDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         log = NasabahApprovalService.reject(
-            nasabah, _user(request), serializer.validated_data.get("catatan", "")
+            nasabah, current_user(request), serializer.validated_data.get("catatan", "")
         )
         return Response(
             {
@@ -192,7 +180,7 @@ class SaldoView(APIView):
     serializer_class = SaldoSerializer
 
     def get(self, request: Request, pk: str) -> Response:
-        nasabah = Nasabah.objects.filter(id=pk, bank_sampah=_bank_sampah(request)).first()
+        nasabah = Nasabah.objects.filter(id=pk, bank_sampah=current_bank(request)).first()
         if not nasabah:
             return Response({"error": "Resource tidak ditemukan"}, status=404)
         saldo, _ = Saldo.objects.get_or_create(nasabah=nasabah)

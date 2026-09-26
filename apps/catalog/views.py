@@ -6,23 +6,11 @@ from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from api.models import BankSampah, JenisSampah, User
+from api.models import JenisSampah
 from apps.catalog.serializers import JenisSampahSerializer
 from apps.membership.serializers import StatusSerializer
 from shared_kernel.permissions import IsActivePengelola
-
-
-def _user(request: Request) -> User:
-    # ponytail: dup of api.views._user; the close phase extracts one shared
-    # request helper once all views have moved.
-    assert isinstance(request.user, User)
-    return request.user
-
-
-def _bank_sampah(request: Request) -> BankSampah:
-    bank = _user(request).bank_sampah
-    assert bank is not None
-    return bank
+from shared_kernel.scoping import current_bank
 
 
 class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
@@ -31,7 +19,7 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_queryset(self) -> QuerySet[JenisSampah]:
-        qs = JenisSampah.objects.filter(bank_sampah=_bank_sampah(self.request))
+        qs = JenisSampah.objects.filter(bank_sampah=current_bank(self.request))
         search = self.request.query_params.get("search", "")
         status_filter = self.request.query_params.get("status", "aktif")
         kategori = self.request.query_params.get("kategori")
@@ -50,7 +38,7 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         nomor = serializer.validated_data["nomor"]
-        bank = _bank_sampah(request)
+        bank = current_bank(request)
         if JenisSampah.objects.filter(bank_sampah=bank, nomor=nomor).exists():
             return Response({"errors": {"kode": ["Kode sampah sudah digunakan"]}}, status=422)
         jenis = serializer.save(
@@ -63,7 +51,7 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
         nomor = request.data.get("kode")  # type: ignore[union-attr]  # DRF types request.data as dict | list; these payloads are objects
         if (
             nomor
-            and JenisSampah.objects.filter(bank_sampah=_bank_sampah(request), nomor=nomor)
+            and JenisSampah.objects.filter(bank_sampah=current_bank(request), nomor=nomor)
             .exclude(id=instance.id)
             .exists()
         ):

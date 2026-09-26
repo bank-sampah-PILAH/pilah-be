@@ -5,7 +5,7 @@ from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from api.models import BankSampah, Transaksi, User
+from api.models import Transaksi
 from apps.ledger.serializers import (
     TransactionCreateSerializer,
     TransactionDetailSerializer,
@@ -14,19 +14,7 @@ from apps.ledger.serializers import (
 from apps.ledger.services import TransactionFilterService, TransactionService
 from apps.notify.api import send_setoran_receipt
 from shared_kernel.permissions import IsActivePengelola
-
-
-def _user(request: Request) -> User:
-    # ponytail: dup of api.views._user; the close phase extracts one shared
-    # request helper once all views have moved.
-    assert isinstance(request.user, User)
-    return request.user
-
-
-def _bank_sampah(request: Request) -> BankSampah:
-    bank = _user(request).bank_sampah
-    assert bank is not None
-    return bank
+from shared_kernel.scoping import current_bank, current_user
 
 
 class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
@@ -46,7 +34,7 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
 
     def get_queryset(self) -> QuerySet[Transaksi]:
         qs = (
-            Transaksi.objects.filter(bank_sampah=_bank_sampah(self.request))
+            Transaksi.objects.filter(bank_sampah=current_bank(self.request))
             .select_related("nasabah", "bank_sampah", "dicatat_oleh")
             .prefetch_related("items")
         )
@@ -90,7 +78,9 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
     def create(self, request: Request) -> Response:
         serializer = TransactionCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        transaksi = TransactionService.create_setoran(_user(request), serializer.validated_data)
+        transaksi = TransactionService.create_setoran(
+            current_user(request), serializer.validated_data
+        )
         return Response(TransactionDetailSerializer(transaksi).data, status=status.HTTP_201_CREATED)
 
     def retrieve(self, request: Request, pk: str | None = None) -> Response:
