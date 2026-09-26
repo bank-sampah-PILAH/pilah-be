@@ -1,11 +1,13 @@
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
+from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import BankSampah, Nasabah, Saldo, User
+from api.models import BankSampah, JenisSampah, Nasabah, Saldo, User
 
 
 class PencairanEditTests(APITestCase):
@@ -97,3 +99,43 @@ class PencairanEditTests(APITestCase):
         self.assertEqual(response.data["saldo_sebelum"], "465600.00")
         self.assertEqual(response.data["saldo_sesudah"], "315600.00")
         self.assertEqual(self._saldo(), "315600.00")
+
+    def _setor(self, harga: str = "100000.00", berat: str = "1.000") -> None:
+        jenis, _ = JenisSampah.objects.get_or_create(
+            bank_sampah=self.bank,
+            nomor="PLS-001",
+            defaults={
+                "nama_sampah": "Plastik PET",
+                "kategori": JenisSampah.Kategori.PLASTIK,
+                "harga_per_kg": Decimal(harga),
+            },
+        )
+        response = self.client.post(
+            "/api/v1/transaksi",
+            {
+                "nasabah_id": str(self.nasabah.id),
+                "items": [{"jenis_sampah_id": str(jenis.id), "berat": berat}],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def _detail(self, pencairan_id: str) -> dict[str, Any]:
+        return dict(self.client.get(f"/api/v1/pencairan/{pencairan_id}").data)
+
+    def test_edit_recomputes_later_pencairan_snapshots(self) -> None:
+        pertama = self._catat("200000", tanggal=(timezone.now() - timedelta(hours=2)).isoformat())
+        self._setor()
+        kedua = self._catat("50000")
+        self.assertEqual(self._detail(kedua["id"])["saldo_sebelum"], "365600.00")
+
+        response = self._edit(pertama["id"], {"nominal": "150000", "alasan": "Salah ketik"})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["saldo_sesudah"], "315600.00")
+        later = self._detail(kedua["id"])
+        self.assertEqual(later["saldo_sebelum"], "415600.00")
+        self.assertEqual(later["saldo_sesudah"], "365600.00")
+        # Recomputing a later snapshot is not an edit of that pencairan.
+        self.assertFalse(later["diperbarui"])
+        self.assertEqual(self._saldo(), "365600.00")
