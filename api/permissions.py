@@ -49,6 +49,10 @@ class IsSuperAdmin(BasePermission):
 
 
 class IsActiveNasabah(BasePermission):
+    """Require an active nasabah account, not active membership or bank status."""
+
+    message = "Endpoint ini hanya untuk nasabah"
+
     def has_permission(self, request: Request, view: APIView) -> bool:
         user = request.user
         if not user.is_authenticated:
