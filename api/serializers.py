@@ -268,6 +268,7 @@ class LogoutSerializer(serializers.Serializer[Any]):
 
 class NasabahSerializer(serializers.ModelSerializer[Model]):
     kode = serializers.CharField(source="nomor", required=True, max_length=20)
+    email = serializers.EmailField(required=False, allow_blank=True, allow_null=True)
     total_saldo = serializers.SerializerMethodField()
 
     class Meta:
@@ -275,6 +276,7 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
         fields = [
             "id",
             "kode",
+            "email",
             "nama",
             "jenis_kelamin",
             "tanggal_lahir",
@@ -294,6 +296,12 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
             "total_saldo",
             "created_at",
         ]
+
+    def validate_email(self, value: Any) -> Any:
+        if value is None:
+            return None
+        value = value.strip().lower()
+        return value or None
 
     def validate_kode(self, value: Any) -> Any:
         value = value.strip()
