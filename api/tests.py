@@ -302,9 +302,7 @@ class APISpecTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.data["dates"], [start_date.isoformat(), end_date.isoformat()]
-        )
+        self.assertEqual(response.data["dates"], [start_date.isoformat(), end_date.isoformat()])
         invalid_range = self.client.get(
             "/api/v1/jadwal/calendar-dates",
             {"start_date": end_date.isoformat(), "end_date": start_date.isoformat()},
