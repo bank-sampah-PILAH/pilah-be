@@ -12,7 +12,7 @@ import requests
 from django.conf import settings
 from django.core import signing
 from django.db import IntegrityError, transaction
-from django.db.models import F, Q, QuerySet, Sum
+from django.db.models import F, Max, Q, QuerySet, Sum
 from django.db.models.functions import Coalesce
 from django.http import HttpRequest
 from django.utils import timezone
@@ -649,6 +649,21 @@ class PencairanService:
                 {"nasabah_id": ["Nasabah tidak ditemukan atau tidak aktif"]}
             )
 
+        tanggal = payload.get("tanggal") or timezone.now()
+        # The balance check below reads the current saldo, which is only the saldo
+        # at `tanggal` when nothing was recorded after it.
+        aktivitas = [
+            model.objects.filter(bank_sampah=bank, nasabah=nasabah).aggregate(
+                terakhir=Max("tanggal")
+            )["terakhir"]
+            for model in (Transaksi, Pencairan)
+        ]
+        terakhir = max((value for value in aktivitas if value), default=None)
+        if terakhir and tanggal < terakhir:
+            raise serializers.ValidationError(
+                {"tanggal": ["Tanggal pencairan tidak boleh sebelum transaksi terakhir nasabah"]}
+            )
+
         saldo, _ = Saldo.objects.select_for_update().get_or_create(nasabah=nasabah)
         nominal = payload["nominal"]
         saldo_sebelum = saldo.total_saldo
@@ -662,7 +677,7 @@ class PencairanService:
             nasabah=nasabah,
             bank_sampah=bank,
             dicatat_oleh=user,
-            tanggal=payload.get("tanggal") or timezone.now(),
+            tanggal=tanggal,
             nominal=nominal,
             metode=payload["metode"],
             keterangan=payload.get("keterangan") or "",
