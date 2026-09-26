@@ -41,7 +41,7 @@ class OAuthRegressionTests(RegressionTestCase):
         self.client.credentials()
         token_response = Mock(status_code=200)
         token_response.json = Mock(return_value={"id_token": "dev:baru@example.com:Baru"})
-        with patch("api.views.requests.post", return_value=token_response):
+        with patch("apps.identity.views.requests.post", return_value=token_response):
             response = self.client.get("/api/v1/auth/google/callback?code=abc&state=bogus")
         self.assertEqual(response.status_code, 200)
 
@@ -49,7 +49,7 @@ class OAuthRegressionTests(RegressionTestCase):
         self.client.credentials()
         token_response = Mock(status_code=400)
         token_response.json = Mock(return_value={"error": "invalid_grant"})
-        with patch("api.views.requests.post", return_value=token_response):
+        with patch("apps.identity.views.requests.post", return_value=token_response):
             response = self.client.get("/api/v1/auth/google/callback?code=abc")
         self.assertEqual(response.status_code, 400)
 
@@ -57,13 +57,13 @@ class OAuthRegressionTests(RegressionTestCase):
         self.client.credentials()
         token_response = Mock(status_code=200)
         token_response.json = Mock(return_value={})
-        with patch("api.views.requests.post", return_value=token_response):
+        with patch("apps.identity.views.requests.post", return_value=token_response):
             response = self.client.get("/api/v1/auth/google/callback?code=abc")
         self.assertEqual(response.status_code, 400)
 
     def test_oauth_callback_network_error(self) -> None:
         self.client.credentials()
-        with patch("api.views.requests.post", side_effect=requests.RequestException("down")):
+        with patch("apps.identity.views.requests.post", side_effect=requests.RequestException("down")):
             response = self.client.get("/api/v1/auth/google/callback?code=abc")
         self.assertEqual(response.status_code, 400)
 
@@ -72,7 +72,7 @@ class OAuthRegressionTests(RegressionTestCase):
         state = TimestampSigner().sign("https://evil.example/")
         token_response = Mock(status_code=400)
         token_response.json = Mock(return_value={"error": "invalid_grant"})
-        with patch("api.views.requests.post", return_value=token_response):
+        with patch("apps.identity.views.requests.post", return_value=token_response):
             response = self.client.get(f"/api/v1/auth/google/callback?code=abc&state={state}")
         self.assertEqual(response.status_code, 400)
 
