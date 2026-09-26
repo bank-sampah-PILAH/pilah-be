@@ -241,3 +241,24 @@ class PencairanEditTests(APITestCase):
         self.assertEqual(before_setoran.data["saldo_sebelum"], "385600.00")
         self.assertEqual(before_setoran.data["saldo_sesudah"], "365600.00")
         self.assertEqual(self._saldo(), "465600.00")
+
+    def test_riwayat_lists_replaced_versions_newest_first(self) -> None:
+        pencairan = self._catat()
+        self._edit(pencairan["id"], {"metode": "transfer", "alasan": "Salah pilih metode"})
+        self._edit(pencairan["id"], {"nominal": "150000", "alasan": "Salah ketik nominal"})
+
+        response = self.client.get(f"/api/v1/pencairan/{pencairan['id']}/riwayat")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["pencairan"]["nominal"], "150000.00")
+        self.assertEqual(response.data["pencairan"]["metode"], "transfer")
+        revisi = response.data["revisi"]
+        self.assertEqual([row["versi"] for row in revisi], [2, 1])
+        self.assertEqual(revisi[0]["nominal"], "200000.00")
+        self.assertEqual(revisi[0]["metode"], "transfer")
+        self.assertEqual(revisi[0]["alasan"], "Salah ketik nominal")
+        self.assertEqual(revisi[1]["metode"], "tunai")
+        self.assertEqual(revisi[1]["saldo_sesudah"], "265600.00")
+        self.assertEqual(revisi[1]["alasan"], "Salah pilih metode")
+        self.assertEqual(revisi[1]["diubah_oleh_nama"], "Ibu Sari")
+        self.assertIn("diubah_pada", revisi[1])
