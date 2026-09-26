@@ -371,11 +371,17 @@ POST /api/v1/pencairan
 | `nasabah_id` | Required. Active nasabah of the pengurus' own bank sampah. |
 | `nominal` | Required. Greater than zero, whole rupiah, not above the saldo. |
 | `metode` | Required. `tunai` or `transfer`. |
-| `tanggal` | Optional, defaults to now. Cannot be in the future. |
+| `tanggal` | Optional, defaults to now. Cannot be in the future, or earlier than the nasabah's latest setoran or pencairan. |
 | `keterangan` | Optional, max 255 characters. |
 
 The response carries `status` (`tercatat`) plus the `saldo_sebelum` and
-`saldo_sesudah` snapshots taken when the payout was recorded.
+`saldo_sesudah` snapshots taken when the payout was recorded. `saldo_sesudah`
+is rounded down to whole rupiah, and saldo history (`saldo_setelah_transaksi`,
+export) debits `saldo_sebelum - saldo_sesudah`, so it matches the stored saldo.
+
+Only pengurus record pencairan. `GET /api/v1/pencairan` and
+`GET /api/v1/pencairan/:id` also accept nasabah accounts, which see only the
+pencairan on their own memberships. Django admin shows pencairan read-only.
 
 ## Report Export
 
