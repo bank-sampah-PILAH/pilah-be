@@ -61,6 +61,12 @@ from apps.reporting.views import (  # noqa: F401
     DashboardStatsView,
 )
 
+__all__ = [
+    "DashboardRecentTransactionsView",
+    "DashboardStatsView",
+    "WATemplateView",
+]
+
 
 def bank_sampah_activity_media(request: HttpRequest, token: str) -> FileResponse:
     try:
