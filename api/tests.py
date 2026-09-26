@@ -18,7 +18,15 @@ from openpyxl import load_workbook
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
-from api.models import BankSampah, BankSampahApprovalLog, JenisSampah, Nasabah, Saldo, User
+from api.models import (
+    BankSampah,
+    BankSampahApprovalLog,
+    DetailTransaksi,
+    JenisSampah,
+    Nasabah,
+    Saldo,
+    User,
+)
 from api.serializers import BankSampahApprovalListSerializer
 
 
@@ -1253,3 +1261,18 @@ class KalkulasiSetoranTests(APITestCase):
 
         endpoint = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
         self.assertEqual(endpoint.data["total_saldo"], "3433.00")
+
+    def test_harga_master_bersen_dikalikan_utuh_sebelum_dibulatkan(self) -> None:
+        # Kolom harga master menerima dua desimal. Rp 3.333,99/kg x 0,300 kg =
+        # Rp 1.000,197, jadi hasilnya Rp 1.000 — bukan Rp 999 seperti yang
+        # terjadi bila harganya dipotong lebih dulu.
+        self.jenis.harga_per_kg = Decimal("3333.99")
+        self.jenis.save(update_fields=["harga_per_kg"])
+
+        response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "0.300"}])
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["items"][0]["subtotal"], "1000.00")
+        # BR-03: harga yang benar-benar dipakai ikut tersimpan pada transaksi.
+        detail = DetailTransaksi.objects.get(transaksi_id=response.data["id"])
+        self.assertEqual(detail.harga_snapshot, Decimal("3333.99"))
