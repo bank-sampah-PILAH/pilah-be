@@ -1,17 +1,12 @@
 from decimal import Decimal
 from typing import Any
 
-from django.conf import settings
-from django.core.signing import TimestampSigner
 from django.db.models import Model, Q, Sum
 from django.db.models.functions import Coalesce
-from django.urls import reverse
 from django.utils import timezone
 from rest_framework import serializers
 
 from api.models import (
-    BankSampah,
-    BankSampahApprovalLog,
     DetailTransaksi,
     JenisSampah,
     Nasabah,
@@ -34,62 +29,12 @@ from apps.identity.serializers import (  # noqa: F401
 from apps.ledger.serializers import TransactionListSerializer  # noqa: F401
 from apps.notify.serializers import WATemplateSerializer  # noqa: F401
 from apps.organization.serializers import (  # noqa: F401
+    ApprovalDecisionSerializer,
+    ApprovalLogSerializer,
+    BankSampahApprovalListSerializer,
     BankSampahRegistrationSerializer,
     BankSampahSerializer,
 )
-
-
-class BankSampahApprovalListSerializer(serializers.ModelSerializer[Model]):
-    pengelola_utama = serializers.SerializerMethodField()
-    foto_kegiatan = serializers.SerializerMethodField()
-
-    class Meta:
-        model = BankSampah
-        fields = [
-            "id",
-            "nama",
-            "alamat",
-            "kota",
-            "no_hp_pic",
-            "foto_kegiatan",
-            "status",
-            "created_at",
-            "pengelola_utama",
-        ]
-
-    def get_pengelola_utama(self, obj: Any) -> Any:
-        user = obj.users.filter(is_primary_pengelola=True).first()
-        if not user:
-            return None
-        return {"id": str(user.id), "nama": user.nama, "email": user.email, "no_hp": user.no_hp}
-
-    def get_foto_kegiatan(self, obj: Any) -> str | None:
-        if not obj.foto_kegiatan:
-            return None
-        if settings.GS_BUCKET_NAME:
-            return str(obj.foto_kegiatan.url)
-
-        request = self.context.get("request")
-        if request is None:
-            return None
-        token = TimestampSigner(salt="bank-sampah-kegiatan").sign(obj.foto_kegiatan.name)
-        return str(
-            request.build_absolute_uri(
-                reverse("bank-sampah-activity-media", kwargs={"token": token})
-            )
-        )
-
-
-class ApprovalDecisionSerializer(serializers.Serializer[Any]):
-    catatan = serializers.CharField(required=False, allow_blank=True)
-
-
-class ApprovalLogSerializer(serializers.ModelSerializer[Model]):
-    superadmin_email = serializers.EmailField(source="superadmin.email")
-
-    class Meta:
-        model = BankSampahApprovalLog
-        fields = ["id", "bank_sampah_id", "superadmin_email", "status", "catatan", "created_at"]
 
 
 class NasabahApprovalLogSerializer(serializers.ModelSerializer[Model]):
