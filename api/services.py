@@ -34,6 +34,7 @@ from api.models import (
     Transaksi,
     User,
 )
+from shared_kernel.numbering import NumberingService  # noqa: F401
 
 DEFAULT_WA_TEMPLATE = (
     "Halo {Nama}, setoran sampahmu senilai {Total} sudah kami catat ya.\n"
@@ -200,9 +201,6 @@ class AuthService:
             "email": profile_email,
             "name": verified_profile.get("name"),
         }
-
-
-from shared_kernel.numbering import NumberingService  # noqa: F401  # ponytail: canonical home is shared_kernel.numbering
 
 
 class OnboardingService:
