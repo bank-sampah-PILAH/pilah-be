@@ -300,3 +300,22 @@ class PencairanEditTests(APITestCase):
         )
         self.assertEqual(self._detail(pencairan["id"])["nominal"], "200000.00")
         self.assertEqual(self._saldo(), "265600.00")
+
+    def test_edit_without_changes_is_rejected(self) -> None:
+        pencairan = self._catat(keterangan="Diambil pagi")
+
+        response = self._edit(
+            pencairan["id"],
+            {
+                "nominal": "200000",
+                "metode": "tunai",
+                "keterangan": "Diambil pagi",
+                "alasan": "Cek ulang",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertEqual(
+            response.data["errors"]["non_field_errors"], ["Tidak ada data yang diubah"]
+        )
+        self.assertFalse(self._detail(pencairan["id"])["diperbarui"])
