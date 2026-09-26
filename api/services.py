@@ -480,6 +480,26 @@ class PencairanService:
         `pencairan` comes from the caller's bank-scoped queryset; it is re-read under lock.
         """
         pencairan = Pencairan.objects.select_for_update().get(pk=pencairan.pk)
+        nominal = payload.get("nominal", pencairan.nominal)
+        tanggal = payload.get("tanggal", pencairan.tanggal)
+        metode = payload.get("metode", pencairan.metode)
+        keterangan = payload.get("keterangan", pencairan.keterangan) or ""
+        if (nominal, tanggal, metode, keterangan) == (
+            pencairan.nominal,
+            pencairan.tanggal,
+            pencairan.metode,
+            pencairan.keterangan,
+        ):
+            raise serializers.ValidationError({"non_field_errors": ["Tidak ada data yang diubah"]})
+        if tanggal < PencairanService.tanggal_edit_minimum(pencairan):
+            raise serializers.ValidationError(
+                {
+                    "tanggal": [
+                        "Tanggal pencairan hanya bisa dimundurkan maksimal "
+                        f"{BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI} hari dari tanggal awal"
+                    ]
+                }
+            )
 
         PencairanRevisi.objects.create(
             pencairan=pencairan,
@@ -493,24 +513,12 @@ class PencairanService:
             alasan=payload["alasan"],
             diubah_oleh=user,
         )
-        for field in ("metode", "keterangan"):
-            if field in payload:
-                setattr(pencairan, field, payload[field] or "")
-        nominal = payload.get("nominal", pencairan.nominal)
-        tanggal = payload.get("tanggal", pencairan.tanggal)
-        if tanggal < PencairanService.tanggal_edit_minimum(pencairan):
-            raise serializers.ValidationError(
-                {
-                    "tanggal": [
-                        "Tanggal pencairan hanya bisa dimundurkan maksimal "
-                        f"{BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI} hari dari tanggal awal"
-                    ]
-                }
-            )
         if nominal != pencairan.nominal or tanggal != pencairan.tanggal:
             PencairanService._hitung_ulang_saldo(pencairan, nominal, tanggal)
-            pencairan.nominal = nominal
-            pencairan.tanggal = tanggal
+        pencairan.nominal = nominal
+        pencairan.tanggal = tanggal
+        pencairan.metode = metode
+        pencairan.keterangan = keterangan
         pencairan.save()
         return pencairan
 
