@@ -6,13 +6,20 @@ from typing import Any, ClassVar, cast
 from unittest.mock import Mock, patch
 
 from django.conf import settings
+from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.core.signing import TimestampSigner
 from django.db import IntegrityError, transaction
-from django.test import Client, TestCase, TransactionTestCase, override_settings
+from django.test import (
+    Client,
+    RequestFactory,
+    TestCase,
+    TransactionTestCase,
+    override_settings,
+)
 from django.urls import Resolver404, resolve
 from django.utils import timezone
 from django.views.static import serve
@@ -2012,6 +2019,24 @@ class PencairanAPITests(APITestCase):
         self.assertEqual(response.data["saldo_sesudah"], "5000.00")
         saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
         self.assertEqual(saldo.data["total_saldo"], "5000.00")
+
+    def test_django_admin_cannot_write_pencairan(self) -> None:
+        # Admin writes skip PencairanService, so the row and Saldo would diverge.
+        superuser = User.objects.create_user(
+            email="root@example.com",
+            nama="Root",
+            role=User.Role.SUPERADMIN,
+            is_staff=True,
+            is_superuser=True,
+        )
+        request = RequestFactory().get("/admin/api/pencairan/")
+        request.user = superuser
+        pencairan_admin = admin.site._registry[Pencairan]
+
+        self.assertTrue(pencairan_admin.has_view_permission(request))
+        self.assertFalse(pencairan_admin.has_add_permission(request))
+        self.assertFalse(pencairan_admin.has_change_permission(request))
+        self.assertFalse(pencairan_admin.has_delete_permission(request))
 
 
 class ResetTestingDataCommandTests(TransactionTestCase):
