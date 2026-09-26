@@ -24,7 +24,7 @@ from django.views.static import serve
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from api.health import healthz
-from api.views import bank_sampah_activity_media
+from apps.organization.views import bank_sampah_activity_media
 
 
 class ApiTestView(TemplateView):

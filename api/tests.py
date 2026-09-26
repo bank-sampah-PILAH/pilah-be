@@ -1623,7 +1623,7 @@ class ProtectedMediaTests(TestCase):
             "bank_sampah/kegiatan/proof.png",
         )
 
-    @patch("api.views.default_storage")
+    @patch("apps.organization.views.default_storage")
     def test_signed_activity_proof_is_served(self, storage: Mock) -> None:
         storage.open.return_value = BytesIO(b"proof")
         token = TimestampSigner(salt="bank-sampah-kegiatan").sign("bank_sampah/kegiatan/proof.png")
