@@ -591,7 +591,7 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
         )
         if self.action == "list":
             date_value = self.request.query_params.get("date")
-            if date_value:
+            if isinstance(date_value, str) and date_value:
                 date = parse_date(date_value)
                 if date is None:
                     raise serializers.ValidationError(
