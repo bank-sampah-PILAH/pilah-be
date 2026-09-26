@@ -319,3 +319,18 @@ class PencairanEditTests(APITestCase):
             response.data["errors"]["non_field_errors"], ["Tidak ada data yang diubah"]
         )
         self.assertFalse(self._detail(pencairan["id"])["diperbarui"])
+
+    def test_detail_exposes_earliest_editable_tanggal(self) -> None:
+        awal = timezone.now() - timedelta(days=1)
+        pencairan = self._catat(tanggal=awal.isoformat())
+        batas = timedelta(days=BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI)
+        expected = (awal - batas).isoformat().replace("+00:00", "Z")
+        self.assertEqual(self._detail(pencairan["id"])["tanggal_edit_minimum"], expected)
+
+        self._edit(
+            pencairan["id"],
+            {"tanggal": (awal - timedelta(days=3)).isoformat(), "alasan": "Salah tanggal"},
+        )
+
+        # Still counted from the tanggal first recorded.
+        self.assertEqual(self._detail(pencairan["id"])["tanggal_edit_minimum"], expected)
