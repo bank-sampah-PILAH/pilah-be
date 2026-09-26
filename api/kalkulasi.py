@@ -31,8 +31,13 @@ def harga_berlaku(jenis: JenisSampah) -> Decimal:
     Satu-satunya sumber harga untuk transaksi adalah harga master milik bank
     sampah, bukan nilai yang dikirim client. Ketika riwayat harga berlaku per
     tanggal ditambahkan (PIL-137), pemilihan harga cukup diubah di sini.
+
+    Harga dikembalikan apa adanya, termasuk sennya. Harga per kg adalah tarif,
+    bukan nilai uang yang disimpan, jadi pembulatan ke rupiah penuh dilakukan
+    pada subtotal. Membulatkan tarifnya lebih dulu membuang presisi dan membuat
+    transaksi menyimpan harga yang tidak benar-benar dipakai (BR-03).
     """
-    return bulatkan_rupiah(jenis.harga_per_kg)
+    return jenis.harga_per_kg
 
 
 def hitung_subtotal(harga: Decimal, berat: Decimal) -> Decimal:
