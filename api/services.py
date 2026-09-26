@@ -492,16 +492,76 @@ class PencairanService:
             if field in payload:
                 setattr(pencairan, field, payload[field] or "")
         if "nominal" in payload:
-            saldo = Saldo.objects.select_for_update().get(nasabah_id=pencairan.nasabah_id)
-            saldo_sesudah = (pencairan.saldo_sebelum - payload["nominal"]).quantize(
-                Decimal(1), rounding=ROUND_DOWN
-            )
-            saldo.total_saldo += saldo_sesudah - pencairan.saldo_sesudah
-            saldo.save(update_fields=["total_saldo", "updated_at"])
+            PencairanService._hitung_ulang_saldo(pencairan, payload["nominal"], pencairan.tanggal)
             pencairan.nominal = payload["nominal"]
-            pencairan.saldo_sesudah = saldo_sesudah
         pencairan.save()
         return pencairan
+
+    @staticmethod
+    def _hitung_ulang_saldo(pencairan: Pencairan, nominal: Decimal, tanggal: datetime) -> None:
+        """Replay the nasabah's ledger from the earliest affected moment with the edited
+        pencairan, rewriting every later pencairan snapshot and moving Saldo by the difference.
+
+        Sets the edited pencairan's own snapshots; the caller saves it.
+        """
+        mulai = min(pencairan.tanggal, tanggal)
+        ledger = {"bank_sampah_id": pencairan.bank_sampah_id, "nasabah_id": pencairan.nasabah_id}
+        saldo = Saldo.objects.select_for_update().get(nasabah_id=pencairan.nasabah_id)
+        lainnya = list(
+            Pencairan.objects.select_for_update()
+            .filter(tanggal__gte=mulai, **ledger)
+            .exclude(pk=pencairan.pk)
+        )
+        setoran = list(
+            Transaksi.objects.filter(tanggal__gte=mulai, **ledger).values_list(
+                "id", "tanggal", "total_nilai"
+            )
+        )
+
+        # PILAH 1.0 opening balances have no transaksi behind them, so the replay starts
+        # from a stored snapshot: the first pencairan at or after `mulai`, minus the
+        # setoran ordered before it (a setoran at the same instant comes first).
+        pertama = min([pencairan, *lainnya], key=lambda cair: (cair.tanggal, str(cair.pk)))
+        awal = pertama.saldo_sebelum - sum(
+            (nilai for _, waktu, nilai in setoran if waktu <= pertama.tanggal), Decimal(0)
+        )
+
+        def putar(
+            nominal_ini: Decimal, tanggal_ini: datetime
+        ) -> tuple[Decimal, dict[UUID, tuple[Decimal, Decimal]]]:
+            peristiwa: list[tuple[datetime, int, str, Decimal, UUID | None]] = [
+                (waktu, 0, str(id_), nilai, None) for id_, waktu, nilai in setoran
+            ]
+            peristiwa += [
+                (cair.tanggal, 1, str(cair.pk), cair.nominal, cair.pk) for cair in lainnya
+            ]
+            peristiwa.append((tanggal_ini, 1, str(pencairan.pk), nominal_ini, pencairan.pk))
+            saldo_berjalan = awal
+            snapshot: dict[UUID, tuple[Decimal, Decimal]] = {}
+            for _, _, _, nilai, pencairan_id in sorted(peristiwa, key=lambda item: item[:3]):
+                if pencairan_id is None:
+                    saldo_berjalan += nilai
+                    continue
+                if nilai > saldo_berjalan:
+                    raise serializers.ValidationError(
+                        {"nominal": ["Saldo nasabah tidak mencukupi untuk perubahan ini"]}
+                    )
+                sesudah = (saldo_berjalan - nilai).quantize(Decimal(1), rounding=ROUND_DOWN)
+                snapshot[pencairan_id] = (saldo_berjalan, sesudah)
+                saldo_berjalan = sesudah
+            return saldo_berjalan, snapshot
+
+        akhir_lama, _ = putar(pencairan.nominal, pencairan.tanggal)
+        akhir_baru, snapshot = putar(nominal, tanggal)
+        berubah = []
+        for cair in lainnya:
+            if (cair.saldo_sebelum, cair.saldo_sesudah) != snapshot[cair.pk]:
+                cair.saldo_sebelum, cair.saldo_sesudah = snapshot[cair.pk]
+                berubah.append(cair)
+        Pencairan.objects.bulk_update(berubah, ["saldo_sebelum", "saldo_sesudah"])
+        pencairan.saldo_sebelum, pencairan.saldo_sesudah = snapshot[pencairan.pk]
+        saldo.total_saldo += akhir_baru - akhir_lama
+        saldo.save(update_fields=["total_saldo", "updated_at"])
 
 
 _Dated = TypeVar("_Dated", bound=Model)
