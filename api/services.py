@@ -96,16 +96,29 @@ class AuthService:
             # the legacy Pengelola profile bootstrap until the Nasabah flow is
             # completed by its owning onboarding work.
             role = User.Role.SUPERADMIN if is_allowlisted else dev_role or User.Role.PENGELOLA
-            user = User.objects.create_user(
-                email=email,
-                google_id=google_id,
-                nama=name,
-                role=role,
-                is_profile_complete=role == User.Role.SUPERADMIN,
-                is_staff=role == User.Role.SUPERADMIN,
-                is_superuser=role == User.Role.SUPERADMIN,
-            )
-            nama_was_empty = True
+            try:
+                with transaction.atomic():
+                    user = User.objects.create_user(
+                        email=email,
+                        google_id=google_id,
+                        nama=name,
+                        role=role,
+                        is_profile_complete=role == User.Role.SUPERADMIN,
+                        is_staff=role == User.Role.SUPERADMIN,
+                        is_superuser=role == User.Role.SUPERADMIN,
+                    )
+                nama_was_empty = True
+            except IntegrityError:
+                # A concurrent Google request may have created this account
+                # after the initial lookup. Authenticate that account instead
+                # of turning a valid token into an uncaught server error.
+                user = AuthService._user_for_email(email)
+                if user is None:
+                    raise
+                is_new_user = False
+                nama_was_empty = not user.nama
+                AuthService._enforce_superadmin_allowlist(user, email)
+                AuthService._update_google_identity(user, google_id, str(name))
         else:
             nama_was_empty = not user.nama
             AuthService._enforce_superadmin_allowlist(user, email)

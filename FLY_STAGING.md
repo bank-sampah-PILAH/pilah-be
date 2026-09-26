@@ -18,8 +18,13 @@ flyctl secrets set --app pilah-be-staging \
   DB_NAME='neondb' \
   DB_USER='neondb_owner' \
   DB_PASSWORD='change-me' \
-  DB_HOST='ep-example.ap-southeast-1.aws.neon.tech'
+  DB_HOST='ep-example.ap-southeast-1.aws.neon.tech' \
+  PILAH_SUPERADMIN_EMAILS='superadmin@example.com'
 ```
+
+Set `PILAH_SUPERADMIN_EMAILS` to the comma-separated email addresses authorized
+as Superadmins. This setting is required for Superadmin login and API access in
+staging.
 
 Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, and any
 WhatsApp/Twilio secrets the staging environment needs with the same command.
