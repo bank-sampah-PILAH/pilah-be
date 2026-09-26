@@ -9,8 +9,9 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.signing import TimestampSigner
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.test import Client, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import Resolver404, resolve
 from django.utils import timezone
 from django.views.static import serve
@@ -21,6 +22,7 @@ from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from api.models import (
     BankSampah,
     BankSampahApprovalLog,
+    JadwalKegiatan,
     JenisSampah,
     Nasabah,
     NasabahApprovalLog,
@@ -73,6 +75,779 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["no_hp_pic"], "+6281234567890")
         self.assertEqual(response.data["pengelola"]["email"], "sari@example.com")
+
+    def test_pengelola_can_create_and_update_organization_schedule(self) -> None:
+        starts_at = timezone.now() + timedelta(days=2)
+        create_response = self.client.post(
+            "/api/v1/jadwal",
+            {
+                "jenis_kegiatan": "penimbangan",
+                "mulai_pada": starts_at.isoformat(),
+                "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+                "lokasi": "Balai Warga RW 04",
+                "keterangan": "Bawa sampah yang sudah dipilah",
+                "cakupan_penerima": "semua_nasabah",
+            },
+            format="json",
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        self.assertEqual(create_response.data["status"], "draft")
+        self.assertEqual(create_response.data["bank_sampah_id"], str(self.bank.id))
+        self.assertFalse(create_response.data["peringatan_jadwal_bertumpuk"])
+
+        update_response = self.client.patch(
+            f"/api/v1/jadwal/{create_response.data['id']}",
+            {"lokasi": "Kantor Bank Sampah BTH"},
+            format="json",
+        )
+
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.data["lokasi"], "Kantor Bank Sampah BTH")
+
+    def test_schedule_overlap_warns_without_blocking_creation(self) -> None:
+        starts_at = timezone.now() + timedelta(days=3)
+        payload = {
+            "jenis_kegiatan": "penimbangan",
+            "mulai_pada": starts_at.isoformat(),
+            "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+            "lokasi": "Balai Warga RW 04",
+            "keterangan": "",
+            "cakupan_penerima": "semua_nasabah",
+        }
+        first = self.client.post("/api/v1/jadwal", payload, format="json")
+        second = self.client.post(
+            "/api/v1/jadwal",
+            {
+                **payload,
+                "mulai_pada": (starts_at + timedelta(minutes=30)).isoformat(),
+                "selesai_pada": (starts_at + timedelta(hours=1)).isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 201)
+        self.assertTrue(second.data["peringatan_jadwal_bertumpuk"])
+
+    def test_schedule_requires_end_after_start_on_create_and_update(self) -> None:
+        starts_at = timezone.now() + timedelta(days=3)
+        payload = {
+            "jenis_kegiatan": "penimbangan",
+            "mulai_pada": (starts_at + timedelta(hours=3)).isoformat(),
+            "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+            "lokasi": "Balai Warga",
+            "cakupan_penerima": "semua_nasabah",
+        }
+        invalid_create = self.client.post("/api/v1/jadwal", payload, format="json")
+
+        self.assertEqual(invalid_create.status_code, 422)
+        self.assertEqual(
+            invalid_create.data["errors"]["selesai_pada"],
+            ["Waktu selesai harus setelah waktu mulai"],
+        )
+
+        payload["mulai_pada"] = starts_at.isoformat()
+        created = self.client.post("/api/v1/jadwal", payload, format="json")
+        invalid_update = self.client.patch(
+            f"/api/v1/jadwal/{created.data['id']}",
+            {"mulai_pada": (starts_at + timedelta(hours=3)).isoformat()},
+            format="json",
+        )
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(invalid_update.status_code, 422)
+        self.assertEqual(
+            invalid_update.data["errors"]["selesai_pada"],
+            ["Waktu selesai harus setelah waktu mulai"],
+        )
+        self.assertEqual(
+            JadwalKegiatan.objects.get(pk=created.data["id"]).mulai_pada,
+            starts_at,
+        )
+
+    def test_schedule_update_recomputes_overlap_warning(self) -> None:
+        starts_at = timezone.now() + timedelta(days=3)
+        JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=starts_at,
+            selesai_pada=starts_at + timedelta(hours=2),
+            lokasi="Balai Warga",
+        )
+        moving_schedule = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=starts_at,
+            selesai_pada=starts_at + timedelta(hours=2),
+            lokasi="Kantor",
+        )
+
+        overlapping = self.client.patch(
+            f"/api/v1/jadwal/{moving_schedule.id}", {"lokasi": "Balai Warga"}, format="json"
+        )
+        self.assertEqual(overlapping.status_code, 200)
+        self.assertTrue(overlapping.data["peringatan_jadwal_bertumpuk"])
+
+        separated = self.client.patch(
+            f"/api/v1/jadwal/{moving_schedule.id}", {"lokasi": "Kantor"}, format="json"
+        )
+        self.assertEqual(separated.status_code, 200)
+        self.assertFalse(separated.data["peringatan_jadwal_bertumpuk"])
+
+    def test_schedule_list_overlap_warnings_do_not_add_queries_per_row(self) -> None:
+        starts_at = timezone.now() + timedelta(days=3)
+
+        def create_schedule(index: int) -> None:
+            begins = starts_at + timedelta(minutes=index)
+            JadwalKegiatan.objects.create(
+                bank_sampah=self.bank,
+                dibuat_oleh=self.user,
+                jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+                mulai_pada=begins,
+                selesai_pada=begins + timedelta(hours=2),
+                lokasi="Balai Warga RW 04",
+            )
+
+        create_schedule(0)
+        with CaptureQueriesContext(connection) as one_schedule_queries:
+            one_schedule = self.client.get("/api/v1/jadwal?page_size=100")
+
+        for index in range(1, 5):
+            create_schedule(index)
+        with CaptureQueriesContext(connection) as five_schedule_queries:
+            five_schedules = self.client.get("/api/v1/jadwal?page_size=100")
+
+        self.assertEqual(one_schedule.data["count"], 1)
+        self.assertEqual(five_schedules.data["count"], 5)
+        self.assertEqual(len(one_schedule_queries), len(five_schedule_queries))
+
+    def test_schedule_list_filters_and_paginates_a_selected_day(self) -> None:
+        starts_at = timezone.localtime() + timedelta(days=3)
+        starts_at = starts_at.replace(hour=9, minute=0, second=0, microsecond=0)
+        for index in range(3):
+            begins = starts_at + timedelta(hours=index)
+            JadwalKegiatan.objects.create(
+                bank_sampah=self.bank,
+                dibuat_oleh=self.user,
+                jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+                mulai_pada=begins,
+                selesai_pada=begins + timedelta(minutes=30),
+                lokasi=f"Lokasi {index}",
+            )
+        other_day = starts_at + timedelta(days=1)
+        JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=other_day,
+            selesai_pada=other_day + timedelta(minutes=30),
+            lokasi="Tanggal lain",
+        )
+
+        first_page = self.client.get(
+            f"/api/v1/jadwal?date={timezone.localdate(starts_at)}&page_size=2"
+        )
+        second_page = self.client.get(
+            f"/api/v1/jadwal?date={timezone.localdate(starts_at)}&page_size=2&page=2"
+        )
+
+        self.assertEqual(first_page.status_code, 200)
+        self.assertEqual(first_page.data["count"], 3)
+        self.assertEqual(len(first_page.data["results"]), 2)
+        self.assertIsNotNone(first_page.data["next"])
+        self.assertEqual(second_page.status_code, 200)
+        self.assertEqual(len(second_page.data["results"]), 1)
+        self.assertIsNone(second_page.data["next"])
+        self.assertTrue(
+            all(
+                item["mulai_pada"].startswith(timezone.localdate(starts_at).isoformat())
+                for item in first_page.data["results"] + second_page.data["results"]
+            )
+        )
+
+        invalid_date = self.client.get("/api/v1/jadwal?date=not-a-date")
+        self.assertEqual(invalid_date.status_code, 422)
+
+    def test_schedule_calendar_dates_returns_unique_dates_for_a_range(self) -> None:
+        starts_at = timezone.localtime() + timedelta(days=3)
+        starts_at = starts_at.replace(hour=9, minute=0, second=0, microsecond=0)
+        next_day = starts_at + timedelta(days=1)
+        for index in range(2):
+            begins = starts_at + timedelta(hours=index)
+            JadwalKegiatan.objects.create(
+                bank_sampah=self.bank,
+                dibuat_oleh=self.user,
+                jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+                mulai_pada=begins,
+                selesai_pada=begins + timedelta(minutes=30),
+                lokasi=f"Lokasi {index}",
+            )
+        JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=next_day,
+            selesai_pada=next_day + timedelta(minutes=30),
+            lokasi="Tanggal berikutnya",
+        )
+        start_date = timezone.localdate(starts_at)
+        end_date = timezone.localdate(next_day)
+
+        response = self.client.get(
+            "/api/v1/jadwal/calendar-dates",
+            {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["dates"], [start_date.isoformat(), end_date.isoformat()])
+        invalid_range = self.client.get(
+            "/api/v1/jadwal/calendar-dates",
+            {"start_date": end_date.isoformat(), "end_date": start_date.isoformat()},
+        )
+        self.assertEqual(invalid_range.status_code, 422)
+
+    def test_schedule_rejects_unapproved_recipients(self) -> None:
+        recipient = self._create_pending_nasabah()
+        starts_at = timezone.now() + timedelta(days=3)
+
+        response = self.client.post(
+            "/api/v1/jadwal",
+            {
+                "jenis_kegiatan": "penimbangan",
+                "mulai_pada": starts_at.isoformat(),
+                "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+                "lokasi": "Balai Warga RW 04",
+                "cakupan_penerima": "nasabah_terpilih",
+                "penerima_ids": [str(recipient.id)],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("penerima_ids", response.data["errors"])
+
+    def test_schedule_rejects_recipients_from_another_bank(self) -> None:
+        other_bank = BankSampah.objects.create(
+            nama="Bank Sampah Lain",
+            alamat="Bogor",
+            kota="Bogor",
+            no_hp_pic="+6281234567891",
+        )
+        other_user = User.objects.create_user(
+            email="nasabah-other-bank@example.com",
+            nama="Nasabah Bank Lain",
+            role=User.Role.NASABAH,
+            is_profile_complete=False,
+        )
+        other_recipient = Nasabah.objects.create(
+            user=other_user,
+            bank_sampah=other_bank,
+            nomor="NAS-1000",
+            nama=other_user.nama,
+            alamat="Jl. Kenanga",
+            no_hp="+628123451000",
+            status=Nasabah.Status.APPROVED,
+        )
+        starts_at = timezone.now() + timedelta(days=3)
+        response = self.client.post(
+            "/api/v1/jadwal",
+            {
+                "jenis_kegiatan": "penimbangan",
+                "mulai_pada": starts_at.isoformat(),
+                "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+                "lokasi": "Balai Warga RW 04",
+                "cakupan_penerima": "nasabah_terpilih",
+                "penerima_ids": [str(other_recipient.id)],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("penerima_ids", response.data["errors"])
+
+    def test_schedule_rejects_explicitly_clearing_selected_recipients(self) -> None:
+        recipient = self._create_pending_nasabah()
+        recipient.status = Nasabah.Status.APPROVED
+        recipient.save(update_fields=["status"])
+        starts_at = timezone.now() + timedelta(days=3)
+        created = self.client.post(
+            "/api/v1/jadwal",
+            {
+                "jenis_kegiatan": "penimbangan",
+                "mulai_pada": starts_at.isoformat(),
+                "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+                "lokasi": "Balai Warga RW 04",
+                "cakupan_penerima": "nasabah_terpilih",
+                "penerima_ids": [str(recipient.id)],
+            },
+            format="json",
+        )
+        response = self.client.patch(
+            f"/api/v1/jadwal/{created.data['id']}", {"penerima_ids": []}, format="json"
+        )
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.data["errors"]["penerima_ids"], ["Pilih minimal satu nasabah"])
+        self.assertTrue(
+            self.client.get(f"/api/v1/jadwal/{created.data['id']}").data["penerima_ids"]
+        )
+
+    def test_pengelola_can_publish_cancel_and_complete_schedules(self) -> None:
+        starts_at = timezone.now() + timedelta(days=4)
+
+        def create_schedule() -> str:
+            response = self.client.post(
+                "/api/v1/jadwal",
+                {
+                    "jenis_kegiatan": "penimbangan",
+                    "mulai_pada": starts_at.isoformat(),
+                    "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+                    "lokasi": "Balai Warga RW 04",
+                    "keterangan": "",
+                    "cakupan_penerima": "semua_nasabah",
+                },
+                format="json",
+            )
+            self.assertEqual(response.status_code, 201)
+            return str(response.data["id"])
+
+        cancelled_id = create_schedule()
+        published = self.client.post(f"/api/v1/jadwal/{cancelled_id}/terbitkan")
+        cancelled = self.client.post(f"/api/v1/jadwal/{cancelled_id}/batalkan")
+        invalid_completion = self.client.post(f"/api/v1/jadwal/{cancelled_id}/selesaikan")
+
+        self.assertEqual(published.status_code, 200)
+        self.assertEqual(published.data["status"], "diterbitkan")
+        self.assertEqual(cancelled.status_code, 200)
+        self.assertEqual(cancelled.data["status"], "dibatalkan")
+        self.assertEqual(invalid_completion.status_code, 400)
+
+        completed_id = create_schedule()
+        self.client.post(f"/api/v1/jadwal/{completed_id}/terbitkan")
+        completed = self.client.post(f"/api/v1/jadwal/{completed_id}/selesaikan")
+
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(completed.data["status"], "selesai")
+
+    def test_nasabah_only_sees_active_published_schedules_for_their_memberships(self) -> None:
+        nasabah_user = User.objects.create_user(
+            email="nasabah@example.com",
+            nama="Budi Nasabah",
+            role=User.Role.NASABAH,
+            is_profile_complete=False,
+        )
+        membership = Nasabah.objects.create(
+            user=nasabah_user,
+            bank_sampah=self.bank,
+            nomor="NAS-0100",
+            nama="Budi Nasabah",
+            alamat="Jl. Kenanga No. 10",
+            no_hp="+628123450100",
+            status=Nasabah.Status.APPROVED,
+        )
+        another_bank = BankSampah.objects.create(
+            nama="Bank Lain", alamat="Bogor", kota="Bogor", no_hp_pic="+628123456700"
+        )
+        now = timezone.now()
+
+        visible = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=now + timedelta(days=1),
+            selesai_pada=now + timedelta(days=1, hours=2),
+            lokasi="Balai Warga",
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+        selected = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENCAIRAN,
+            mulai_pada=now + timedelta(days=2),
+            selesai_pada=now + timedelta(days=2, hours=1),
+            lokasi="Kantor BTH",
+            cakupan_penerima=JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH,
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+        selected.penerima.add(membership)
+        JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=now + timedelta(days=3),
+            selesai_pada=now + timedelta(days=3, hours=1),
+            lokasi="Masih Draft",
+        )
+        JadwalKegiatan.objects.create(
+            bank_sampah=another_bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=now + timedelta(days=4),
+            selesai_pada=now + timedelta(days=4, hours=1),
+            lokasi="Organisasi Lain",
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+
+        refresh = RefreshToken.for_user(nasabah_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        response = self.client.get("/api/v1/jadwal")
+
+        self.assertEqual(response.status_code, 200)
+        ids = {item["id"] for item in response.data["results"]}
+        self.assertEqual(ids, {str(visible.id), str(selected.id)})
+        selected_data = next(
+            item for item in response.data["results"] if item["id"] == str(selected.id)
+        )
+        self.assertNotIn("penerima_ids", selected_data)
+        self.assertNotIn("peringatan_jadwal_bertumpuk", selected_data)
+
+    def test_nasabah_serializer_omits_manager_fields_before_serializing(self) -> None:
+        from api.serializers import JadwalKegiatanSerializer
+
+        nasabah_user = User.objects.create_user(
+            email="serializer-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            is_profile_complete=False,
+        )
+        membership = Nasabah.objects.create(
+            user=nasabah_user,
+            bank_sampah=self.bank,
+            nomor="NAS-0106",
+            nama=nasabah_user.nama,
+            alamat="Jl. Kenanga",
+            no_hp="+628123450106",
+            status=Nasabah.Status.APPROVED,
+        )
+        starts_at = timezone.now() + timedelta(days=1)
+        schedule = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=starts_at,
+            selesai_pada=starts_at + timedelta(hours=1),
+            lokasi="Balai Warga",
+            cakupan_penerima=JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH,
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+        schedule.penerima.add(membership)
+        serializer = JadwalKegiatanSerializer(
+            schedule,
+            context={"request": Mock(user=nasabah_user)},
+        )
+
+        self.assertNotIn("penerima_ids", serializer.fields)
+        self.assertNotIn("peringatan_jadwal_bertumpuk", serializer.fields)
+        self.assertNotIn("penerima_ids", serializer.data)
+        self.assertNotIn("peringatan_jadwal_bertumpuk", serializer.data)
+
+    def test_nasabah_queryset_skips_manager_only_work(self) -> None:
+        from api.views import JadwalKegiatanViewSet
+
+        nasabah_user = User.objects.create_user(
+            email="queryset-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            is_profile_complete=False,
+        )
+        view = cast(Any, JadwalKegiatanViewSet())
+        view.request = Mock(user=nasabah_user)
+        view.action = "list"
+
+        queryset = view.get_queryset()
+
+        self.assertNotIn("penerima", queryset._prefetch_related_lookups)
+        self.assertNotIn("_peringatan_jadwal_bertumpuk", queryset.query.annotations)
+
+    def test_anonymous_users_cannot_view_schedules(self) -> None:
+        self.client.credentials()
+
+        response = self.client.get("/api/v1/jadwal")
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_transition_does_not_overwrite_a_concurrent_status_change(self) -> None:
+        from api.views import JadwalKegiatanViewSet
+
+        starts_at = timezone.now() + timedelta(days=4)
+        created = self.client.post(
+            "/api/v1/jadwal",
+            {
+                "jenis_kegiatan": "penimbangan",
+                "mulai_pada": starts_at.isoformat(),
+                "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+                "lokasi": "Balai Warga RW 04",
+                "cakupan_penerima": "semua_nasabah",
+            },
+            format="json",
+        )
+        original_get_object = JadwalKegiatanViewSet.get_object
+
+        def change_state_after_read(view: Any) -> Any:
+            schedule = original_get_object(view)
+            JadwalKegiatan.objects.filter(pk=schedule.pk).update(
+                status=JadwalKegiatan.Status.DIBATALKAN
+            )
+            return schedule
+
+        with patch.object(JadwalKegiatanViewSet, "get_object", change_state_after_read):
+            response = self.client.post(f"/api/v1/jadwal/{created.data['id']}/terbitkan")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            self.client.get(f"/api/v1/jadwal/{created.data['id']}").data["status"], "dibatalkan"
+        )
+
+    def test_transition_response_uses_fresh_schedule_after_concurrent_edit(self) -> None:
+        from api.views import JadwalKegiatanViewSet
+
+        recipient_before = self._create_pending_nasabah()
+        recipient_before.status = Nasabah.Status.APPROVED
+        recipient_before.save(update_fields=["status"])
+        recipient_after = self._create_pending_nasabah()
+        recipient_after.status = Nasabah.Status.APPROVED
+        recipient_after.save(update_fields=["status"])
+        starts_at = timezone.now() + timedelta(days=4)
+        JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=starts_at,
+            selesai_pada=starts_at + timedelta(hours=2),
+            lokasi="Balai Warga Baru",
+        )
+        schedule = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=starts_at,
+            selesai_pada=starts_at + timedelta(hours=2),
+            lokasi="Balai Warga Lama",
+            cakupan_penerima=JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH,
+        )
+        schedule.penerima.add(recipient_before)
+        original_get_object = JadwalKegiatanViewSet.get_object
+        changed_after_read = False
+
+        def edit_after_read(view: Any) -> Any:
+            nonlocal changed_after_read
+            instance = original_get_object(view)
+            if not changed_after_read:
+                changed_after_read = True
+                JadwalKegiatan.objects.filter(pk=instance.pk).update(lokasi="Balai Warga Baru")
+                through = JadwalKegiatan.penerima.through
+                through.objects.filter(jadwalkegiatan_id=instance.pk).delete()
+                through.objects.create(
+                    jadwalkegiatan_id=instance.pk,
+                    nasabah_id=recipient_after.pk,
+                )
+            return instance
+
+        with patch.object(JadwalKegiatanViewSet, "get_object", edit_after_read):
+            response = self.client.post(f"/api/v1/jadwal/{schedule.id}/batalkan")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "dibatalkan")
+        self.assertEqual(response.data["lokasi"], "Balai Warga Baru")
+        self.assertEqual(response.data["penerima_ids"], [recipient_after.id])
+        self.assertTrue(response.data["peringatan_jadwal_bertumpuk"])
+
+    def test_edit_does_not_overwrite_a_concurrent_terminal_transition(self) -> None:
+        from api.views import JadwalKegiatanViewSet
+
+        starts_at = timezone.now() + timedelta(days=4)
+        created = self.client.post(
+            "/api/v1/jadwal",
+            {
+                "jenis_kegiatan": "penimbangan",
+                "mulai_pada": starts_at.isoformat(),
+                "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+                "lokasi": "Balai Warga RW 04",
+                "cakupan_penerima": "semua_nasabah",
+            },
+            format="json",
+        )
+        original_get_object = JadwalKegiatanViewSet.get_object
+
+        def cancel_after_read(view: Any) -> Any:
+            schedule = original_get_object(view)
+            JadwalKegiatan.objects.filter(pk=schedule.pk).update(
+                status=JadwalKegiatan.Status.DIBATALKAN
+            )
+            return schedule
+
+        with patch.object(JadwalKegiatanViewSet, "get_object", cancel_after_read):
+            response = self.client.patch(
+                f"/api/v1/jadwal/{created.data['id']}",
+                {"lokasi": "Lokasi Baru"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        schedule = JadwalKegiatan.objects.get(pk=created.data["id"])
+        self.assertEqual(schedule.status, JadwalKegiatan.Status.DIBATALKAN)
+        self.assertEqual(schedule.lokasi, "Balai Warga RW 04")
+
+    def test_terminal_schedules_cannot_be_edited(self) -> None:
+        starts_at = timezone.now() + timedelta(days=4)
+
+        def create_schedule() -> str:
+            response = self.client.post(
+                "/api/v1/jadwal",
+                {
+                    "jenis_kegiatan": "penimbangan",
+                    "mulai_pada": starts_at.isoformat(),
+                    "selesai_pada": (starts_at + timedelta(hours=2)).isoformat(),
+                    "lokasi": "Balai Warga RW 04",
+                    "cakupan_penerima": "semua_nasabah",
+                },
+                format="json",
+            )
+            self.assertEqual(response.status_code, 201)
+            return str(response.data["id"])
+
+        cancelled_id = create_schedule()
+        self.client.post(f"/api/v1/jadwal/{cancelled_id}/batalkan")
+        completed_id = create_schedule()
+        self.client.post(f"/api/v1/jadwal/{completed_id}/terbitkan")
+        self.client.post(f"/api/v1/jadwal/{completed_id}/selesaikan")
+
+        for schedule_id in (cancelled_id, completed_id):
+            response = self.client.patch(
+                f"/api/v1/jadwal/{schedule_id}", {"lokasi": "Lokasi Baru"}, format="json"
+            )
+
+            self.assertEqual(response.status_code, 400)
+            schedule = self.client.get(f"/api/v1/jadwal/{schedule_id}")
+            self.assertEqual(schedule.data["lokasi"], "Balai Warga RW 04")
+
+    def test_nasabah_sees_only_unexpired_schedules_for_their_membership(self) -> None:
+        def create_member(
+            email: str, number: str, status: str, active: bool = True
+        ) -> tuple[User, Nasabah]:
+            user = User.objects.create_user(
+                email=email,
+                nama=email,
+                role=User.Role.NASABAH,
+                is_profile_complete=False,
+            )
+            member = Nasabah.objects.create(
+                user=user,
+                bank_sampah=self.bank,
+                nomor=f"NAS-{number}",
+                nama=email,
+                alamat="Jl. Kenanga",
+                no_hp=f"+62812345{number}",
+                email=email,
+                status=status,
+                is_active=active,
+            )
+            return user, member
+
+        recipient_user, recipient = create_member(
+            "recipient@example.com", "0102", Nasabah.Status.APPROVED
+        )
+        other_user, _ = create_member("other@example.com", "0103", Nasabah.Status.APPROVED)
+        pending_user, _ = create_member("pending@example.com", "0104", Nasabah.Status.PENDING)
+        rejected_user, _ = create_member(
+            "rejected@example.com", "0105", Nasabah.Status.REJECTED, active=False
+        )
+        now = timezone.now()
+        public_schedule = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=now + timedelta(days=1),
+            selesai_pada=now + timedelta(days=1, hours=1),
+            lokasi="Balai Warga",
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+        selected_schedule = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENCAIRAN,
+            mulai_pada=now + timedelta(days=2),
+            selesai_pada=now + timedelta(days=2, hours=1),
+            lokasi="Kantor BTH",
+            cakupan_penerima=JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH,
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+        selected_schedule.penerima.add(recipient)
+        expired_schedule = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=now - timedelta(days=2),
+            selesai_pada=now - timedelta(days=1),
+            lokasi="Kegiatan Lama",
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(other_user).access_token}"
+        )
+        other_response = self.client.get("/api/v1/jadwal")
+
+        self.assertEqual(other_response.status_code, 200)
+        other_ids = {item["id"] for item in other_response.data["results"]}
+        self.assertEqual(other_ids, {str(public_schedule.id)})
+        self.assertNotIn(str(selected_schedule.id), other_ids)
+        self.assertNotIn(str(expired_schedule.id), other_ids)
+
+        for member_user in (recipient_user, pending_user, rejected_user):
+            self.client.credentials(
+                HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(member_user).access_token}"
+            )
+            response = self.client.get("/api/v1/jadwal")
+            self.assertEqual(response.status_code, 200)
+            if member_user == recipient_user:
+                ids = {item["id"] for item in response.data["results"]}
+                self.assertEqual(ids, {str(public_schedule.id), str(selected_schedule.id)})
+            else:
+                self.assertEqual(response.data["results"], [])
+
+    def test_nasabah_cannot_see_schedules_from_inactive_bank(self) -> None:
+        nasabah_user = User.objects.create_user(
+            email="inactive-bank-nasabah@example.com",
+            nama="Nasabah Bank Nonaktif",
+            role=User.Role.NASABAH,
+            is_profile_complete=False,
+        )
+        Nasabah.objects.create(
+            user=nasabah_user,
+            bank_sampah=self.bank,
+            nomor="NAS-0101",
+            nama=nasabah_user.nama,
+            alamat="Jl. Kenanga No. 11",
+            no_hp="+628123450101",
+            status=Nasabah.Status.APPROVED,
+        )
+        now = timezone.now()
+        schedule = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=now + timedelta(days=1),
+            selesai_pada=now + timedelta(days=1, hours=2),
+            lokasi="Balai Warga",
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+        self.bank.status = BankSampah.Status.REJECTED
+        self.bank.is_active = False
+        self.bank.save(update_fields=["status", "is_active", "updated_at"])
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(nasabah_user).access_token}"
+        )
+
+        response = self.client.get("/api/v1/jadwal")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["results"], [])
+        self.assertNotIn(str(schedule.id), {item["id"] for item in response.data["results"]})
 
     @override_settings(
         ALLOWED_HOSTS=["admin.example.com"],
@@ -1163,16 +1938,16 @@ class APISpecTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["token_type"], "Bearer")
-        self.assertTrue(response.data["is_new_user"])
-        self.assertIsNone(response.data["user"]["bank_sampah_id"])
-        self.assertEqual(response.data["next_step"], "complete_profile")
+        self.assertTrue(response.data["registration_required"])
+        self.assertIn("registration_token", response.data)
+        self.assertFalse(User.objects.filter(email="new@example.com").exists())
 
+    @override_settings(PILAH_SUPERADMIN_EMAILS=("super@example.com",))
     def test_onboarding_superadmin_approval_and_invite_flow(self) -> None:
         self.client.credentials()
         login = self.client.post(
             "/api/v1/auth/google",
-            {"id_token": "dev:onboard@example.com:Onboard User"},
+            {"id_token": "dev-pengelola:onboard@example.com:Onboard User"},
             format="json",
         )
         self.assertEqual(login.status_code, 200)
@@ -1281,7 +2056,7 @@ class APISpecTests(APITestCase):
         self.client.credentials()
         invited_login = self.client.post(
             "/api/v1/auth/google",
-            {"id_token": "dev:invited@example.com:Invited User"},
+            {"id_token": "dev-pengelola:invited@example.com:Invited User"},
             format="json",
         )
         self.assertEqual(invited_login.status_code, 200)
@@ -1431,6 +2206,7 @@ class APISpecTests(APITestCase):
             ).exists()
         )
 
+    @override_settings(PILAH_SUPERADMIN_EMAILS=("root@example.com",))
     def test_superadmin_cannot_use_pengelola_endpoints(self) -> None:
         self.client.credentials()
         response = self.client.post(
@@ -1448,6 +2224,7 @@ class APISpecTests(APITestCase):
         approvals = self.client.get("/api/v1/superadmin/bank-sampah")
         self.assertEqual(approvals.status_code, 200)
 
+    @override_settings(PILAH_SUPERADMIN_EMAILS=("queue-admin@example.com",))
     def test_superadmin_bank_queue_sorts_oldest_first(self) -> None:
         self.client.credentials()
         superadmin = User.objects.create_user(
@@ -1701,6 +2478,7 @@ class APISpecTests(APITestCase):
         verify.return_value = {
             "sub": "google-123",
             "email": "claim@example.com",
+            "email_verified": True,
             "name": "Claim User",
             "role": User.Role.SUPERADMIN,
         }

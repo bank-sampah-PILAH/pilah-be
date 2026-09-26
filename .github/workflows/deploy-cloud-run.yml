@@ -30,6 +30,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate Superadmin allowlist
+        run: |
+          if [ -z "${PILAH_SUPERADMIN_EMAILS}" ]; then
+            echo "::error::Set the repository variable PILAH_SUPERADMIN_EMAILS before deploying."
+            exit 1
+          fi
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:

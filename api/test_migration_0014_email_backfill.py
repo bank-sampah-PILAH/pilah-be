@@ -9,14 +9,17 @@ class Nasabah0014EmailBackfillTests(TransactionTestCase):
     column was nullable (seeded fixtures, pengurus-entered rows created
     before PIL-204) must be backfilled, not left to break `migrate`."""
 
-    # Both targets applied together: this is the real pre-0014 production
-    # state, where the sibling 0011 branches (status, alamat) have already
-    # merged via 0012 alongside the independent 0011_nasabah_email branch.
+    # 0014 now depends directly on both pre-existing sibling branches
+    # (0012_merge_20260921_1833: alamat+status; 0013_merge_nasabah_email_and_jadwal:
+    # status+email+jadwal), so it is itself the single merge point. Targeting
+    # its two parents directly as migrate_from — rather than a combination of
+    # unrelated leaf nodes — is what Django's executor can reliably reverse
+    # to on SQLite without dropping a sibling branch's columns.
     migrate_from = [
         ("api", "0012_merge_20260921_1833"),
-        ("api", "0011_nasabah_email"),
+        ("api", "0013_merge_nasabah_email_and_jadwal"),
     ]
-    migrate_to = [("api", "0015_merge_20260925_1833")]
+    migrate_to = [("api", "0014_alter_nasabah_unique_together_alter_nasabah_email_and_more")]
 
     def setUp(self) -> None:
         executor = MigrationExecutor(connection)

@@ -14,6 +14,7 @@ from api.views import (
     GoogleOAuthCallbackView,
     GoogleOAuthStartView,
     GoogleRegistrationView,
+    JadwalKegiatanViewSet,
     JenisSampahViewSet,
     LogoutView,
     NasabahSelfView,
@@ -31,6 +32,7 @@ from api.views import (
 router = DefaultRouter(trailing_slash=False)
 router.register("nasabah", NasabahViewSet, basename="nasabah")
 router.register("jenis-sampah", JenisSampahViewSet, basename="jenis-sampah")
+router.register("jadwal", JadwalKegiatanViewSet, basename="jadwal")
 router.register("transaksi", TransaksiViewSet, basename="transaksi")
 router.register(
     "superadmin/bank-sampah", SuperAdminBankSampahViewSet, basename="superadmin-bank-sampah"

@@ -62,10 +62,11 @@ class AuthService:
         google_id = profile["sub"]
         name = profile.get("name") or email.split("@")[0]
         dev_role = profile.get("_pilah_dev_role")
-        user = User.objects.filter(email__iexact=email).first()
-        is_allowlisted = email in AuthService._superadmin_emails()
+        user = AuthService._user_for_email(email)
+        nasabah = Nasabah.objects.filter(email__iexact=email, is_active=True).first()
+        is_allowlisted = AuthService.is_superadmin_allowlisted(email)
 
-        if user is None and not is_allowlisted and dev_role is None:
+        if user is None and nasabah is None and not is_allowlisted and dev_role is None:
             registration_token = signing.dumps(
                 {
                     "sub": google_id,
@@ -87,52 +88,42 @@ class AuthService:
                 },
             }
 
+        is_new_user = user is None
         if user is None:
-            role = User.Role.SUPERADMIN if is_allowlisted else dev_role
-            user = User.objects.create_user(
-                email=email,
-                google_id=google_id,
-                nama=name,
-                role=role,
-                is_profile_complete=role == User.Role.SUPERADMIN,
-                is_staff=role == User.Role.SUPERADMIN,
-                is_superuser=role == User.Role.SUPERADMIN,
-            )
-            AuthService._sync_nasabah_prefill(user)
-            return AuthService._session_response(user, is_new_user=True)
+            if dev_role == User.Role.SUPERADMIN and not is_allowlisted:
+                raise AuthService._superadmin_not_allowlisted()
+            # A pre-existing Nasabah row is already a known account; preserve
+            # the legacy Pengelola profile bootstrap until the Nasabah flow is
+            # completed by its owning onboarding work.
+            role = User.Role.SUPERADMIN if is_allowlisted else dev_role or User.Role.PENGELOLA
+            try:
+                with transaction.atomic():
+                    user = User.objects.create_user(
+                        email=email,
+                        google_id=google_id,
+                        nama=name,
+                        role=role,
+                        is_profile_complete=role == User.Role.SUPERADMIN,
+                        is_staff=role == User.Role.SUPERADMIN,
+                        is_superuser=role == User.Role.SUPERADMIN,
+                    )
+            except IntegrityError:
+                # A concurrent Google request may have created this account
+                # after the initial lookup. Authenticate that account instead
+                # of turning a valid token into an uncaught server error.
+                user = AuthService._user_for_email(email)
+                if user is None:
+                    raise
+                is_new_user = False
+                AuthService._enforce_superadmin_allowlist(user, email)
+                AuthService._update_google_identity(user, google_id, str(name))
+        else:
+            AuthService._enforce_superadmin_allowlist(user, email)
+            AuthService._update_google_identity(user, google_id, str(name))
 
-        is_dev_superadmin = dev_role == User.Role.SUPERADMIN
-        if user.role == User.Role.SUPERADMIN and not (is_allowlisted or is_dev_superadmin):
-            raise AuthServiceError(
-                "Email Superadmin tidak terdaftar pada whitelist",
-                code="superadmin_not_allowlisted",
-                status_code=403,
-            )
-        if is_allowlisted and user.role != User.Role.SUPERADMIN:
-            if user.bank_sampah_id or user.keanggotaan_nasabah.exists():
-                raise AuthServiceError(
-                    "Email whitelist sudah terhubung ke data operasional",
-                    code="superadmin_configuration_conflict",
-                    status_code=409,
-                )
-            user.role = User.Role.SUPERADMIN
-            user.is_staff = True
-            user.is_superuser = True
-            user.is_profile_complete = True
-            user.save(
-                update_fields=[
-                    "role",
-                    "is_staff",
-                    "is_superuser",
-                    "is_profile_complete",
-                    "updated_at",
-                ]
-            )
-
-        AuthService._update_google_identity(user, google_id, str(name))
         AuthService._sync_nasabah_prefill(user)
 
-        return AuthService._session_response(user, is_new_user=False)
+        return AuthService._session_response(user, is_new_user=is_new_user)
 
     @staticmethod
     def _sync_nasabah_prefill(user: User) -> None:
@@ -192,26 +183,66 @@ class AuthService:
                 status_code=400,
             )
 
-        user = User.objects.filter(email__iexact=email).first()
+        user = AuthService._user_for_email(email)
         created = False
         if user is None:
+            is_allowlisted = email in AuthService._superadmin_emails()
+            registered_role = User.Role.SUPERADMIN if is_allowlisted else role
             try:
                 with transaction.atomic():
                     user = User.objects.create_user(
                         email=email,
                         google_id=google_id,
                         nama=name,
-                        role=role,
-                        is_profile_complete=False,
+                        role=registered_role,
+                        is_profile_complete=is_allowlisted,
+                        is_staff=is_allowlisted,
+                        is_superuser=is_allowlisted,
                     )
                     created = True
             except IntegrityError:
-                user = User.objects.filter(email__iexact=email).first()
+                user = AuthService._user_for_email(email)
                 if user is None:
                     raise
 
+        AuthService._enforce_superadmin_allowlist(user, email)
         AuthService._update_google_identity(user, google_id, name)
         return AuthService._session_response(user, is_new_user=created), created
+
+    @staticmethod
+    def _user_for_email(email: str) -> User | None:
+        matches = list(User.objects.filter(email__iexact=email)[:2])
+        if len(matches) > 1:
+            raise AuthServiceError(
+                "Beberapa akun menggunakan alamat email ini. Hubungi dukungan untuk memperbaikinya.",
+                code="ambiguous_email_match",
+                status_code=409,
+            )
+        return matches[0] if matches else None
+
+    @staticmethod
+    def _superadmin_not_allowlisted() -> AuthServiceError:
+        return AuthServiceError(
+            "Email Superadmin tidak terdaftar pada whitelist",
+            code="superadmin_not_allowlisted",
+            status_code=403,
+        )
+
+    @staticmethod
+    def _enforce_superadmin_allowlist(user: User, email: str) -> None:
+        if user.role != User.Role.SUPERADMIN:
+            return
+        if not AuthService._sync_superadmin_admin_flags(user, email):
+            raise AuthService._superadmin_not_allowlisted()
+
+    @staticmethod
+    def _sync_superadmin_admin_flags(user: User, email: str) -> bool:
+        is_allowlisted = AuthService.is_superadmin_allowlisted(email)
+        if user.is_staff != is_allowlisted or user.is_superuser != is_allowlisted:
+            user.is_staff = is_allowlisted
+            user.is_superuser = is_allowlisted
+            user.save(update_fields=["is_staff", "is_superuser", "updated_at"])
+        return is_allowlisted
 
     @staticmethod
     def _update_google_identity(user: User, google_id: str, name: str) -> None:
@@ -294,6 +325,7 @@ class AuthService:
         if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN:
             dev_roles = {
                 "dev-superadmin:": ("dev-superadmin", User.Role.SUPERADMIN),
+                "dev-pengelola:": ("dev-pengelola", User.Role.PENGELOLA),
                 "dev-pengelola-induk:": ("dev-pengelola-induk", User.Role.PENGELOLA_INDUK),
                 "dev-nasabah:": ("dev-nasabah", User.Role.NASABAH),
             }
@@ -308,12 +340,7 @@ class AuthService:
                     }
         if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and raw_id_token.startswith("dev:"):
             _, email, name = (raw_id_token.split(":", 2) + [""])[:3]
-            return {
-                "sub": f"dev-{email}",
-                "email": email,
-                "name": name or email.split("@")[0],
-                "_pilah_dev_role": User.Role.PENGELOLA,
-            }
+            return {"sub": f"dev-{email}", "email": email, "name": name or email.split("@")[0]}
         audience = settings.GOOGLE_CLIENT_ID or None
         try:
             profile = google_id_token.verify_oauth2_token(  # type: ignore[no-untyped-call]  # google-auth ships no stubs
@@ -335,6 +362,8 @@ class AuthService:
             raise serializers.ValidationError(
                 {"id_token": ["ID Token tidak memuat email atau subject yang diperlukan"]}
             )
+        if verified_profile.get("email_verified") is not True:
+            raise serializers.ValidationError({"id_token": ["Email Google belum terverifikasi"]})
         return {
             "sub": profile_subject,
             "email": profile_email,
@@ -347,6 +376,10 @@ class AuthService:
         configured = settings.PILAH_SUPERADMIN_EMAILS
         values = configured.split(",") if isinstance(configured, str) else configured
         return frozenset(str(value).strip().lower() for value in values if str(value).strip())
+
+    @staticmethod
+    def is_superadmin_allowlisted(email: str) -> bool:
+        return email.strip().lower() in AuthService._superadmin_emails()
 
 
 class NumberingService:

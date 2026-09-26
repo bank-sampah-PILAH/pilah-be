@@ -39,8 +39,18 @@ def backfill_nasabah_email(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) 
 
 
 class Migration(migrations.Migration):
+    # Depends on both pre-existing sibling branches directly, rather than on
+    # bare 0011_nasabah_email, so this migration is itself the single merge
+    # point for alamat+status (0012_merge_20260921_1833) and
+    # status+email+jadwal (0013_merge_nasabah_email_and_jadwal) ahead of
+    # making Nasabah.email required. A prior version routed through separate
+    # 0015/0016 merge migrations after this one; collapsing them here avoids
+    # a migration-graph shape where Django's executor can reverse-migrate to
+    # a target combination that silently drops the alamat/status columns or
+    # skips reversing this migration (see api/test_migration_0014_email_backfill.py).
     dependencies = [
-        ("api", "0011_nasabah_email"),
+        ("api", "0012_merge_20260921_1833"),
+        ("api", "0013_merge_nasabah_email_and_jadwal"),
     ]
 
     operations = [

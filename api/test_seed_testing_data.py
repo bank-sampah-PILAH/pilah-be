@@ -32,6 +32,15 @@ class SeedTestingDataCommandTests(TestCase):
             defaults = self._parse_seed_arguments()
         self.assertEqual(defaults.pengurus_email, "pengurus.demo@example.com")
         self.assertEqual(defaults.pending_pengurus_email, "pending.pengurus.demo@example.com")
+        self.assertEqual(defaults.induk_email, "induk.demo@example.com")
+
+        with patch.dict(
+            os.environ,
+            {"PILAH_SEED_INDUK_EMAIL": "configured.induk@example.com"},
+            clear=True,
+        ):
+            configured_induk = self._parse_seed_arguments()
+        self.assertEqual(configured_induk.induk_email, "configured.induk@example.com")
 
         with patch.dict(
             os.environ,
