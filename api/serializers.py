@@ -26,6 +26,14 @@ from api.services import BalanceService
 from api.validators import get_initials, normalize_indonesian_phone
 
 
+def _validate_nominal_pencairan(value: Decimal) -> Decimal:
+    if value <= 0:
+        raise serializers.ValidationError("Nominal harus lebih dari nol")
+    if value != value.to_integral_value():
+        raise serializers.ValidationError("Nominal harus dalam rupiah bulat tanpa desimal")
+    return value
+
+
 class PencairanCreateSerializer(serializers.Serializer[Any]):
     nasabah_id = serializers.UUIDField(required=True)
     nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=True)
@@ -36,11 +44,7 @@ class PencairanCreateSerializer(serializers.Serializer[Any]):
     )
 
     def validate_nominal(self, value: Decimal) -> Decimal:
-        if value <= 0:
-            raise serializers.ValidationError("Nominal harus lebih dari nol")
-        if value != value.to_integral_value():
-            raise serializers.ValidationError("Nominal harus dalam rupiah bulat tanpa desimal")
-        return value
+        return _validate_nominal_pencairan(value)
 
     def validate_tanggal(self, value: datetime) -> datetime:
         if value > timezone.now():
@@ -63,6 +67,9 @@ class PencairanEditSerializer(serializers.Serializer[Any]):
             "blank": "Alasan perubahan wajib diisi",
         },
     )
+
+    def validate_nominal(self, value: Decimal) -> Decimal:
+        return _validate_nominal_pencairan(value)
 
 
 class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
