@@ -24,7 +24,13 @@ from openpyxl.worksheet.worksheet import Worksheet
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.kalkulasi import bulatkan_rupiah, harga_berlaku, hitung_subtotal, total_setoran
+from api.kalkulasi import (
+    bulatkan_rupiah,
+    format_ribuan,
+    harga_berlaku,
+    hitung_subtotal,
+    total_setoran,
+)
 from api.models import (
     BankSampah,
     BankSampahApprovalLog,
@@ -919,7 +925,7 @@ class WhatsAppService:
 
     @staticmethod
     def format_rupiah(value: Decimal) -> str:
-        return f"Rp {int(value):,}".replace(",", ".")
+        return f"Rp {format_ribuan(value)}"
 
     @staticmethod
     def format_kg(value: Decimal) -> str:
