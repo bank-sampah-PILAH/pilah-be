@@ -3,6 +3,7 @@ from rest_framework.request import Request
 from rest_framework.views import APIView
 
 from api.models import BankSampah, User
+from api.services import AuthService
 
 
 def _auth_user(request: Request) -> User:
@@ -15,6 +16,13 @@ class IsPengelola(BasePermission):
 
     def has_permission(self, request: Request, view: APIView) -> bool:
         return request.user.is_authenticated and request.user.role == User.Role.PENGELOLA
+
+
+class IsRegistrationRole(BasePermission):
+    message = "Endpoint ini hanya untuk peran yang sedang mendaftar"
+
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        return request.user.is_authenticated and request.user.role in User.GOOGLE_REGISTRATION_ROLES
 
 
 class IsActivePengelola(IsPengelola):
@@ -45,7 +53,12 @@ class IsSuperAdmin(BasePermission):
     message = "Endpoint ini hanya untuk superadmin"
 
     def has_permission(self, request: Request, view: APIView) -> bool:
-        return request.user.is_authenticated and request.user.role == User.Role.SUPERADMIN
+        user = request.user
+        return (
+            user.is_authenticated
+            and user.role == User.Role.SUPERADMIN
+            and AuthService.is_superadmin_allowlisted(user.email)
+        )
 
 
 class IsActiveNasabah(BasePermission):

@@ -258,6 +258,11 @@ class GoogleAuthSerializer(serializers.Serializer[Any]):
     id_token = serializers.CharField(required=True)
 
 
+class GoogleRegistrationSerializer(serializers.Serializer[Any]):
+    registration_token = serializers.CharField(required=True)
+    role = serializers.ChoiceField(choices=User.GOOGLE_REGISTRATION_ROLES)
+
+
 class RefreshTokenSerializer(serializers.Serializer[Any]):
     refresh_token = serializers.CharField(required=True)
 

@@ -33,6 +33,12 @@ class ApiTestView(TemplateView):
     def get_context_data(self, **kwargs: object) -> dict[str, object]:
         context = super().get_context_data(**kwargs)
         context["google_client_id"] = settings.GOOGLE_CLIENT_ID
+        superadmin_emails = settings.PILAH_SUPERADMIN_EMAILS
+        context["test_superadmin_email"] = (
+            superadmin_emails[0]
+            if settings.DEBUG and settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and superadmin_emails
+            else ""
+        )
         return context
 
 
