@@ -224,6 +224,93 @@ class APISpecTests(APITestCase):
         self.assertEqual(five_schedules.data["count"], 5)
         self.assertEqual(len(one_schedule_queries), len(five_schedule_queries))
 
+    def test_schedule_list_filters_and_paginates_a_selected_day(self) -> None:
+        starts_at = timezone.localtime() + timedelta(days=3)
+        starts_at = starts_at.replace(hour=9, minute=0, second=0, microsecond=0)
+        for index in range(3):
+            begins = starts_at + timedelta(hours=index)
+            JadwalKegiatan.objects.create(
+                bank_sampah=self.bank,
+                dibuat_oleh=self.user,
+                jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+                mulai_pada=begins,
+                selesai_pada=begins + timedelta(minutes=30),
+                lokasi=f"Lokasi {index}",
+            )
+        other_day = starts_at + timedelta(days=1)
+        JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=other_day,
+            selesai_pada=other_day + timedelta(minutes=30),
+            lokasi="Tanggal lain",
+        )
+
+        first_page = self.client.get(
+            f"/api/v1/jadwal?date={timezone.localdate(starts_at)}&page_size=2"
+        )
+        second_page = self.client.get(
+            f"/api/v1/jadwal?date={timezone.localdate(starts_at)}&page_size=2&page=2"
+        )
+
+        self.assertEqual(first_page.status_code, 200)
+        self.assertEqual(first_page.data["count"], 3)
+        self.assertEqual(len(first_page.data["results"]), 2)
+        self.assertIsNotNone(first_page.data["next"])
+        self.assertEqual(second_page.status_code, 200)
+        self.assertEqual(len(second_page.data["results"]), 1)
+        self.assertIsNone(second_page.data["next"])
+        self.assertTrue(
+            all(
+                item["mulai_pada"].startswith(timezone.localdate(starts_at).isoformat())
+                for item in first_page.data["results"] + second_page.data["results"]
+            )
+        )
+
+        invalid_date = self.client.get("/api/v1/jadwal?date=not-a-date")
+        self.assertEqual(invalid_date.status_code, 422)
+
+    def test_schedule_calendar_dates_returns_unique_dates_for_a_range(self) -> None:
+        starts_at = timezone.localtime() + timedelta(days=3)
+        starts_at = starts_at.replace(hour=9, minute=0, second=0, microsecond=0)
+        next_day = starts_at + timedelta(days=1)
+        for index in range(2):
+            begins = starts_at + timedelta(hours=index)
+            JadwalKegiatan.objects.create(
+                bank_sampah=self.bank,
+                dibuat_oleh=self.user,
+                jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+                mulai_pada=begins,
+                selesai_pada=begins + timedelta(minutes=30),
+                lokasi=f"Lokasi {index}",
+            )
+        JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=next_day,
+            selesai_pada=next_day + timedelta(minutes=30),
+            lokasi="Tanggal berikutnya",
+        )
+        start_date = timezone.localdate(starts_at)
+        end_date = timezone.localdate(next_day)
+
+        response = self.client.get(
+            "/api/v1/jadwal/calendar-dates",
+            {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["dates"], [start_date.isoformat(), end_date.isoformat()]
+        )
+        invalid_range = self.client.get(
+            "/api/v1/jadwal/calendar-dates",
+            {"start_date": end_date.isoformat(), "end_date": start_date.isoformat()},
+        )
+        self.assertEqual(invalid_range.status_code, 422)
+
     def test_schedule_rejects_unapproved_recipients(self) -> None:
         recipient = self._create_pending_nasabah()
         starts_at = timezone.now() + timedelta(days=3)

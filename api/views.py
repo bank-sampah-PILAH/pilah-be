@@ -8,6 +8,7 @@ from django.core.files.storage import default_storage
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseRedirect
+from django.utils.dateparse import parse_date
 from django.utils.http import urlencode
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
@@ -582,12 +583,56 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
             .exclude(pk=OuterRef("pk"))
             .exclude(status=JadwalKegiatan.Status.DIBATALKAN)
         )
-        return (
+        queryset = (
             JadwalKegiatan.objects.filter(bank_sampah=_bank_sampah(self.request))
             .select_related("bank_sampah", "dibuat_oleh")
             .prefetch_related("penerima")
             .annotate(_peringatan_jadwal_bertumpuk=Exists(overlapping_schedules))
         )
+        if self.action == "list":
+            date_value = self.request.query_params.get("date")
+            if date_value:
+                date = parse_date(date_value)
+                if date is None:
+                    raise serializers.ValidationError(
+                        {"date": "Gunakan tanggal dengan format YYYY-MM-DD"}
+                    )
+                queryset = queryset.filter(mulai_pada__date=date)
+            queryset = queryset.order_by("mulai_pada", "pk")
+        return queryset
+
+    @action(detail=False, methods=["get"], url_path="calendar-dates")
+    def calendar_dates(self, request: Request) -> Response:
+        start_value = request.query_params.get("start_date")
+        end_value = request.query_params.get("end_date")
+        start_date = parse_date(start_value or "")
+        end_date = parse_date(end_value or "")
+        if start_date is None or end_date is None:
+            raise serializers.ValidationError(
+                {
+                    "date_range": (
+                        "start_date dan end_date wajib menggunakan format YYYY-MM-DD"
+                    )
+                }
+            )
+        if end_date < start_date:
+            raise serializers.ValidationError(
+                {"end_date": "end_date harus sama dengan atau setelah start_date"}
+            )
+        if (end_date - start_date).days > 62:
+            raise serializers.ValidationError(
+                {"date_range": "Rentang kalender maksimal 63 hari"}
+            )
+
+        dates = (
+            JadwalKegiatan.objects.filter(
+                bank_sampah=_bank_sampah(request),
+                mulai_pada__date__range=(start_date, end_date),
+            )
+            .order_by()
+            .dates("mulai_pada", "day", order="ASC")
+        )
+        return Response({"dates": [date.isoformat() for date in dates]})
 
     def perform_create(self, serializer: serializers.BaseSerializer[Any]) -> None:
         serializer.save(bank_sampah=_bank_sampah(self.request), dibuat_oleh=_user(self.request))
