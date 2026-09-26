@@ -38,6 +38,33 @@ from apps.organization.serializers import (  # noqa: F401
     BankSampahSerializer,
 )
 
+__all__ = [
+    "ApprovalDecisionSerializer",
+    "ApprovalLogSerializer",
+    "AuthUserSerializer",
+    "BankSampahApprovalListSerializer",
+    "BankSampahRegistrationSerializer",
+    "BankSampahSerializer",
+    "DetailTransaksiSerializer",
+    "GoogleAuthSerializer",
+    "InviteAcceptSerializer",
+    "JenisSampahSerializer",
+    "LogoutSerializer",
+    "NasabahApprovalLogSerializer",
+    "NasabahDetailSerializer",
+    "NasabahSerializer",
+    "RefreshTokenSerializer",
+    "SaldoSerializer",
+    "StatusSerializer",
+    "TeamMemberSerializer",
+    "TransactionCreateSerializer",
+    "TransactionDetailSerializer",
+    "TransactionItemInputSerializer",
+    "TransactionListSerializer",
+    "UserProfileSerializer",
+    "WATemplateSerializer",
+]
+
 
 class TransactionItemInputSerializer(serializers.Serializer[Any]):
     jenis_sampah_id = serializers.UUIDField(required=True)

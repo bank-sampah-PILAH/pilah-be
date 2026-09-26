@@ -49,6 +49,29 @@ from apps.reporting.views import (  # noqa: F401
     DashboardStatsView,
 )
 
+__all__ = [
+    "AcceptInviteView",
+    "AuthMeView",
+    "BankSampahMeView",
+    "CompleteProfileView",
+    "DashboardRecentTransactionsView",
+    "DashboardStatsView",
+    "GenerateInviteView",
+    "GoogleAuthView",
+    "GoogleOAuthCallbackView",
+    "GoogleOAuthStartView",
+    "JenisSampahViewSet",
+    "LogoutView",
+    "NasabahViewSet",
+    "RefreshTokenView",
+    "RegisterBankSampahView",
+    "SaldoView",
+    "SuperAdminBankSampahViewSet",
+    "TeamView",
+    "TransaksiViewSet",
+    "WATemplateView",
+]
+
 
 def bank_sampah_activity_media(request: HttpRequest, token: str) -> FileResponse:
     try:
