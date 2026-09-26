@@ -37,6 +37,7 @@ from api.serializers import (
     PencairanCreateSerializer,
     PencairanDetailSerializer,
     PencairanEditSerializer,
+    PencairanRevisiSerializer,
     RefreshTokenSerializer,
     SaldoSerializer,
     StatusSerializer,
@@ -627,6 +628,17 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
             _user(request), self.get_object(), serializer.validated_data
         )
         return Response(PencairanDetailSerializer(pencairan).data)
+
+    @action(detail=True, methods=["get"], url_path="riwayat")
+    def riwayat(self, request: Request, pk: str | None = None) -> Response:
+        pencairan = self.get_object()
+        revisi = pencairan.revisi.select_related("diubah_oleh").order_by("-versi")
+        return Response(
+            {
+                "pencairan": PencairanDetailSerializer(pencairan).data,
+                "revisi": PencairanRevisiSerializer(revisi, many=True).data,
+            }
+        )
 
 
 class SaldoView(APIView):

@@ -18,6 +18,7 @@ from api.models import (
     Nasabah,
     NasabahApprovalLog,
     Pencairan,
+    PencairanRevisi,
     Saldo,
     Transaksi,
     User,
@@ -109,6 +110,27 @@ class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
 
     def get_diperbarui(self, obj: Pencairan) -> bool:
         return obj.revisi.exists()
+
+
+class PencairanRevisiSerializer(serializers.ModelSerializer[Model]):
+    diubah_oleh = serializers.UUIDField(source="diubah_oleh.id")
+    diubah_oleh_nama = serializers.CharField(source="diubah_oleh.nama")
+
+    class Meta:
+        model = PencairanRevisi
+        fields = [
+            "versi",
+            "tanggal",
+            "nominal",
+            "metode",
+            "keterangan",
+            "saldo_sebelum",
+            "saldo_sesudah",
+            "alasan",
+            "diubah_oleh",
+            "diubah_oleh_nama",
+            "diubah_pada",
+        ]
 
 
 class BankSampahSerializer(serializers.ModelSerializer[Model]):
