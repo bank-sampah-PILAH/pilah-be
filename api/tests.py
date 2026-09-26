@@ -1371,7 +1371,7 @@ class APISpecTests(APITestCase):
                 self.assertEqual(response.status_code, 403)
 
     @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False)
-    @patch("api.services.google_id_token.verify_oauth2_token")
+    @patch("apps.identity.services.google_id_token.verify_oauth2_token")
     def test_google_profile_claim_cannot_assign_pilah_role(self, verify: Mock) -> None:
         verify.return_value = {
             "sub": "google-123",
@@ -1388,7 +1388,7 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.data["user"]["role"], User.Role.PENGELOLA)
 
     @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False)
-    @patch("api.services.google_id_token.verify_oauth2_token")
+    @patch("apps.identity.services.google_id_token.verify_oauth2_token")
     def test_google_profile_without_email_is_rejected(self, verify: Mock) -> None:
         verify.return_value = {"sub": "google-without-email", "name": "Missing Email"}
 
