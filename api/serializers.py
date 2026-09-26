@@ -21,9 +21,11 @@ from api.models import (
     Transaksi,
     User,
 )
-from api.validators import get_initials, normalize_indonesian_phone
+from api.validators import normalize_indonesian_phone
 
-# ponytail: compat shim — canonical home is apps.notify.serializers.
+# ponytail: compat shims — canonical homes are apps.*.serializers.
+from apps.identity.serializers import AuthUserSerializer  # noqa: F401
+from apps.ledger.serializers import TransactionListSerializer  # noqa: F401
 from apps.notify.serializers import WATemplateSerializer  # noqa: F401
 
 
@@ -132,26 +134,6 @@ class BankSampahRegistrationSerializer(serializers.Serializer[Any]):
         if not value:
             raise serializers.ValidationError("Foto kegiatan wajib diunggah sebagai bukti validasi")
         return validate_image_upload(value, "Foto kegiatan")
-
-
-class AuthUserSerializer(serializers.ModelSerializer[Model]):
-    bank_sampah_id = serializers.UUIDField(source="bank_sampah.id", allow_null=True)
-    bank_sampah_nama = serializers.CharField(source="bank_sampah.nama", allow_null=True)
-    bank_sampah_status = serializers.CharField(source="bank_sampah.status", allow_null=True)
-
-    class Meta:
-        model = User
-        fields = [
-            "id",
-            "nama",
-            "email",
-            "role",
-            "bank_sampah_id",
-            "bank_sampah_nama",
-            "bank_sampah_status",
-            "is_profile_complete",
-            "is_primary_pengelola",
-        ]
 
 
 class TeamMemberSerializer(serializers.ModelSerializer[Model]):
@@ -473,40 +455,6 @@ class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
             .filter(Q(tanggal__lt=obj.tanggal) | Q(tanggal=obj.tanggal, id__lte=obj.id))
             .aggregate(total=Coalesce(Sum("total_nilai"), Decimal("0.00")))["total"]
         )
-
-
-class TransactionListSerializer(serializers.ModelSerializer[Model]):
-    nasabah_id = serializers.UUIDField(source="nasabah.id")
-    nasabah_nama = serializers.CharField(source="nasabah.nama")
-    nasabah_inisial = serializers.SerializerMethodField()
-    jenis_sampah_utama = serializers.SerializerMethodField()
-    total_berat_kg = serializers.SerializerMethodField()
-    dicatat_oleh = serializers.UUIDField(source="dicatat_oleh.id")
-
-    class Meta:
-        model = Transaksi
-        fields = [
-            "id",
-            "nasabah_id",
-            "nasabah_nama",
-            "nasabah_inisial",
-            "jenis_sampah_utama",
-            "total_berat_kg",
-            "total_nilai",
-            "tanggal",
-            "status_wa",
-            "dicatat_oleh",
-        ]
-
-    def get_nasabah_inisial(self, obj: Any) -> Any:
-        return get_initials(obj.nasabah.nama)
-
-    def get_jenis_sampah_utama(self, obj: Any) -> Any:
-        item = max(obj.items.all(), key=lambda detail: detail.berat, default=None)
-        return item.nama_sampah_snapshot if item else None
-
-    def get_total_berat_kg(self, obj: Any) -> Any:
-        return sum((item.berat for item in obj.items.all()), Decimal(0))
 
 
 class SaldoSerializer(serializers.ModelSerializer[Model]):

@@ -46,7 +46,6 @@ from api.serializers import (
 from api.services import (
     ApprovalService,
     AuthService,
-    DashboardService,
     NasabahApprovalService,
     OnboardingService,
     TeamService,
@@ -54,9 +53,13 @@ from api.services import (
     TransactionService,
 )
 
-# ponytail: compat shims — canonical homes are apps.notify.*.
+# ponytail: compat shims — canonical homes are apps.notify.* and apps.reporting.*.
 from apps.notify.api import send_setoran_receipt
 from apps.notify.views import WATemplateView  # noqa: F401
+from apps.reporting.views import (  # noqa: F401
+    DashboardRecentTransactionsView,
+    DashboardStatsView,
+)
 
 
 def bank_sampah_activity_media(request: HttpRequest, token: str) -> FileResponse:
@@ -617,28 +620,6 @@ class SaldoView(APIView):
             return Response({"error": "Resource tidak ditemukan"}, status=404)
         saldo, _ = Saldo.objects.get_or_create(nasabah=nasabah)
         return Response(SaldoSerializer(saldo).data)
-
-
-class DashboardStatsView(APIView):
-    permission_classes = [IsActivePengelola]
-    serializer_class = AuthUserSerializer
-
-    def get(self, request: Request) -> Response:
-        return Response(DashboardService.stats(_user(request)))
-
-
-class DashboardRecentTransactionsView(APIView):
-    permission_classes = [IsActivePengelola]
-    serializer_class = TransactionListSerializer
-
-    def get(self, request: Request) -> Response:
-        qs = (
-            Transaksi.objects.filter(bank_sampah=_bank_sampah(request))
-            .select_related("nasabah", "dicatat_oleh")
-            .prefetch_related("items")
-            .order_by("-tanggal")[:3]
-        )
-        return Response({"transactions": TransactionListSerializer(qs, many=True).data})
 
 
 class TeamView(APIView):
