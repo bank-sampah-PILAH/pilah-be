@@ -12,7 +12,7 @@ from django.utils.http import urlencode
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -21,6 +21,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from api.models import BankSampah, JenisSampah, Nasabah, Pencairan, Saldo, Transaksi, User
 from api.permissions import (
     IsActivePengelola,
+    IsActivePengelolaOrNasabah,
     IsPengelola,
     IsPrimaryPengelola,
     IsRegistrationRole,
@@ -647,10 +648,19 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
     permission_classes = [IsActivePengelola]
     serializer_class = PencairanDetailSerializer
 
+    def get_permissions(self) -> list[BasePermission]:
+        # Recording stays pengurus-only; nasabah may read their own riwayat.
+        if self.action in ("list", "retrieve"):
+            return [IsActivePengelolaOrNasabah()]
+        return [IsActivePengelola()]
+
     def get_queryset(self) -> QuerySet[Pencairan]:
-        qs = Pencairan.objects.filter(bank_sampah=_bank_sampah(self.request)).select_related(
-            "nasabah", "bank_sampah", "dicatat_oleh"
-        )
+        user = _user(self.request)
+        if user.role == User.Role.NASABAH:
+            qs = Pencairan.objects.filter(nasabah__user=user)
+        else:
+            qs = Pencairan.objects.filter(bank_sampah=_bank_sampah(self.request))
+        qs = qs.select_related("nasabah", "bank_sampah", "dicatat_oleh")
         nasabah_id = self.request.query_params.get("nasabah_id")
         if nasabah_id:
             qs = qs.filter(nasabah_id=nasabah_id)

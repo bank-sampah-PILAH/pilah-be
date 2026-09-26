@@ -18,6 +18,13 @@ class IsPengelola(BasePermission):
         return request.user.is_authenticated and request.user.role == User.Role.PENGELOLA
 
 
+class IsNasabah(BasePermission):
+    message = "Endpoint ini hanya untuk nasabah"
+
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        return request.user.is_authenticated and request.user.role == User.Role.NASABAH
+
+
 class IsRegistrationRole(BasePermission):
     message = "Endpoint ini hanya untuk peran yang sedang mendaftar"
 
@@ -39,6 +46,15 @@ class IsActivePengelola(IsPengelola):
             and bank is not None
             and bank.status == BankSampah.Status.ACTIVE
             and bank.is_active
+        )
+
+
+class IsActivePengelolaOrNasabah(BasePermission):
+    message = "Endpoint ini hanya untuk pengelola aktif atau nasabah"
+
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        return IsActivePengelola().has_permission(request, view) or IsNasabah().has_permission(
+            request, view
         )
 
 
