@@ -10,6 +10,7 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework import serializers
 
+from api.kalkulasi import bulatkan_rupiah
 from api.models import (
     BankSampah,
     BankSampahApprovalLog,
@@ -414,9 +415,6 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
 class TransactionItemInputSerializer(serializers.Serializer[Any]):
     jenis_sampah_id = serializers.UUIDField(required=True)
     berat = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal("0.001"))
-    harga_per_kg = serializers.DecimalField(
-        max_digits=11, decimal_places=2, min_value=Decimal("0.01"), required=False
-    )
 
 
 class TransactionCreateSerializer(serializers.Serializer[Any]):
@@ -428,6 +426,22 @@ class TransactionCreateSerializer(serializers.Serializer[Any]):
         if not value:
             raise serializers.ValidationError("Minimal 1 item setoran diperlukan")
         return value
+
+    def validate(self, attrs: Any) -> Any:
+        # Harga hanya boleh berasal dari master jenis sampah. Menerima harga
+        # dari client membuat nilai setoran bisa diatur dari luar sistem, jadi
+        # request yang masih mengirimnya ditolak, bukan diabaikan diam-diam.
+        raw_items = self.initial_data.get("items")
+        if isinstance(raw_items, list):
+            item_errors: list[dict[str, list[str]]] = [
+                {"harga_per_kg": ["Harga diambil dari master jenis sampah dan tidak dapat dikirim"]}
+                if isinstance(item, dict) and "harga_per_kg" in item
+                else {}
+                for item in raw_items
+            ]
+            if any(item_errors):
+                raise serializers.ValidationError({"items": item_errors})
+        return attrs
 
 
 class DetailTransaksiSerializer(serializers.ModelSerializer[Model]):
@@ -470,11 +484,15 @@ class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
         ]
 
     def get_saldo_setelah_transaksi(self, obj: Any) -> Any:
-        return (
+        riwayat = (
             Transaksi.objects.filter(bank_sampah=obj.bank_sampah, nasabah=obj.nasabah)
             .filter(Q(tanggal__lt=obj.tanggal) | Q(tanggal=obj.tanggal, id__lte=obj.id))
             .aggregate(total=Coalesce(Sum("total_nilai"), Decimal("0.00")))["total"]
         )
+        # Transaksi warisan PILAH 1.0 bisa bersen, sedangkan saldo tersimpan
+        # sudah dirapikan. Tanpa pembulatan di sini riwayat akan tampak lebih
+        # besar daripada saldo yang sebenarnya dimiliki nasabah.
+        return bulatkan_rupiah(riwayat)
 
 
 class TransactionListSerializer(serializers.ModelSerializer[Model]):

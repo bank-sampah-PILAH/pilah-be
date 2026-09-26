@@ -24,6 +24,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from api.kalkulasi import bulatkan_rupiah, harga_berlaku, hitung_subtotal, total_setoran
 from api.models import (
     BankSampah,
     BankSampahApprovalLog,
@@ -563,7 +564,7 @@ class TransactionService:
             catatan=payload.get("catatan") or None,
         )
 
-        total_nilai = Decimal("0.00")
+        subtotal_items: list[Decimal] = []
         for index, item_payload in enumerate(payload["items"]):
             jenis = JenisSampah.objects.filter(
                 id=item_payload["jenis_sampah_id"], bank_sampah=bank, is_active=True
@@ -576,9 +577,9 @@ class TransactionService:
                         ]
                     }
                 )
-            harga = item_payload.get("harga_per_kg") or jenis.harga_per_kg
+            harga = harga_berlaku(jenis)
             berat = item_payload["berat"]
-            subtotal = (harga * berat).quantize(Decimal("0.01"))
+            subtotal = hitung_subtotal(harga, berat)
             DetailTransaksi.objects.create(
                 transaksi=transaksi,
                 jenis_sampah=jenis,
@@ -588,11 +589,13 @@ class TransactionService:
                 berat=berat,
                 subtotal=subtotal,
             )
-            total_nilai += subtotal
+            subtotal_items.append(subtotal)
 
+        total_nilai = total_setoran(subtotal_items)
         transaksi.total_nilai = total_nilai
         transaksi.save(update_fields=["total_nilai"])
-        saldo.total_saldo += total_nilai
+        # Saldo warisan PILAH 1.0 bisa menyimpan sen; rapikan saat disentuh.
+        saldo.total_saldo = bulatkan_rupiah(saldo.total_saldo + total_nilai)
         saldo.save(update_fields=["total_saldo", "updated_at"])
         return transaksi
 
@@ -1072,7 +1075,9 @@ def _saldo_after_by_transaction(queryset: QuerySet[Transaksi]) -> dict[UUID, Dec
     for trans in transactions:
         running_balances[trans.nasabah_id] += trans.total_nilai
         if trans.id in target_ids:
-            saldo_after[trans.id] = running_balances[trans.nasabah_id]
+            # Aturan yang sama dengan respons detail: riwayat mengikuti saldo
+            # tersimpan yang sudah dibulatkan, bukan jumlah mentah bersen.
+            saldo_after[trans.id] = bulatkan_rupiah(running_balances[trans.nasabah_id])
 
     return saldo_after
 

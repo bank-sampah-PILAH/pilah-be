@@ -21,10 +21,12 @@ from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from api.models import (
     BankSampah,
     BankSampahApprovalLog,
+    DetailTransaksi,
     JenisSampah,
     Nasabah,
     NasabahApprovalLog,
     Saldo,
+    Transaksi,
     User,
 )
 from api.serializers import BankSampahApprovalListSerializer
@@ -1642,3 +1644,142 @@ class ProtectedMediaTests(TestCase):
         response = self.client.get("/media/activity/not-a-valid-token")
 
         self.assertEqual(response.status_code, 404)
+
+
+class KalkulasiSetoranTests(APITestCase):
+    """Nilai setoran memakai harga master dan dibulatkan ke bawah ke rupiah penuh."""
+
+    def setUp(self) -> None:
+        self.bank = BankSampah.objects.create(
+            nama="Bank Sampah BTH", alamat="Depok", kota="Depok", no_hp_pic="+628123456789"
+        )
+        self.user = User.objects.create_user(
+            email="sari@example.com",
+            nama="Ibu Sari",
+            bank_sampah=self.bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        refresh = RefreshToken.for_user(self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        self.nasabah = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Budi Santoso",
+            no_hp="+628123456789",
+            alamat="Jl. Mawar No. 12",
+        )
+        Saldo.objects.create(nasabah=self.nasabah)
+        self.jenis = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="PLS-001",
+            nama_sampah="Plastik PET",
+            kategori=JenisSampah.Kategori.PLASTIK,
+            harga_per_kg=Decimal("3333.00"),
+        )
+
+    def _setor(self, items: list[dict[str, Any]]) -> Any:
+        return self.client.post(
+            "/api/v1/transaksi",
+            {"nasabah_id": str(self.nasabah.id), "items": items},
+            format="json",
+        )
+
+    def test_subtotal_dibulatkan_ke_bawah_ke_rupiah_penuh(self) -> None:
+        # 2,345 kg x Rp 3.333 = Rp 7.815,885 -> dibulatkan ke bawah jadi Rp 7.815
+        response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "2.345"}])
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["items"][0]["subtotal"], "7815.00")
+        self.assertEqual(response.data["total_nilai"], "7815.00")
+        self.assertEqual(response.data["saldo_setelah_transaksi"], Decimal("7815.00"))
+
+    def test_harga_dari_client_ditolak(self) -> None:
+        response = self._setor(
+            [{"jenis_sampah_id": str(self.jenis.id), "berat": "2.000", "harga_per_kg": "9999"}]
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data["errors"]["items"][0]["harga_per_kg"],
+            ["Harga diambil dari master jenis sampah dan tidak dapat dikirim"],
+        )
+
+    def test_saldo_lama_bersen_ikut_dibulatkan(self) -> None:
+        # Saldo warisan PILAH 1.0 masih menyimpan sen; setoran baru merapikannya.
+        saldo = Saldo.objects.get(nasabah=self.nasabah)
+        saldo.total_saldo = Decimal("100.75")
+        saldo.save(update_fields=["total_saldo"])
+
+        response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "1.000"}])
+
+        self.assertEqual(response.status_code, 201)
+        # Rp 100,75 + Rp 3.333 = Rp 3.433,75 -> saldo tersimpan jadi Rp 3.433
+        saldo.refresh_from_db()
+        self.assertEqual(saldo.total_saldo, Decimal("3433.00"))
+
+        endpoint = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
+        self.assertEqual(endpoint.data["total_saldo"], "3433.00")
+
+    def test_harga_master_bersen_dikalikan_utuh_sebelum_dibulatkan(self) -> None:
+        # Kolom harga master menerima dua desimal. Rp 3.333,99/kg x 0,300 kg =
+        # Rp 1.000,197, jadi hasilnya Rp 1.000 — bukan Rp 999 seperti yang
+        # terjadi bila harganya dipotong lebih dulu.
+        self.jenis.harga_per_kg = Decimal("3333.99")
+        self.jenis.save(update_fields=["harga_per_kg"])
+
+        response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "0.300"}])
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["items"][0]["subtotal"], "1000.00")
+        # BR-03: harga yang benar-benar dipakai ikut tersimpan pada transaksi.
+        detail = DetailTransaksi.objects.get(transaksi_id=response.data["id"])
+        self.assertEqual(detail.harga_snapshot, Decimal("3333.99"))
+
+    def test_saldo_riwayat_ikut_dibulatkan(self) -> None:
+        # Nasabah warisan PILAH 1.0: saldo dan transaksi lamanya bersen. Saldo
+        # tersimpan dirapikan saat disentuh, jadi riwayat tidak boleh
+        # menampilkan angka yang lebih besar daripada saldo itu.
+        saldo = Saldo.objects.get(nasabah=self.nasabah)
+        saldo.total_saldo = Decimal("100.75")
+        saldo.save(update_fields=["total_saldo"])
+        Transaksi.objects.create(
+            nasabah=self.nasabah,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.user,
+            total_nilai=Decimal("100.75"),
+        )
+
+        response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "1.000"}])
+        self.assertEqual(response.status_code, 201)
+
+        # Rp 100,75 + Rp 3.333 = Rp 3.433,75; saldo tersimpan Rp 3.433.
+        saldo.refresh_from_db()
+        self.assertEqual(saldo.total_saldo, Decimal("3433.00"))
+        self.assertEqual(response.data["saldo_setelah_transaksi"], Decimal("3433.00"))
+
+        detail = self.client.get(f"/api/v1/transaksi/{response.data['id']}")
+        self.assertEqual(detail.data["saldo_setelah_transaksi"], Decimal("3433.00"))
+
+    def test_saldo_riwayat_di_export_ikut_dibulatkan(self) -> None:
+        saldo = Saldo.objects.get(nasabah=self.nasabah)
+        saldo.total_saldo = Decimal("100.75")
+        saldo.save(update_fields=["total_saldo"])
+        Transaksi.objects.create(
+            nasabah=self.nasabah,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.user,
+            total_nilai=Decimal("100.75"),
+        )
+        self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "1.000"}])
+
+        export = self.client.get("/api/v1/transaksi/export?periode=bulan_ini")
+        self.assertEqual(export.status_code, 200)
+        workbook = load_workbook(BytesIO(export.content), data_only=False)
+        riwayat = workbook["Riwayat Transaksi"]
+        # Dua baris judul dan satu baris kosong mendahului header, jadi barisnya
+        # dicari, bukan dipatok.
+        baris_header = next(row for row in riwayat.iter_rows() if row[0].value == "No")
+        kolom_saldo = [cell.value for cell in baris_header].index("Saldo Setelah Transaksi (Rp)")
+        baris_data = riwayat[baris_header[0].row + 1]
+        self.assertEqual(baris_data[kolom_saldo].value, Decimal("3433.00"))
