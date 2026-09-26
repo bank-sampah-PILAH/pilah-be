@@ -8,6 +8,7 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.models import BankSampah, JenisSampah, Nasabah, Saldo, User
+from api.services import BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI
 
 
 class PencairanEditTests(APITestCase):
@@ -175,3 +176,38 @@ class PencairanEditTests(APITestCase):
                 self.assertEqual(response.status_code, 422, response.data)
                 self.assertEqual(response.data["errors"]["nominal"], [message])
         self.assertEqual(self._saldo(), "265600.00")
+
+    def test_edit_tanggal_stays_within_limit_of_original_tanggal(self) -> None:
+        awal = timezone.now() - timedelta(days=1)
+        pencairan = self._catat(tanggal=awal.isoformat())
+        batas = timedelta(days=BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI)
+        terlalu_awal = (
+            "Tanggal pencairan hanya bisa dimundurkan maksimal "
+            f"{BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI} hari dari tanggal awal"
+        )
+
+        cases = [
+            (
+                timezone.now() + timedelta(hours=1),
+                422,
+                "Tanggal pencairan tidak boleh di masa depan",
+            ),
+            (awal - batas - timedelta(minutes=1), 422, terlalu_awal),
+            (awal - batas + timedelta(days=2), 200, None),
+            # Measured from the original tanggal, so repeated edits cannot creep back.
+            (awal - batas - timedelta(minutes=1), 422, terlalu_awal),
+            (awal - batas, 200, None),
+        ]
+        for tanggal, status, message in cases:
+            with self.subTest(tanggal=tanggal):
+                response = self._edit(
+                    pencairan["id"], {"tanggal": tanggal.isoformat(), "alasan": "Salah tanggal"}
+                )
+
+                self.assertEqual(response.status_code, status, response.data)
+                if message:
+                    self.assertEqual(response.data["errors"]["tanggal"], [message])
+                else:
+                    self.assertEqual(
+                        response.data["tanggal"], tanggal.isoformat().replace("+00:00", "Z")
+                    )
