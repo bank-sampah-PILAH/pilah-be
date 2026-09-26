@@ -23,7 +23,7 @@ from api.models import (
     Transaksi,
     User,
 )
-from api.services import BalanceService
+from api.services import BalanceService, PencairanService
 from api.validators import get_initials, normalize_indonesian_phone
 
 
@@ -87,6 +87,7 @@ class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
     dicatat_oleh = serializers.UUIDField(source="dicatat_oleh.id")
     dicatat_oleh_nama = serializers.CharField(source="dicatat_oleh.nama")
     diperbarui = serializers.SerializerMethodField()
+    tanggal_edit_minimum = serializers.SerializerMethodField()
 
     class Meta:
         model = Pencairan
@@ -105,11 +106,17 @@ class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
             "saldo_sebelum",
             "saldo_sesudah",
             "diperbarui",
+            "tanggal_edit_minimum",
             "created_at",
         ]
 
     def get_diperbarui(self, obj: Pencairan) -> bool:
         return obj.revisi.exists()
+
+    def get_tanggal_edit_minimum(self, obj: Pencairan) -> str:
+        return serializers.DateTimeField().to_representation(
+            PencairanService.tanggal_edit_minimum(obj)
+        )
 
 
 class PencairanRevisiSerializer(serializers.ModelSerializer[Model]):
