@@ -371,6 +371,313 @@ class APISpecTests(APITestCase):
             duplicate_update.data["errors"]["no_hp"], ["Nomor HP nasabah sudah digunakan"]
         )
 
+    def test_nasabah_create_with_email(self) -> None:
+        created = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "Budi@Example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.data["email"], "budi@example.com")
+        self.assertTrue(Saldo.objects.filter(nasabah_id=created.data["id"]).exists())
+
+    def test_nasabah_create_without_email_still_works(self) -> None:
+        created = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertIsNone(created.data["email"])
+
+    def test_nasabah_duplicate_email_same_bank_returns_validation_error(self) -> None:
+        first = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(first.status_code, 201)
+
+        duplicate = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0002",
+                "nama": "Dewi Lestari",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1992-02-02",
+                "no_hp": "081999999999",
+                "alamat": "Jl. Melati No. 7",
+                "email": "Budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(duplicate.status_code, 422)
+        self.assertEqual(
+            duplicate.data["errors"]["email"],
+            ["Email sudah terdaftar sebagai nasabah di bank sampah ini"],
+        )
+
+    def test_nasabah_duplicate_email_other_bank_returns_validation_error(self) -> None:
+        created = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+
+        other_bank = BankSampah.objects.create(
+            nama="Bank Sampah Lain", alamat="Jakarta", kota="Jakarta", no_hp_pic="+628123456788"
+        )
+        other_user = User.objects.create_user(
+            email="pengelola-lain@example.com",
+            nama="Pengelola Lain",
+            bank_sampah=other_bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        refresh = RefreshToken.for_user(other_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        duplicate = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NSL-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(duplicate.status_code, 422)
+        self.assertEqual(
+            duplicate.data["errors"]["email"],
+            ["Email sudah terdaftar sebagai nasabah di bank sampah lain"],
+        )
+
+    def test_nasabah_email_on_update(self) -> None:
+        first = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(first.status_code, 201)
+
+        second = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0002",
+                "nama": "Dewi Lestari",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1992-02-02",
+                "no_hp": "081999999999",
+                "alamat": "Jl. Melati No. 7",
+                "email": "dewi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(second.status_code, 201)
+
+        stolen = self.client.put(
+            f"/api/v1/nasabah/{second.data['id']}",
+            {
+                "kode": "NAS-0002",
+                "nama": "Dewi Lestari",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1992-02-02",
+                "no_hp": "081999999999",
+                "alamat": "Jl. Melati No. 7",
+                "email": "budi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(stolen.status_code, 422)
+        self.assertEqual(
+            stolen.data["errors"]["email"],
+            ["Email sudah terdaftar sebagai nasabah di bank sampah ini"],
+        )
+
+        kept = self.client.put(
+            f"/api/v1/nasabah/{second.data['id']}",
+            {
+                "kode": "NAS-0002",
+                "nama": "Dewi Lestari",
+                "jenis_kelamin": "perempuan",
+                "tanggal_lahir": "1992-02-02",
+                "no_hp": "081999999999",
+                "alamat": "Jl. Melati No. 7",
+                "email": "dewi@example.com",
+            },
+            format="json",
+        )
+        self.assertEqual(kept.status_code, 200)
+
+    def test_nasabah_invalid_email_format_returns_validation_error(self) -> None:
+        response = self.client.post(
+            "/api/v1/nasabah",
+            {
+                "kode": "NAS-0001",
+                "nama": "Budi Santoso",
+                "jenis_kelamin": "laki-laki",
+                "tanggal_lahir": "1990-01-01",
+                "no_hp": "081234567890",
+                "alamat": "Jl. Anggrek No. 3",
+                "email": "bukan-email",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertTrue(response.data["errors"]["email"])
+
+    def test_google_login_with_nasabah_email_prefills_profile(self) -> None:
+        self.client.credentials()
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Budi Santoso",
+            jenis_kelamin="laki-laki",
+            tanggal_lahir="1990-01-01",
+            alamat="Jl. Anggrek No. 3",
+            no_hp="081234567890",
+            email="budi@example.com",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/google", {"id_token": "dev:budi@example.com:B"}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+
+        user = User.objects.get(email="budi@example.com")
+        self.assertEqual(user.nama, "Budi Santoso")
+        self.assertEqual(user.no_hp, "081234567890")
+        self.assertTrue(user.is_profile_complete)
+        self.assertEqual(response.data["next_step"], "register_bank_sampah")
+
+    def test_google_login_does_not_overwrite_existing_profile(self) -> None:
+        self.client.credentials()
+        User.objects.create_user(
+            email="lengkap@example.com",
+            nama="Nama Lama",
+            no_hp="081111111111",
+            is_profile_complete=True,
+        )
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Nama Nasabah",
+            alamat="Jl. Anggrek No. 3",
+            no_hp="081234567890",
+            email="lengkap@example.com",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev:lengkap@example.com:Baru"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        user = User.objects.get(email="lengkap@example.com")
+        self.assertEqual(user.nama, "Nama Lama")
+        self.assertEqual(user.no_hp, "081111111111")
+
+    def test_google_login_prefills_nama_from_nasabah_when_existing_name_empty(
+        self,
+    ) -> None:
+        """P2 regression: the token fallback must not block the nasabah name."""
+        self.client.credentials()
+        User.objects.create_user(
+            email="kosong@example.com",
+            nama="",
+            is_profile_complete=False,
+        )
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Nama Nasabah",
+            alamat="Jl. Anggrek No. 3",
+            no_hp="081234567890",
+            email="kosong@example.com",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/google", {"id_token": "dev:kosong@example.com:K"}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+
+        user = User.objects.get(email="kosong@example.com")
+        self.assertEqual(user.nama, "Nama Nasabah")
+
+    def test_google_login_partial_nasabah_keeps_profile_incomplete(self) -> None:
+        """P1 regression: a nasabah record lacking jenis_kelamin/tanggal_lahir
+        must not mark the profile complete — /onboarding/profile would reject
+        the follow-up with 'Profil sudah lengkap'."""
+        self.client.credentials()
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Budi Sebagian",
+            alamat="Jl. Anggrek No. 3",
+            no_hp="081234567890",
+            email="sebagian@example.com",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev:sebagian@example.com:S"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        user = User.objects.get(email="sebagian@example.com")
+        self.assertEqual(user.nama, "Budi Sebagian")
+        self.assertEqual(user.no_hp, "081234567890")
+        self.assertFalse(user.jenis_kelamin)
+        self.assertIsNone(user.tanggal_lahir)
+        self.assertFalse(user.is_profile_complete)
+        self.assertEqual(response.data["next_step"], "complete_profile")
+
     def test_jenis_sampah_and_transaction_update_saldo(self) -> None:
         nasabah = Nasabah.objects.create(
             bank_sampah=self.bank,
@@ -653,16 +960,16 @@ class APISpecTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["token_type"], "Bearer")
-        self.assertTrue(response.data["is_new_user"])
-        self.assertIsNone(response.data["user"]["bank_sampah_id"])
-        self.assertEqual(response.data["next_step"], "complete_profile")
+        self.assertTrue(response.data["registration_required"])
+        self.assertIn("registration_token", response.data)
+        self.assertFalse(User.objects.filter(email="new@example.com").exists())
 
+    @override_settings(PILAH_SUPERADMIN_EMAILS=("super@example.com",))
     def test_onboarding_superadmin_approval_and_invite_flow(self) -> None:
         self.client.credentials()
         login = self.client.post(
             "/api/v1/auth/google",
-            {"id_token": "dev:onboard@example.com:Onboard User"},
+            {"id_token": "dev-pengelola:onboard@example.com:Onboard User"},
             format="json",
         )
         self.assertEqual(login.status_code, 200)
@@ -771,7 +1078,7 @@ class APISpecTests(APITestCase):
         self.client.credentials()
         invited_login = self.client.post(
             "/api/v1/auth/google",
-            {"id_token": "dev:invited@example.com:Invited User"},
+            {"id_token": "dev-pengelola:invited@example.com:Invited User"},
             format="json",
         )
         self.assertEqual(invited_login.status_code, 200)
@@ -921,6 +1228,7 @@ class APISpecTests(APITestCase):
             ).exists()
         )
 
+    @override_settings(PILAH_SUPERADMIN_EMAILS=("root@example.com",))
     def test_superadmin_cannot_use_pengelola_endpoints(self) -> None:
         self.client.credentials()
         response = self.client.post(
@@ -938,6 +1246,7 @@ class APISpecTests(APITestCase):
         approvals = self.client.get("/api/v1/superadmin/bank-sampah")
         self.assertEqual(approvals.status_code, 200)
 
+    @override_settings(PILAH_SUPERADMIN_EMAILS=("queue-admin@example.com",))
     def test_superadmin_bank_queue_sorts_oldest_first(self) -> None:
         self.client.credentials()
         superadmin = User.objects.create_user(
@@ -1017,8 +1326,8 @@ class APISpecTests(APITestCase):
 
     def test_new_role_logins_return_role_specific_states(self) -> None:
         expected_states = {
-            "dev-pengelola-induk": "pengelola_induk_dashboard",
-            "dev-nasabah": "nasabah_dashboard",
+            "dev-pengelola-induk": "complete_profile",
+            "dev-nasabah": "complete_profile",
         }
         for index, (token_prefix, state) in enumerate(expected_states.items(), start=1):
             with self.subTest(role=token_prefix):
@@ -1048,7 +1357,7 @@ class APISpecTests(APITestCase):
                 self.assertEqual(response.status_code, 200, response.data)
                 self.assertEqual(response.data["user"]["role"], role)
                 self.assertEqual(AccessToken(response.data["access_token"])["role"], role)
-                self.assertEqual(response.data["next_step"], f"{role}_dashboard")
+                self.assertEqual(response.data["next_step"], "complete_profile")
 
     def test_new_roles_do_not_inherit_pengelola_endpoint_access(self) -> None:
         for role in (User.Role.PENGELOLA_INDUK, User.Role.NASABAH):
@@ -1073,6 +1382,7 @@ class APISpecTests(APITestCase):
         verify.return_value = {
             "sub": "google-123",
             "email": "claim@example.com",
+            "email_verified": True,
             "name": "Claim User",
             "role": User.Role.SUPERADMIN,
         }
@@ -1082,7 +1392,8 @@ class APISpecTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data["user"]["role"], User.Role.PENGELOLA)
+        self.assertTrue(response.data["registration_required"])
+        self.assertFalse(User.objects.filter(email="claim@example.com").exists())
 
     @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False)
     @patch("api.services.google_id_token.verify_oauth2_token")

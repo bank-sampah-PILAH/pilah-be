@@ -18,8 +18,13 @@ flyctl secrets set --app pilah-be-staging \
   DB_NAME='neondb' \
   DB_USER='neondb_owner' \
   DB_PASSWORD='change-me' \
-  DB_HOST='ep-example.ap-southeast-1.aws.neon.tech'
+  DB_HOST='ep-example.ap-southeast-1.aws.neon.tech' \
+  PILAH_SUPERADMIN_EMAILS='superadmin@example.com'
 ```
+
+Set `PILAH_SUPERADMIN_EMAILS` to the comma-separated email addresses authorized
+as Superadmins. This setting is required for Superadmin login and API access in
+staging.
 
 Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, and any
 WhatsApp/Twilio secrets the staging environment needs with the same command.
@@ -30,20 +35,26 @@ https://pilah-be-staging.fly.dev/api/v1/auth/google/callback
 ```
 
 GitHub's `staging` environment must contain an app-scoped `FLY_API_TOKEN`.
-It should also contain the five non-secret variables used by the seed workflow:
+It should also contain the non-secret variables used by the seed workflow:
 
 ```text
-PILAH_SEED_OPERATOR_EMAIL
+PILAH_SEED_PENGURUS_EMAIL
 PILAH_SEED_CUSTOMER_EMAIL
 PILAH_SEED_CUSTOMER_TWO_EMAIL
 PILAH_SEED_SUPERADMIN_EMAIL
-PILAH_SEED_PENDING_OPERATOR_EMAIL
+PILAH_SEED_PENDING_PENGURUS_EMAIL
+PILAH_SEED_INDUK_EMAIL
 ```
 
-These addresses should be Google test accounts already listed on the OAuth
-consent screen. Staging uses real Google ID tokens; `PILAH_ALLOW_FAKE_GOOGLE_TOKEN`
-must remain `false` and the mobile staging build does not show the local demo
-login.
+`PILAH_SEED_INDUK_EMAIL` is optional; it defaults to
+`induk.demo@example.com` when unset.
+
+The old `PILAH_SEED_OPERATOR_EMAIL` and
+`PILAH_SEED_PENDING_OPERATOR_EMAIL` variables remain temporary fallbacks so
+existing GitHub environment settings keep working. These addresses should be
+Google test accounts already listed on the OAuth consent screen. Staging uses
+real Google ID tokens; `PILAH_ALLOW_FAKE_GOOGLE_TOKEN` must remain `false`, and
+the mobile staging build does not show the local demo login.
 
 ## Operations
 
