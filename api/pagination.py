@@ -1,7 +1,2 @@
-from rest_framework.pagination import PageNumberPagination
-
-
-class StandardPagination(PageNumberPagination):
-    page_size = 20
-    page_size_query_param = "page_size"
-    max_page_size = 100
+# ponytail: compat shim — canonical home is shared_kernel.pagination.
+from shared_kernel.pagination import StandardPagination  # noqa: F401
