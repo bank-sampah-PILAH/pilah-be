@@ -19,7 +19,13 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.models import BankSampah, JenisSampah, Nasabah, Saldo, Transaksi, User
-from api.permissions import IsActivePengelola, IsPengelola, IsPrimaryPengelola, IsSuperAdmin
+from api.permissions import (
+    IsActivePengelola,
+    IsPengelola,
+    IsPrimaryPengelola,
+    IsRegistrationRole,
+    IsSuperAdmin,
+)
 from api.serializers import (
     ApprovalDecisionSerializer,
     ApprovalLogSerializer,
@@ -28,9 +34,11 @@ from api.serializers import (
     BankSampahRegistrationSerializer,
     BankSampahSerializer,
     GoogleAuthSerializer,
+    GoogleRegistrationSerializer,
     InviteAcceptSerializer,
     JenisSampahSerializer,
     LogoutSerializer,
+    NasabahApprovalLogSerializer,
     NasabahDetailSerializer,
     NasabahSerializer,
     RefreshTokenSerializer,
@@ -46,7 +54,9 @@ from api.serializers import (
 from api.services import (
     ApprovalService,
     AuthService,
+    AuthServiceError,
     DashboardService,
+    NasabahApprovalService,
     OnboardingService,
     TeamService,
     TransactionFilterService,
@@ -84,6 +94,10 @@ def _bank_sampah(request: Request) -> BankSampah:
     return bank
 
 
+def _auth_service_error_response(error: AuthServiceError) -> Response:
+    return Response({"error": str(error), "code": error.code}, status=error.status_code)
+
+
 class GoogleAuthView(APIView):
     permission_classes = [AllowAny]
     serializer_class = GoogleAuthSerializer
@@ -94,8 +108,28 @@ class GoogleAuthView(APIView):
             return Response({"errors": {"id_token": ["Google ID Token wajib diisi"]}}, status=422)
         try:
             return Response(AuthService.login_with_google(token))
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
         except Exception:
             return Response({"error": "ID Token invalid atau expired"}, status=401)
+
+
+class GoogleRegistrationView(APIView):
+    permission_classes = [AllowAny]
+    serializer_class = GoogleRegistrationSerializer
+
+    def post(self, request: Request) -> Response:
+        serializer = GoogleRegistrationSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({"errors": serializer.errors}, status=422)
+        try:
+            payload, created = AuthService.register_with_google(
+                serializer.validated_data["registration_token"],
+                serializer.validated_data["role"],
+            )
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
+        return Response(payload, status=201 if created else 200)
 
 
 class GoogleOAuthStartView(APIView):
@@ -204,11 +238,14 @@ class RefreshTokenView(APIView):
             access = refresh.access_token
             user = User.objects.filter(id=refresh["user_id"]).first()
             if user:
+                AuthService._enforce_superadmin_allowlist(user, user.email)
                 if user.bank_sampah_id:
                     access["bank_sampah_id"] = str(user.bank_sampah_id)
                 access["role"] = user.role
                 access["email"] = user.email
             return Response({"access_token": str(access), "expires_in": 86400})
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
         except Exception:
             return Response({"error": "Refresh token invalid / expired"}, status=401)
 
@@ -236,7 +273,7 @@ class AuthMeView(APIView):
 
 
 class CompleteProfileView(APIView):
-    permission_classes = [IsPengelola]
+    permission_classes = [IsRegistrationRole]
     serializer_class = UserProfileSerializer
 
     def put(self, request: Request) -> Response:
@@ -322,18 +359,30 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         search = self.request.query_params.get("search", "")
         status_filter = self.request.query_params.get("status", "aktif")
         if self.action == "list" and len(search) >= 2:
-            qs = qs.filter(Q(nama__icontains=search) | Q(no_hp__icontains=search))
+            qs = qs.filter(
+                Q(nama__icontains=search) | Q(no_hp__icontains=search) | Q(email__icontains=search)
+            )
         if self.action == "list":
             if status_filter == "aktif":
-                qs = qs.filter(is_active=True)
+                qs = qs.filter(is_active=True, status=Nasabah.Status.APPROVED)
             elif status_filter == "tidak_aktif":
-                qs = qs.filter(is_active=False)
+                qs = qs.filter(is_active=False, status=Nasabah.Status.APPROVED)
+            elif status_filter == "menunggu":
+                qs = qs.filter(status=Nasabah.Status.PENDING)
+            elif status_filter == "ditolak":
+                qs = qs.filter(status=Nasabah.Status.REJECTED)
         return qs.order_by("nomor")
 
     def get_serializer_class(self) -> type[NasabahSerializer | NasabahDetailSerializer]:
         if self.action == "retrieve":
             return NasabahDetailSerializer
         return NasabahSerializer
+
+    @staticmethod
+    def _email_duplicate_error(nasabah: Nasabah, bank_id: Any) -> str:
+        if nasabah.bank_sampah_id == bank_id:
+            return "Email sudah terdaftar sebagai nasabah di bank sampah ini"
+        return "Email sudah terdaftar sebagai nasabah di bank sampah lain"
 
     def create(self, request: Request) -> Response:
         serializer = self.get_serializer(data=request.data)
@@ -345,6 +394,13 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             return Response({"errors": {"kode": ["ID Nasabah sudah digunakan"]}}, status=422)
         if Nasabah.objects.filter(bank_sampah=bank, no_hp=no_hp).exists():
             return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
+        email = serializer.validated_data.get("email")
+        existing_by_email = Nasabah.objects.filter(email=email).first() if email else None
+        if existing_by_email:
+            return Response(
+                {"errors": {"email": [self._email_duplicate_error(existing_by_email, bank.id)]}},
+                status=422,
+            )
         nasabah = serializer.save(
             bank_sampah=bank,
         )
@@ -376,6 +432,15 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             .exists()
         ):
             return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
+        email = serializer.validated_data.get("email")
+        existing_by_email = (
+            Nasabah.objects.filter(email=email).exclude(id=instance.id).first() if email else None
+        )
+        if existing_by_email:
+            return Response(
+                {"errors": {"email": [self._email_duplicate_error(existing_by_email, bank.id)]}},
+                status=422,
+            )
         self.perform_update(serializer)
         return Response(serializer.data)
 
@@ -392,6 +457,48 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
                 "id": str(nasabah.id),
                 "is_active": nasabah.is_active,
                 "message": f"Nasabah berhasil {state}",
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="approve")
+    def approve(self, request: Request, pk: str | None = None) -> Response:
+        nasabah = self.get_object()
+        if nasabah.status != Nasabah.Status.PENDING:
+            return Response(
+                {"error": "Hanya pengajuan berstatus menunggu yang dapat diproses"}, status=400
+            )
+        serializer = ApprovalDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        log = NasabahApprovalService.approve(
+            nasabah, _user(request), serializer.validated_data.get("catatan", "")
+        )
+        return Response(
+            {
+                "nasabah": NasabahDetailSerializer(
+                    nasabah, context=self.get_serializer_context()
+                ).data,
+                "approval_log": NasabahApprovalLogSerializer(log).data,
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="reject")
+    def reject(self, request: Request, pk: str | None = None) -> Response:
+        nasabah = self.get_object()
+        if nasabah.status != Nasabah.Status.PENDING:
+            return Response(
+                {"error": "Hanya pengajuan berstatus menunggu yang dapat diproses"}, status=400
+            )
+        serializer = ApprovalDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        log = NasabahApprovalService.reject(
+            nasabah, _user(request), serializer.validated_data.get("catatan", "")
+        )
+        return Response(
+            {
+                "nasabah": NasabahDetailSerializer(
+                    nasabah, context=self.get_serializer_context()
+                ).data,
+                "approval_log": NasabahApprovalLogSerializer(log).data,
             }
         )
 
