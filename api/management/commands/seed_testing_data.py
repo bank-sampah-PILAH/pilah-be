@@ -21,7 +21,7 @@ from api.models import (
     Transaksi,
     User,
 )
-from api.services import DEFAULT_WA_TEMPLATE
+from apps.notify.api import DEFAULT_WA_TEMPLATE
 
 CONFIRMATION = "SEED-PILAH-STAGING-DATA"
 
