@@ -23,6 +23,9 @@ from api.models import (
 )
 from api.validators import get_initials, normalize_indonesian_phone
 
+# ponytail: compat shim — canonical home is apps.notify.serializers.
+from apps.notify.serializers import WATemplateSerializer  # noqa: F401
+
 
 class BankSampahSerializer(serializers.ModelSerializer[Model]):
     pengelola = serializers.SerializerMethodField()
@@ -513,7 +516,3 @@ class SaldoSerializer(serializers.ModelSerializer[Model]):
     class Meta:
         model = Saldo
         fields = ["nasabah_id", "nasabah_nama", "total_saldo", "updated_at"]
-
-
-class WATemplateSerializer(serializers.Serializer[Any]):
-    template = serializers.CharField(required=True, allow_blank=False)

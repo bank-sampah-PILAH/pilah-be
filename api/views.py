@@ -42,7 +42,6 @@ from api.serializers import (
     TransactionDetailSerializer,
     TransactionListSerializer,
     UserProfileSerializer,
-    WATemplateSerializer,
 )
 from api.services import (
     ApprovalService,
@@ -53,8 +52,11 @@ from api.services import (
     TeamService,
     TransactionFilterService,
     TransactionService,
-    WhatsAppService,
 )
+
+# ponytail: compat shims — canonical homes are apps.notify.*.
+from apps.notify.api import send_setoran_receipt
+from apps.notify.views import WATemplateView  # noqa: F401
 
 
 def bank_sampah_activity_media(request: HttpRequest, token: str) -> FileResponse:
@@ -601,7 +603,7 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
     @action(detail=True, methods=["post"], url_path="notify-wa")
     def notify_wa(self, request: Request, pk: str | None = None) -> Response:
         transaksi = self.get_object()
-        result = WhatsAppService.notify(transaksi)
+        result = send_setoran_receipt(transaksi)
         return Response(result, status=200 if result["success"] else 400)
 
 
@@ -637,36 +639,6 @@ class DashboardRecentTransactionsView(APIView):
             .order_by("-tanggal")[:3]
         )
         return Response({"transactions": TransactionListSerializer(qs, many=True).data})
-
-
-class WATemplateView(APIView):
-    permission_classes = [IsActivePengelola]
-    serializer_class = WATemplateSerializer
-
-    def get(self, request: Request) -> Response:
-        bank = _bank_sampah(request)
-        return Response(
-            {
-                "template": WhatsAppService.get_template(bank),
-                "variabel_tersedia": [
-                    "{Nama}",
-                    "{Total}",
-                    "{Saldo}",
-                    "{Tanggal}",
-                    "{daftar_item}",
-                    "{daftar_item_harga}",
-                ],
-                "preview_contoh": WhatsAppService.preview(bank),
-            }
-        )
-
-    def put(self, request: Request) -> Response:
-        serializer = WATemplateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        bank = _bank_sampah(request)
-        bank.wa_template = serializer.validated_data["template"]
-        bank.save(update_fields=["wa_template", "updated_at"])
-        return Response({"template": bank.wa_template, "message": "Template berhasil disimpan"})
 
 
 class TeamView(APIView):
