@@ -50,6 +50,8 @@ staticfiles/
 *.key
 *.crt
 secrets.json
+# Raw prod database dumps (the anonymized fixture in db/fixtures/ is committed)
+pilah-prod-*.sql.gz
 
 # Test, coverage, and type-check caches
 .coverage
