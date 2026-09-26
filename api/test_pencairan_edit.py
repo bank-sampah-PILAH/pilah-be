@@ -139,3 +139,24 @@ class PencairanEditTests(APITestCase):
         # Recomputing a later snapshot is not an edit of that pencairan.
         self.assertFalse(later["diperbarui"])
         self.assertEqual(self._saldo(), "365600.00")
+
+    def test_edit_rejects_nominal_that_overdraws_a_later_pencairan(self) -> None:
+        now = timezone.now()
+        pertama = self._catat("200000", tanggal=(now - timedelta(hours=2)).isoformat())
+        kedua = self._catat("250000", tanggal=(now - timedelta(hours=1)).isoformat())
+        self._setor()
+        # Today's saldo (Rp 115.600) would cover +Rp 20.000, but the second pencairan
+        # would then be paid from Rp 245.600 < Rp 250.000.
+        self.assertEqual(self._saldo(), "115600.00")
+
+        response = self._edit(pertama["id"], {"nominal": "220000", "alasan": "Salah ketik"})
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertEqual(
+            response.data["errors"]["nominal"],
+            ["Saldo nasabah tidak mencukupi untuk perubahan ini"],
+        )
+        self.assertEqual(self._saldo(), "115600.00")
+        self.assertEqual(self._detail(pertama["id"])["nominal"], "200000.00")
+        self.assertFalse(self._detail(pertama["id"])["diperbarui"])
+        self.assertEqual(self._detail(kedua["id"])["saldo_sebelum"], "265600.00")
