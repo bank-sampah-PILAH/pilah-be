@@ -1321,11 +1321,7 @@ class KalkulasiSetoranTests(APITestCase):
         riwayat = workbook["Riwayat Transaksi"]
         # Dua baris judul dan satu baris kosong mendahului header, jadi barisnya
         # dicari, bukan dipatok.
-        baris_header = next(
-            row for row in riwayat.iter_rows() if row[0].value == "No"
-        )
-        kolom_saldo = [cell.value for cell in baris_header].index(
-            "Saldo Setelah Transaksi (Rp)"
-        )
+        baris_header = next(row for row in riwayat.iter_rows() if row[0].value == "No")
+        kolom_saldo = [cell.value for cell in baris_header].index("Saldo Setelah Transaksi (Rp)")
         baris_data = riwayat[baris_header[0].row + 1]
         self.assertEqual(baris_data[kolom_saldo].value, Decimal("3433.00"))
