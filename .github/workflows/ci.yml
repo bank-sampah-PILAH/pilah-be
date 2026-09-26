@@ -132,9 +132,10 @@ jobs:
 
       # mypy --strict against pyproject.toml [tool.mypy]: full first-party
       # checking, django-stubs plugin resolves models/FKs. Blocking — new
-      # code must be fully typed.
+      # code must be fully typed. tests/ holds the refactor safety net
+      # outside api/ so it survives the modular-monolith split.
       - name: mypy strict
-        run: mypy api config
+        run: mypy api config tests
 
       # --- SonarQube analysis (was its own sonar.yml workflow) ---
       #
