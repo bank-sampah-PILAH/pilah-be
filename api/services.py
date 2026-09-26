@@ -31,6 +31,7 @@ from api.models import (
     Nasabah,
     NasabahApprovalLog,
     Pencairan,
+    PencairanRevisi,
     Saldo,
     Transaksi,
     User,
@@ -464,6 +465,33 @@ class PencairanService:
         )
         saldo.total_saldo = saldo_sesudah
         saldo.save(update_fields=["total_saldo", "updated_at"])
+        return pencairan
+
+    @staticmethod
+    @transaction.atomic
+    def edit_pencairan(user: User, pencairan: Pencairan, payload: Mapping[str, Any]) -> Pencairan:
+        """Apply a pengurus correction, keeping the replaced version as a PencairanRevisi.
+
+        `pencairan` comes from the caller's bank-scoped queryset; it is re-read under lock.
+        """
+        pencairan = Pencairan.objects.select_for_update().get(pk=pencairan.pk)
+
+        PencairanRevisi.objects.create(
+            pencairan=pencairan,
+            versi=pencairan.revisi.count() + 1,
+            tanggal=pencairan.tanggal,
+            nominal=pencairan.nominal,
+            metode=pencairan.metode,
+            keterangan=pencairan.keterangan,
+            saldo_sebelum=pencairan.saldo_sebelum,
+            saldo_sesudah=pencairan.saldo_sesudah,
+            alasan=payload["alasan"],
+            diubah_oleh=user,
+        )
+        for field in ("metode", "keterangan"):
+            if field in payload:
+                setattr(pencairan, field, payload[field] or "")
+        pencairan.save()
         return pencairan
 
 

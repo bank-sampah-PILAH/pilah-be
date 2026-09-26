@@ -36,6 +36,7 @@ from api.serializers import (
     NasabahSerializer,
     PencairanCreateSerializer,
     PencairanDetailSerializer,
+    PencairanEditSerializer,
     RefreshTokenSerializer,
     SaldoSerializer,
     StatusSerializer,
@@ -618,6 +619,14 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
 
     def retrieve(self, request: Request, pk: str | None = None) -> Response:
         return Response(PencairanDetailSerializer(self.get_object()).data)
+
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
+        serializer = PencairanEditSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        pencairan = PencairanService.edit_pencairan(
+            _user(request), self.get_object(), serializer.validated_data
+        )
+        return Response(PencairanDetailSerializer(pencairan).data)
 
 
 class SaldoView(APIView):

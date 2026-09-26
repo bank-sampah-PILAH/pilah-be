@@ -48,12 +48,23 @@ class PencairanCreateSerializer(serializers.Serializer[Any]):
         return value
 
 
+class PencairanEditSerializer(serializers.Serializer[Any]):
+    nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
+    metode = serializers.ChoiceField(choices=Pencairan.Metode.choices, required=False)
+    tanggal = serializers.DateTimeField(required=False)
+    keterangan = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True, max_length=255
+    )
+    alasan = serializers.CharField(required=True, max_length=255)
+
+
 class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
     nasabah_id = serializers.UUIDField(source="nasabah.id")
     nasabah_nama = serializers.CharField(source="nasabah.nama")
     bank_sampah_id = serializers.UUIDField(source="bank_sampah.id")
     dicatat_oleh = serializers.UUIDField(source="dicatat_oleh.id")
     dicatat_oleh_nama = serializers.CharField(source="dicatat_oleh.nama")
+    diperbarui = serializers.SerializerMethodField()
 
     class Meta:
         model = Pencairan
@@ -71,8 +82,12 @@ class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
             "status",
             "saldo_sebelum",
             "saldo_sesudah",
+            "diperbarui",
             "created_at",
         ]
+
+    def get_diperbarui(self, obj: Pencairan) -> bool:
+        return obj.revisi.exists()
 
 
 class BankSampahSerializer(serializers.ModelSerializer[Model]):
