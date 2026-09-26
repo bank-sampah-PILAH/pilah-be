@@ -362,6 +362,33 @@ class Pencairan(TimestampedModel):
         ]
 
 
+class PencairanRevisi(models.Model):
+    """A replaced version of a pencairan (PIL-230). Append-only: never edited or deleted."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    pencairan = models.ForeignKey(Pencairan, on_delete=models.PROTECT, related_name="revisi")
+    versi = models.PositiveIntegerField()
+    tanggal = models.DateTimeField()
+    nominal = models.DecimalField(max_digits=14, decimal_places=2)
+    metode = models.CharField(max_length=20, choices=Pencairan.Metode.choices)
+    keterangan = models.TextField(blank=True)
+    saldo_sebelum = models.DecimalField(max_digits=14, decimal_places=2)
+    saldo_sesudah = models.DecimalField(max_digits=14, decimal_places=2)
+    # Why this version was replaced, by whom and when.
+    alasan = models.CharField(max_length=255)
+    diubah_oleh = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="pencairan_revisi_dibuat"
+    )
+    diubah_pada = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "pencairan_revisi"
+        ordering = ["pencairan", "versi"]
+        constraints = [
+            models.UniqueConstraint(fields=["pencairan", "versi"], name="pencairan_revisi_unik"),
+        ]
+
+
 class BankSampahApprovalLog(models.Model):
     class Status(models.TextChoices):
         APPROVED = "approved", "Approved"

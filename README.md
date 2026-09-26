@@ -316,6 +316,8 @@ Pencairan:
 - `GET /api/v1/pencairan?nasabah_id=:id&periode=:periode&search=:nama`
 - `POST /api/v1/pencairan`
 - `GET /api/v1/pencairan/:id`
+- `PATCH /api/v1/pencairan/:id`
+- `GET /api/v1/pencairan/:id/riwayat`
 
 Dashboard and settings:
 
@@ -370,6 +372,42 @@ The response carries `status` (`tercatat`) plus the `saldo_sebelum` and
 | `search` | 2+ characters | Case-insensitive match on the nasabah name. A shorter value is ignored, so clients should not send one. |
 
 Results are always limited to the pengurus' own bank sampah, newest first, paginated.
+
+### Editing a pencairan
+
+Pengurus correct a recorded payout with `PATCH /api/v1/pencairan/:id`. Every
+edit keeps the replaced version as an append-only revision.
+
+```http
+PATCH /api/v1/pencairan/:id
+{
+  "nominal": "150000",
+  "tanggal": "2026-09-19T10:15:00+07:00",
+  "metode": "transfer",
+  "keterangan": "Ditransfer ke BRI",
+  "alasan": "Salah ketik nominal"
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `alasan` | Required, max 255 characters. Stored with the replaced version. |
+| `nominal`, `metode`, `keterangan` | Optional, same rules as recording. |
+| `tanggal` | Optional. Not in the future, and at most `BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI` (7) days before the tanggal the pencairan was first recorded with, however many edits follow. |
+
+An edit that changes nothing returns 422. Changing `nominal` or `tanggal`
+recomputes `saldo_sebelum`/`saldo_sesudah` of this and every later pencairan of
+the nasabah and moves the saldo by the difference, all in one transaction. The
+edit is rejected (422 on `nominal`) if the saldo would not cover this or any
+later pencairan. Later pencairan are not marked as edited.
+
+Pencairan responses carry `diperbarui` (true once edited) and
+`tanggal_edit_minimum`, the earliest tanggal an edit may set.
+
+`GET /api/v1/pencairan/:id/riwayat` (pengurus only) returns the current
+`pencairan` and its replaced versions in `revisi`, newest first, each with
+`versi`, the old values and snapshots, `alasan`, `diubah_oleh_nama` and
+`diubah_pada`. Django admin shows revisions read-only.
 
 ## Report Export
 

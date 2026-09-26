@@ -11,7 +11,7 @@ from uuid import UUID
 import requests
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Model, Q, QuerySet, Sum
+from django.db.models import Exists, Model, OuterRef, Q, QuerySet, Subquery, Sum
 from django.db.models.functions import Coalesce
 from django.http import HttpRequest
 from django.utils import timezone
@@ -31,6 +31,7 @@ from api.models import (
     Nasabah,
     NasabahApprovalLog,
     Pencairan,
+    PencairanRevisi,
     Saldo,
     Transaksi,
     User,
@@ -421,6 +422,11 @@ class BalanceService:
         return cast(Decimal, masuk - keluar)
 
 
+# How far an edit may move a pencairan's tanggal back from the tanggal it was first
+# recorded with (PIL-230, agreed with the PO; change here if it is revised).
+BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI = 7
+
+
 class PencairanService:
     @staticmethod
     @transaction.atomic
@@ -465,6 +471,147 @@ class PencairanService:
         saldo.total_saldo = saldo_sesudah
         saldo.save(update_fields=["total_saldo", "updated_at"])
         return pencairan
+
+    @staticmethod
+    @transaction.atomic
+    def edit_pencairan(user: User, pencairan: Pencairan, payload: Mapping[str, Any]) -> Pencairan:
+        """Apply a pengurus correction, keeping the replaced version as a PencairanRevisi.
+
+        `pencairan` comes from the caller's bank-scoped queryset; it is re-read under lock.
+        """
+        pencairan = Pencairan.objects.select_for_update().get(pk=pencairan.pk)
+        nominal = payload.get("nominal", pencairan.nominal)
+        tanggal = payload.get("tanggal", pencairan.tanggal)
+        metode = payload.get("metode", pencairan.metode)
+        keterangan = payload.get("keterangan", pencairan.keterangan) or ""
+        if (nominal, tanggal, metode, keterangan) == (
+            pencairan.nominal,
+            pencairan.tanggal,
+            pencairan.metode,
+            pencairan.keterangan,
+        ):
+            raise serializers.ValidationError({"non_field_errors": ["Tidak ada data yang diubah"]})
+        if tanggal < PencairanService.tanggal_edit_minimum(pencairan):
+            raise serializers.ValidationError(
+                {
+                    "tanggal": [
+                        "Tanggal pencairan hanya bisa dimundurkan maksimal "
+                        f"{BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI} hari dari tanggal awal"
+                    ]
+                }
+            )
+
+        PencairanRevisi.objects.create(
+            pencairan=pencairan,
+            versi=pencairan.revisi.count() + 1,
+            tanggal=pencairan.tanggal,
+            nominal=pencairan.nominal,
+            metode=pencairan.metode,
+            keterangan=pencairan.keterangan,
+            saldo_sebelum=pencairan.saldo_sebelum,
+            saldo_sesudah=pencairan.saldo_sesudah,
+            alasan=payload["alasan"],
+            diubah_oleh=user,
+        )
+        if nominal != pencairan.nominal or tanggal != pencairan.tanggal:
+            PencairanService._hitung_ulang_saldo(pencairan, nominal, tanggal)
+        pencairan.nominal = nominal
+        pencairan.tanggal = tanggal
+        pencairan.metode = metode
+        pencairan.keterangan = keterangan
+        pencairan.save()
+        return pencairan
+
+    @staticmethod
+    def dengan_info_revisi(queryset: QuerySet[Pencairan]) -> QuerySet[Pencairan]:
+        """Annotate what `diperbarui` and `tanggal_edit_minimum` need, one query for all rows."""
+        revisi = PencairanRevisi.objects.filter(pencairan=OuterRef("pk"))
+        return queryset.annotate(
+            ada_revisi=Exists(revisi),
+            tanggal_versi_awal=Subquery(revisi.filter(versi=1).values("tanggal")[:1]),
+        )
+
+    @staticmethod
+    def diperbarui(pencairan: Pencairan) -> bool:
+        if hasattr(pencairan, "ada_revisi"):
+            return bool(pencairan.ada_revisi)
+        return pencairan.revisi.exists()
+
+    @staticmethod
+    def tanggal_edit_minimum(pencairan: Pencairan) -> datetime:
+        """Earliest tanggal an edit may set, counted from the tanggal first recorded."""
+        if hasattr(pencairan, "tanggal_versi_awal"):
+            tanggal_awal = pencairan.tanggal_versi_awal or pencairan.tanggal
+        else:
+            versi_awal = pencairan.revisi.order_by("versi").first()
+            tanggal_awal = versi_awal.tanggal if versi_awal else pencairan.tanggal
+        return tanggal_awal - timedelta(days=BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI)
+
+    @staticmethod
+    def _hitung_ulang_saldo(pencairan: Pencairan, nominal: Decimal, tanggal: datetime) -> None:
+        """Replay the nasabah's ledger from the earliest affected moment with the edited
+        pencairan, rewriting every later pencairan snapshot and moving Saldo by the difference.
+
+        Sets the edited pencairan's own snapshots; the caller saves it.
+        """
+        mulai = min(pencairan.tanggal, tanggal)
+        ledger = {"bank_sampah_id": pencairan.bank_sampah_id, "nasabah_id": pencairan.nasabah_id}
+        saldo = Saldo.objects.select_for_update().get(nasabah_id=pencairan.nasabah_id)
+        lainnya = list(
+            Pencairan.objects.select_for_update()
+            .filter(tanggal__gte=mulai, **ledger)
+            .exclude(pk=pencairan.pk)
+        )
+        setoran = list(
+            Transaksi.objects.filter(tanggal__gte=mulai, **ledger).values_list(
+                "id", "tanggal", "total_nilai"
+            )
+        )
+
+        # PILAH 1.0 opening balances have no transaksi behind them, so the replay starts
+        # from a stored snapshot: the first pencairan at or after `mulai`, minus the
+        # setoran ordered before it (a setoran at the same instant comes first).
+        pertama = min([pencairan, *lainnya], key=lambda cair: (cair.tanggal, str(cair.pk)))
+        awal = pertama.saldo_sebelum - sum(
+            (nilai for _, waktu, nilai in setoran if waktu <= pertama.tanggal), Decimal(0)
+        )
+
+        def putar(
+            nominal_ini: Decimal, tanggal_ini: datetime
+        ) -> tuple[Decimal, dict[UUID, tuple[Decimal, Decimal]]]:
+            peristiwa: list[tuple[datetime, int, str, Decimal, UUID | None]] = [
+                (waktu, 0, str(id_), nilai, None) for id_, waktu, nilai in setoran
+            ]
+            peristiwa += [
+                (cair.tanggal, 1, str(cair.pk), cair.nominal, cair.pk) for cair in lainnya
+            ]
+            peristiwa.append((tanggal_ini, 1, str(pencairan.pk), nominal_ini, pencairan.pk))
+            saldo_berjalan = awal
+            snapshot: dict[UUID, tuple[Decimal, Decimal]] = {}
+            for _, _, _, nilai, pencairan_id in sorted(peristiwa, key=lambda item: item[:3]):
+                if pencairan_id is None:
+                    saldo_berjalan += nilai
+                    continue
+                if nilai > saldo_berjalan:
+                    raise serializers.ValidationError(
+                        {"nominal": ["Saldo nasabah tidak mencukupi untuk perubahan ini"]}
+                    )
+                sesudah = (saldo_berjalan - nilai).quantize(Decimal(1), rounding=ROUND_DOWN)
+                snapshot[pencairan_id] = (saldo_berjalan, sesudah)
+                saldo_berjalan = sesudah
+            return saldo_berjalan, snapshot
+
+        akhir_lama, _ = putar(pencairan.nominal, pencairan.tanggal)
+        akhir_baru, snapshot = putar(nominal, tanggal)
+        berubah = []
+        for cair in lainnya:
+            if (cair.saldo_sebelum, cair.saldo_sesudah) != snapshot[cair.pk]:
+                cair.saldo_sebelum, cair.saldo_sesudah = snapshot[cair.pk]
+                berubah.append(cair)
+        Pencairan.objects.bulk_update(berubah, ["saldo_sebelum", "saldo_sesudah"])
+        pencairan.saldo_sebelum, pencairan.saldo_sesudah = snapshot[pencairan.pk]
+        saldo.total_saldo += akhir_baru - akhir_lama
+        saldo.save(update_fields=["total_saldo", "updated_at"])
 
 
 _Dated = TypeVar("_Dated", bound=Model)

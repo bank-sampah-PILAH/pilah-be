@@ -36,6 +36,8 @@ from api.serializers import (
     NasabahSerializer,
     PencairanCreateSerializer,
     PencairanDetailSerializer,
+    PencairanEditSerializer,
+    PencairanRevisiSerializer,
     RefreshTokenSerializer,
     SaldoSerializer,
     StatusSerializer,
@@ -598,7 +600,7 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
             qs = qs.filter(nasabah_id=nasabah_id)
         if len(search) >= 2:
             qs = qs.filter(nasabah__nama__icontains=search)
-        return qs
+        return PencairanService.dengan_info_revisi(qs)
 
     def list(self, request: Request) -> Response:
         # Unlike transaksi, no periode means the whole history (per-nasabah riwayat).
@@ -618,6 +620,25 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
 
     def retrieve(self, request: Request, pk: str | None = None) -> Response:
         return Response(PencairanDetailSerializer(self.get_object()).data)
+
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
+        serializer = PencairanEditSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        pencairan = PencairanService.edit_pencairan(
+            _user(request), self.get_object(), serializer.validated_data
+        )
+        return Response(PencairanDetailSerializer(pencairan).data)
+
+    @action(detail=True, methods=["get"], url_path="riwayat")
+    def riwayat(self, request: Request, pk: str | None = None) -> Response:
+        pencairan = self.get_object()
+        revisi = pencairan.revisi.select_related("diubah_oleh").order_by("-versi")
+        return Response(
+            {
+                "pencairan": PencairanDetailSerializer(pencairan).data,
+                "revisi": PencairanRevisiSerializer(revisi, many=True).data,
+            }
+        )
 
 
 class SaldoView(APIView):

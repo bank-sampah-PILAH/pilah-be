@@ -18,12 +18,27 @@ from api.models import (
     Nasabah,
     NasabahApprovalLog,
     Pencairan,
+    PencairanRevisi,
     Saldo,
     Transaksi,
     User,
 )
-from api.services import BalanceService
+from api.services import BalanceService, PencairanService
 from api.validators import get_initials, normalize_indonesian_phone
+
+
+def _validate_nominal_pencairan(value: Decimal) -> Decimal:
+    if value <= 0:
+        raise serializers.ValidationError("Nominal harus lebih dari nol")
+    if value != value.to_integral_value():
+        raise serializers.ValidationError("Nominal harus dalam rupiah bulat tanpa desimal")
+    return value
+
+
+def _validate_tanggal_pencairan(value: datetime) -> datetime:
+    if value > timezone.now():
+        raise serializers.ValidationError("Tanggal pencairan tidak boleh di masa depan")
+    return value
 
 
 class PencairanCreateSerializer(serializers.Serializer[Any]):
@@ -36,16 +51,33 @@ class PencairanCreateSerializer(serializers.Serializer[Any]):
     )
 
     def validate_nominal(self, value: Decimal) -> Decimal:
-        if value <= 0:
-            raise serializers.ValidationError("Nominal harus lebih dari nol")
-        if value != value.to_integral_value():
-            raise serializers.ValidationError("Nominal harus dalam rupiah bulat tanpa desimal")
-        return value
+        return _validate_nominal_pencairan(value)
 
     def validate_tanggal(self, value: datetime) -> datetime:
-        if value > timezone.now():
-            raise serializers.ValidationError("Tanggal pencairan tidak boleh di masa depan")
-        return value
+        return _validate_tanggal_pencairan(value)
+
+
+class PencairanEditSerializer(serializers.Serializer[Any]):
+    nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
+    metode = serializers.ChoiceField(choices=Pencairan.Metode.choices, required=False)
+    tanggal = serializers.DateTimeField(required=False)
+    keterangan = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True, max_length=255
+    )
+    alasan = serializers.CharField(
+        required=True,
+        max_length=255,
+        error_messages={
+            "required": "Alasan perubahan wajib diisi",
+            "blank": "Alasan perubahan wajib diisi",
+        },
+    )
+
+    def validate_nominal(self, value: Decimal) -> Decimal:
+        return _validate_nominal_pencairan(value)
+
+    def validate_tanggal(self, value: datetime) -> datetime:
+        return _validate_tanggal_pencairan(value)
 
 
 class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
@@ -54,6 +86,8 @@ class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
     bank_sampah_id = serializers.UUIDField(source="bank_sampah.id")
     dicatat_oleh = serializers.UUIDField(source="dicatat_oleh.id")
     dicatat_oleh_nama = serializers.CharField(source="dicatat_oleh.nama")
+    diperbarui = serializers.SerializerMethodField()
+    tanggal_edit_minimum = serializers.SerializerMethodField()
 
     class Meta:
         model = Pencairan
@@ -71,7 +105,38 @@ class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
             "status",
             "saldo_sebelum",
             "saldo_sesudah",
+            "diperbarui",
+            "tanggal_edit_minimum",
             "created_at",
+        ]
+
+    def get_diperbarui(self, obj: Pencairan) -> bool:
+        return PencairanService.diperbarui(obj)
+
+    def get_tanggal_edit_minimum(self, obj: Pencairan) -> str:
+        return serializers.DateTimeField().to_representation(
+            PencairanService.tanggal_edit_minimum(obj)
+        )
+
+
+class PencairanRevisiSerializer(serializers.ModelSerializer[Model]):
+    diubah_oleh = serializers.UUIDField(source="diubah_oleh.id")
+    diubah_oleh_nama = serializers.CharField(source="diubah_oleh.nama")
+
+    class Meta:
+        model = PencairanRevisi
+        fields = [
+            "versi",
+            "tanggal",
+            "nominal",
+            "metode",
+            "keterangan",
+            "saldo_sebelum",
+            "saldo_sesudah",
+            "alasan",
+            "diubah_oleh",
+            "diubah_oleh_nama",
+            "diubah_pada",
         ]
 
 
