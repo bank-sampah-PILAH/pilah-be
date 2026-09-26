@@ -13,20 +13,20 @@ from api.models import (
     DetailTransaksi,
     JenisSampah,
     Nasabah,
-    NasabahApprovalLog,
     Saldo,
     Transaksi,
     User,
 )
 
 # ponytail: compat shims — canonical homes are apps.identity.services,
-# apps.notify.services, apps.reporting.services, apps.reporting.exporter and
-# shared_kernel.numbering.
+# apps.membership.services, apps.notify.services, apps.reporting.services,
+# apps.reporting.exporter and shared_kernel.numbering.
 from apps.identity.services import (  # noqa: F401
     AuthService,
     OnboardingService,
     TeamService,
 )
+from apps.membership.services import NasabahApprovalService  # noqa: F401
 from apps.notify.services import (  # noqa: F401
     DEFAULT_WA_TEMPLATE,
     WhatsAppService,
@@ -35,34 +35,6 @@ from apps.organization.services import ApprovalService  # noqa: F401
 from apps.reporting import exporter
 from apps.reporting.services import DashboardService  # noqa: F401
 from shared_kernel.numbering import NumberingService  # noqa: F401
-
-
-class NasabahApprovalService:
-    @staticmethod
-    @transaction.atomic
-    def approve(nasabah: Nasabah, pengurus: User, catatan: str = "") -> NasabahApprovalLog:
-        nasabah.status = Nasabah.Status.APPROVED
-        nasabah.is_active = True
-        nasabah.save(update_fields=["status", "is_active", "updated_at"])
-        return NasabahApprovalLog.objects.create(
-            nasabah=nasabah,
-            pengurus=pengurus,
-            status=NasabahApprovalLog.Status.APPROVED,
-            catatan=catatan,
-        )
-
-    @staticmethod
-    @transaction.atomic
-    def reject(nasabah: Nasabah, pengurus: User, catatan: str = "") -> NasabahApprovalLog:
-        nasabah.status = Nasabah.Status.REJECTED
-        nasabah.is_active = False
-        nasabah.save(update_fields=["status", "is_active", "updated_at"])
-        return NasabahApprovalLog.objects.create(
-            nasabah=nasabah,
-            pengurus=pengurus,
-            status=NasabahApprovalLog.Status.REJECTED,
-            catatan=catatan,
-        )
 
 
 class TransactionService:
