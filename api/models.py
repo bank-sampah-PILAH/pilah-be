@@ -10,6 +10,13 @@ from apps.membership.models import Nasabah, NasabahApprovalLog, Saldo  # noqa: F
 from apps.organization.models import BankSampah, BankSampahApprovalLog  # noqa: F401
 from shared_kernel.models import TimestampedModel
 
+__all__ = [
+    "BankSampah",
+    "BankSampahApprovalLog",
+    "User",
+    "UserManager",
+]
+
 
 class Transaksi(TimestampedModel):
     class Tipe(models.TextChoices):
