@@ -59,3 +59,15 @@ class IsSuperAdmin(BasePermission):
             and user.role == User.Role.SUPERADMIN
             and AuthService.is_superadmin_allowlisted(user.email)
         )
+
+
+class IsActiveNasabah(BasePermission):
+    """Require an active nasabah account, not active membership or bank status."""
+
+    message = "Endpoint ini hanya untuk nasabah"
+
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        user = request.user
+        if not user.is_authenticated:
+            return False
+        return bool(user.is_active and user.role == User.Role.NASABAH)

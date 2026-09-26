@@ -477,6 +477,41 @@ Run tests:
 python manage.py test
 ```
 
+## Nasabah home API (PIL-225)
+
+All endpoints require a Bearer JWT for an active user with role `nasabah`.
+
+| GET endpoint | Response |
+| --- | --- |
+| `/api/v1/nasabah/me/beranda` | `user`, `keanggotaan`, `bank_sampah`, `saldo`, and up to five `aktivitas_terbaru` |
+| `/api/v1/nasabah/me/saldo` | `total_saldo` (decimal string), `updated_at` |
+| `/api/v1/nasabah/me/bank-sampah` | Public details of the selected membership's bank |
+| `/api/v1/nasabah/me/riwayat` | Paginated `count`, `next`, `previous`, `results`; newest transactions first |
+
+The membership must belong to the authenticated user, have status `approved`,
+and be active. Its bank must also have status `active` and be active.
+No request can select another user's data. Bank credentials and invite tokens
+are excluded from responses. Reads never create or update balances.
+
+Pass `?keanggotaan_id=<UUID>` to select a membership. When omitted, the API uses
+the user's only eligible membership. If several are eligible, it returns 422
+with `errors.keanggotaan_id` and `errors.pilihan` containing the available IDs
+and bank names. Invalid UUIDs also return 422, another user's or missing
+membership returns 404, and ineligible memberships return 403.
+History supports `page` and `page_size` (default 20, maximum 100); retain the
+membership selection when requesting subsequent pages.
+
+Balances without a row return `"0.00"` and `updated_at: null`; empty history
+returns an empty list. Activity fields are `id`, `tanggal`, `tipe`, and
+`total_nilai`. These represent the transactions available in staging
+(currently deposits); this change does not implement withdrawals.
+
+Mobile integration must handle staging's `next_step: "nasabah_dashboard"`,
+then load this API to check membership eligibility. Bank status from the
+login payload alone is not proof of active membership. The existing mobile
+preview is still mock data until its repository/state layer calls these APIs.
+This backend branch does not modify the mobile application or login contract.
+
 ## Notes
 
 - This repository is backend-only.
