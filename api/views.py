@@ -609,20 +609,14 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
         end_date = parse_date(end_value or "")
         if start_date is None or end_date is None:
             raise serializers.ValidationError(
-                {
-                    "date_range": (
-                        "start_date dan end_date wajib menggunakan format YYYY-MM-DD"
-                    )
-                }
+                {"date_range": ("start_date dan end_date wajib menggunakan format YYYY-MM-DD")}
             )
         if end_date < start_date:
             raise serializers.ValidationError(
                 {"end_date": "end_date harus sama dengan atau setelah start_date"}
             )
         if (end_date - start_date).days > 62:
-            raise serializers.ValidationError(
-                {"date_range": "Rentang kalender maksimal 63 hari"}
-            )
+            raise serializers.ValidationError({"date_range": "Rentang kalender maksimal 63 hari"})
 
         dates = (
             JadwalKegiatan.objects.filter(
