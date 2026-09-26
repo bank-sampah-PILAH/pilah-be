@@ -78,22 +78,26 @@ class MembershipService:
             member_id = UUID(identifier)
         except (ValueError, TypeError, AttributeError) as exc:
             raise ValidationError({"keanggotaan_id": "UUID tidak valid."}) from exc
-        member = memberships.filter(pk=member_id).first()
-        if member is None:
-            raise NotFound("Keanggotaan tidak ditemukan.")
-        MembershipService._validate_active(member)
-        return member
+        selected = memberships.filter(pk=member_id)
+        member = MembershipService._eligible_memberships(selected).first()
+        if member is not None:
+            return member
+        if selected.exists():
+            raise PermissionDenied("Keanggotaan dan bank sampah harus aktif.")
+        raise NotFound()
+
+    @staticmethod
+    def _eligible_memberships(memberships: QuerySet[Nasabah]) -> QuerySet[Nasabah]:
+        return memberships.filter(
+            status=Nasabah.Status.APPROVED,
+            is_active=True,
+            bank_sampah__is_active=True,
+            bank_sampah__status=BankSampah.Status.ACTIVE,
+        )
 
     @staticmethod
     def _get_default_membership(memberships: QuerySet[Nasabah]) -> Nasabah:
-        eligible = list(
-            memberships.filter(
-                status=Nasabah.Status.APPROVED,
-                is_active=True,
-                bank_sampah__is_active=True,
-                bank_sampah__status=BankSampah.Status.ACTIVE,
-            )
-        )
+        eligible = list(MembershipService._eligible_memberships(memberships))
         if not eligible:
             raise PermissionDenied("Keanggotaan aktif diperlukan.")
         if len(eligible) > 1:
@@ -108,14 +112,6 @@ class MembershipService:
             )
         return eligible[0]
 
-    @staticmethod
-    def _validate_active(member: Nasabah) -> None:
-        membership_is_active = member.status == Nasabah.Status.APPROVED and member.is_active
-        bank = member.bank_sampah
-        bank_is_active = bank.is_active and bank.status == BankSampah.Status.ACTIVE
-        if not (membership_is_active and bank_is_active):
-            raise PermissionDenied("Keanggotaan dan bank sampah harus aktif.")
-
 
 def balance_data(member: Nasabah) -> dict[str, Any]:
     balance = getattr(member, "saldo", None)
@@ -127,7 +123,7 @@ def balance_data(member: Nasabah) -> dict[str, Any]:
 
 def activities(member: Nasabah) -> QuerySet[Transaksi]:
     return Transaksi.objects.filter(nasabah=member, bank_sampah=member.bank_sampah).order_by(
-        "-tanggal", "-id"
+        "-tanggal", "-created_at", "-id"
     )
 
 

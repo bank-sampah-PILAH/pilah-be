@@ -1,5 +1,6 @@
 from datetime import timedelta
 from decimal import Decimal
+from uuid import UUID
 
 from django.utils import timezone
 from rest_framework.test import APITestCase
@@ -66,7 +67,9 @@ class NasabahHomeTests(APITestCase):
         self.client.force_authenticate(None)
         self.assertEqual(self.client.get(self.url).status_code, 401)
         self.client.force_authenticate(self.manager)
-        self.assertEqual(self.client.get(self.url).status_code, 403)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data, {"error": "Endpoint ini hanya untuk nasabah"})
 
     def test_no_membership_is_forbidden(self) -> None:
         self.member.delete()
@@ -194,3 +197,76 @@ class NasabahHomeTests(APITestCase):
         self.user.is_active = False
         self.user.save()
         self.assertEqual(self.client.get(self.url).status_code, 401)
+
+    def test_equal_transaction_dates_use_creation_time_before_uuid(self) -> None:
+        timestamp = timezone.now()
+        expected: list[str] = []
+        for index in range(7):
+            transaction = Transaksi.objects.create(
+                id=UUID(int=100 - index),
+                nasabah=self.member,
+                bank_sampah=self.bank,
+                dicatat_oleh=self.manager,
+                total_nilai=index,
+                tanggal=timestamp,
+            )
+            Transaksi.objects.filter(pk=transaction.pk).update(
+                created_at=timestamp + timedelta(seconds=index)
+            )
+            expected.insert(0, str(transaction.id))
+        home = self.client.get(self.url)
+        self.assertEqual(home.status_code, 200)
+        self.assertEqual([item["id"] for item in home.data["aktivitas_terbaru"]], expected[:5])
+        actual: list[str] = []
+        for page in range(1, 5):
+            response = self.client.get("/api/v1/nasabah/me/riwayat", {"page_size": 2, "page": page})
+            self.assertEqual(response.status_code, 200)
+            actual.extend(item["id"] for item in response.data["results"])
+        self.assertEqual(actual, expected)
+        # UUID is only the final stable fallback when both timestamps match.
+        Transaksi.objects.all().update(created_at=timestamp)
+        response = self.client.get("/api/v1/nasabah/me/riwayat")
+        self.assertEqual(
+            [item["id"] for item in response.data["results"]], list(reversed(expected))
+        )
+
+    def test_default_and_selected_membership_share_eligibility_rules(self) -> None:
+        cases = [
+            ("approved", True, "active", True, 200),
+            ("pending", True, "active", True, 403),
+            ("rejected", True, "active", True, 403),
+            ("approved", False, "active", True, 403),
+            ("approved", True, "pending", True, 403),
+            ("approved", True, "rejected", True, 403),
+            ("approved", True, "active", False, 403),
+        ]
+        for status, active, bank_status, bank_active, expected in cases:
+            self.member.status, self.member.is_active = status, active
+            self.member.save()
+            self.bank.status, self.bank.is_active = bank_status, bank_active
+            self.bank.save()
+            for path in ("beranda", "saldo", "bank-sampah", "riwayat"):
+                for query in ({}, {"keanggotaan_id": str(self.member.id)}):
+                    with self.subTest(
+                        case=(status, active, bank_status, bank_active), path=path, query=query
+                    ):
+                        response = self.client.get(f"/api/v1/nasabah/me/{path}", query)
+                        self.assertEqual(response.status_code, expected)
+
+    def test_missing_and_foreign_memberships_share_generic_404(self) -> None:
+        other = User.objects.create_user(
+            email="foreign@example.test", nama="Other", role=User.Role.NASABAH
+        )
+        foreign = Nasabah.objects.create(
+            user=other,
+            bank_sampah=self.bank,
+            nomor="002",
+            nama="Other",
+            alamat="Depok",
+            no_hp="08999",
+            status=Nasabah.Status.REJECTED,
+        )
+        for identifier in (str(UUID(int=1)), str(foreign.id)):
+            response = self.client.get(self.url, {"keanggotaan_id": identifier})
+            self.assertEqual(response.status_code, 404)
+            self.assertEqual(response.data, {"error": "Resource tidak ditemukan"})
