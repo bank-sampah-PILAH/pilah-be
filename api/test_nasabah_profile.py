@@ -1,6 +1,6 @@
 from rest_framework.test import APITestCase
 
-from api.models import User
+from api.models import BankSampah, Nasabah, User
 
 
 class NasabahProfileTests(APITestCase):
@@ -46,7 +46,9 @@ class NasabahProfileTests(APITestCase):
                 email=f"{role}@example.test", nama="Pengurus", role=role
             )
             self.client.force_authenticate(user)
-            self.assertEqual(self.client.get(self.url).status_code, 403)
+            response = self.client.get(self.url)
+            self.assertEqual(response.status_code, 403)
+            self.assertEqual(response.data, {"error": "Endpoint ini hanya untuk nasabah"})
 
     def test_profile_is_read_only(self) -> None:
         for method in (self.client.post, self.client.put, self.client.patch, self.client.delete):
@@ -63,3 +65,27 @@ class NasabahProfileTests(APITestCase):
         self.user.is_active = False
         self.user.save()
         self.assertEqual(self.client.get(self.url).status_code, 401)
+
+    def test_profile_allows_ineligible_membership_and_bank(self) -> None:
+        bank = BankSampah.objects.create(
+            nama="Inactive bank",
+            no_hp_pic="08123",
+            is_active=False,
+            status=BankSampah.Status.REJECTED,
+        )
+        member = Nasabah.objects.create(
+            user=self.user,
+            bank_sampah=bank,
+            nomor="001",
+            nama="Siti",
+            alamat="Depok",
+            no_hp="08123",
+            is_active=False,
+        )
+        for status in (Nasabah.Status.PENDING, Nasabah.Status.REJECTED):
+            member.status = status
+            member.save()
+            with self.subTest(status=status):
+                response = self.client.get(self.url)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.data["id"], str(self.user.id))
