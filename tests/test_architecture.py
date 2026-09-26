@@ -62,6 +62,6 @@ class ArchitectureTest(SimpleTestCase):
                         violations.append(f"{path}: forbidden {module}")
                 elif module == "apps" or module.startswith("apps."):
                     parts = module.split(".")
-                    if len(parts) > 2 and (parts[1] != context or parts[2] != "api"):
+                    if len(parts) > 2 and parts[1] != context and parts[2] != "api":
                         violations.append(f"{path}: cross-context {module}")
         self.assertEqual(violations, [])
