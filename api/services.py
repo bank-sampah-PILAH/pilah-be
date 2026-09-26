@@ -835,7 +835,9 @@ def _saldo_after_by_transaction(queryset: QuerySet[Transaksi]) -> dict[UUID, Dec
     for trans in transactions:
         running_balances[trans.nasabah_id] += trans.total_nilai
         if trans.id in target_ids:
-            saldo_after[trans.id] = running_balances[trans.nasabah_id]
+            # Aturan yang sama dengan respons detail: riwayat mengikuti saldo
+            # tersimpan yang sudah dibulatkan, bukan jumlah mentah bersen.
+            saldo_after[trans.id] = bulatkan_rupiah(running_balances[trans.nasabah_id])
 
     return saldo_after
 
