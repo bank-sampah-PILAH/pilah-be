@@ -2020,6 +2020,45 @@ class PencairanAPITests(APITestCase):
         saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
         self.assertEqual(saldo.data["total_saldo"], "5000.00")
 
+    def test_history_saldo_matches_saldo_after_pencairan_drops_sen(self) -> None:
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))
+        jenis = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="PLS-001",
+            nama_sampah="Plastik PET",
+            kategori=JenisSampah.Kategori.PLASTIK,
+            harga_per_kg=Decimal("10001.00"),
+        )
+        item = {"jenis_sampah_id": str(jenis.id), "berat": "0.500"}
+        first = self.client.post(
+            "/api/v1/transaksi",
+            {"nasabah_id": str(self.nasabah.id), "items": [item]},
+            format="json",
+        )
+        self.assertEqual(first.status_code, 201, first.data)
+        pencairan = self.client.post(
+            "/api/v1/pencairan",
+            {"nasabah_id": str(self.nasabah.id), "nominal": "3000", "metode": "tunai"},
+            format="json",
+        )
+        self.assertEqual(pencairan.status_code, 201, pencairan.data)
+        # Rp 5.000,50 - Rp 3.000 keeps whole rupiah only: the 50 sen leave the saldo.
+        self.assertEqual(pencairan.data["saldo_sesudah"], "2000.00")
+        second = self.client.post(
+            "/api/v1/transaksi",
+            {"nasabah_id": str(self.nasabah.id), "items": [item]},
+            format="json",
+        )
+        self.assertEqual(second.status_code, 201, second.data)
+
+        saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
+        self.assertEqual(saldo.data["total_saldo"], "7000.50")
+        detail = self.client.get(f"/api/v1/transaksi/{second.data['id']}")
+        self.assertEqual(detail.data["saldo_setelah_transaksi"], Decimal("7000.50"))
+        export = self.client.get("/api/v1/transaksi/export?periode=bulan_ini")
+        sheet = load_workbook(BytesIO(export.content), data_only=False)["Riwayat Transaksi"]
+        self.assertEqual(sheet.cell(5, 10).value, 7000)
+
     def test_django_admin_cannot_write_pencairan(self) -> None:
         # Admin writes skip PencairanService, so the row and Saldo would diverge.
         superuser = User.objects.create_user(
