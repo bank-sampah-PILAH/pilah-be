@@ -262,3 +262,41 @@ class PencairanEditTests(APITestCase):
         self.assertEqual(revisi[1]["alasan"], "Salah pilih metode")
         self.assertEqual(revisi[1]["diubah_oleh_nama"], "Ibu Sari")
         self.assertIn("diubah_pada", revisi[1])
+
+    def test_edit_and_riwayat_are_pengurus_only_and_bank_scoped(self) -> None:
+        pencairan = self._catat()
+        outsider_bank = BankSampah.objects.create(
+            nama="Bank Sampah Seberang",
+            alamat="Bekasi",
+            kota="Bekasi",
+            no_hp_pic="+628128888888",
+            status=BankSampah.Status.ACTIVE,
+        )
+        outsider = User.objects.create_user(
+            email="outsider@example.com",
+            nama="Pak Outsider",
+            bank_sampah=outsider_bank,
+            is_profile_complete=True,
+        )
+        akun_nasabah = User.objects.create_user(
+            email="ahmad@example.com", nama="Ahmad Ridwan", role=User.Role.NASABAH
+        )
+        self.nasabah.user = akun_nasabah
+        self.nasabah.save()
+
+        for user, status in ((outsider, 404), (akun_nasabah, 403)):
+            with self.subTest(user=user.email):
+                self.client.credentials(
+                    HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(user).access_token}"
+                )
+                edit = self._edit(pencairan["id"], {"nominal": "1000", "alasan": "Coba"})
+                riwayat = self.client.get(f"/api/v1/pencairan/{pencairan['id']}/riwayat")
+
+                self.assertEqual(edit.status_code, status, edit.data)
+                self.assertEqual(riwayat.status_code, status, riwayat.data)
+
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(self.user).access_token}"
+        )
+        self.assertEqual(self._detail(pencairan["id"])["nominal"], "200000.00")
+        self.assertEqual(self._saldo(), "265600.00")
