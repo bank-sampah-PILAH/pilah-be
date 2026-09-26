@@ -2020,6 +2020,65 @@ class PencairanAPITests(APITestCase):
         saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
         self.assertEqual(saldo.data["total_saldo"], "5000.00")
 
+    def test_pencairan_cannot_predate_latest_nasabah_activity(self) -> None:
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))
+        jenis = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="PLS-001",
+            nama_sampah="Plastik PET",
+            kategori=JenisSampah.Kategori.PLASTIK,
+            harga_per_kg=Decimal("100000.00"),
+        )
+        setoran = self.client.post(
+            "/api/v1/transaksi",
+            {
+                "nasabah_id": str(self.nasabah.id),
+                "items": [{"jenis_sampah_id": str(jenis.id), "berat": "1.000"}],
+            },
+            format="json",
+        )
+        self.assertEqual(setoran.status_code, 201, setoran.data)
+        setoran_tanggal = Transaksi.objects.get(id=setoran.data["id"]).tanggal
+        message = "Tanggal pencairan tidak boleh sebelum transaksi terakhir nasabah"
+
+        # The saldo only exists because of the setoran, so it cannot fund a payout before it.
+        before_setoran = self.client.post(
+            "/api/v1/pencairan",
+            {
+                "nasabah_id": str(self.nasabah.id),
+                "nominal": "100000",
+                "metode": "tunai",
+                "tanggal": (setoran_tanggal - timedelta(hours=1)).isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(before_setoran.status_code, 422, before_setoran.data)
+        self.assertEqual(before_setoran.data["errors"]["tanggal"], [message])
+
+        recorded = self.client.post(
+            "/api/v1/pencairan",
+            {"nasabah_id": str(self.nasabah.id), "nominal": "40000", "metode": "tunai"},
+            format="json",
+        )
+        self.assertEqual(recorded.status_code, 201, recorded.data)
+        recorded_tanggal = Pencairan.objects.get(id=recorded.data["id"]).tanggal
+        before_pencairan = self.client.post(
+            "/api/v1/pencairan",
+            {
+                "nasabah_id": str(self.nasabah.id),
+                "nominal": "10000",
+                "metode": "tunai",
+                "tanggal": (recorded_tanggal - timedelta(minutes=1)).isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(before_pencairan.status_code, 422, before_pencairan.data)
+        self.assertEqual(before_pencairan.data["errors"]["tanggal"], [message])
+
+        self.assertEqual(Pencairan.objects.count(), 1)
+        saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
+        self.assertEqual(saldo.data["total_saldo"], "60000.00")
+
     def test_history_saldo_matches_saldo_after_pencairan_drops_sen(self) -> None:
         Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))
         jenis = JenisSampah.objects.create(
