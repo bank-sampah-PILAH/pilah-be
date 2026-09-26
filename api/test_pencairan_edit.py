@@ -2,12 +2,14 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
+from django.contrib import admin
+from django.test import RequestFactory
 from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import BankSampah, JenisSampah, Nasabah, Saldo, User
+from api.models import BankSampah, JenisSampah, Nasabah, PencairanRevisi, Saldo, User
 from api.services import BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI
 
 
@@ -334,3 +336,20 @@ class PencairanEditTests(APITestCase):
 
         # Still counted from the tanggal first recorded.
         self.assertEqual(self._detail(pencairan["id"])["tanggal_edit_minimum"], expected)
+
+    def test_django_admin_shows_revisi_read_only(self) -> None:
+        superuser = User.objects.create_user(
+            email="root@example.com",
+            nama="Root",
+            role=User.Role.SUPERADMIN,
+            is_staff=True,
+            is_superuser=True,
+        )
+        request = RequestFactory().get("/admin/api/pencairanrevisi/")
+        request.user = superuser
+        revisi_admin = admin.site._registry[PencairanRevisi]
+
+        self.assertTrue(revisi_admin.has_view_permission(request))
+        self.assertFalse(revisi_admin.has_add_permission(request))
+        self.assertFalse(revisi_admin.has_change_permission(request))
+        self.assertFalse(revisi_admin.has_delete_permission(request))
