@@ -24,7 +24,13 @@ from openpyxl.worksheet.worksheet import Worksheet
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.kalkulasi import bulatkan_rupiah, harga_berlaku, hitung_subtotal, total_setoran
+from api.kalkulasi import (
+    bulatkan_rupiah,
+    format_ribuan,
+    harga_berlaku,
+    hitung_subtotal,
+    total_setoran,
+)
 from api.models import (
     BankSampah,
     BankSampahApprovalLog,
@@ -578,6 +584,10 @@ class TransactionService:
                     }
                 )
             harga = harga_berlaku(jenis)
+            if harga <= 0:
+                raise serializers.ValidationError(
+                    {f"items[{index}].jenis_sampah_id": ["Harga jenis sampah belum diatur"]}
+                )
             berat = item_payload["berat"]
             subtotal = hitung_subtotal(harga, berat)
             DetailTransaksi.objects.create(
@@ -915,7 +925,7 @@ class WhatsAppService:
 
     @staticmethod
     def format_rupiah(value: Decimal) -> str:
-        return f"Rp {int(value):,}".replace(",", ".")
+        return f"Rp {format_ribuan(value)}"
 
     @staticmethod
     def format_kg(value: Decimal) -> str:

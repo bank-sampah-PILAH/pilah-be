@@ -1646,8 +1646,8 @@ class ProtectedMediaTests(TestCase):
         self.assertEqual(response.status_code, 404)
 
 
-class KalkulasiSetoranTests(APITestCase):
-    """Nilai setoran memakai harga master dan dibulatkan ke bawah ke rupiah penuh."""
+class SetoranTestBase(APITestCase):
+    """Pengurus, nasabah, dan satu jenis sampah untuk skenario setoran."""
 
     def setUp(self) -> None:
         self.bank = BankSampah.objects.create(
@@ -1684,6 +1684,13 @@ class KalkulasiSetoranTests(APITestCase):
             {"nasabah_id": str(self.nasabah.id), "items": items},
             format="json",
         )
+
+    def _saldo(self) -> Any:
+        return self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo").data["total_saldo"]
+
+
+class KalkulasiSetoranTests(SetoranTestBase):
+    """Nilai setoran memakai harga master dan dibulatkan ke bawah ke rupiah penuh."""
 
     def test_subtotal_dibulatkan_ke_bawah_ke_rupiah_penuh(self) -> None:
         # 2,345 kg x Rp 3.333 = Rp 7.815,885 -> dibulatkan ke bawah jadi Rp 7.815
@@ -1783,3 +1790,75 @@ class KalkulasiSetoranTests(APITestCase):
         kolom_saldo = [cell.value for cell in baris_header].index("Saldo Setelah Transaksi (Rp)")
         baris_data = riwayat[baris_header[0].row + 1]
         self.assertEqual(baris_data[kolom_saldo].value, Decimal("3433.00"))
+
+
+class ValidasiInputSetoranTests(SetoranTestBase):
+    """Input setoran yang tidak wajar ditolak sebelum menyentuh saldo nasabah."""
+
+    def test_berat_satu_item_di_atas_500_kg_ditolak(self) -> None:
+        response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "500.001"}])
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data["errors"]["items"][0]["berat"],
+            ["Berat maksimal 500 kg untuk satu jenis sampah"],
+        )
+        self.assertEqual(self._saldo(), "0.00")
+
+    def test_berat_tepat_500_kg_diterima(self) -> None:
+        response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "500.000"}])
+
+        self.assertEqual(response.status_code, 201)
+
+    def test_total_berat_setoran_di_atas_1000_kg_ditolak(self) -> None:
+        jenis_id = str(self.jenis.id)
+        response = self._setor(
+            [
+                {"jenis_sampah_id": jenis_id, "berat": "500.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "500.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "0.001"},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data["errors"]["items"], ["Total berat satu setoran maksimal 1.000 kg"]
+        )
+        self.assertEqual(self._saldo(), "0.00")
+
+    def test_total_berat_tepat_1000_kg_diterima(self) -> None:
+        jenis_id = str(self.jenis.id)
+        response = self._setor(
+            [
+                {"jenis_sampah_id": jenis_id, "berat": "500.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "500.000"},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+    def test_jenis_sampah_tanpa_harga_berlaku_ditolak(self) -> None:
+        # Harga yang belum diatur bernilai nol, sehingga setoran tidak bernilai
+        # apa-apa dan ditolak sebelum menyentuh saldo.
+        self.jenis.harga_per_kg = Decimal("0.00")
+        self.jenis.save(update_fields=["harga_per_kg"])
+
+        response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "2.000"}])
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data["errors"]["items[0].jenis_sampah_id"],
+            ["Harga jenis sampah belum diatur"],
+        )
+        self.assertEqual(self._saldo(), "0.00")
+
+    def test_harga_di_bawah_satu_rupiah_tetap_dipakai(self) -> None:
+        # Sejak harga master dibawa utuh ke perkalian (PIL-168), tarif di bawah
+        # Rp 1 tidak lagi runtuh jadi nol: Rp 0,50/kg x 4 kg = Rp 2.
+        self.jenis.harga_per_kg = Decimal("0.50")
+        self.jenis.save(update_fields=["harga_per_kg"])
+
+        response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "4.000"}])
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["items"][0]["subtotal"], "2.00")
