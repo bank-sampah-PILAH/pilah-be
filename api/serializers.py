@@ -1,11 +1,11 @@
 from collections.abc import Mapping
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
 from django.conf import settings
 from django.core.signing import TimestampSigner
-from django.db.models import Model, Q, Sum
-from django.db.models.functions import Coalesce
+from django.db.models import Model
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import serializers
@@ -17,11 +17,62 @@ from api.models import (
     JenisSampah,
     Nasabah,
     NasabahApprovalLog,
+    Pencairan,
     Saldo,
     Transaksi,
     User,
 )
+from api.services import BalanceService
 from api.validators import get_initials, normalize_indonesian_phone
+
+
+class PencairanCreateSerializer(serializers.Serializer[Any]):
+    nasabah_id = serializers.UUIDField(required=True)
+    nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=True)
+    metode = serializers.ChoiceField(choices=Pencairan.Metode.choices, required=True)
+    tanggal = serializers.DateTimeField(required=False)
+    keterangan = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True, max_length=255
+    )
+
+    def validate_nominal(self, value: Decimal) -> Decimal:
+        if value <= 0:
+            raise serializers.ValidationError("Nominal harus lebih dari nol")
+        if value != value.to_integral_value():
+            raise serializers.ValidationError("Nominal harus dalam rupiah bulat tanpa desimal")
+        return value
+
+    def validate_tanggal(self, value: datetime) -> datetime:
+        if value > timezone.now():
+            raise serializers.ValidationError("Tanggal pencairan tidak boleh di masa depan")
+        return value
+
+
+class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
+    nasabah_id = serializers.UUIDField(source="nasabah.id")
+    nasabah_nama = serializers.CharField(source="nasabah.nama")
+    bank_sampah_id = serializers.UUIDField(source="bank_sampah.id")
+    dicatat_oleh = serializers.UUIDField(source="dicatat_oleh.id")
+    dicatat_oleh_nama = serializers.CharField(source="dicatat_oleh.nama")
+
+    class Meta:
+        model = Pencairan
+        fields = [
+            "id",
+            "nasabah_id",
+            "nasabah_nama",
+            "bank_sampah_id",
+            "dicatat_oleh",
+            "dicatat_oleh_nama",
+            "tanggal",
+            "nominal",
+            "metode",
+            "keterangan",
+            "status",
+            "saldo_sebelum",
+            "saldo_sesudah",
+            "created_at",
+        ]
 
 
 class BankSampahSerializer(serializers.ModelSerializer[Model]):
@@ -470,11 +521,7 @@ class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
         ]
 
     def get_saldo_setelah_transaksi(self, obj: Any) -> Any:
-        return (
-            Transaksi.objects.filter(bank_sampah=obj.bank_sampah, nasabah=obj.nasabah)
-            .filter(Q(tanggal__lt=obj.tanggal) | Q(tanggal=obj.tanggal, id__lte=obj.id))
-            .aggregate(total=Coalesce(Sum("total_nilai"), Decimal("0.00")))["total"]
-        )
+        return BalanceService.saldo_at(obj.bank_sampah, obj.nasabah_id, obj.tanggal, obj.id)
 
 
 class TransactionListSerializer(serializers.ModelSerializer[Model]):

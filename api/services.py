@@ -3,7 +3,7 @@ import secrets
 from calendar import monthrange
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from io import BytesIO
 from typing import Any, cast
 from uuid import UUID
@@ -12,7 +12,7 @@ import requests
 from django.conf import settings
 from django.core import signing
 from django.db import IntegrityError, transaction
-from django.db.models import QuerySet, Sum
+from django.db.models import F, Max, Q, QuerySet, Sum
 from django.db.models.functions import Coalesce
 from django.http import HttpRequest
 from django.utils import timezone
@@ -31,6 +31,7 @@ from api.models import (
     JenisSampah,
     Nasabah,
     NasabahApprovalLog,
+    Pencairan,
     Saldo,
     Transaksi,
     User,
@@ -603,6 +604,91 @@ class TransactionService:
         return _export_excel(queryset, request)
 
 
+class BalanceService:
+    """Running saldo for a nasabah: setoran added, pencairan subtracted."""
+
+    @staticmethod
+    def saldo_at(
+        bank_sampah: BankSampah, nasabah_id: UUID, until: datetime, until_id: UUID
+    ) -> Decimal:
+        setoran = Transaksi.objects.filter(bank_sampah=bank_sampah, nasabah_id=nasabah_id).filter(
+            Q(tanggal__lt=until) | Q(tanggal=until, id__lte=until_id)
+        )
+        # At an equal tanggal a pencairan is ordered after the setoran, so it is
+        # excluded here; the export's merge below applies the same rule.
+        pencairan = Pencairan.objects.filter(
+            bank_sampah=bank_sampah, nasabah_id=nasabah_id, tanggal__lt=until
+        )
+        masuk = setoran.aggregate(total=Coalesce(Sum("total_nilai"), Decimal("0.00")))["total"]
+        # A pencairan debits what left the saldo: the nominal plus any sen its
+        # rounding dropped, so history lands on the stored Saldo.
+        keluar = pencairan.aggregate(
+            total=Coalesce(Sum(F("saldo_sebelum") - F("saldo_sesudah")), Decimal("0.00"))
+        )["total"]
+        return cast(Decimal, masuk - keluar)
+
+
+class PencairanService:
+    @staticmethod
+    @transaction.atomic
+    def create_pencairan(user: User, payload: Mapping[str, Any]) -> Pencairan:
+        bank = user.bank_sampah
+        assert bank is not None  # ponytail: views gate on IsActivePengelola
+        nasabah = (
+            Nasabah.objects.select_for_update()
+            .filter(
+                id=payload["nasabah_id"],
+                bank_sampah=bank,
+                is_active=True,
+                status=Nasabah.Status.APPROVED,
+            )
+            .first()
+        )
+        if not nasabah:
+            raise serializers.ValidationError(
+                {"nasabah_id": ["Nasabah tidak ditemukan atau tidak aktif"]}
+            )
+
+        tanggal = payload.get("tanggal") or timezone.now()
+        # The balance check below reads the current saldo, which is only the saldo
+        # at `tanggal` when nothing was recorded after it.
+        aktivitas = [
+            model.objects.filter(bank_sampah=bank, nasabah=nasabah).aggregate(
+                terakhir=Max("tanggal")
+            )["terakhir"]
+            for model in (Transaksi, Pencairan)
+        ]
+        terakhir = max((value for value in aktivitas if value), default=None)
+        if terakhir and tanggal < terakhir:
+            raise serializers.ValidationError(
+                {"tanggal": ["Tanggal pencairan tidak boleh sebelum transaksi terakhir nasabah"]}
+            )
+
+        saldo, _ = Saldo.objects.select_for_update().get_or_create(nasabah=nasabah)
+        nominal = payload["nominal"]
+        saldo_sebelum = saldo.total_saldo
+        if nominal > saldo_sebelum:
+            raise serializers.ValidationError({"nominal": ["Saldo nasabah tidak mencukupi"]})
+
+        # Whole rupiah, rounded down: drops sen left in PILAH 1.0 saldo, matching
+        # the setoran rule. Swap for kalkulasi.bulatkan_rupiah once PR #22 lands.
+        saldo_sesudah = (saldo_sebelum - nominal).quantize(Decimal(1), rounding=ROUND_DOWN)
+        pencairan = Pencairan.objects.create(
+            nasabah=nasabah,
+            bank_sampah=bank,
+            dicatat_oleh=user,
+            tanggal=tanggal,
+            nominal=nominal,
+            metode=payload["metode"],
+            keterangan=payload.get("keterangan") or "",
+            saldo_sebelum=saldo_sebelum,
+            saldo_sesudah=saldo_sesudah,
+        )
+        saldo.total_saldo = saldo_sesudah
+        saldo.save(update_fields=["total_saldo", "updated_at"])
+        return pencairan
+
+
 class TransactionFilterService:
     @staticmethod
     def apply_period(queryset: QuerySet[Transaksi], request: HttpRequest) -> QuerySet[Transaksi]:
@@ -1069,10 +1155,30 @@ def _saldo_after_by_transaction(queryset: QuerySet[Transaksi]) -> dict[UUID, Dec
         .only("id", "nasabah_id", "total_nilai", "tanggal")
         .order_by("nasabah_id", "tanggal", "id")
     )
-    for trans in transactions:
-        running_balances[trans.nasabah_id] += trans.total_nilai
-        if trans.id in target_ids:
-            saldo_after[trans.id] = running_balances[trans.nasabah_id]
+    pencairan = (
+        Pencairan.objects.filter(
+            bank_sampah=bank_sampah,
+            nasabah_id__in=nasabah_ids,
+            tanggal__lte=latest_transaction.tanggal,
+        )
+        .only("id", "nasabah_id", "saldo_sebelum", "saldo_sesudah", "tanggal")
+        .order_by("nasabah_id", "tanggal", "id")
+    )
+    # Merge both ledgers so a setoran recorded after a pencairan reports the
+    # balance that actually remains.
+    events: list[tuple[UUID, datetime, UUID, Decimal, bool]] = [
+        (trans.nasabah_id, trans.tanggal, trans.id, trans.total_nilai, True)
+        for trans in transactions
+    ]
+    events.extend(
+        (cair.nasabah_id, cair.tanggal, cair.id, cair.saldo_sesudah - cair.saldo_sebelum, False)
+        for cair in pencairan
+    )
+    events.sort(key=lambda event: (str(event[0]), event[1], not event[4], str(event[2])))
+    for nasabah_id, _tanggal, event_id, delta, is_transaksi in events:
+        running_balances[nasabah_id] += delta
+        if is_transaksi and event_id in target_ids:
+            saldo_after[event_id] = running_balances[nasabah_id]
 
     return saldo_after
 

@@ -331,6 +331,40 @@ class DetailTransaksi(models.Model):
         db_table = "detail_transaksi"
 
 
+class Pencairan(TimestampedModel):
+    class Metode(models.TextChoices):
+        TUNAI = "tunai", "Tunai"
+        TRANSFER = "transfer", "Transfer"
+
+    class Status(models.TextChoices):
+        TERCATAT = "tercatat", "Tercatat"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    nasabah = models.ForeignKey(Nasabah, on_delete=models.PROTECT, related_name="pencairan")
+    bank_sampah = models.ForeignKey(BankSampah, on_delete=models.PROTECT, related_name="pencairan")
+    dicatat_oleh = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="pencairan_dicatat"
+    )
+    tanggal = models.DateTimeField(default=timezone.now)
+    nominal = models.DecimalField(max_digits=14, decimal_places=2)
+    metode = models.CharField(max_length=20, choices=Metode.choices)
+    keterangan = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.TERCATAT)
+    # Receipt snapshots at record time; PIL-230 decides how edits affect them.
+    saldo_sebelum = models.DecimalField(max_digits=14, decimal_places=2)
+    saldo_sesudah = models.DecimalField(max_digits=14, decimal_places=2)
+
+    class Meta:
+        db_table = "pencairan"
+        ordering = ["-tanggal"]
+        indexes = [models.Index(fields=["bank_sampah", "nasabah", "tanggal"])]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(nominal__gt=0), name="pencairan_nominal_positive"
+            ),
+        ]
+
+
 class BankSampahApprovalLog(models.Model):
     class Status(models.TextChoices):
         APPROVED = "approved", "Approved"

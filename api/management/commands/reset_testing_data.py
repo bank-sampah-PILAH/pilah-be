@@ -3,7 +3,7 @@ from argparse import ArgumentParser
 from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
 
-from api.models import BankSampah, Nasabah, Transaksi, User
+from api.models import BankSampah, Nasabah, Pencairan, Transaksi, User
 
 CONFIRMATION = "RESET-PILAH-TEST-DATA"
 
@@ -25,6 +25,7 @@ class Command(BaseCommand):
             "bank_sampah": BankSampah.objects.count(),
             "nasabah": Nasabah.objects.count(),
             "transaksi": Transaksi.objects.count(),
+            "pencairan": Pencairan.objects.count(),
         }
         if any(remaining.values()):
             raise CommandError(f"Application data reset verification failed: {remaining}")
