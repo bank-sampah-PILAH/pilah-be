@@ -218,18 +218,23 @@ emails to the Google OAuth consent screen's test-user list, and configure the
 same values as GitHub `staging` environment variables:
 
 ```text
-PILAH_SEED_OPERATOR_EMAIL
+PILAH_SEED_PENGURUS_EMAIL
 PILAH_SEED_CUSTOMER_EMAIL
 PILAH_SEED_CUSTOMER_TWO_EMAIL
 PILAH_SEED_SUPERADMIN_EMAIL
-PILAH_SEED_PENDING_OPERATOR_EMAIL
+PILAH_SEED_PENDING_PENGURUS_EMAIL
 ```
+
+The old `PILAH_SEED_OPERATOR_EMAIL` and
+`PILAH_SEED_PENDING_OPERATOR_EMAIL` names remain supported as temporary
+fallbacks; the Pengurus names take precedence. The command also accepts the
+old `--operator-email` and `--pending-operator-email` flags.
 
 Run the confirmation-gated **Seed Staging Testing Data** GitHub Actions
 workflow and enter `SEED-PILAH-STAGING-DATA` exactly. The workflow connects to
 the documented `pilah-be-staging` Fly.io app and runs the same idempotent
 command with `--environment staging`; it never enables fake authentication.
-See [Fly.io staging](FLY_STAGING.md) for the operator setup.
+See [Fly.io staging](FLY_STAGING.md) for setup details.
 
 Bank Sampah organizations can be `mandiri`, `induk`, or `unit`. A unit must
 belong to an induk organization. A Nasabah user can have one membership per

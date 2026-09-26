@@ -209,6 +209,7 @@ class Nasabah(TimestampedModel):
     tanggal_lahir = models.DateField(blank=True, null=True)
     alamat = models.TextField()
     no_hp = models.CharField(max_length=20)
+    email = models.EmailField(blank=True, null=True, unique=True)
     tanggal_daftar = models.DateField(default=timezone.localdate)
     is_active = models.BooleanField(default=True)
     # Approval state of the membership (PIL-188): pending = self-registered
