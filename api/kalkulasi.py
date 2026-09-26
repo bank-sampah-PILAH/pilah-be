@@ -10,6 +10,7 @@ Semua perhitungan nilai setoran harus lewat modul ini supaya angka di database,
 aplikasi, pesan WhatsApp, dan laporan selalu sama.
 """
 
+from collections.abc import Iterable
 from decimal import ROUND_DOWN, Decimal
 
 from api.models import JenisSampah
@@ -47,3 +48,13 @@ def hitung_subtotal(harga: Decimal, berat: Decimal) -> Decimal:
     jumlah subtotal yang tampil di riwayat dan pesan WhatsApp.
     """
     return bulatkan_rupiah(harga * berat)
+
+
+def total_setoran(subtotal: Iterable[Decimal]) -> Decimal:
+    """Total satu setoran dari subtotal tiap itemnya.
+
+    Subtotal sudah berupa rupiah penuh, jadi penjumlahannya tidak menambah
+    sen baru. Dikumpulkan di sini supaya seluruh perhitungan nilai setoran
+    berada di satu modul, sesuai aturan di ``AGENTS.md``.
+    """
+    return bulatkan_rupiah(sum(subtotal, Decimal(0)))

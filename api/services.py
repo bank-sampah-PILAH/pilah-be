@@ -23,7 +23,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.kalkulasi import bulatkan_rupiah, harga_berlaku, hitung_subtotal
+from api.kalkulasi import bulatkan_rupiah, harga_berlaku, hitung_subtotal, total_setoran
 from api.models import (
     BankSampah,
     BankSampahApprovalLog,
@@ -327,7 +327,7 @@ class TransactionService:
             catatan=payload.get("catatan") or None,
         )
 
-        total_nilai = Decimal("0.00")
+        subtotal_items: list[Decimal] = []
         for index, item_payload in enumerate(payload["items"]):
             jenis = JenisSampah.objects.filter(
                 id=item_payload["jenis_sampah_id"], bank_sampah=bank, is_active=True
@@ -352,8 +352,9 @@ class TransactionService:
                 berat=berat,
                 subtotal=subtotal,
             )
-            total_nilai += subtotal
+            subtotal_items.append(subtotal)
 
+        total_nilai = total_setoran(subtotal_items)
         transaksi.total_nilai = total_nilai
         transaksi.save(update_fields=["total_nilai"])
         # Saldo warisan PILAH 1.0 bisa menyimpan sen; rapikan saat disentuh.
