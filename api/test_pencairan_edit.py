@@ -211,3 +211,33 @@ class PencairanEditTests(APITestCase):
                     self.assertEqual(
                         response.data["tanggal"], tanggal.isoformat().replace("+00:00", "Z")
                     )
+
+    def test_edit_tanggal_reorders_snapshots(self) -> None:
+        now = timezone.now()
+        pertama = self._catat("50000", tanggal=(now - timedelta(hours=3)).isoformat())
+        kedua = self._catat("30000", tanggal=(now - timedelta(hours=1)).isoformat())
+
+        moved = self._edit(
+            kedua["id"],
+            {"tanggal": (now - timedelta(hours=4)).isoformat(), "alasan": "Salah tanggal"},
+        )
+
+        self.assertEqual(moved.status_code, 200, moved.data)
+        self.assertEqual(moved.data["saldo_sebelum"], "465600.00")
+        self.assertEqual(moved.data["saldo_sesudah"], "435600.00")
+        self.assertEqual(self._detail(pertama["id"])["saldo_sebelum"], "435600.00")
+        self.assertEqual(self._detail(pertama["id"])["saldo_sesudah"], "385600.00")
+        self.assertEqual(self._saldo(), "385600.00")
+
+        self._setor()
+        ketiga = self._catat("20000")
+        self.assertEqual(ketiga["saldo_sebelum"], "485600.00")
+        before_setoran = self._edit(
+            ketiga["id"],
+            {"tanggal": (now - timedelta(hours=2)).isoformat(), "alasan": "Salah tanggal"},
+        )
+
+        self.assertEqual(before_setoran.status_code, 200, before_setoran.data)
+        self.assertEqual(before_setoran.data["saldo_sebelum"], "385600.00")
+        self.assertEqual(before_setoran.data["saldo_sesudah"], "365600.00")
+        self.assertEqual(self._saldo(), "465600.00")
