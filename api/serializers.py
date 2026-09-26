@@ -55,7 +55,14 @@ class PencairanEditSerializer(serializers.Serializer[Any]):
     keterangan = serializers.CharField(
         required=False, allow_blank=True, allow_null=True, max_length=255
     )
-    alasan = serializers.CharField(required=True, max_length=255)
+    alasan = serializers.CharField(
+        required=True,
+        max_length=255,
+        error_messages={
+            "required": "Alasan perubahan wajib diisi",
+            "blank": "Alasan perubahan wajib diisi",
+        },
+    )
 
 
 class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
