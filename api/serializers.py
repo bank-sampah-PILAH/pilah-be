@@ -66,6 +66,20 @@ class BankSampahSerializer(serializers.ModelSerializer[Model]):
         return {"id": str(user.id), "nama": user.nama, "email": user.email}
 
 
+class BankSampahDirectorySerializer(serializers.ModelSerializer[Model]):
+    """Public-facing listing for the calon-nasabah bank-sampah picker.
+
+    Deliberately excludes `pengelola`, `no_hp_pic`, and `wa_gateway_token` —
+    `BankSampahSerializer` carries those for the owning pengelola, not for a
+    prospective member browsing banks to join.
+    """
+
+    class Meta:
+        model = BankSampah
+        fields = ["id", "nama", "alamat", "kota", "foto_logo"]
+        read_only_fields = fields
+
+
 class UserProfileSerializer(serializers.ModelSerializer[Model]):
     class Meta:
         model = User
@@ -76,11 +90,13 @@ class UserProfileSerializer(serializers.ModelSerializer[Model]):
             "no_hp",
             "jenis_kelamin",
             "tanggal_lahir",
+            "alamat",
             "role",
             "is_profile_complete",
             "is_primary_pengelola",
         ]
         read_only_fields = ["id", "email", "role", "is_profile_complete", "is_primary_pengelola"]
+        extra_kwargs = {"alamat": {"required": False, "allow_blank": True}}
 
     def validate_nama(self, value: Any) -> Any:
         value = value.strip()
@@ -100,6 +116,18 @@ class UserProfileSerializer(serializers.ModelSerializer[Model]):
         if value > timezone.localdate():
             raise serializers.ValidationError("Tanggal lahir tidak boleh di masa depan")
         return value
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        # alamat is only meaningful (and required) for nasabah accounts —
+        # pengelola/pengelola induk give their organization's address on a
+        # separate step and have no use for a personal one here.
+        instance = self.instance
+        if isinstance(instance, User) and instance.role == User.Role.NASABAH:
+            alamat = attrs.get("alamat", instance.alamat).strip()
+            if not alamat:
+                raise serializers.ValidationError({"alamat": "Alamat wajib diisi"})
+            attrs["alamat"] = alamat
+        return attrs
 
 
 class BankSampahRegistrationSerializer(serializers.Serializer[Any]):
@@ -143,6 +171,10 @@ class AuthUserSerializer(serializers.ModelSerializer[Model]):
             "id",
             "nama",
             "email",
+            "no_hp",
+            "jenis_kelamin",
+            "tanggal_lahir",
+            "alamat",
             "role",
             "bank_sampah_id",
             "bank_sampah_nama",
@@ -274,7 +306,7 @@ class LogoutSerializer(serializers.Serializer[Any]):
 
 class NasabahSerializer(serializers.ModelSerializer[Model]):
     kode = serializers.CharField(source="nomor", required=True, max_length=20)
-    email = serializers.EmailField(required=False, allow_blank=True, allow_null=True)
+    email = serializers.EmailField(required=True)
     total_saldo = serializers.SerializerMethodField()
 
     class Meta:
@@ -304,10 +336,10 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
         ]
 
     def validate_email(self, value: Any) -> Any:
-        if value is None:
-            return None
         value = value.strip().lower()
-        return value or None
+        if not value:
+            raise serializers.ValidationError("Email wajib diisi")
+        return value
 
     def validate_kode(self, value: Any) -> Any:
         value = value.strip()
@@ -342,6 +374,53 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
 
     def get_total_saldo(self, obj: Any) -> Any:
         return getattr(getattr(obj, "saldo", None), "total_saldo", Decimal("0.00"))
+
+
+class NasabahSelfRegistrationSerializer(serializers.Serializer[Any]):
+    """Input for a calon nasabah applying to join a bank sampah (PIL-204).
+
+    Only `bank_sampah_id` is asked for here: `nama`, `jenis_kelamin`,
+    `tanggal_lahir`, `no_hp`, and `alamat` were already collected on the
+    shared `complete_profile` onboarding step and are copied from the User
+    by the service.
+    """
+
+    bank_sampah_id = serializers.UUIDField()
+
+
+class NasabahSelfBankSampahSerializer(serializers.ModelSerializer[Model]):
+    """The bank sampah facet of a nasabah's own membership listing.
+
+    Deliberately smaller than `BankSampahSerializer` — a nasabah viewing
+    their own membership has no use for the owning pengelola's contact
+    details, only enough to identify which bank the row belongs to.
+    """
+
+    class Meta:
+        model = BankSampah
+        fields = ["id", "nama", "kota"]
+        read_only_fields = fields
+
+
+class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
+    """A calon/active nasabah's own membership row (PIL-204's beranda-first
+    onboarding): status, and — only while rejected — the pengurus's reason,
+    so the beranda can show it and let the user appeal by reapplying.
+    """
+
+    bank_sampah = NasabahSelfBankSampahSerializer(read_only=True)
+    alasan_penolakan = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Nasabah
+        fields = ["id", "bank_sampah", "status", "is_active", "alasan_penolakan"]
+        read_only_fields = fields
+
+    def get_alasan_penolakan(self, obj: Nasabah) -> str | None:
+        if obj.status != Nasabah.Status.REJECTED:
+            return None
+        log = obj.approval_logs.filter(status=NasabahApprovalLog.Status.REJECTED).first()
+        return log.catatan if log else None
 
 
 class NasabahDetailSerializer(NasabahSerializer):

@@ -152,6 +152,7 @@ Auth and app variables:
 ```env
 GOOGLE_CLIENT_ID=
 PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false
+PILAH_SUPERADMIN_EMAILS=admin@example.com
 PILAH_PUBLIC_APP_URL=https://pilah.example.com
 PILAH_SUPERADMIN_EMAILS=admin@example.com,another-admin@example.com
 ```
@@ -244,6 +245,12 @@ The old `PILAH_SEED_OPERATOR_EMAIL` and
 fallbacks; the Pengurus names take precedence. The command also accepts the
 old `--operator-email` and `--pending-operator-email` flags.
 
+Set `PILAH_SUPERADMIN_EMAILS` on Fly to the comma-separated authoritative
+Superadmin Google accounts; the seeded Superadmin email must be included. The
+Cloud Run workflow reads the production allowlist from the GitHub variable with
+the same name.
+Existing Superadmin accounts not present in this list cannot use Google login.
+
 Run the confirmation-gated **Seed Staging Testing Data** GitHub Actions
 workflow and enter `SEED-PILAH-STAGING-DATA` exactly. The workflow connects to
 the documented `pilah-be-staging` Fly.io app and runs the same idempotent
@@ -288,6 +295,7 @@ SuperAdmin flow:
 Authentication:
 
 - `POST /api/v1/auth/google`
+- `POST /api/v1/auth/google/register`
 - `POST /api/v1/auth/refresh`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`

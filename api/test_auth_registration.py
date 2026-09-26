@@ -487,6 +487,7 @@ class RoleOnboardingStateTests(APITestCase):
                         "jenis_kelamin": "laki-laki",
                         "tanggal_lahir": "1990-01-01",
                         "no_hp": f"08123456789{index}",
+                        "alamat": "Jl. Role User",
                     },
                     format="json",
                 )

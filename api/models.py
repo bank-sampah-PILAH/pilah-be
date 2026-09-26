@@ -146,6 +146,9 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
     no_hp = models.CharField(max_length=20, blank=True)
     jenis_kelamin = models.CharField(max_length=20, choices=Gender.choices, blank=True)
     tanggal_lahir = models.DateField(blank=True, null=True)
+    # Personal address, collected on complete_profile for nasabah accounts only
+    # (PIL-204) — copied onto each Nasabah membership row at registration time.
+    alamat = models.TextField(blank=True)
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.PENGELOLA)
     is_profile_complete = models.BooleanField(default=False)
     bank_sampah = models.ForeignKey(
@@ -211,7 +214,7 @@ class Nasabah(TimestampedModel):
     tanggal_lahir = models.DateField(blank=True, null=True)
     alamat = models.TextField()
     no_hp = models.CharField(max_length=20)
-    email = models.EmailField(blank=True, null=True, unique=True)
+    email = models.EmailField()
     tanggal_daftar = models.DateField(default=timezone.localdate)
     is_active = models.BooleanField(default=True)
     # Approval state of the membership (PIL-188): pending = self-registered
@@ -221,7 +224,11 @@ class Nasabah(TimestampedModel):
 
     class Meta:
         db_table = "nasabah"
-        unique_together = (("bank_sampah", "nomor"), ("bank_sampah", "no_hp"))
+        unique_together = (
+            ("bank_sampah", "nomor"),
+            ("bank_sampah", "no_hp"),
+            ("bank_sampah", "email"),
+        )
         ordering = ["nomor"]
         constraints = [
             models.UniqueConstraint(

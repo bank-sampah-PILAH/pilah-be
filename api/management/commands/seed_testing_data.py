@@ -239,6 +239,10 @@ class Command(BaseCommand):
             role=User.Role.NASABAH,
             bank=None,
             is_primary=False,
+            no_hp="+628333333331",
+            alamat="Jl. Mawar E2E No. 1",
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir=date(1990, 1, 1),
         )
         customer_two_user = self._upsert_user(
             user_id=CUSTOMER_TWO_USER_ID,
@@ -247,6 +251,10 @@ class Command(BaseCommand):
             role=User.Role.NASABAH,
             bank=None,
             is_primary=False,
+            no_hp="+628333333332",
+            alamat="Jl. Melati E2E No. 2",
+            jenis_kelamin=User.Gender.FEMALE,
+            tanggal_lahir=date(1992, 2, 2),
         )
 
         customer_one = self._upsert_customer(
@@ -360,6 +368,10 @@ class Command(BaseCommand):
         is_primary: bool,
         is_staff: bool = False,
         is_superuser: bool = False,
+        no_hp: str = "",
+        alamat: str = "",
+        jenis_kelamin: str = "",
+        tanggal_lahir: date | None = None,
     ) -> User:
         user = User.objects.filter(pk=user_id).first()
         if user is None:
@@ -406,6 +418,15 @@ class Command(BaseCommand):
         user.is_active = True
         user.is_staff = is_staff
         user.is_superuser = is_superuser
+        # A nasabah account's own profile mirrors the Nasabah record it's
+        # linked to below — a blank no_hp/alamat here despite
+        # is_profile_complete=True doesn't match any state the real login
+        # flow produces, and register_nasabah's alamat guard would reject
+        # this account outright if it ever tried to self-register.
+        user.no_hp = no_hp
+        user.alamat = alamat
+        user.jenis_kelamin = jenis_kelamin
+        user.tanggal_lahir = tanggal_lahir
         user.save(
             update_fields=[
                 "email",
@@ -417,6 +438,10 @@ class Command(BaseCommand):
                 "is_active",
                 "is_staff",
                 "is_superuser",
+                "no_hp",
+                "alamat",
+                "jenis_kelamin",
+                "tanggal_lahir",
                 "updated_at",
             ]
         )
@@ -446,6 +471,7 @@ class Command(BaseCommand):
                 "tanggal_lahir": birth_date,
                 "alamat": address,
                 "no_hp": phone,
+                "email": user.email,
                 "is_active": True,
             },
         )

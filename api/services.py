@@ -107,7 +107,6 @@ class AuthService:
                         is_staff=role == User.Role.SUPERADMIN,
                         is_superuser=role == User.Role.SUPERADMIN,
                     )
-                nama_was_empty = True
             except IntegrityError:
                 # A concurrent Google request may have created this account
                 # after the initial lookup. Authenticate that account instead
@@ -116,22 +115,39 @@ class AuthService:
                 if user is None:
                     raise
                 is_new_user = False
-                nama_was_empty = not user.nama
                 AuthService._enforce_superadmin_allowlist(user, email)
                 AuthService._update_google_identity(user, google_id, str(name))
         else:
-            nama_was_empty = not user.nama
             AuthService._enforce_superadmin_allowlist(user, email)
             AuthService._update_google_identity(user, google_id, str(name))
 
-        # PIL-154: a Nasabah row created by a Pengurus can prefill the matching
-        # Google account. Existing profile values remain authoritative.
-        if nasabah:
-            AuthService._sync_nasabah_profile(
-                user, nasabah, is_new_user=is_new_user, nama_was_empty=nama_was_empty
-            )
+        AuthService._sync_nasabah_prefill(user)
 
         return AuthService._session_response(user, is_new_user=is_new_user)
+
+    @staticmethod
+    def _sync_nasabah_prefill(user: User) -> None:
+        """Claim a pengurus-entered membership on first matching,
+        Google-verified login — but never copy its profile fields onto the
+        user. The user's own identity data is authoritative: they always
+        fill it in themselves via complete_profile, which then overrides
+        the Nasabah record (see
+        OnboardingService._propagate_profile_to_memberships), not the other
+        way around.
+
+        Gated on role because a pengurus-entered email can coincidentally
+        match an account that registered as something other than nasabah,
+        and that account must not be silently turned into a member.
+        """
+        if user.role != User.Role.NASABAH:
+            return
+        nasabah = Nasabah.objects.filter(
+            email__iexact=user.email, is_active=True, user__isnull=True
+        ).first()
+        if nasabah is None:
+            return
+        nasabah.user = user
+        nasabah.save(update_fields=["user", "updated_at"])
 
     @staticmethod
     def register_with_google(registration_token: str, role: str) -> tuple[dict[str, Any], bool]:
@@ -241,25 +257,6 @@ class AuthService:
             user.save(update_fields=updates)
 
     @staticmethod
-    def _sync_nasabah_profile(
-        user: User, nasabah: Nasabah, *, is_new_user: bool, nama_was_empty: bool
-    ) -> None:
-        profile_updates = []
-        for user_field in ("nama", "no_hp", "jenis_kelamin", "tanggal_lahir"):
-            fillable = user_field == "nama" and (is_new_user or nama_was_empty)
-            nasabah_value = getattr(nasabah, user_field)
-            if (fillable or not getattr(user, user_field)) and nasabah_value:
-                setattr(user, user_field, nasabah_value)
-                profile_updates.append(user_field)
-        if profile_updates and all(
-            getattr(user, field) for field in ("nama", "no_hp", "jenis_kelamin", "tanggal_lahir")
-        ):
-            user.is_profile_complete = True
-            profile_updates.append("is_profile_complete")
-        if profile_updates:
-            user.save(update_fields=profile_updates)
-
-    @staticmethod
     def _session_response(user: User, *, is_new_user: bool) -> dict[str, Any]:
         refresh = RefreshToken.for_user(user)
         access = refresh.access_token
@@ -281,6 +278,10 @@ class AuthService:
                 "name": user.nama,
                 "nama": user.nama,
                 "email": user.email,
+                "no_hp": user.no_hp,
+                "jenis_kelamin": user.jenis_kelamin,
+                "tanggal_lahir": user.tanggal_lahir.isoformat() if user.tanggal_lahir else None,
+                "alamat": user.alamat,
                 "role": user.role,
                 "bank_sampah_id": str(user.bank_sampah_id) if user.bank_sampah_id else None,
                 "bank_sampah_nama": bank.nama if bank else None,
@@ -304,6 +305,11 @@ class AuthService:
                 "pengelola_induk_dashboard" if user.bank_sampah_id else "register_bank_sampah_induk"
             )
         if user.role == User.Role.NASABAH:
+            # Routing doesn't gate on approval: a membership application, once
+            # submitted, sends the user straight to their own beranda
+            # regardless of status. Pending/rejected states — and appealing a
+            # rejection by reapplying — are handled there (GET /nasabah/me),
+            # not by stalling onboarding on a blocking screen.
             return "nasabah_dashboard" if user.keanggotaan_nasabah.exists() else "register_nasabah"
         bank = user.bank_sampah
         if not user.bank_sampah_id or bank is None:
@@ -392,7 +398,11 @@ class OnboardingService:
     @staticmethod
     @transaction.atomic
     def complete_profile(user: User, profile_data: Mapping[str, Any]) -> User:
-        if user.is_profile_complete:
+        # One-shot, except a nasabah can still fix it while pengurus hasn't
+        # decided on their registration yet.
+        if user.is_profile_complete and not OnboardingService._has_pending_nasabah_registration(
+            user
+        ):
             raise ValueError("Profil sudah lengkap")
         for field, value in profile_data.items():
             setattr(user, field, value)
@@ -403,11 +413,50 @@ class OnboardingService:
                 "no_hp",
                 "jenis_kelamin",
                 "tanggal_lahir",
+                "alamat",
                 "is_profile_complete",
                 "updated_at",
             ]
         )
+        if user.role == User.Role.NASABAH:
+            OnboardingService._propagate_profile_to_memberships(user)
         return user
+
+    @staticmethod
+    def _has_pending_nasabah_registration(user: User) -> bool:
+        return (
+            user.role == User.Role.NASABAH
+            and user.keanggotaan_nasabah.filter(status=Nasabah.Status.PENDING).exists()
+        )
+
+    @staticmethod
+    def _propagate_profile_to_memberships(user: User) -> None:
+        """The user's own profile is authoritative: whatever they just
+        entered overrides any pengurus-entered data on their linked
+        Nasabah record(s) — the opposite direction from PIL-154's original
+        design, where the Nasabah record won."""
+        for nasabah in user.keanggotaan_nasabah.all():
+            nasabah.nama = user.nama
+            nasabah.jenis_kelamin = user.jenis_kelamin
+            nasabah.tanggal_lahir = user.tanggal_lahir
+            nasabah.alamat = user.alamat
+            nasabah.no_hp = user.no_hp
+            try:
+                with transaction.atomic():
+                    nasabah.save(
+                        update_fields=[
+                            "nama",
+                            "jenis_kelamin",
+                            "tanggal_lahir",
+                            "alamat",
+                            "no_hp",
+                            "updated_at",
+                        ]
+                    )
+            except IntegrityError as exc:
+                raise ValueError(
+                    "Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus"
+                ) from exc
 
     @staticmethod
     @transaction.atomic
@@ -434,6 +483,90 @@ class OnboardingService:
         user.is_primary_pengelola = True
         user.save(update_fields=["bank_sampah", "is_primary_pengelola", "updated_at"])
         return bank
+
+    @staticmethod
+    @transaction.atomic
+    def register_nasabah(user: User, payload: Mapping[str, Any]) -> Nasabah:
+        if user.role != User.Role.NASABAH:
+            raise PermissionError("Hanya nasabah yang dapat mengajukan keanggotaan")
+        if not user.alamat.strip():
+            raise ValueError("Lengkapi alamat pada profil Anda terlebih dahulu")
+
+        bank = BankSampah.objects.filter(id=payload["bank_sampah_id"]).first()
+        if (
+            not bank
+            or bank.status != BankSampah.Status.ACTIVE
+            or not bank.is_active
+            or bank.jenis_organisasi == BankSampah.OrganizationType.INDUK
+        ):
+            raise ValueError("Bank sampah tidak ditemukan atau belum tersedia")
+
+        own_record = Nasabah.objects.filter(bank_sampah=bank, user=user).first()
+        if own_record is not None:
+            if own_record.status != Nasabah.Status.REJECTED:
+                raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
+            # A rejection is correctable, not a permanent lockout: resubmit
+            # the same row as a fresh application rather than raising.
+            #
+            # Conditional UPDATE, not own_record.save(): guards against two
+            # concurrent reapply requests both passing the check above.
+            # A losing request affects 0 rows and falls through to the
+            # error below instead of silently double-applying.
+            updated = Nasabah.objects.filter(
+                pk=own_record.pk, status=Nasabah.Status.REJECTED
+            ).update(
+                nama=user.nama,
+                jenis_kelamin=user.jenis_kelamin,
+                tanggal_lahir=user.tanggal_lahir,
+                alamat=user.alamat,
+                status=Nasabah.Status.PENDING,
+                is_active=True,
+                updated_at=timezone.now(),
+            )
+            if updated == 0:
+                raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
+            own_record.refresh_from_db()
+            Saldo.objects.get_or_create(nasabah=own_record)
+            return own_record
+
+        # A pengurus-entered record for this same person converges onto
+        # `own_record` above at first Google login (AuthService matches on
+        # verified `email`, not on this self-declared `no_hp`), so reaching
+        # here with a phone collision means it belongs to someone else.
+        if Nasabah.objects.filter(bank_sampah=bank, no_hp=user.no_hp).exists():
+            raise ValueError("Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus")
+
+        nasabah = Nasabah(
+            bank_sampah=bank,
+            user=user,
+            nomor=OnboardingService._next_nasabah_nomor(bank),
+            nama=user.nama,
+            jenis_kelamin=user.jenis_kelamin,
+            tanggal_lahir=user.tanggal_lahir,
+            no_hp=user.no_hp,
+            email=user.email,
+            alamat=user.alamat,
+            # A self-registration awaits pengurus review (PIL-188); the model
+            # default of APPROVED is for records a pengurus enters directly,
+            # who has already vetted them by typing them in.
+            status=Nasabah.Status.PENDING,
+        )
+        for _ in range(5):
+            try:
+                with transaction.atomic():
+                    nasabah.save()
+                break
+            except IntegrityError:
+                nasabah.nomor = OnboardingService._next_nasabah_nomor(bank)
+        else:
+            raise ValueError("Gagal membuat nomor nasabah, silakan coba lagi")
+        Saldo.objects.create(nasabah=nasabah)
+        return nasabah
+
+    @staticmethod
+    def _next_nasabah_nomor(bank: BankSampah) -> str:
+        count = Nasabah.objects.filter(bank_sampah=bank).count()
+        return f"NAS-{count + 1:04d}"
 
     @staticmethod
     @transaction.atomic

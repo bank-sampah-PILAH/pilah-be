@@ -25,6 +25,8 @@ from api.models import BankSampah, JadwalKegiatan, JenisSampah, Nasabah, Saldo, 
 from api.permissions import (
     IsActivePengelola,
     IsJadwalViewer,
+    IsNasabah,
+    IsNasabahRole,
     IsPengelola,
     IsPrimaryPengelola,
     IsRegistrationRole,
@@ -35,6 +37,7 @@ from api.serializers import (
     ApprovalLogSerializer,
     AuthUserSerializer,
     BankSampahApprovalListSerializer,
+    BankSampahDirectorySerializer,
     BankSampahRegistrationSerializer,
     BankSampahSerializer,
     GoogleAuthSerializer,
@@ -45,6 +48,8 @@ from api.serializers import (
     LogoutSerializer,
     NasabahApprovalLogSerializer,
     NasabahDetailSerializer,
+    NasabahSelfRegistrationSerializer,
+    NasabahSelfViewSerializer,
     NasabahSerializer,
     RefreshTokenSerializer,
     SaldoSerializer,
@@ -312,6 +317,39 @@ class RegisterBankSampahView(APIView):
         return Response(data, status=201)
 
 
+class RegisterNasabahView(APIView):
+    permission_classes = [IsNasabah]
+    serializer_class = NasabahSelfRegistrationSerializer
+
+    def post(self, request: Request) -> Response:
+        serializer = NasabahSelfRegistrationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            nasabah = OnboardingService.register_nasabah(_user(request), serializer.validated_data)
+        except PermissionError as exc:
+            return Response({"error": str(exc)}, status=403)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
+        data = NasabahSerializer(nasabah).data
+        data["next_step"] = AuthService.user_state(_user(request))
+        return Response(data, status=201)
+
+
+class NasabahSelfView(APIView):
+    """A nasabah's own membership rows (beranda-first onboarding, PIL-204):
+    status, and the pengurus's reason when rejected, so the app can show
+    it and let the user appeal by reapplying via `RegisterNasabahView`
+    rather than being stalled on a blocking approval screen.
+    """
+
+    permission_classes = [IsNasabahRole]
+    serializer_class = NasabahSelfViewSerializer
+
+    def get(self, request: Request) -> Response:
+        memberships = Nasabah.objects.filter(user=_user(request)).select_related("bank_sampah")
+        return Response(NasabahSelfViewSerializer(memberships, many=True).data)
+
+
 class AcceptInviteView(APIView):
     permission_classes = [IsAuthenticated]
     serializer_class = InviteAcceptSerializer
@@ -354,6 +392,26 @@ class BankSampahMeView(APIView):
         return Response(serializer.data)
 
 
+class BankSampahDirectoryView(APIView):
+    """Lists bank sampah a calon nasabah can apply to join.
+
+    Excludes `induk` organizations — they are administrative parents with no
+    direct membership of their own; a nasabah joins one of their `unit`
+    branches, or a standalone `mandiri` bank sampah, instead.
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = BankSampahDirectorySerializer
+
+    def get(self, request: Request) -> Response:
+        banks = (
+            BankSampah.objects.filter(status=BankSampah.Status.ACTIVE, is_active=True)
+            .exclude(jenis_organisasi=BankSampah.OrganizationType.INDUK)
+            .order_by("nama")
+        )
+        return Response(BankSampahDirectorySerializer(banks, many=True).data)
+
+
 class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
     permission_classes = [IsActivePengelola]
     serializer_class = NasabahSerializer
@@ -383,12 +441,6 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             return NasabahDetailSerializer
         return NasabahSerializer
 
-    @staticmethod
-    def _email_duplicate_error(nasabah: Nasabah, bank_id: Any) -> str:
-        if nasabah.bank_sampah_id == bank_id:
-            return "Email sudah terdaftar sebagai nasabah di bank sampah ini"
-        return "Email sudah terdaftar sebagai nasabah di bank sampah lain"
-
     def create(self, request: Request) -> Response:
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -400,10 +452,12 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         if Nasabah.objects.filter(bank_sampah=bank, no_hp=no_hp).exists():
             return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
         email = serializer.validated_data.get("email")
-        existing_by_email = Nasabah.objects.filter(email=email).first() if email else None
+        existing_by_email = (
+            Nasabah.objects.filter(bank_sampah=bank, email=email).first() if email else None
+        )
         if existing_by_email:
             return Response(
-                {"errors": {"email": [self._email_duplicate_error(existing_by_email, bank.id)]}},
+                {"errors": {"email": ["Email sudah terdaftar sebagai nasabah di bank sampah ini"]}},
                 status=422,
             )
         nasabah = serializer.save(
@@ -439,11 +493,13 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
         email = serializer.validated_data.get("email")
         existing_by_email = (
-            Nasabah.objects.filter(email=email).exclude(id=instance.id).first() if email else None
+            Nasabah.objects.filter(bank_sampah=bank, email=email).exclude(id=instance.id).first()
+            if email
+            else None
         )
         if existing_by_email:
             return Response(
-                {"errors": {"email": [self._email_duplicate_error(existing_by_email, bank.id)]}},
+                {"errors": {"email": ["Email sudah terdaftar sebagai nasabah di bank sampah ini"]}},
                 status=422,
             )
         self.perform_update(serializer)
