@@ -600,7 +600,7 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
             qs = qs.filter(nasabah_id=nasabah_id)
         if len(search) >= 2:
             qs = qs.filter(nasabah__nama__icontains=search)
-        return qs
+        return PencairanService.dengan_info_revisi(qs)
 
     def list(self, request: Request) -> Response:
         # Unlike transaksi, no periode means the whole history (per-nasabah riwayat).

@@ -11,7 +11,7 @@ from uuid import UUID
 import requests
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Model, Q, QuerySet, Sum
+from django.db.models import Exists, Model, OuterRef, Q, QuerySet, Subquery, Sum
 from django.db.models.functions import Coalesce
 from django.http import HttpRequest
 from django.utils import timezone
@@ -523,10 +523,28 @@ class PencairanService:
         return pencairan
 
     @staticmethod
+    def dengan_info_revisi(queryset: QuerySet[Pencairan]) -> QuerySet[Pencairan]:
+        """Annotate what `diperbarui` and `tanggal_edit_minimum` need, one query for all rows."""
+        revisi = PencairanRevisi.objects.filter(pencairan=OuterRef("pk"))
+        return queryset.annotate(
+            ada_revisi=Exists(revisi),
+            tanggal_versi_awal=Subquery(revisi.filter(versi=1).values("tanggal")[:1]),
+        )
+
+    @staticmethod
+    def diperbarui(pencairan: Pencairan) -> bool:
+        if hasattr(pencairan, "ada_revisi"):
+            return bool(pencairan.ada_revisi)
+        return pencairan.revisi.exists()
+
+    @staticmethod
     def tanggal_edit_minimum(pencairan: Pencairan) -> datetime:
         """Earliest tanggal an edit may set, counted from the tanggal first recorded."""
-        versi_awal = pencairan.revisi.order_by("versi").first()
-        tanggal_awal = versi_awal.tanggal if versi_awal else pencairan.tanggal
+        if hasattr(pencairan, "tanggal_versi_awal"):
+            tanggal_awal = pencairan.tanggal_versi_awal or pencairan.tanggal
+        else:
+            versi_awal = pencairan.revisi.order_by("versi").first()
+            tanggal_awal = versi_awal.tanggal if versi_awal else pencairan.tanggal
         return tanggal_awal - timedelta(days=BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI)
 
     @staticmethod

@@ -111,7 +111,7 @@ class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
         ]
 
     def get_diperbarui(self, obj: Pencairan) -> bool:
-        return obj.revisi.exists()
+        return PencairanService.diperbarui(obj)
 
     def get_tanggal_edit_minimum(self, obj: Pencairan) -> str:
         return serializers.DateTimeField().to_representation(
