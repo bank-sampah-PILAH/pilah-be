@@ -9,6 +9,7 @@ from api.models import (
     JenisSampah,
     Nasabah,
     Pencairan,
+    PencairanRevisi,
     Saldo,
     Transaksi,
     User,
@@ -77,8 +78,6 @@ admin.site.register(JenisSampah)
 admin.site.register(Transaksi)
 admin.site.register(DetailTransaksi)
 admin.site.register(BankSampahApprovalLog)
-
-
 @admin.register(Pencairan)
 class PencairanAdmin(admin.ModelAdmin):  # type: ignore[type-arg]  # stubs are generic, runtime is not
     # Read-only: writes must go through PencairanService so Saldo moves with the row.
@@ -89,4 +88,23 @@ class PencairanAdmin(admin.ModelAdmin):  # type: ignore[type-arg]  # stubs are g
         return False
 
     def has_delete_permission(self, request: HttpRequest, obj: Pencairan | None = None) -> bool:
+        return False
+
+
+@admin.register(PencairanRevisi)
+class PencairanRevisiAdmin(admin.ModelAdmin):  # type: ignore[type-arg]  # stubs are generic, runtime is not
+    # Append-only audit trail: admins may read old versions, never change them.
+    list_display = ("pencairan", "versi", "nominal", "tanggal", "alasan", "diubah_oleh")
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_change_permission(
+        self, request: HttpRequest, obj: PencairanRevisi | None = None
+    ) -> bool:
+        return False
+
+    def has_delete_permission(
+        self, request: HttpRequest, obj: PencairanRevisi | None = None
+    ) -> bool:
         return False
