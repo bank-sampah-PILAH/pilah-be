@@ -11,7 +11,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.models import BankSampah, User
+from api.models import BankSampah
 from apps.organization.serializers import (
     ApprovalDecisionSerializer,
     ApprovalLogSerializer,
@@ -20,19 +20,7 @@ from apps.organization.serializers import (
 )
 from apps.organization.services import ApprovalService
 from shared_kernel.permissions import IsActivePengelola, IsSuperAdmin
-
-
-def _user(request: Request) -> User:
-    # ponytail: dup of api.views._user; the close phase extracts one shared
-    # request helper once all views have moved.
-    assert isinstance(request.user, User)
-    return request.user
-
-
-def _bank_sampah(request: Request) -> BankSampah:
-    bank = _user(request).bank_sampah
-    assert bank is not None
-    return bank
+from shared_kernel.scoping import current_bank, current_user
 
 
 def bank_sampah_activity_media(request: HttpRequest, token: str) -> FileResponse:
@@ -59,10 +47,10 @@ class BankSampahMeView(APIView):
     serializer_class = BankSampahSerializer
 
     def get(self, request: Request) -> Response:
-        return Response(BankSampahSerializer(_bank_sampah(request)).data)
+        return Response(BankSampahSerializer(current_bank(request)).data)
 
     def put(self, request: Request) -> Response:
-        serializer = BankSampahSerializer(_bank_sampah(request), data=request.data, partial=True)
+        serializer = BankSampahSerializer(current_bank(request), data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
@@ -94,7 +82,7 @@ class SuperAdminBankSampahViewSet(viewsets.GenericViewSet):  # type: ignore[type
         serializer = ApprovalDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         log = ApprovalService.approve(
-            bank, _user(request), serializer.validated_data.get("catatan", "")
+            bank, current_user(request), serializer.validated_data.get("catatan", "")
         )
         return Response(
             {
@@ -109,7 +97,7 @@ class SuperAdminBankSampahViewSet(viewsets.GenericViewSet):  # type: ignore[type
         serializer = ApprovalDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         log = ApprovalService.reject(
-            bank, _user(request), serializer.validated_data.get("catatan", "")
+            bank, current_user(request), serializer.validated_data.get("catatan", "")
         )
         return Response(
             {

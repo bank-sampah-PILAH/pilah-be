@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import BankSampah, User
+from api.models import User
 from apps.identity.serializers import (
     AuthUserSerializer,
     GoogleAuthSerializer,
@@ -29,19 +29,7 @@ from apps.organization.serializers import (
     BankSampahSerializer,
 )
 from shared_kernel.permissions import IsActivePengelola, IsPengelola, IsPrimaryPengelola
-
-
-def _user(request: Request) -> User:
-    # ponytail: dup of api.views._user; the close phase extracts one shared
-    # request helper once all views have moved.
-    assert isinstance(request.user, User)
-    return request.user
-
-
-def _bank_sampah(request: Request) -> BankSampah:
-    bank = _user(request).bank_sampah
-    assert bank is not None
-    return bank
+from shared_kernel.scoping import current_bank, current_user
 
 
 class GoogleAuthView(APIView):
@@ -190,8 +178,8 @@ class AuthMeView(APIView):
     serializer_class = AuthUserSerializer
 
     def get(self, request: Request) -> Response:
-        data = AuthUserSerializer(_user(request)).data
-        data["state"] = AuthService.user_state(_user(request))
+        data = AuthUserSerializer(current_user(request)).data
+        data["state"] = AuthService.user_state(current_user(request))
         return Response(data)
 
 
@@ -200,10 +188,12 @@ class CompleteProfileView(APIView):
     serializer_class = UserProfileSerializer
 
     def put(self, request: Request) -> Response:
-        serializer = UserProfileSerializer(_user(request), data=request.data, partial=True)
+        serializer = UserProfileSerializer(current_user(request), data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         try:
-            user = OnboardingService.complete_profile(_user(request), serializer.validated_data)
+            user = OnboardingService.complete_profile(
+                current_user(request), serializer.validated_data
+            )
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         data = UserProfileSerializer(user).data
@@ -220,13 +210,15 @@ class RegisterBankSampahView(APIView):
         serializer = BankSampahRegistrationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            bank = OnboardingService.register_bank_sampah(_user(request), serializer.validated_data)
+            bank = OnboardingService.register_bank_sampah(
+                current_user(request), serializer.validated_data
+            )
         except PermissionError as exc:
             return Response({"error": str(exc)}, status=403)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         data = BankSampahSerializer(bank).data
-        data["next_step"] = AuthService.user_state(_user(request))
+        data["next_step"] = AuthService.user_state(current_user(request))
         return Response(data, status=201)
 
 
@@ -239,14 +231,14 @@ class AcceptInviteView(APIView):
         serializer.is_valid(raise_exception=True)
         try:
             bank, outcome = OnboardingService.accept_invite(
-                _user(request), serializer.validated_data["token"]
+                current_user(request), serializer.validated_data["token"]
             )
         except PermissionError as exc:
             return Response({"error": str(exc)}, status=403)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         data = BankSampahSerializer(bank).data
-        data["next_step"] = AuthService.user_state(_user(request))
+        data["next_step"] = AuthService.user_state(current_user(request))
         data["outcome"] = outcome
         data["bank_sampah_id"] = str(bank.id)
         data["bank_sampah_nama"] = bank.nama
@@ -263,7 +255,7 @@ class TeamView(APIView):
 
     def get(self, request: Request) -> Response:
         members = User.objects.filter(
-            bank_sampah=_bank_sampah(request), role=User.Role.PENGELOLA, is_active=True
+            bank_sampah=current_bank(request), role=User.Role.PENGELOLA, is_active=True
         ).order_by("-is_primary_pengelola", "nama")
         return Response(
             {"members": TeamMemberSerializer(members, many=True, context={"request": request}).data}
@@ -275,7 +267,7 @@ class GenerateInviteView(APIView):
     serializer_class = InviteAcceptSerializer
 
     def post(self, request: Request) -> Response:
-        bank = _bank_sampah(request)
+        bank = current_bank(request)
         token = TeamService.generate_invite(bank)
         invite_path = f"/invite?{urlencode({'token': token})}"
         base_url = request.build_absolute_uri("/")[:-1]
