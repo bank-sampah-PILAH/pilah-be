@@ -63,7 +63,9 @@ class OAuthRegressionTests(RegressionTestCase):
 
     def test_oauth_callback_network_error(self) -> None:
         self.client.credentials()
-        with patch("apps.identity.views.requests.post", side_effect=requests.RequestException("down")):
+        with patch(
+            "apps.identity.views.requests.post", side_effect=requests.RequestException("down")
+        ):
             response = self.client.get("/api/v1/auth/google/callback?code=abc")
         self.assertEqual(response.status_code, 400)
 
