@@ -422,6 +422,11 @@ class BalanceService:
         return cast(Decimal, masuk - keluar)
 
 
+# How far an edit may move a pencairan's tanggal back from the tanggal it was first
+# recorded with (PIL-230, agreed with the PO; change here if it is revised).
+BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI = 7
+
+
 class PencairanService:
     @staticmethod
     @transaction.atomic
@@ -491,11 +496,30 @@ class PencairanService:
         for field in ("metode", "keterangan"):
             if field in payload:
                 setattr(pencairan, field, payload[field] or "")
-        if "nominal" in payload:
-            PencairanService._hitung_ulang_saldo(pencairan, payload["nominal"], pencairan.tanggal)
-            pencairan.nominal = payload["nominal"]
+        nominal = payload.get("nominal", pencairan.nominal)
+        tanggal = payload.get("tanggal", pencairan.tanggal)
+        if tanggal < PencairanService.tanggal_edit_minimum(pencairan):
+            raise serializers.ValidationError(
+                {
+                    "tanggal": [
+                        "Tanggal pencairan hanya bisa dimundurkan maksimal "
+                        f"{BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI} hari dari tanggal awal"
+                    ]
+                }
+            )
+        if nominal != pencairan.nominal or tanggal != pencairan.tanggal:
+            PencairanService._hitung_ulang_saldo(pencairan, nominal, tanggal)
+            pencairan.nominal = nominal
+            pencairan.tanggal = tanggal
         pencairan.save()
         return pencairan
+
+    @staticmethod
+    def tanggal_edit_minimum(pencairan: Pencairan) -> datetime:
+        """Earliest tanggal an edit may set, counted from the tanggal first recorded."""
+        versi_awal = pencairan.revisi.order_by("versi").first()
+        tanggal_awal = versi_awal.tanggal if versi_awal else pencairan.tanggal
+        return tanggal_awal - timedelta(days=BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI)
 
     @staticmethod
     def _hitung_ulang_saldo(pencairan: Pencairan, nominal: Decimal, tanggal: datetime) -> None:

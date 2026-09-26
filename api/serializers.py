@@ -34,6 +34,12 @@ def _validate_nominal_pencairan(value: Decimal) -> Decimal:
     return value
 
 
+def _validate_tanggal_pencairan(value: datetime) -> datetime:
+    if value > timezone.now():
+        raise serializers.ValidationError("Tanggal pencairan tidak boleh di masa depan")
+    return value
+
+
 class PencairanCreateSerializer(serializers.Serializer[Any]):
     nasabah_id = serializers.UUIDField(required=True)
     nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=True)
@@ -47,9 +53,7 @@ class PencairanCreateSerializer(serializers.Serializer[Any]):
         return _validate_nominal_pencairan(value)
 
     def validate_tanggal(self, value: datetime) -> datetime:
-        if value > timezone.now():
-            raise serializers.ValidationError("Tanggal pencairan tidak boleh di masa depan")
-        return value
+        return _validate_tanggal_pencairan(value)
 
 
 class PencairanEditSerializer(serializers.Serializer[Any]):
@@ -70,6 +74,9 @@ class PencairanEditSerializer(serializers.Serializer[Any]):
 
     def validate_nominal(self, value: Decimal) -> Decimal:
         return _validate_nominal_pencairan(value)
+
+    def validate_tanggal(self, value: datetime) -> datetime:
+        return _validate_tanggal_pencairan(value)
 
 
 class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
