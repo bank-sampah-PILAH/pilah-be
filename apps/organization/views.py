@@ -1,3 +1,9 @@
+import mimetypes
+
+from django.conf import settings
+from django.core.files.storage import default_storage
+from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
+from django.http import FileResponse, Http404, HttpRequest
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -27,6 +33,24 @@ def _bank_sampah(request: Request) -> BankSampah:
     bank = _user(request).bank_sampah
     assert bank is not None
     return bank
+
+
+def bank_sampah_activity_media(request: HttpRequest, token: str) -> FileResponse:
+    try:
+        name = TimestampSigner(salt="bank-sampah-kegiatan").unsign(
+            token, max_age=settings.MEDIA_SIGNED_URL_MAX_AGE
+        )
+    except (BadSignature, SignatureExpired):
+        raise Http404 from None
+
+    if not name.startswith("bank_sampah/kegiatan/"):
+        raise Http404
+    try:
+        media_file = default_storage.open(name, "rb")
+    except FileNotFoundError:
+        raise Http404 from None
+    content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    return FileResponse(media_file, content_type=content_type)
 
 
 class BankSampahMeView(APIView):
