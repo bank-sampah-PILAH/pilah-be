@@ -10,12 +10,14 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework import serializers
 
+from api.kalkulasi import bulatkan_rupiah
 from api.models import (
     BankSampah,
     BankSampahApprovalLog,
     DetailTransaksi,
     JenisSampah,
     Nasabah,
+    NasabahApprovalLog,
     Saldo,
     Transaksi,
     User,
@@ -245,8 +247,21 @@ class ApprovalLogSerializer(serializers.ModelSerializer[Model]):
         fields = ["id", "bank_sampah_id", "superadmin_email", "status", "catatan", "created_at"]
 
 
+class NasabahApprovalLogSerializer(serializers.ModelSerializer[Model]):
+    pengurus_email = serializers.EmailField(source="pengurus.email")
+
+    class Meta:
+        model = NasabahApprovalLog
+        fields = ["id", "nasabah_id", "pengurus_email", "status", "catatan", "created_at"]
+
+
 class GoogleAuthSerializer(serializers.Serializer[Any]):
     id_token = serializers.CharField(required=True)
+
+
+class GoogleRegistrationSerializer(serializers.Serializer[Any]):
+    registration_token = serializers.CharField(required=True)
+    role = serializers.ChoiceField(choices=User.GOOGLE_REGISTRATION_ROLES)
 
 
 class RefreshTokenSerializer(serializers.Serializer[Any]):
@@ -259,6 +274,7 @@ class LogoutSerializer(serializers.Serializer[Any]):
 
 class NasabahSerializer(serializers.ModelSerializer[Model]):
     kode = serializers.CharField(source="nomor", required=True, max_length=20)
+    email = serializers.EmailField(required=False, allow_blank=True, allow_null=True)
     total_saldo = serializers.SerializerMethodField()
 
     class Meta:
@@ -266,6 +282,7 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
         fields = [
             "id",
             "kode",
+            "email",
             "nama",
             "jenis_kelamin",
             "tanggal_lahir",
@@ -273,10 +290,24 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
             "alamat",
             "tanggal_daftar",
             "is_active",
+            "status",
             "total_saldo",
             "created_at",
         ]
-        read_only_fields = ["id", "tanggal_daftar", "is_active", "total_saldo", "created_at"]
+        read_only_fields = [
+            "id",
+            "tanggal_daftar",
+            "is_active",
+            "status",
+            "total_saldo",
+            "created_at",
+        ]
+
+    def validate_email(self, value: Any) -> Any:
+        if value is None:
+            return None
+        value = value.strip().lower()
+        return value or None
 
     def validate_kode(self, value: Any) -> Any:
         value = value.strip()
@@ -475,11 +506,15 @@ class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
         ]
 
     def get_saldo_setelah_transaksi(self, obj: Any) -> Any:
-        return (
+        riwayat = (
             Transaksi.objects.filter(bank_sampah=obj.bank_sampah, nasabah=obj.nasabah)
             .filter(Q(tanggal__lt=obj.tanggal) | Q(tanggal=obj.tanggal, id__lte=obj.id))
             .aggregate(total=Coalesce(Sum("total_nilai"), Decimal("0.00")))["total"]
         )
+        # Transaksi warisan PILAH 1.0 bisa bersen, sedangkan saldo tersimpan
+        # sudah dirapikan. Tanpa pembulatan di sini riwayat akan tampak lebih
+        # besar daripada saldo yang sebenarnya dimiliki nasabah.
+        return bulatkan_rupiah(riwayat)
 
 
 class TransactionListSerializer(serializers.ModelSerializer[Model]):

@@ -12,6 +12,7 @@ from api.views import (
     GoogleAuthView,
     GoogleOAuthCallbackView,
     GoogleOAuthStartView,
+    GoogleRegistrationView,
     JenisSampahViewSet,
     LogoutView,
     NasabahViewSet,
@@ -34,6 +35,7 @@ router.register(
 
 urlpatterns = [
     path("auth/google", GoogleAuthView.as_view(), name="auth-google"),
+    path("auth/google/register", GoogleRegistrationView.as_view(), name="auth-google-register"),
     path("auth/google/start", GoogleOAuthStartView.as_view(), name="auth-google-start"),
     path("auth/google/callback", GoogleOAuthCallbackView.as_view(), name="auth-google-callback"),
     path("auth/refresh", RefreshTokenView.as_view(), name="auth-refresh"),

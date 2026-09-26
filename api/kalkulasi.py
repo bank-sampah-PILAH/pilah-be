@@ -10,6 +10,7 @@ Semua perhitungan nilai setoran harus lewat modul ini supaya angka di database,
 aplikasi, pesan WhatsApp, dan laporan selalu sama.
 """
 
+from collections.abc import Iterable
 from decimal import ROUND_DOWN, Decimal
 
 from api.models import JenisSampah
@@ -31,8 +32,13 @@ def harga_berlaku(jenis: JenisSampah) -> Decimal:
     Satu-satunya sumber harga untuk transaksi adalah harga master milik bank
     sampah, bukan nilai yang dikirim client. Ketika riwayat harga berlaku per
     tanggal ditambahkan (PIL-137), pemilihan harga cukup diubah di sini.
+
+    Harga dikembalikan apa adanya, termasuk sennya. Harga per kg adalah tarif,
+    bukan nilai uang yang disimpan, jadi pembulatan ke rupiah penuh dilakukan
+    pada subtotal. Membulatkan tarifnya lebih dulu membuang presisi dan membuat
+    transaksi menyimpan harga yang tidak benar-benar dipakai (BR-03).
     """
-    return bulatkan_rupiah(jenis.harga_per_kg)
+    return jenis.harga_per_kg
 
 
 def hitung_subtotal(harga: Decimal, berat: Decimal) -> Decimal:
@@ -42,3 +48,13 @@ def hitung_subtotal(harga: Decimal, berat: Decimal) -> Decimal:
     jumlah subtotal yang tampil di riwayat dan pesan WhatsApp.
     """
     return bulatkan_rupiah(harga * berat)
+
+
+def total_setoran(subtotal: Iterable[Decimal]) -> Decimal:
+    """Total satu setoran dari subtotal tiap itemnya.
+
+    Subtotal sudah berupa rupiah penuh, jadi penjumlahannya tidak menambah
+    sen baru. Dikumpulkan di sini supaya seluruh perhitungan nilai setoran
+    berada di satu modul, sesuai aturan di ``AGENTS.md``.
+    """
+    return bulatkan_rupiah(sum(subtotal, Decimal(0)))

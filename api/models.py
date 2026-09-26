@@ -137,6 +137,8 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
         NASABAH = "nasabah", "Nasabah"
         SUPERADMIN = "superadmin", "Superadmin"
 
+    GOOGLE_REGISTRATION_ROLES = (Role.PENGELOLA, Role.PENGELOLA_INDUK, Role.NASABAH)
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     google_id = models.CharField(max_length=255, blank=True, unique=True, null=True)
     email = models.EmailField(unique=True)
@@ -189,6 +191,11 @@ class Nasabah(TimestampedModel):
         MALE = "laki-laki", "Laki-laki"
         FEMALE = "perempuan", "Perempuan"
 
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
         User,
@@ -204,8 +211,13 @@ class Nasabah(TimestampedModel):
     tanggal_lahir = models.DateField(blank=True, null=True)
     alamat = models.TextField()
     no_hp = models.CharField(max_length=20)
+    email = models.EmailField(blank=True, null=True, unique=True)
     tanggal_daftar = models.DateField(default=timezone.localdate)
     is_active = models.BooleanField(default=True)
+    # Approval state of the membership (PIL-188): pending = self-registered
+    # awaiting pengurus decision, approved = active membership, rejected =
+    # kept as audit record. is_active stays the manual toggle on top.
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.APPROVED)
 
     class Meta:
         db_table = "nasabah"
@@ -335,3 +347,22 @@ class BankSampahApprovalLog(models.Model):
 
     class Meta:
         db_table = "bs_approval_log"
+
+
+class NasabahApprovalLog(models.Model):
+    class Status(models.TextChoices):
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    nasabah = models.ForeignKey(Nasabah, on_delete=models.CASCADE, related_name="approval_logs")
+    pengurus = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="nasabah_approval_logs"
+    )
+    status = models.CharField(max_length=20, choices=Status.choices)
+    catatan = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "nasabah_approval_log"
+        ordering = ["-created_at"]
