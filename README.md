@@ -153,7 +153,13 @@ Auth and app variables:
 GOOGLE_CLIENT_ID=
 PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false
 PILAH_PUBLIC_APP_URL=https://pilah.example.com
+PILAH_SUPERADMIN_EMAILS=admin@example.com,another-admin@example.com
 ```
+
+Set `PILAH_SUPERADMIN_EMAILS` on Fly and as a GitHub repository variable for
+Cloud Run. It is the authoritative comma-separated list of Superadmin Google
+accounts. The deploy workflow stops before deployment if the repository
+variable is empty.
 
 WhatsApp gateway variables:
 
@@ -178,7 +184,7 @@ Pengelola:
 
 ```json
 {
-  "id_token": "dev:user@example.com:User Name"
+  "id_token": "dev-pengelola:user@example.com:User Name"
 }
 ```
 
@@ -189,6 +195,10 @@ SuperAdmin:
   "id_token": "dev-superadmin:admin@example.com:Admin Name"
 }
 ```
+
+The `/api-test/` Run Full Flow runner uses the first address in
+`PILAH_SUPERADMIN_EMAILS` as its stable SuperAdmin identity. For local fake-auth
+runs, use an address that is allowlisted and belongs to a SuperAdmin test account.
 
 Pengelola Induk and Nasabah:
 
@@ -204,16 +214,16 @@ Pengelola Induk and Nasabah:
 }
 ```
 
-These role-specific token prefixes are local test helpers and work only while
-`PILAH_ALLOW_FAKE_GOOGLE_TOKEN=true`. For Google Sign-In, PILAH uses the role
-stored on the existing user account. Google profile claims cannot assign a
-PILAH role.
+Role-specific token prefixes are local test helpers and work only while
+`PILAH_ALLOW_FAKE_GOOGLE_TOKEN=true`. A new identity using `dev:email:name`
+still goes through role selection; an existing account signs in with its stored
+role. Google profile claims cannot assign a PILAH role.
 
 Use only real Google ID tokens in production.
 
 ## Staging E2E data and Google accounts
 
-Staging keeps genuine Google OAuth enabled. Add the five staging test-account
+Staging keeps genuine Google OAuth enabled. Add the staging test-account
 emails to the Google OAuth consent screen's test-user list, and configure the
 same values as GitHub `staging` environment variables:
 
@@ -223,7 +233,11 @@ PILAH_SEED_CUSTOMER_EMAIL
 PILAH_SEED_CUSTOMER_TWO_EMAIL
 PILAH_SEED_SUPERADMIN_EMAIL
 PILAH_SEED_PENDING_PENGURUS_EMAIL
+PILAH_SEED_INDUK_EMAIL
 ```
+
+`PILAH_SEED_INDUK_EMAIL` is optional and defaults to
+`induk.demo@example.com` in both the workflow and seed command.
 
 The old `PILAH_SEED_OPERATOR_EMAIL` and
 `PILAH_SEED_PENDING_OPERATOR_EMAIL` names remain supported as temporary
