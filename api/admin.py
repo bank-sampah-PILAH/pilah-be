@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.http import HttpRequest
 
 from api.models import (
     BankSampah,
@@ -76,4 +77,16 @@ admin.site.register(JenisSampah)
 admin.site.register(Transaksi)
 admin.site.register(DetailTransaksi)
 admin.site.register(BankSampahApprovalLog)
-admin.site.register(Pencairan)
+
+
+@admin.register(Pencairan)
+class PencairanAdmin(admin.ModelAdmin):  # type: ignore[type-arg]  # stubs are generic, runtime is not
+    # Read-only: writes must go through PencairanService so Saldo moves with the row.
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: Pencairan | None = None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: Pencairan | None = None) -> bool:
+        return False
