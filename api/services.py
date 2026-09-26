@@ -10,8 +10,6 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from api.models import (
-    BankSampah,
-    BankSampahApprovalLog,
     DetailTransaksi,
     JenisSampah,
     Nasabah,
@@ -33,37 +31,10 @@ from apps.notify.services import (  # noqa: F401
     DEFAULT_WA_TEMPLATE,
     WhatsAppService,
 )
+from apps.organization.services import ApprovalService  # noqa: F401
 from apps.reporting import exporter
 from apps.reporting.services import DashboardService  # noqa: F401
 from shared_kernel.numbering import NumberingService  # noqa: F401
-
-
-class ApprovalService:
-    @staticmethod
-    @transaction.atomic
-    def approve(bank: BankSampah, superadmin: User, catatan: str = "") -> BankSampahApprovalLog:
-        bank.status = BankSampah.Status.ACTIVE
-        bank.is_active = True
-        bank.save(update_fields=["status", "is_active", "updated_at"])
-        return BankSampahApprovalLog.objects.create(
-            bank_sampah=bank,
-            superadmin=superadmin,
-            status=BankSampahApprovalLog.Status.APPROVED,
-            catatan=catatan,
-        )
-
-    @staticmethod
-    @transaction.atomic
-    def reject(bank: BankSampah, superadmin: User, catatan: str = "") -> BankSampahApprovalLog:
-        bank.status = BankSampah.Status.REJECTED
-        bank.is_active = False
-        bank.save(update_fields=["status", "is_active", "updated_at"])
-        return BankSampahApprovalLog.objects.create(
-            bank_sampah=bank,
-            superadmin=superadmin,
-            status=BankSampahApprovalLog.Status.REJECTED,
-            catatan=catatan,
-        )
 
 
 class NasabahApprovalService:
