@@ -5,3 +5,10 @@ from shared_kernel.permissions import (  # noqa: F401
     IsPrimaryPengelola,
     IsSuperAdmin,
 )
+
+__all__ = [
+    "IsActivePengelola",
+    "IsPengelola",
+    "IsPrimaryPengelola",
+    "IsSuperAdmin",
+]

@@ -7,3 +7,17 @@ from apps.ledger.models import DetailTransaksi, Transaksi  # noqa: F401
 from apps.membership.models import Nasabah, NasabahApprovalLog, Saldo  # noqa: F401
 from apps.organization.models import BankSampah, BankSampahApprovalLog  # noqa: F401
 from shared_kernel.models import TimestampedModel  # noqa: F401
+
+__all__ = [
+    "BankSampah",
+    "BankSampahApprovalLog",
+    "DetailTransaksi",
+    "JenisSampah",
+    "Nasabah",
+    "NasabahApprovalLog",
+    "Saldo",
+    "TimestampedModel",
+    "Transaksi",
+    "User",
+    "UserManager",
+]
