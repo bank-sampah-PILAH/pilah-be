@@ -2060,6 +2060,26 @@ class PencairanAPITests(APITestCase):
             self.client.get(f"/api/v1/pencairan/{milik_tetangga.data['id']}").status_code, 404
         )
 
+    def test_nasabah_cannot_record_pencairan(self) -> None:
+        akun_nasabah = User.objects.create_user(
+            email="ahmad@example.com", nama="Ahmad Ridwan", role=User.Role.NASABAH
+        )
+        self.nasabah.user = akun_nasabah
+        self.nasabah.save()
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(akun_nasabah).access_token}"
+        )
+
+        response = self.client.post(
+            "/api/v1/pencairan",
+            {"nasabah_id": str(self.nasabah.id), "nominal": "10000", "metode": "tunai"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403, response.data)
+        self.assertEqual(Pencairan.objects.count(), 0)
+        self.assertEqual(Saldo.objects.get(nasabah=self.nasabah).total_saldo, Decimal("465600"))
+
     def test_pencairan_cannot_predate_latest_nasabah_activity(self) -> None:
         Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))
         jenis = JenisSampah.objects.create(
