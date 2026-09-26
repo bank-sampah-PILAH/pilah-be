@@ -49,6 +49,18 @@ class IsPrimaryPengelola(IsActivePengelola):
         return super().has_permission(request, view) and _auth_user(request).is_primary_pengelola
 
 
+class IsJadwalViewer(BasePermission):
+    message = "Jadwal hanya dapat dilihat oleh pengelola atau nasabah aktif"
+
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        if IsActivePengelola().has_permission(request, view):
+            return True
+        if not request.user.is_authenticated:
+            return False
+        user = _auth_user(request)
+        return user.role == User.Role.NASABAH and user.is_active
+
+
 class IsSuperAdmin(BasePermission):
     message = "Endpoint ini hanya untuk superadmin"
 
