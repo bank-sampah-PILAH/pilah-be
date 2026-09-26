@@ -956,16 +956,16 @@ class APISpecTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["token_type"], "Bearer")
-        self.assertTrue(response.data["is_new_user"])
-        self.assertIsNone(response.data["user"]["bank_sampah_id"])
-        self.assertEqual(response.data["next_step"], "complete_profile")
+        self.assertTrue(response.data["registration_required"])
+        self.assertIn("registration_token", response.data)
+        self.assertFalse(User.objects.filter(email="new@example.com").exists())
 
+    @override_settings(PILAH_SUPERADMIN_EMAILS=("super@example.com",))
     def test_onboarding_superadmin_approval_and_invite_flow(self) -> None:
         self.client.credentials()
         login = self.client.post(
             "/api/v1/auth/google",
-            {"id_token": "dev:onboard@example.com:Onboard User"},
+            {"id_token": "dev-pengelola:onboard@example.com:Onboard User"},
             format="json",
         )
         self.assertEqual(login.status_code, 200)
@@ -1074,7 +1074,7 @@ class APISpecTests(APITestCase):
         self.client.credentials()
         invited_login = self.client.post(
             "/api/v1/auth/google",
-            {"id_token": "dev:invited@example.com:Invited User"},
+            {"id_token": "dev-pengelola:invited@example.com:Invited User"},
             format="json",
         )
         self.assertEqual(invited_login.status_code, 200)
@@ -1224,6 +1224,7 @@ class APISpecTests(APITestCase):
             ).exists()
         )
 
+    @override_settings(PILAH_SUPERADMIN_EMAILS=("root@example.com",))
     def test_superadmin_cannot_use_pengelola_endpoints(self) -> None:
         self.client.credentials()
         response = self.client.post(
@@ -1241,6 +1242,7 @@ class APISpecTests(APITestCase):
         approvals = self.client.get("/api/v1/superadmin/bank-sampah")
         self.assertEqual(approvals.status_code, 200)
 
+    @override_settings(PILAH_SUPERADMIN_EMAILS=("queue-admin@example.com",))
     def test_superadmin_bank_queue_sorts_oldest_first(self) -> None:
         self.client.credentials()
         superadmin = User.objects.create_user(
@@ -1320,8 +1322,8 @@ class APISpecTests(APITestCase):
 
     def test_new_role_logins_return_role_specific_states(self) -> None:
         expected_states = {
-            "dev-pengelola-induk": "pengelola_induk_dashboard",
-            "dev-nasabah": "nasabah_dashboard",
+            "dev-pengelola-induk": "complete_profile",
+            "dev-nasabah": "complete_profile",
         }
         for index, (token_prefix, state) in enumerate(expected_states.items(), start=1):
             with self.subTest(role=token_prefix):
@@ -1351,7 +1353,7 @@ class APISpecTests(APITestCase):
                 self.assertEqual(response.status_code, 200, response.data)
                 self.assertEqual(response.data["user"]["role"], role)
                 self.assertEqual(AccessToken(response.data["access_token"])["role"], role)
-                self.assertEqual(response.data["next_step"], f"{role}_dashboard")
+                self.assertEqual(response.data["next_step"], "complete_profile")
 
     def test_new_roles_do_not_inherit_pengelola_endpoint_access(self) -> None:
         for role in (User.Role.PENGELOLA_INDUK, User.Role.NASABAH):
@@ -1376,6 +1378,7 @@ class APISpecTests(APITestCase):
         verify.return_value = {
             "sub": "google-123",
             "email": "claim@example.com",
+            "email_verified": True,
             "name": "Claim User",
             "role": User.Role.SUPERADMIN,
         }
@@ -1385,7 +1388,8 @@ class APISpecTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data["user"]["role"], User.Role.PENGELOLA)
+        self.assertTrue(response.data["registration_required"])
+        self.assertFalse(User.objects.filter(email="claim@example.com").exists())
 
     @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False)
     @patch("api.services.google_id_token.verify_oauth2_token")

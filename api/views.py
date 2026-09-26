@@ -19,7 +19,13 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.models import BankSampah, JenisSampah, Nasabah, Saldo, Transaksi, User
-from api.permissions import IsActivePengelola, IsPengelola, IsPrimaryPengelola, IsSuperAdmin
+from api.permissions import (
+    IsActivePengelola,
+    IsPengelola,
+    IsPrimaryPengelola,
+    IsRegistrationRole,
+    IsSuperAdmin,
+)
 from api.serializers import (
     ApprovalDecisionSerializer,
     ApprovalLogSerializer,
@@ -28,6 +34,7 @@ from api.serializers import (
     BankSampahRegistrationSerializer,
     BankSampahSerializer,
     GoogleAuthSerializer,
+    GoogleRegistrationSerializer,
     InviteAcceptSerializer,
     JenisSampahSerializer,
     LogoutSerializer,
@@ -47,6 +54,7 @@ from api.serializers import (
 from api.services import (
     ApprovalService,
     AuthService,
+    AuthServiceError,
     DashboardService,
     NasabahApprovalService,
     OnboardingService,
@@ -86,6 +94,10 @@ def _bank_sampah(request: Request) -> BankSampah:
     return bank
 
 
+def _auth_service_error_response(error: AuthServiceError) -> Response:
+    return Response({"error": str(error), "code": error.code}, status=error.status_code)
+
+
 class GoogleAuthView(APIView):
     permission_classes = [AllowAny]
     serializer_class = GoogleAuthSerializer
@@ -96,8 +108,28 @@ class GoogleAuthView(APIView):
             return Response({"errors": {"id_token": ["Google ID Token wajib diisi"]}}, status=422)
         try:
             return Response(AuthService.login_with_google(token))
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
         except Exception:
             return Response({"error": "ID Token invalid atau expired"}, status=401)
+
+
+class GoogleRegistrationView(APIView):
+    permission_classes = [AllowAny]
+    serializer_class = GoogleRegistrationSerializer
+
+    def post(self, request: Request) -> Response:
+        serializer = GoogleRegistrationSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({"errors": serializer.errors}, status=422)
+        try:
+            payload, created = AuthService.register_with_google(
+                serializer.validated_data["registration_token"],
+                serializer.validated_data["role"],
+            )
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
+        return Response(payload, status=201 if created else 200)
 
 
 class GoogleOAuthStartView(APIView):
@@ -206,11 +238,14 @@ class RefreshTokenView(APIView):
             access = refresh.access_token
             user = User.objects.filter(id=refresh["user_id"]).first()
             if user:
+                AuthService._enforce_superadmin_allowlist(user, user.email)
                 if user.bank_sampah_id:
                     access["bank_sampah_id"] = str(user.bank_sampah_id)
                 access["role"] = user.role
                 access["email"] = user.email
             return Response({"access_token": str(access), "expires_in": 86400})
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
         except Exception:
             return Response({"error": "Refresh token invalid / expired"}, status=401)
 
@@ -238,7 +273,7 @@ class AuthMeView(APIView):
 
 
 class CompleteProfileView(APIView):
-    permission_classes = [IsPengelola]
+    permission_classes = [IsRegistrationRole]
     serializer_class = UserProfileSerializer
 
     def put(self, request: Request) -> Response:

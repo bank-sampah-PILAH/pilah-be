@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -171,6 +172,7 @@ STORAGES = {
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "api.User"
+AUTHENTICATION_BACKENDS = ("api.backends.AllowlistedSuperadminBackend",)
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -207,6 +209,15 @@ PILAH_ALLOW_FAKE_GOOGLE_TOKEN = (
 )
 if PILAH_ALLOW_FAKE_GOOGLE_TOKEN and not DEBUG:
     raise ImproperlyConfigured("PILAH_ALLOW_FAKE_GOOGLE_TOKEN requires DJANGO_DEBUG=true")
+PILAH_SUPERADMIN_EMAILS = tuple(
+    email.strip().lower()
+    for email in os.getenv("PILAH_SUPERADMIN_EMAILS", "").split(",")
+    if email.strip()
+)
+if not DEBUG and not PILAH_SUPERADMIN_EMAILS:
+    logging.getLogger(__name__).warning(
+        "PILAH_SUPERADMIN_EMAILS is empty; all Superadmin logins will be rejected"
+    )
 WHATSAPP_GATEWAY_URL = os.getenv("WHATSAPP_GATEWAY_URL", "")
 WHATSAPP_GATEWAY_TOKEN = os.getenv("WHATSAPP_GATEWAY_TOKEN", "")
 WHATSAPP_GATEWAY_TIMEOUT = int(os.getenv("WHATSAPP_GATEWAY_TIMEOUT", "10"))
