@@ -23,8 +23,8 @@ from django.views.generic import TemplateView
 from django.views.static import serve
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-from api.health import healthz
 from apps.organization.views import bank_sampah_activity_media
+from shared_kernel.health import healthz
 
 
 class ApiTestView(TemplateView):

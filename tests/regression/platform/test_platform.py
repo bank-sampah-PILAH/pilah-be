@@ -8,9 +8,9 @@ from django.test import TestCase
 from rest_framework import serializers
 
 from api.models import BankSampah, User
-from api.validators import get_initials, normalize_indonesian_phone
 from apps.catalog.api import next_jenis_number
 from apps.membership.api import next_nasabah_number
+from shared_kernel.validators import get_initials, normalize_indonesian_phone
 from tests.regression.helpers import RegressionTestCase
 
 
