@@ -82,3 +82,18 @@ class PencairanEditTests(APITestCase):
         detail = self.client.get(f"/api/v1/pencairan/{pencairan['id']}")
         self.assertEqual(detail.data["metode"], "tunai")
         self.assertFalse(detail.data["diperbarui"])
+
+    def _saldo(self) -> str:
+        return str(self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo").data["total_saldo"])
+
+    def test_edit_nominal_adjusts_saldo_and_snapshot(self) -> None:
+        pencairan = self._catat("200000")
+        self.assertEqual(self._saldo(), "265600.00")
+
+        response = self._edit(pencairan["id"], {"nominal": "150000", "alasan": "Salah ketik"})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["nominal"], "150000.00")
+        self.assertEqual(response.data["saldo_sebelum"], "465600.00")
+        self.assertEqual(response.data["saldo_sesudah"], "315600.00")
+        self.assertEqual(self._saldo(), "315600.00")
