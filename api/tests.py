@@ -796,7 +796,7 @@ class APISpecTests(APITestCase):
         self.assertEqual(sheet["I6"].value, 8750)
         self.assertEqual(sheet["J6"].value, 8750)
 
-    @patch("api.services.requests.post")
+    @patch("apps.notify.services.requests.post")
     def test_transaction_notify_wa_uses_twilio(self, post: Mock) -> None:
         post.return_value = Mock(status_code=201, json=lambda: {"sid": "SM123"}, text="")
         nasabah = Nasabah.objects.create(
@@ -882,7 +882,7 @@ class APISpecTests(APITestCase):
         WHATSAPP_GATEWAY_URL="https://wa.example.test/send",
         WHATSAPP_GATEWAY_TOKEN="test-token",
     )
-    @patch("api.services.requests.post")
+    @patch("apps.notify.services.requests.post")
     def test_wa_template_item_variables_match_sent_payload(self, post: Mock) -> None:
         post.return_value = Mock(status_code=200, text="")
         self.client.put(
