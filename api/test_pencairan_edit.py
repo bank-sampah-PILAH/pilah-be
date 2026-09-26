@@ -67,3 +67,18 @@ class PencairanEditTests(APITestCase):
         self.assertTrue(response.data["diperbarui"])
         detail = self.client.get(f"/api/v1/pencairan/{pencairan['id']}")
         self.assertTrue(detail.data["diperbarui"])
+
+    def test_edit_requires_alasan(self) -> None:
+        pencairan = self._catat()
+
+        for payload in ({}, {"alasan": ""}, {"alasan": "   "}):
+            with self.subTest(payload=payload):
+                response = self._edit(pencairan["id"], {"metode": "transfer", **payload})
+
+                self.assertEqual(response.status_code, 422, response.data)
+                self.assertEqual(
+                    response.data["errors"]["alasan"], ["Alasan perubahan wajib diisi"]
+                )
+        detail = self.client.get(f"/api/v1/pencairan/{pencairan['id']}")
+        self.assertEqual(detail.data["metode"], "tunai")
+        self.assertFalse(detail.data["diperbarui"])
