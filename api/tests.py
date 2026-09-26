@@ -2020,6 +2020,46 @@ class PencairanAPITests(APITestCase):
         saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
         self.assertEqual(saldo.data["total_saldo"], "5000.00")
 
+    def test_nasabah_reads_only_own_pencairan(self) -> None:
+        tetangga = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0002",
+            nama="Siti Aminah",
+            no_hp="+628126666666",
+            alamat="Jl. Melati No. 2",
+        )
+        Saldo.objects.create(nasabah=tetangga, total_saldo=Decimal("90000.00"))
+        milik_sendiri = self.client.post(
+            "/api/v1/pencairan",
+            {"nasabah_id": str(self.nasabah.id), "nominal": "20000", "metode": "tunai"},
+            format="json",
+        )
+        self.assertEqual(milik_sendiri.status_code, 201, milik_sendiri.data)
+        milik_tetangga = self.client.post(
+            "/api/v1/pencairan",
+            {"nasabah_id": str(tetangga.id), "nominal": "30000", "metode": "tunai"},
+            format="json",
+        )
+        self.assertEqual(milik_tetangga.status_code, 201, milik_tetangga.data)
+        akun_nasabah = User.objects.create_user(
+            email="ahmad@example.com", nama="Ahmad Ridwan", role=User.Role.NASABAH
+        )
+        self.nasabah.user = akun_nasabah
+        self.nasabah.save()
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(akun_nasabah).access_token}"
+        )
+
+        listed = self.client.get("/api/v1/pencairan")
+        self.assertEqual(listed.status_code, 200, listed.data)
+        self.assertEqual([row["id"] for row in listed.data["results"]], [milik_sendiri.data["id"]])
+        detail = self.client.get(f"/api/v1/pencairan/{milik_sendiri.data['id']}")
+        self.assertEqual(detail.status_code, 200, detail.data)
+        self.assertEqual(detail.data["nominal"], "20000.00")
+        self.assertEqual(
+            self.client.get(f"/api/v1/pencairan/{milik_tetangga.data['id']}").status_code, 404
+        )
+
     def test_pencairan_cannot_predate_latest_nasabah_activity(self) -> None:
         Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))
         jenis = JenisSampah.objects.create(
