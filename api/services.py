@@ -10,7 +10,6 @@ from uuid import UUID
 from django.conf import settings
 from django.db import transaction
 from django.db.models import QuerySet, Sum
-from django.db.models.functions import Coalesce
 from django.http import HttpRequest
 from django.utils import timezone
 from google.auth.transport import requests as google_requests
@@ -33,12 +32,13 @@ from api.models import (
     User,
 )
 
-# ponytail: compat shims — canonical homes are apps.notify.services and
-# shared_kernel.numbering.
+# ponytail: compat shims — canonical homes are apps.notify.services,
+# apps.reporting.services and shared_kernel.numbering.
 from apps.notify.services import (  # noqa: F401
     DEFAULT_WA_TEMPLATE,
     WhatsAppService,
 )
+from apps.reporting.services import DashboardService  # noqa: F401
 from shared_kernel.numbering import NumberingService  # noqa: F401
 
 
@@ -458,36 +458,6 @@ class TransactionFilterService:
             return date.fromisoformat(value)
         except ValueError as exc:
             raise serializers.ValidationError({"error": "Format tanggal harus YYYY-MM-DD"}) from exc
-
-
-class DashboardService:
-    @staticmethod
-    def stats(user: User) -> dict[str, Any]:
-        bank = user.bank_sampah
-        assert bank is not None  # ponytail: views gate on IsActivePengelola
-        today = timezone.localdate()
-        start = today.replace(day=1)
-        end = today.replace(day=monthrange(today.year, today.month)[1])
-        tz = timezone.get_current_timezone()
-        start_dt = timezone.make_aware(datetime.combine(start, time.min), tz)
-        end_dt = timezone.make_aware(datetime.combine(end, time.max), tz)
-
-        transaksi = Transaksi.objects.filter(bank_sampah=bank, tanggal__range=(start_dt, end_dt))
-        totals = DetailTransaksi.objects.filter(transaksi__in=transaksi).aggregate(
-            total_kg=Coalesce(Sum("berat"), Decimal(0)),
-        )
-        nilai = transaksi.aggregate(total=Coalesce(Sum("total_nilai"), Decimal(0)))["total"]
-        return {
-            "bank_sampah_nama": bank.nama,
-            "pengelola_nama": user.nama,
-            "periode": today.strftime("%Y-%m"),
-            "nasabah_aktif": Nasabah.objects.filter(
-                bank_sampah=bank, is_active=True, status=Nasabah.Status.APPROVED
-            ).count(),
-            "transaksi_bulan_ini": transaksi.count(),
-            "total_sampah_kg_bulan_ini": totals["total_kg"],
-            "total_nilai_bulan_ini": nilai,
-        }
 
 
 def _month_label() -> str:
