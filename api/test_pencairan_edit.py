@@ -3,7 +3,9 @@ from decimal import Decimal
 from typing import Any
 
 from django.contrib import admin
+from django.db import connection
 from django.test import RequestFactory
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.test import APITestCase
@@ -353,3 +355,19 @@ class PencairanEditTests(APITestCase):
         self.assertFalse(revisi_admin.has_add_permission(request))
         self.assertFalse(revisi_admin.has_change_permission(request))
         self.assertFalse(revisi_admin.has_delete_permission(request))
+
+    def test_list_query_count_does_not_grow_with_rows(self) -> None:
+        def list_queries() -> int:
+            with CaptureQueriesContext(connection) as queries:
+                response = self.client.get("/api/v1/pencairan")
+            self.assertEqual(response.status_code, 200, response.data)
+            return len(queries)
+
+        pertama = self._catat("10000")
+        self._edit(pertama["id"], {"metode": "transfer", "alasan": "Salah pilih metode"})
+        satu_baris = list_queries()
+        for _ in range(3):
+            baru = self._catat("10000")
+            self._edit(baru["id"], {"metode": "transfer", "alasan": "Salah pilih metode"})
+
+        self.assertEqual(list_queries(), satu_baris)
