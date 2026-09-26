@@ -8,8 +8,9 @@ from django.test import TestCase
 from rest_framework import serializers
 
 from api.models import BankSampah, User
-from api.services import NumberingService
 from api.validators import get_initials, normalize_indonesian_phone
+from apps.catalog.api import next_jenis_number
+from apps.membership.api import next_nasabah_number
 from tests.regression.helpers import RegressionTestCase
 
 
@@ -66,8 +67,8 @@ class PlatformUnitTests(TestCase):
         bank = BankSampah.objects.create(
             nama="Bank", alamat="Jl. Panjang Sekali No. 1", kota="Depok", no_hp_pic="+628100000001"
         )
-        self.assertEqual(NumberingService.next_nasabah_number(bank), "NAS-0001")
-        self.assertEqual(NumberingService.next_jenis_number(bank), "JS-0001")
+        self.assertEqual(next_nasabah_number(bank), "NAS-0001")
+        self.assertEqual(next_jenis_number(bank), "JS-0001")
 
     def test_user_manager_requires_email(self) -> None:
         with self.assertRaises(ValueError):

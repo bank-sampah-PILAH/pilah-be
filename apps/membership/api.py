@@ -21,3 +21,8 @@ def get_locked_nasabah(bank: BankSampah, nasabah_id: UUID) -> Nasabah | None:
         )
         .first()
     )
+
+
+def next_nasabah_number(bank_sampah: BankSampah) -> str:
+    count = Nasabah.objects.filter(bank_sampah=bank_sampah).count() + 1
+    return f"NAS-{count:04d}"
