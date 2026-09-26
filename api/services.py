@@ -491,6 +491,15 @@ class PencairanService:
         for field in ("metode", "keterangan"):
             if field in payload:
                 setattr(pencairan, field, payload[field] or "")
+        if "nominal" in payload:
+            saldo = Saldo.objects.select_for_update().get(nasabah_id=pencairan.nasabah_id)
+            saldo_sesudah = (pencairan.saldo_sebelum - payload["nominal"]).quantize(
+                Decimal(1), rounding=ROUND_DOWN
+            )
+            saldo.total_saldo += saldo_sesudah - pencairan.saldo_sesudah
+            saldo.save(update_fields=["total_saldo", "updated_at"])
+            pencairan.nominal = payload["nominal"]
+            pencairan.saldo_sesudah = saldo_sesudah
         pencairan.save()
         return pencairan
 
