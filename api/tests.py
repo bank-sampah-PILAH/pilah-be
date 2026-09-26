@@ -27,7 +27,7 @@ from api.models import (
     Saldo,
     User,
 )
-from api.serializers import BankSampahApprovalListSerializer
+from apps.organization.serializers import BankSampahApprovalListSerializer
 
 
 class APISpecTests(APITestCase):
