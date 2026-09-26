@@ -160,3 +160,18 @@ class PencairanEditTests(APITestCase):
         self.assertEqual(self._detail(pertama["id"])["nominal"], "200000.00")
         self.assertFalse(self._detail(pertama["id"])["diperbarui"])
         self.assertEqual(self._detail(kedua["id"])["saldo_sebelum"], "265600.00")
+
+    def test_edit_rejects_invalid_nominal(self) -> None:
+        pencairan = self._catat()
+        cases = [
+            ("0", "Nominal harus lebih dari nol"),
+            ("-1000", "Nominal harus lebih dari nol"),
+            ("1000.50", "Nominal harus dalam rupiah bulat tanpa desimal"),
+        ]
+        for nominal, message in cases:
+            with self.subTest(nominal=nominal):
+                response = self._edit(pencairan["id"], {"nominal": nominal, "alasan": "Koreksi"})
+
+                self.assertEqual(response.status_code, 422, response.data)
+                self.assertEqual(response.data["errors"]["nominal"], [message])
+        self.assertEqual(self._saldo(), "265600.00")
