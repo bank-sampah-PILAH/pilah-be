@@ -36,6 +36,23 @@ from apps.organization.serializers import (  # noqa: F401
     BankSampahSerializer,
 )
 
+__all__ = [
+    "ApprovalDecisionSerializer",
+    "ApprovalLogSerializer",
+    "AuthUserSerializer",
+    "BankSampahApprovalListSerializer",
+    "BankSampahRegistrationSerializer",
+    "BankSampahSerializer",
+    "GoogleAuthSerializer",
+    "InviteAcceptSerializer",
+    "LogoutSerializer",
+    "RefreshTokenSerializer",
+    "TeamMemberSerializer",
+    "TransactionListSerializer",
+    "UserProfileSerializer",
+    "WATemplateSerializer",
+]
+
 
 class NasabahApprovalLogSerializer(serializers.ModelSerializer[Model]):
     pengurus_email = serializers.EmailField(source="pengurus.email")

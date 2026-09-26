@@ -10,6 +10,13 @@ from apps.identity.models import User, UserManager  # noqa: F401
 from apps.organization.models import BankSampah, BankSampahApprovalLog  # noqa: F401
 from shared_kernel.models import TimestampedModel
 
+__all__ = [
+    "BankSampah",
+    "BankSampahApprovalLog",
+    "User",
+    "UserManager",
+]
+
 
 class Nasabah(TimestampedModel):
     class Gender(models.TextChoices):

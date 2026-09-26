@@ -13,6 +13,8 @@ from apps.notify.services import (  # noqa: F401  # re-exported: notify owns the
     WhatsAppService,
 )
 
+__all__ = ["DEFAULT_WA_TEMPLATE", "send_setoran_receipt"]
+
 
 def send_setoran_receipt(transaksi: Transaksi) -> dict[str, Any]:
     return WhatsAppService.notify(transaksi)
