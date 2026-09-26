@@ -13,6 +13,10 @@ from shared_kernel.models import TimestampedModel
 __all__ = [
     "BankSampah",
     "BankSampahApprovalLog",
+    "JenisSampah",
+    "Nasabah",
+    "NasabahApprovalLog",
+    "Saldo",
     "User",
     "UserManager",
 ]
