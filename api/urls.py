@@ -1,28 +1,27 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from api.views import (
+# ponytail: views are imported from their canonical bounded-context homes;
+# routes and names are frozen so this compose is behavior-neutral.
+from apps.catalog.views import JenisSampahViewSet
+from apps.identity.views import (
     AcceptInviteView,
     AuthMeView,
-    BankSampahMeView,
     CompleteProfileView,
-    DashboardRecentTransactionsView,
-    DashboardStatsView,
     GenerateInviteView,
     GoogleAuthView,
     GoogleOAuthCallbackView,
     GoogleOAuthStartView,
-    JenisSampahViewSet,
     LogoutView,
-    NasabahViewSet,
     RefreshTokenView,
     RegisterBankSampahView,
-    SaldoView,
-    SuperAdminBankSampahViewSet,
     TeamView,
-    TransaksiViewSet,
-    WATemplateView,
 )
+from apps.ledger.views import TransaksiViewSet
+from apps.membership.views import NasabahViewSet, SaldoView
+from apps.notify.views import WATemplateView
+from apps.organization.views import BankSampahMeView, SuperAdminBankSampahViewSet
+from apps.reporting.views import DashboardRecentTransactionsView, DashboardStatsView
 
 router = DefaultRouter(trailing_slash=False)
 router.register("nasabah", NasabahViewSet, basename="nasabah")

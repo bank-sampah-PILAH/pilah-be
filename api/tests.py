@@ -27,7 +27,7 @@ from api.models import (
     Saldo,
     User,
 )
-from api.serializers import BankSampahApprovalListSerializer
+from apps.organization.serializers import BankSampahApprovalListSerializer
 
 
 class APISpecTests(APITestCase):
@@ -796,7 +796,7 @@ class APISpecTests(APITestCase):
         self.assertEqual(sheet["I6"].value, 8750)
         self.assertEqual(sheet["J6"].value, 8750)
 
-    @patch("api.services.requests.post")
+    @patch("apps.notify.services.requests.post")
     def test_transaction_notify_wa_uses_twilio(self, post: Mock) -> None:
         post.return_value = Mock(status_code=201, json=lambda: {"sid": "SM123"}, text="")
         nasabah = Nasabah.objects.create(
@@ -882,7 +882,7 @@ class APISpecTests(APITestCase):
         WHATSAPP_GATEWAY_URL="https://wa.example.test/send",
         WHATSAPP_GATEWAY_TOKEN="test-token",
     )
-    @patch("api.services.requests.post")
+    @patch("apps.notify.services.requests.post")
     def test_wa_template_item_variables_match_sent_payload(self, post: Mock) -> None:
         post.return_value = Mock(status_code=200, text="")
         self.client.put(
@@ -1371,7 +1371,7 @@ class APISpecTests(APITestCase):
                 self.assertEqual(response.status_code, 403)
 
     @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False)
-    @patch("api.services.google_id_token.verify_oauth2_token")
+    @patch("apps.identity.services.google_id_token.verify_oauth2_token")
     def test_google_profile_claim_cannot_assign_pilah_role(self, verify: Mock) -> None:
         verify.return_value = {
             "sub": "google-123",
@@ -1388,7 +1388,7 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.data["user"]["role"], User.Role.PENGELOLA)
 
     @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False)
-    @patch("api.services.google_id_token.verify_oauth2_token")
+    @patch("apps.identity.services.google_id_token.verify_oauth2_token")
     def test_google_profile_without_email_is_rejected(self, verify: Mock) -> None:
         verify.return_value = {"sub": "google-without-email", "name": "Missing Email"}
 
@@ -1623,7 +1623,7 @@ class ProtectedMediaTests(TestCase):
             "bank_sampah/kegiatan/proof.png",
         )
 
-    @patch("api.views.default_storage")
+    @patch("apps.organization.views.default_storage")
     def test_signed_activity_proof_is_served(self, storage: Mock) -> None:
         storage.open.return_value = BytesIO(b"proof")
         token = TimestampSigner(salt="bank-sampah-kegiatan").sign("bank_sampah/kegiatan/proof.png")

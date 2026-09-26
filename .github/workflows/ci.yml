@@ -98,7 +98,7 @@ jobs:
       # Plain `manage.py test` = discovery across every Django app, so tests
       # in future apps (not just api/) still gate the build.
       - name: Run tests with coverage
-        run: coverage run --source=api manage.py test -v 2
+        run: coverage run --source=api,apps,shared_kernel manage.py test -v 2
 
       - name: Coverage report (fail under 80%)
         run: coverage report --show-missing --skip-covered --fail-under=80
@@ -135,7 +135,7 @@ jobs:
       # code must be fully typed. tests/ holds the refactor safety net
       # outside api/ so it survives the modular-monolith split.
       - name: mypy strict
-        run: mypy api config tests
+        run: mypy api apps config shared_kernel tests
 
       # --- SonarQube analysis (was its own sonar.yml workflow) ---
       #
@@ -173,7 +173,7 @@ jobs:
         with:
           args: >
             -Dsonar.projectKey=${{ steps.pick.outputs.key }}
-            -Dsonar.sources=api,config
+            -Dsonar.sources=api,apps,config,shared_kernel
             -Dsonar.tests=api
             -Dsonar.test.inclusions=**/tests.py
             -Dsonar.python.coverage.reportPaths=coverage.xml

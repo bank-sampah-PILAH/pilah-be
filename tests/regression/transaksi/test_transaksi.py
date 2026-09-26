@@ -190,7 +190,7 @@ class TransaksiRegressionTests(RegressionTestCase):
         ok = Mock(status_code=201)
         ok.json = Mock(return_value={"sid": "SM1"})
         with twilio_env():
-            with patch("api.services.requests.post", return_value=ok):
+            with patch("apps.notify.services.requests.post", return_value=ok):
                 response = self.client.post(f"/api/v1/transaksi/{tid}/notify-wa", {}, format="json")
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["success"])
@@ -199,7 +199,7 @@ class TransaksiRegressionTests(RegressionTestCase):
         fail.json = Mock(return_value={"message": "down"})
         fail.text = "down"
         with twilio_env():
-            with patch("api.services.requests.post", return_value=fail):
+            with patch("apps.notify.services.requests.post", return_value=fail):
                 response = self.client.post(f"/api/v1/transaksi/{tid}/notify-wa", {}, format="json")
         self.assertEqual(response.status_code, 400)
 
@@ -220,20 +220,20 @@ class TransaksiRegressionTests(RegressionTestCase):
         tid = self.make_transaksi()
         ok = Mock(status_code=200)
         with gateway_env():
-            with patch("api.services.requests.post", return_value=ok):
+            with patch("apps.notify.services.requests.post", return_value=ok):
                 response = self.client.post(f"/api/v1/transaksi/{tid}/notify-wa", {}, format="json")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["provider"], "gateway")
 
         fail = Mock(status_code=502, text="bad gateway")
         with gateway_env():
-            with patch("api.services.requests.post", return_value=fail):
+            with patch("apps.notify.services.requests.post", return_value=fail):
                 response = self.client.post(f"/api/v1/transaksi/{tid}/notify-wa", {}, format="json")
         self.assertEqual(response.status_code, 400)
 
         with gateway_env():
             with patch(
-                "api.services.requests.post",
+                "apps.notify.services.requests.post",
                 side_effect=requests.RequestException("down"),
             ):
                 response = self.client.post(f"/api/v1/transaksi/{tid}/notify-wa", {}, format="json")
