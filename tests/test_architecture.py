@@ -3,9 +3,10 @@
 Rules (loose phase — commit "tighten guard" removes the api.models allowance
 once models live in apps/*/models.py):
 - apps/<bc>/* may import: stdlib, django, DRF, third-party infra, shared_kernel,
-  api.models (temporary), its own package, or another BC only via apps.<bc>.api.
+  api.models (temporary), its own package, another BC via apps.<bc>.api, or
+  another BC's serializers (shared DTOs — presentation reuse, no logic).
 - apps/<bc>/* may NOT import api.services/views/serializers/permissions/etc.
-  (moved homes must be used) nor another BC's internals.
+  (moved homes must be used) nor another BC's models/services/views.
 """
 
 import ast
@@ -62,6 +63,10 @@ class ArchitectureTest(SimpleTestCase):
                         violations.append(f"{path}: forbidden {module}")
                 elif module == "apps" or module.startswith("apps."):
                     parts = module.split(".")
-                    if len(parts) > 2 and parts[1] != context and parts[2] != "api":
+                    if (
+                        len(parts) > 2
+                        and parts[1] != context
+                        and parts[2] not in ("api", "serializers")
+                    ):
                         violations.append(f"{path}: cross-context {module}")
         self.assertEqual(violations, [])
