@@ -577,7 +577,9 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
 
     def get_permissions(self) -> list[Any]:
         permission_classes = (
-            [IsJadwalViewer] if self.action in {"list", "retrieve"} else [IsActivePengelola]
+            [IsJadwalViewer]
+            if self.action in {"list", "retrieve", "calendar_dates"}
+            else [IsActivePengelola]
         )
         return [permission() for permission in permission_classes]
 
@@ -649,10 +651,8 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
             raise serializers.ValidationError({"date_range": "Rentang kalender maksimal 63 hari"})
 
         dates = (
-            JadwalKegiatan.objects.filter(
-                bank_sampah=_bank_sampah(request),
-                mulai_pada__date__range=(start_date, end_date),
-            )
+            self.get_queryset()
+            .filter(mulai_pada__date__range=(start_date, end_date))
             .order_by()
             .dates("mulai_pada", "day", order="ASC")
         )

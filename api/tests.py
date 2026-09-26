@@ -309,6 +309,96 @@ class APISpecTests(APITestCase):
         )
         self.assertEqual(invalid_range.status_code, 422)
 
+    def test_nasabah_calendar_dates_only_include_visible_schedules(self) -> None:
+        nasabah_user = User.objects.create_user(
+            email="calendar-nasabah@example.com",
+            nama="Nasabah Kalender",
+            role=User.Role.NASABAH,
+            is_profile_complete=False,
+        )
+        membership = Nasabah.objects.create(
+            user=nasabah_user,
+            bank_sampah=self.bank,
+            nomor="NAS-0108",
+            nama=nasabah_user.nama,
+            alamat="Jl. Kenanga",
+            no_hp="+628123450108",
+            status=Nasabah.Status.APPROVED,
+        )
+        other_user = User.objects.create_user(
+            email="calendar-other-nasabah@example.com",
+            nama="Nasabah Lain",
+            role=User.Role.NASABAH,
+            is_profile_complete=False,
+        )
+        other_membership = Nasabah.objects.create(
+            user=other_user,
+            bank_sampah=self.bank,
+            nomor="NAS-0109",
+            nama=other_user.nama,
+            alamat="Jl. Kenanga",
+            no_hp="+628123450109",
+            status=Nasabah.Status.APPROVED,
+        )
+        starts_at = timezone.localtime() + timedelta(days=3)
+        starts_at = starts_at.replace(hour=9, minute=0, second=0, microsecond=0)
+        public_day = timezone.localdate(starts_at)
+        selected_day = public_day + timedelta(days=1)
+        draft_day = public_day + timedelta(days=3)
+
+        JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=starts_at,
+            selesai_pada=starts_at + timedelta(hours=1),
+            lokasi="Balai Warga",
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+        selected_schedule = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENCAIRAN,
+            mulai_pada=starts_at + timedelta(days=1),
+            selesai_pada=starts_at + timedelta(days=1, hours=1),
+            lokasi="Kantor BTH",
+            cakupan_penerima=JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH,
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+        selected_schedule.penerima.add(membership)
+        hidden_schedule = JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=starts_at + timedelta(days=2),
+            selesai_pada=starts_at + timedelta(days=2, hours=1),
+            lokasi="Untuk nasabah lain",
+            cakupan_penerima=JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH,
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+        hidden_schedule.penerima.add(other_membership)
+        JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=starts_at + timedelta(days=3),
+            selesai_pada=starts_at + timedelta(days=3, hours=1),
+            lokasi="Masih Draft",
+        )
+
+        refresh = RefreshToken.for_user(nasabah_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        response = self.client.get(
+            "/api/v1/jadwal/calendar-dates",
+            {
+                "start_date": public_day.isoformat(),
+                "end_date": draft_day.isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["dates"], [public_day.isoformat(), selected_day.isoformat()])
+
     def test_schedule_rejects_unapproved_recipients(self) -> None:
         recipient = self._create_pending_nasabah()
         starts_at = timezone.now() + timedelta(days=3)
