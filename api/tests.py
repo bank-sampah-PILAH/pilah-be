@@ -1537,6 +1537,30 @@ class APISpecTests(APITestCase):
         # (see test_google_login_never_prefills_profile_from_nasabah_record).
         self.assertEqual(response.data["next_step"], "complete_profile")
 
+    def test_google_login_claims_preregistered_nasabah_by_verified_email(self) -> None:
+        nasabah = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0001",
+            nama="Budi Santoso",
+            alamat="Jl. Anggrek No. 3",
+            no_hp="081234567892",
+            email="budi-first-login@example.com",
+        )
+        self.client.credentials()
+
+        response = self.client.post(
+            "/api/v1/auth/google",
+            {"id_token": "dev:budi-first-login@example.com:B"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        user = User.objects.get(email="budi-first-login@example.com")
+        self.assertEqual(user.role, User.Role.NASABAH)
+        nasabah.refresh_from_db()
+        self.assertEqual(nasabah.user_id, user.id)
+        self.assertEqual(response.data["next_step"], "complete_profile")
+
     def test_google_login_does_not_link_nasabah_membership_for_other_roles(self) -> None:
         """A pengurus-added nasabah record matching a pengelola's email must
         not be claimed as that pengelola's own membership."""
@@ -1549,6 +1573,12 @@ class APISpecTests(APITestCase):
             alamat="Jl. Anggrek No. 3",
             no_hp="081234567893",
             email="budi-pengelola@example.com",
+        )
+        User.objects.create_user(
+            email="budi-pengelola@example.com",
+            nama="Budi Pengelola",
+            role=User.Role.PENGELOLA,
+            is_profile_complete=True,
         )
         self.client.credentials()
 
