@@ -7,7 +7,6 @@ from api.nasabah_home import (
     NasabahHistoryView,
     NasabahHomeView,
 )
-
 from api.nasabah_profile import NasabahProfileView
 from api.views import (
     AcceptInviteView,
