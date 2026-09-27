@@ -3624,6 +3624,103 @@ class ProfilNasabahBerakunTests(APITestCase):
         self.assertEqual(response.data["error"], "Nasabah nonaktif tidak bisa diedit")
 
 
+class StatusPenautanAkunNasabahTests(APITestCase):
+    """Respons nasabah menyatakan keanggotaan yang sudah tertaut ke akun (PIL-281).
+
+    Aturan penolakannya sendiri sudah ditegakkan PIL-223. Field ini hanya
+    memberi tahu klien, supaya layar detail dapat menampilkan profil global
+    sebagai read-only alih-alih membiarkan pengurus mengisi form yang pasti
+    ditolak.
+    """
+
+    def setUp(self) -> None:
+        self.bank = BankSampah.objects.create(
+            nama="Bank Sampah BTH", alamat="Depok", kota="Depok", no_hp_pic="+628123456789"
+        )
+        self.pengurus = User.objects.create_user(
+            email="sari@example.com",
+            nama="Ibu Sari",
+            bank_sampah=self.bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        refresh = RefreshToken.for_user(self.pengurus)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        self.pemilik_akun = User.objects.create_user(
+            email="budi@example.com",
+            nama="Budi Santoso",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        self.berakun = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            user=self.pemilik_akun,
+            nomor="NAS-0001",
+            nama="Budi Santoso",
+            email=self.pemilik_akun.email,
+            jenis_kelamin=Nasabah.Gender.MALE,
+            no_hp="+628111111111",
+            alamat="Jl. Mawar No. 12",
+        )
+        self.tanpa_akun = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0002",
+            nama="Siti Aminah",
+            email="siti@example.com",
+            jenis_kelamin=Nasabah.Gender.FEMALE,
+            no_hp="+628222222222",
+            alamat="Jl. Melati No. 3",
+        )
+
+    def _payload_tanpa_akun(self, **ubah: Any) -> dict[str, Any]:
+        payload = {
+            "kode": self.tanpa_akun.nomor,
+            "email": self.tanpa_akun.email,
+            "nama": self.tanpa_akun.nama,
+            "jenis_kelamin": self.tanpa_akun.jenis_kelamin,
+            "no_hp": self.tanpa_akun.no_hp,
+            "alamat": self.tanpa_akun.alamat,
+        }
+        payload.update(ubah)
+        return payload
+
+    def test_detail_nasabah_berakun_menyatakan_sudah_tertaut(self) -> None:
+        response = self.client.get(f"/api/v1/nasabah/{self.berakun.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIs(response.data["punya_akun"], True)
+
+    def test_detail_nasabah_tanpa_akun_menyatakan_belum_tertaut(self) -> None:
+        response = self.client.get(f"/api/v1/nasabah/{self.tanpa_akun.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIs(response.data["punya_akun"], False)
+
+    def test_daftar_nasabah_memuat_status_penautan_tiap_baris(self) -> None:
+        # Daftar dipakai layar nasabah untuk menandai baris yang profilnya
+        # dikelola sendiri oleh nasabah, jadi statusnya tidak boleh hanya
+        # tersedia pada detail.
+        response = self.client.get("/api/v1/nasabah")
+
+        self.assertEqual(response.status_code, 200)
+        status_per_kode = {row["kode"]: row["punya_akun"] for row in response.data["results"]}
+        self.assertEqual(status_per_kode, {"NAS-0001": True, "NAS-0002": False})
+
+    def test_status_penautan_tidak_dapat_ditautkan_lewat_update(self) -> None:
+        # Status ini turunan dari penautan akun, bukan masukan pengurus. Klien
+        # yang mengirimkannya tidak boleh menautkan keanggotaan ke akun.
+        response = self.client.put(
+            f"/api/v1/nasabah/{self.tanpa_akun.id}",
+            self._payload_tanpa_akun(punya_akun=True),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIs(response.data["punya_akun"], False)
+        self.tanpa_akun.refresh_from_db()
+        self.assertIsNone(self.tanpa_akun.user)
+
+
 class SetoranTestBase(APITestCase):
     """Pengurus, nasabah, dan satu jenis sampah untuk skenario setoran."""
 
