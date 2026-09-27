@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import BankSampah, JenisSampah, Nasabah, PencairanRevisi, Saldo, User
+from api.models import BankSampah, JenisSampah, Nasabah, Pencairan, PencairanRevisi, Saldo, User
 from api.services import BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI
 
 
@@ -53,6 +53,127 @@ class PencairanEditTests(APITestCase):
 
     def _edit(self, pencairan_id: str, payload: dict[str, Any]) -> Response:
         return self.client.patch(f"/api/v1/pencairan/{pencairan_id}", payload, format="json")
+
+    def test_nasabah_history_includes_all_membership_banks_and_only_current_values(self) -> None:
+        nasabah_user = User.objects.create_user(
+            email="nasabah-history@example.com",
+            nama="Ayu Nasabah",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        membership_one = Nasabah.objects.create(
+            user=nasabah_user,
+            bank_sampah=self.bank,
+            nomor="NAS-HISTORY-1",
+            nama=nasabah_user.nama,
+            alamat="Jl. Mawar",
+            no_hp="+628123456781",
+            email=nasabah_user.email,
+        )
+        other_bank = BankSampah.objects.create(
+            nama="Bank Sampah Kenanga",
+            alamat="Bogor",
+            kota="Bogor",
+            no_hp_pic="+628123456782",
+            status=BankSampah.Status.ACTIVE,
+        )
+        other_bank_user = User.objects.create_user(
+            email="pengurus-kenanga@example.com",
+            nama="Pengurus Kenanga",
+            bank_sampah=other_bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        membership_two = Nasabah.objects.create(
+            user=nasabah_user,
+            bank_sampah=other_bank,
+            nomor="NAS-HISTORY-2",
+            nama=nasabah_user.nama,
+            alamat="Jl. Mawar",
+            no_hp="+628123456783",
+            email=nasabah_user.email,
+        )
+        other_user = User.objects.create_user(
+            email="nasabah-other-history@example.com",
+            nama="Nasabah Lain",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        other_membership = Nasabah.objects.create(
+            user=other_user,
+            bank_sampah=self.bank,
+            nomor="NAS-HISTORY-3",
+            nama=other_user.nama,
+            alamat="Jl. Melati",
+            no_hp="+628123456784",
+            email=other_user.email,
+        )
+
+        pencairan_one = Pencairan.objects.create(
+            nasabah=membership_one,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.user,
+            tanggal=timezone.now() - timedelta(days=2),
+            nominal=Decimal("150000.00"),
+            metode=Pencairan.Metode.TRANSFER,
+            keterangan="Nilai terkini",
+            saldo_sebelum=Decimal("200000.00"),
+            saldo_sesudah=Decimal("50000.00"),
+        )
+        pencairan_two = Pencairan.objects.create(
+            nasabah=membership_two,
+            bank_sampah=other_bank,
+            dicatat_oleh=other_bank_user,
+            tanggal=timezone.now() - timedelta(days=1),
+            nominal=Decimal("25000.00"),
+            metode=Pencairan.Metode.TUNAI,
+            saldo_sebelum=Decimal("25000.00"),
+            saldo_sesudah=Decimal("0.00"),
+        )
+        Pencairan.objects.create(
+            nasabah=other_membership,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.user,
+            nominal=Decimal("10000.00"),
+            metode=Pencairan.Metode.TUNAI,
+            saldo_sebelum=Decimal("10000.00"),
+            saldo_sesudah=Decimal("0.00"),
+        )
+        PencairanRevisi.objects.create(
+            pencairan=pencairan_one,
+            versi=1,
+            tanggal=pencairan_one.tanggal,
+            nominal=Decimal("100000.00"),
+            metode=Pencairan.Metode.TUNAI,
+            keterangan="Nilai lama",
+            saldo_sebelum=Decimal("200000.00"),
+            saldo_sesudah=Decimal("100000.00"),
+            alasan="Salah catat",
+            diubah_oleh=self.user,
+        )
+
+        refresh = RefreshToken.for_user(nasabah_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        response = self.client.get("/api/v1/pencairan?page_size=100")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        rows = response.data["results"]
+        self.assertEqual(
+            {row["id"] for row in rows},
+            {str(pencairan_one.id), str(pencairan_two.id)},
+        )
+        self.assertEqual(len(rows), 2)
+        bank_names = {row["bank_sampah_nama"] for row in rows}
+        self.assertEqual(bank_names, {"Bank Sampah BTH", "Bank Sampah Kenanga"})
+        edited = next(row for row in rows if row["id"] == str(pencairan_one.id))
+        self.assertEqual(edited["nominal"], "150000.00")
+        self.assertEqual(edited["metode"], "transfer")
+        self.assertTrue(edited["diperbarui"])
+        self.assertNotIn("revisi", edited)
+        self.assertNotIn("alasan", edited)
+
+        revision_response = self.client.get(f"/api/v1/pencairan/{pencairan_one.id}/riwayat")
+        self.assertEqual(revision_response.status_code, 403)
 
     def test_edit_metode_and_keterangan_marks_pencairan_diperbarui(self) -> None:
         pencairan = self._catat(keterangan="Diambil pagi")
