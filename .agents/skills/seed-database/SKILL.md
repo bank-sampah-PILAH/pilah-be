@@ -23,15 +23,16 @@ uv run --with-requirements requirements.txt python manage.py migrate --noinput
 uv run --with-requirements requirements.txt python manage.py seed_testing_data
 ```
 
-Local seeding requires `DJANGO_DEBUG=true` and uses the default demo emails
-unless `PILAH_SEED_OPERATOR_EMAIL`, `PILAH_SEED_CUSTOMER_EMAIL`,
-`PILAH_SEED_SUPERADMIN_EMAIL`, or `PILAH_SEED_PENDING_OPERATOR_EMAIL` is set.
-The command is idempotent and preserves unrelated rows.
+Local seeding requires `DJANGO_DEBUG=true`. Set any of the five
+`PILAH_SEED_*_EMAIL` variables to override its defaults, including
+`PILAH_SEED_PENGURUS_EMAIL` and `PILAH_SEED_PENDING_PENGURUS_EMAIL`. The old
+operator-named variables remain temporary fallbacks; Pengurus-named variables
+take precedence. The command is idempotent and preserves unrelated rows.
 
 ## Staging
 
 Never enable fake Google authentication on staging or production. Configure the
-four staging Google test-account emails in the GitHub `staging` environment and
+five staging Google test-account emails in the GitHub `staging` environment and
 run the confirmation-gated **Seed Staging Testing Data** workflow. The exact
 confirmation is `SEED-PILAH-STAGING-DATA`; do not run this command against
 production.

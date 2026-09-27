@@ -6,10 +6,13 @@ import requests
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
-from django.db.models import Q, QuerySet
+from django.db import transaction
+from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseRedirect
+from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.utils.http import urlencode
-from rest_framework import status, viewsets
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -18,21 +21,36 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import BankSampah, JenisSampah, Nasabah, Saldo, Transaksi, User
-from api.permissions import IsActivePengelola, IsPengelola, IsPrimaryPengelola, IsSuperAdmin
+from api.keanggotaan import profil_terkunci
+from api.models import BankSampah, JadwalKegiatan, JenisSampah, Nasabah, Saldo, Transaksi, User
+from api.permissions import (
+    IsActivePengelola,
+    IsJadwalViewer,
+    IsNasabah,
+    IsNasabahRole,
+    IsPengelola,
+    IsPrimaryPengelola,
+    IsRegistrationRole,
+    IsSuperAdmin,
+)
 from api.serializers import (
     ApprovalDecisionSerializer,
     ApprovalLogSerializer,
     AuthUserSerializer,
     BankSampahApprovalListSerializer,
+    BankSampahDirectorySerializer,
     BankSampahRegistrationSerializer,
     BankSampahSerializer,
     GoogleAuthSerializer,
+    GoogleRegistrationSerializer,
     InviteAcceptSerializer,
+    JadwalKegiatanSerializer,
     JenisSampahSerializer,
     LogoutSerializer,
     NasabahApprovalLogSerializer,
     NasabahDetailSerializer,
+    NasabahSelfRegistrationSerializer,
+    NasabahSelfViewSerializer,
     NasabahSerializer,
     RefreshTokenSerializer,
     SaldoSerializer,
@@ -47,6 +65,7 @@ from api.serializers import (
 from api.services import (
     ApprovalService,
     AuthService,
+    AuthServiceError,
     DashboardService,
     NasabahApprovalService,
     OnboardingService,
@@ -86,6 +105,10 @@ def _bank_sampah(request: Request) -> BankSampah:
     return bank
 
 
+def _auth_service_error_response(error: AuthServiceError) -> Response:
+    return Response({"error": str(error), "code": error.code}, status=error.status_code)
+
+
 class GoogleAuthView(APIView):
     permission_classes = [AllowAny]
     serializer_class = GoogleAuthSerializer
@@ -96,8 +119,28 @@ class GoogleAuthView(APIView):
             return Response({"errors": {"id_token": ["Google ID Token wajib diisi"]}}, status=422)
         try:
             return Response(AuthService.login_with_google(token))
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
         except Exception:
             return Response({"error": "ID Token invalid atau expired"}, status=401)
+
+
+class GoogleRegistrationView(APIView):
+    permission_classes = [AllowAny]
+    serializer_class = GoogleRegistrationSerializer
+
+    def post(self, request: Request) -> Response:
+        serializer = GoogleRegistrationSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({"errors": serializer.errors}, status=422)
+        try:
+            payload, created = AuthService.register_with_google(
+                serializer.validated_data["registration_token"],
+                serializer.validated_data["role"],
+            )
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
+        return Response(payload, status=201 if created else 200)
 
 
 class GoogleOAuthStartView(APIView):
@@ -206,11 +249,14 @@ class RefreshTokenView(APIView):
             access = refresh.access_token
             user = User.objects.filter(id=refresh["user_id"]).first()
             if user:
+                AuthService._enforce_superadmin_allowlist(user, user.email)
                 if user.bank_sampah_id:
                     access["bank_sampah_id"] = str(user.bank_sampah_id)
                 access["role"] = user.role
                 access["email"] = user.email
             return Response({"access_token": str(access), "expires_in": 86400})
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
         except Exception:
             return Response({"error": "Refresh token invalid / expired"}, status=401)
 
@@ -238,7 +284,7 @@ class AuthMeView(APIView):
 
 
 class CompleteProfileView(APIView):
-    permission_classes = [IsPengelola]
+    permission_classes = [IsRegistrationRole]
     serializer_class = UserProfileSerializer
 
     def put(self, request: Request) -> Response:
@@ -270,6 +316,39 @@ class RegisterBankSampahView(APIView):
         data = BankSampahSerializer(bank).data
         data["next_step"] = AuthService.user_state(_user(request))
         return Response(data, status=201)
+
+
+class RegisterNasabahView(APIView):
+    permission_classes = [IsNasabah]
+    serializer_class = NasabahSelfRegistrationSerializer
+
+    def post(self, request: Request) -> Response:
+        serializer = NasabahSelfRegistrationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            nasabah = OnboardingService.register_nasabah(_user(request), serializer.validated_data)
+        except PermissionError as exc:
+            return Response({"error": str(exc)}, status=403)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
+        data = NasabahSerializer(nasabah).data
+        data["next_step"] = AuthService.user_state(_user(request))
+        return Response(data, status=201)
+
+
+class NasabahSelfView(APIView):
+    """A nasabah's own membership rows (beranda-first onboarding, PIL-204):
+    status, and the pengurus's reason when rejected, so the app can show
+    it and let the user appeal by reapplying via `RegisterNasabahView`
+    rather than being stalled on a blocking approval screen.
+    """
+
+    permission_classes = [IsNasabahRole]
+    serializer_class = NasabahSelfViewSerializer
+
+    def get(self, request: Request) -> Response:
+        memberships = Nasabah.objects.filter(user=_user(request)).select_related("bank_sampah")
+        return Response(NasabahSelfViewSerializer(memberships, many=True).data)
 
 
 class AcceptInviteView(APIView):
@@ -314,6 +393,26 @@ class BankSampahMeView(APIView):
         return Response(serializer.data)
 
 
+class BankSampahDirectoryView(APIView):
+    """Lists bank sampah a calon nasabah can apply to join.
+
+    Excludes `induk` organizations — they are administrative parents with no
+    direct membership of their own; a nasabah joins one of their `unit`
+    branches, or a standalone `mandiri` bank sampah, instead.
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = BankSampahDirectorySerializer
+
+    def get(self, request: Request) -> Response:
+        banks = (
+            BankSampah.objects.filter(status=BankSampah.Status.ACTIVE, is_active=True)
+            .exclude(jenis_organisasi=BankSampah.OrganizationType.INDUK)
+            .order_by("nama")
+        )
+        return Response(BankSampahDirectorySerializer(banks, many=True).data)
+
+
 class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
     permission_classes = [IsActivePengelola]
     serializer_class = NasabahSerializer
@@ -324,7 +423,9 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         search = self.request.query_params.get("search", "")
         status_filter = self.request.query_params.get("status", "aktif")
         if self.action == "list" and len(search) >= 2:
-            qs = qs.filter(Q(nama__icontains=search) | Q(no_hp__icontains=search))
+            qs = qs.filter(
+                Q(nama__icontains=search) | Q(no_hp__icontains=search) | Q(email__icontains=search)
+            )
         if self.action == "list":
             if status_filter == "aktif":
                 qs = qs.filter(is_active=True, status=Nasabah.Status.APPROVED)
@@ -351,6 +452,15 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             return Response({"errors": {"kode": ["ID Nasabah sudah digunakan"]}}, status=422)
         if Nasabah.objects.filter(bank_sampah=bank, no_hp=no_hp).exists():
             return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
+        email = serializer.validated_data.get("email")
+        existing_by_email = (
+            Nasabah.objects.filter(bank_sampah=bank, email=email).first() if email else None
+        )
+        if existing_by_email:
+            return Response(
+                {"errors": {"email": ["Email sudah terdaftar sebagai nasabah di bank sampah ini"]}},
+                status=422,
+            )
         nasabah = serializer.save(
             bank_sampah=bank,
         )
@@ -374,6 +484,11 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             instance, data=request.data, partial=kwargs.pop("partial", False)
         )
         serializer.is_valid(raise_exception=True)
+        if profil_terkunci(instance, serializer.validated_data):
+            return Response(
+                {"error": "Nasabah dengan akun hanya bisa diubah pada data keanggotaan"},
+                status=403,
+            )
         no_hp = serializer.validated_data.get("no_hp")
         if (
             no_hp
@@ -382,6 +497,17 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             .exists()
         ):
             return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
+        email = serializer.validated_data.get("email")
+        existing_by_email = (
+            Nasabah.objects.filter(bank_sampah=bank, email=email).exclude(id=instance.id).first()
+            if email
+            else None
+        )
+        if existing_by_email:
+            return Response(
+                {"errors": {"email": ["Email sudah terdaftar sebagai nasabah di bank sampah ini"]}},
+                status=422,
+            )
         self.perform_update(serializer)
         return Response(serializer.data)
 
@@ -503,6 +629,162 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
                 "is_active": jenis.is_active,
                 "message": f"Jenis sampah berhasil {state}",
             }
+        )
+
+
+class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
+    permission_classes = [IsActivePengelola]
+    serializer_class = JadwalKegiatanSerializer
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+
+    def get_permissions(self) -> list[Any]:
+        permission_classes = (
+            [IsJadwalViewer]
+            if self.action in {"list", "retrieve", "calendar_dates"}
+            else [IsActivePengelola]
+        )
+        return [permission() for permission in permission_classes]
+
+    def get_queryset(self) -> QuerySet[JadwalKegiatan]:
+        user = _user(self.request)
+        queryset = JadwalKegiatan.objects.select_related("bank_sampah", "dibuat_oleh")
+        if user.role == User.Role.NASABAH:
+            queryset = (
+                queryset.filter(
+                    bank_sampah__status=BankSampah.Status.ACTIVE,
+                    bank_sampah__is_active=True,
+                    bank_sampah__nasabah__user=user,
+                    bank_sampah__nasabah__is_active=True,
+                    bank_sampah__nasabah__status=Nasabah.Status.APPROVED,
+                    status=JadwalKegiatan.Status.DITERBITKAN,
+                    selesai_pada__gte=timezone.now(),
+                )
+                .filter(
+                    Q(cakupan_penerima=JadwalKegiatan.CakupanPenerima.SEMUA_NASABAH)
+                    | Q(penerima__user=user, penerima__is_active=True)
+                )
+                .distinct()
+            )
+        else:
+            overlapping_schedules = (
+                JadwalKegiatan.objects.filter(
+                    bank_sampah=OuterRef("bank_sampah"),
+                    lokasi__iexact=OuterRef("lokasi"),
+                    mulai_pada__lt=OuterRef("selesai_pada"),
+                    selesai_pada__gt=OuterRef("mulai_pada"),
+                )
+                .exclude(pk=OuterRef("pk"))
+                .exclude(status=JadwalKegiatan.Status.DIBATALKAN)
+            )
+            queryset = (
+                queryset.filter(bank_sampah=_bank_sampah(self.request))
+                .prefetch_related("penerima")
+                .annotate(_peringatan_jadwal_bertumpuk=Exists(overlapping_schedules))
+            )
+        if self.action == "list":
+            date_value = self.request.query_params.get("date")
+            if isinstance(date_value, str) and date_value:
+                date = parse_date(date_value)
+                if date is None:
+                    raise serializers.ValidationError(
+                        {"date": "Gunakan tanggal dengan format YYYY-MM-DD"}
+                    )
+                queryset = queryset.filter(mulai_pada__date=date)
+            queryset = queryset.order_by("mulai_pada", "pk")
+        if self.action in {"update", "partial_update"}:
+            queryset = queryset.select_for_update()
+        return queryset
+
+    @action(detail=False, methods=["get"], url_path="calendar-dates")
+    def calendar_dates(self, request: Request) -> Response:
+        start_value = request.query_params.get("start_date")
+        end_value = request.query_params.get("end_date")
+        start_date = parse_date(start_value or "")
+        end_date = parse_date(end_value or "")
+        if start_date is None or end_date is None:
+            raise serializers.ValidationError(
+                {"date_range": ("start_date dan end_date wajib menggunakan format YYYY-MM-DD")}
+            )
+        if end_date < start_date:
+            raise serializers.ValidationError(
+                {"end_date": "end_date harus sama dengan atau setelah start_date"}
+            )
+        if (end_date - start_date).days > 62:
+            raise serializers.ValidationError({"date_range": "Rentang kalender maksimal 63 hari"})
+
+        dates = (
+            self.get_queryset()
+            .filter(mulai_pada__date__range=(start_date, end_date))
+            .order_by()
+            .dates("mulai_pada", "day", order="ASC")
+        )
+        return Response({"dates": [date.isoformat() for date in dates]})
+
+    def perform_create(self, serializer: serializers.BaseSerializer[Any]) -> None:
+        serializer.save(bank_sampah=_bank_sampah(self.request), dibuat_oleh=_user(self.request))
+
+    def perform_update(self, serializer: serializers.BaseSerializer[Any]) -> None:
+        instance = serializer.save()
+        if hasattr(instance, "_peringatan_jadwal_bertumpuk"):
+            delattr(instance, "_peringatan_jadwal_bertumpuk")
+
+    @transaction.atomic
+    def update(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        instance.refresh_from_db(fields=["status"])
+        if instance.status in {JadwalKegiatan.Status.DIBATALKAN, JadwalKegiatan.Status.SELESAI}:
+            return Response(
+                {"error": "Jadwal yang dibatalkan atau selesai tidak dapat diubah"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        if getattr(instance, "_prefetched_objects_cache", None):
+            instance._prefetched_objects_cache = {}
+        return Response(serializer.data)
+
+    def _transition(
+        self,
+        jadwal: JadwalKegiatan,
+        *,
+        allowed_from: set[str],
+        target: str,
+    ) -> Response:
+        updated = JadwalKegiatan.objects.filter(pk=jadwal.pk, status__in=allowed_from).update(
+            status=target, updated_at=timezone.now()
+        )
+        if not updated:
+            return Response(
+                {"error": "Perubahan status jadwal tidak diizinkan"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(self.get_serializer(self.get_object()).data)
+
+    @action(detail=True, methods=["post"], url_path="terbitkan")
+    def terbitkan(self, request: Request, pk: str | None = None) -> Response:
+        return self._transition(
+            self.get_object(),
+            allowed_from={JadwalKegiatan.Status.DRAFT},
+            target=JadwalKegiatan.Status.DITERBITKAN,
+        )
+
+    @action(detail=True, methods=["post"], url_path="batalkan")
+    def batalkan(self, request: Request, pk: str | None = None) -> Response:
+        return self._transition(
+            self.get_object(),
+            allowed_from={JadwalKegiatan.Status.DRAFT, JadwalKegiatan.Status.DITERBITKAN},
+            target=JadwalKegiatan.Status.DIBATALKAN,
+        )
+
+    @action(detail=True, methods=["post"], url_path="selesaikan")
+    def selesaikan(self, request: Request, pk: str | None = None) -> Response:
+        return self._transition(
+            self.get_object(),
+            allowed_from={JadwalKegiatan.Status.DITERBITKAN},
+            target=JadwalKegiatan.Status.SELESAI,
         )
 
 
