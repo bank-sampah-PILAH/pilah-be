@@ -534,6 +534,15 @@ class NasabahSelfBankSampahSerializer(serializers.ModelSerializer[Model]):
         read_only_fields = fields
 
 
+class NasabahApprovalLogSerializer(serializers.ModelSerializer[Model]):
+    """One decision entry in a membership row's approval history (PIL-232)."""
+
+    class Meta:
+        model = NasabahApprovalLog
+        fields = ["status", "catatan", "created_at"]
+        read_only_fields = fields
+
+
 class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
     """A calon/active nasabah's own membership row (PIL-204's beranda-first
     onboarding): status, and — only while rejected — the pengurus's reason,
@@ -542,10 +551,18 @@ class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
 
     bank_sampah = NasabahSelfBankSampahSerializer(read_only=True)
     alasan_penolakan = serializers.SerializerMethodField()
+    riwayat_persetujuan = serializers.SerializerMethodField()
 
     class Meta:
         model = Nasabah
-        fields = ["id", "bank_sampah", "status", "is_active", "alasan_penolakan"]
+        fields = [
+            "id",
+            "bank_sampah",
+            "status",
+            "is_active",
+            "alasan_penolakan",
+            "riwayat_persetujuan",
+        ]
         read_only_fields = fields
 
     def get_alasan_penolakan(self, obj: Nasabah) -> str | None:
@@ -553,6 +570,12 @@ class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
             return None
         log = obj.approval_logs.filter(status=NasabahApprovalLog.Status.REJECTED).first()
         return log.catatan if log else None
+
+    def get_riwayat_persetujuan(self, obj: Nasabah) -> Any:
+        log = obj.approval_logs.first()
+        if not log:
+            return []
+        return NasabahApprovalLogSerializer([log], many=True).data
 
 
 class NasabahDetailSerializer(NasabahSerializer):
