@@ -3815,17 +3815,30 @@ class ValidasiInputSetoranTests(SetoranTestBase):
 
         self.assertEqual(response.status_code, 201)
 
-    def test_jenis_sampah_tanpa_harga_berlaku_ditolak(self) -> None:
-        # Data lama bisa menyimpan harga di bawah Rp 1; setelah dibulatkan ke
-        # bawah harganya jadi Rp 0 sehingga setoran tidak bernilai apa-apa.
+    def test_item_dengan_subtotal_di_bawah_satu_rupiah_ditolak(self) -> None:
+        # Harga master dipertahankan presisinya, tetapi item yang nilainya
+        # membulat ke Rp 0 tidak boleh membuat transaksi tanpa nilai.
+        self.jenis.harga_per_kg = Decimal("0.50")
+        self.jenis.save(update_fields=["harga_per_kg"])
+
+        response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "0.001"}])
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data["errors"]["items[0].jenis_sampah_id"],
+            ["Nilai setoran item kurang dari Rp 1 setelah pembulatan"],
+        )
+        self.assertEqual(self._saldo(), "0.00")
+        self.assertFalse(Transaksi.objects.filter(nasabah=self.nasabah).exists())
+
+    def test_harga_master_bersen_diterima_jika_subtotal_minimal_satu_rupiah(self) -> None:
+        # Preservasi pecahan harga berarti Rp 0,50/kg x 2 kg = Rp 1 dan valid.
         self.jenis.harga_per_kg = Decimal("0.50")
         self.jenis.save(update_fields=["harga_per_kg"])
 
         response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "2.000"}])
 
-        self.assertEqual(response.status_code, 422)
-        self.assertEqual(
-            response.data["errors"]["items[0].jenis_sampah_id"],
-            ["Harga jenis sampah belum diatur"],
-        )
-        self.assertEqual(self._saldo(), "0.00")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["items"][0]["subtotal"], "1.00")
+        detail = DetailTransaksi.objects.get(transaksi_id=response.data["id"])
+        self.assertEqual(detail.harga_snapshot, Decimal("0.50"))

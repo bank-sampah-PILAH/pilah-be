@@ -61,8 +61,9 @@
   setoran maksimal 1.000 kg (`BERAT_MAKS_PER_SETORAN`). Input di atas batas
   ditolak dengan 422; ubah angkanya hanya lewat konstanta di
   `api/serializers.py`.
-- Jenis sampah yang harga berlakunya Rp 0 setelah dibulatkan ditolak, supaya
-  tidak ada setoran yang tercatat tanpa nilai.
+- Harga master harus positif dan dipertahankan presisinya sampai dikalikan
+  dengan berat. Bulatkan subtotal setiap item ke bawah; tolak item yang
+  subtotalnya menjadi Rp 0 supaya transaksi tidak mencatat item tanpa nilai.
 - Peringatan untuk item di atas 100 kg belum dikerjakan; jika dibuat, tempatnya
   di layar tinjauan setoran pada aplikasi, bukan penolakan di backend.
 

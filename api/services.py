@@ -728,6 +728,14 @@ class TransactionService:
                 )
             berat = item_payload["berat"]
             subtotal = hitung_subtotal(harga, berat)
+            if subtotal <= 0:
+                raise serializers.ValidationError(
+                    {
+                        f"items[{index}].jenis_sampah_id": [
+                            "Nilai setoran item kurang dari Rp 1 setelah pembulatan"
+                        ]
+                    }
+                )
             DetailTransaksi.objects.create(
                 transaksi=transaksi,
                 jenis_sampah=jenis,
