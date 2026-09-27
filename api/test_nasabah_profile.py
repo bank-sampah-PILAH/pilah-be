@@ -74,6 +74,7 @@ class NasabahProfileTests(APITestCase):
             status=BankSampah.Status.REJECTED,
         )
         member = Nasabah.objects.create(
+            email="fixture-1@example.test",
             user=self.user,
             bank_sampah=bank,
             nomor="001",

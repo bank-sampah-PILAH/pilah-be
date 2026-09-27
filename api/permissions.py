@@ -25,6 +25,34 @@ class IsRegistrationRole(BasePermission):
         return request.user.is_authenticated and request.user.role in User.GOOGLE_REGISTRATION_ROLES
 
 
+class IsNasabah(BasePermission):
+    message = "Endpoint ini hanya untuk nasabah dengan profil lengkap"
+
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        return (
+            request.user.is_authenticated
+            and request.user.role == User.Role.NASABAH
+            and request.user.is_profile_complete
+        )
+
+
+class IsNasabahRole(BasePermission):
+    """Like `IsNasabah`, but without the `is_profile_complete` requirement.
+
+    A pengurus-entered record can now auto-link on login before the user
+    has filled in their own profile (see AuthService._sync_nasabah_prefill),
+    so an endpoint that needs to see that membership before the profile
+    step ever posts to the backend — the bank-sampah picker's existing-
+    membership check — can't gate on profile completeness the way
+    `IsNasabah` does for endpoints that actually depend on it.
+    """
+
+    message = "Endpoint ini hanya untuk nasabah"
+
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        return request.user.is_authenticated and request.user.role == User.Role.NASABAH
+
+
 class IsActivePengelola(IsPengelola):
     message = "Bank sampah belum aktif"
 
@@ -47,6 +75,18 @@ class IsPrimaryPengelola(IsActivePengelola):
 
     def has_permission(self, request: Request, view: APIView) -> bool:
         return super().has_permission(request, view) and _auth_user(request).is_primary_pengelola
+
+
+class IsJadwalViewer(BasePermission):
+    message = "Jadwal hanya dapat dilihat oleh pengelola atau nasabah aktif"
+
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        if IsActivePengelola().has_permission(request, view):
+            return True
+        if not request.user.is_authenticated:
+            return False
+        user = _auth_user(request)
+        return user.role == User.Role.NASABAH and user.is_active
 
 
 class IsSuperAdmin(BasePermission):
