@@ -59,6 +59,9 @@ jobs:
       DB_PORT: "5432"
     steps:
       - uses: actions/checkout@v4
+        with:
+          # PR diff coverage compares against the actual stacked base branch.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -70,7 +73,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install ruff==0.16.6 coverage mypy==2.3.1 django-stubs djangorestframework-stubs==3.18.1
+          pip install ruff==0.16.6 coverage diff-cover==10.6.0 mypy==2.3.1 django-stubs djangorestframework-stubs==3.18.1
 
       # pyproject.toml [tool.ruff] holds the config. Blocking: a failing rule
       # fails the gate. BLE001/S110/RUF012 are ignored there by design (DRF
@@ -105,6 +108,17 @@ jobs:
       # already enforces 80%.
       - name: Coverage XML for Sonar
         run: coverage xml
+
+      # Report only executable lines changed by this PR. The base ref comes
+      # from GitHub so stacked PRs compare against their immediate parent.
+      - name: PR diff coverage (fail under 80%)
+        if: github.event_name == 'pull_request'
+        run: >-
+          diff-cover coverage.xml
+          --compare-branch=origin/${{ github.base_ref }}
+          --fail-under=80
+          --total-percent-float
+          --show-uncovered
 
       - name: Django system checks
         run: python manage.py check
