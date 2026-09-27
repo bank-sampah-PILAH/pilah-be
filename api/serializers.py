@@ -518,6 +518,9 @@ class NasabahSelfRegistrationSerializer(serializers.Serializer[Any]):
     """
 
     bank_sampah_id = serializers.UUIDField()
+    # Only meaningful when reapplying after a rejection (PIL-232's appeal
+    # action) — ignored on a first-time application, nothing to appeal yet.
+    pesan = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class NasabahSelfBankSampahSerializer(serializers.ModelSerializer[Model]):

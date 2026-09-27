@@ -3570,9 +3570,15 @@ class APISpecTests(APITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["id"], str(membership.id))
         riwayat = response.data[0]["riwayat_persetujuan"]
-        self.assertEqual([entry["status"] for entry in riwayat], ["approved", "rejected"])
+        # The reapply itself now leaves its own "appealed" entry (PIL-232's
+        # appeal message) between the rejection it answers and the approval
+        # that follows it.
+        self.assertEqual(
+            [entry["status"] for entry in riwayat], ["approved", "appealed", "rejected"]
+        )
         self.assertEqual(riwayat[0]["catatan"], "Sudah lengkap")
-        self.assertEqual(riwayat[1]["catatan"], "Data belum lengkap")
+        self.assertEqual(riwayat[1]["catatan"], "")
+        self.assertEqual(riwayat[2]["catatan"], "Data belum lengkap")
 
     def test_nasabah_self_view_riwayat_persetujuan_independent_per_membership(self) -> None:
         """PIL-232: a user with rows at two different bank sampah (allowed,
