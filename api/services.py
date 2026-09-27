@@ -92,10 +92,15 @@ class AuthService:
         if user is None:
             if dev_role == User.Role.SUPERADMIN and not is_allowlisted:
                 raise AuthService._superadmin_not_allowlisted()
-            # A pre-existing Nasabah row is already a known account; preserve
-            # the legacy Pengelola profile bootstrap until the Nasabah flow is
-            # completed by its owning onboarding work.
-            role = User.Role.SUPERADMIN if is_allowlisted else dev_role or User.Role.PENGELOLA
+            # A Google-verified email matching an active Nasabah record
+            # identifies a new account as Nasabah. Existing accounts keep
+            # their assigned role, and _sync_nasabah_prefill links only
+            # Nasabah users.
+            role = (
+                User.Role.SUPERADMIN
+                if is_allowlisted
+                else dev_role or (User.Role.NASABAH if nasabah is not None else User.Role.PENGELOLA)
+            )
             try:
                 with transaction.atomic():
                     user = User.objects.create_user(
