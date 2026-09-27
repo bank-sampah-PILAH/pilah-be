@@ -4069,6 +4069,7 @@ class PencairanAPITests(APITestCase):
             nama="Nasabah Lain",
             no_hp="+628129999999",
             alamat="Jl. Kenanga No. 1",
+            email="nasabah-lain@example.test",
         )
         Saldo.objects.create(nasabah=other_nasabah, total_saldo=Decimal("100000.00"))
         inactive_nasabah = Nasabah.objects.create(
@@ -4079,6 +4080,7 @@ class PencairanAPITests(APITestCase):
             email="inactive@example.com",
             alamat="Jl. Dahlia No. 5",
             is_active=False,
+            email="nasabah-nonaktif@example.test",
         )
         Saldo.objects.create(nasabah=inactive_nasabah, total_saldo=Decimal("50000.00"))
 
@@ -4192,6 +4194,7 @@ class PencairanAPITests(APITestCase):
             no_hp="+628126666666",
             email="siti@example.com",
             alamat="Jl. Melati No. 2",
+            email="siti-lain@example.test",
         )
         Saldo.objects.create(nasabah=other_nasabah, total_saldo=Decimal("90000.00"))
         for nasabah, nominal in ((self.nasabah, "20000"), (other_nasabah, "30000")):
@@ -4327,6 +4330,7 @@ class PencairanAPITests(APITestCase):
             no_hp="+628126666666",
             email="siti@example.com",
             alamat="Jl. Melati No. 2",
+            email="tetangga@example.test",
         )
         Saldo.objects.create(nasabah=tetangga, total_saldo=Decimal("90000.00"))
         milik_sendiri = self.client.post(
