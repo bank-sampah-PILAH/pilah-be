@@ -10,6 +10,7 @@ from api.nasabah_home import (
 from api.views import (
     AcceptInviteView,
     AuthMeView,
+    BankSampahDirectoryView,
     BankSampahMeView,
     CompleteProfileView,
     DashboardRecentTransactionsView,
@@ -19,11 +20,14 @@ from api.views import (
     GoogleOAuthCallbackView,
     GoogleOAuthStartView,
     GoogleRegistrationView,
+    JadwalKegiatanViewSet,
     JenisSampahViewSet,
     LogoutView,
+    NasabahSelfView,
     NasabahViewSet,
     RefreshTokenView,
     RegisterBankSampahView,
+    RegisterNasabahView,
     SaldoView,
     SuperAdminBankSampahViewSet,
     TeamView,
@@ -34,6 +38,7 @@ from api.views import (
 router = DefaultRouter(trailing_slash=False)
 router.register("nasabah", NasabahViewSet, basename="nasabah")
 router.register("jenis-sampah", JenisSampahViewSet, basename="jenis-sampah")
+router.register("jadwal", JadwalKegiatanViewSet, basename="jadwal")
 router.register("transaksi", TransaksiViewSet, basename="transaksi")
 router.register(
     "superadmin/bank-sampah", SuperAdminBankSampahViewSet, basename="superadmin-bank-sampah"
@@ -53,11 +58,14 @@ urlpatterns = [
     path("auth/me", AuthMeView.as_view(), name="auth-me"),
     path("onboarding/profile", CompleteProfileView.as_view(), name="onboarding-profile"),
     path("onboarding/bank-sampah", RegisterBankSampahView.as_view(), name="onboarding-bank-sampah"),
+    path("onboarding/nasabah", RegisterNasabahView.as_view(), name="onboarding-nasabah"),
     path("invites/accept", AcceptInviteView.as_view(), name="invite-accept"),
     path("bank-sampah/invite/join", AcceptInviteView.as_view(), name="bank-sampah-invite-join"),
     path("bank-sampah/me", BankSampahMeView.as_view(), name="bank-sampah-me"),
+    path("bank-sampah", BankSampahDirectoryView.as_view(), name="bank-sampah-directory"),
     path("team", TeamView.as_view(), name="team"),
     path("team/invite", GenerateInviteView.as_view(), name="team-invite"),
+    path("nasabah/me", NasabahSelfView.as_view(), name="nasabah-me"),
     path("nasabah/<uuid:pk>/saldo", SaldoView.as_view(), name="nasabah-saldo"),
     path("dashboard/stats", DashboardStatsView.as_view(), name="dashboard-stats"),
     path(
