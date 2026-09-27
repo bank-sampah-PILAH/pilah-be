@@ -3446,6 +3446,45 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data[0]["riwayat_persetujuan"], [])
 
+    def test_nasabah_self_view_riwayat_persetujuan_has_rejection_entry(self) -> None:
+        """PIL-232: a single rejection shows up as one history entry with
+        the pengurus's status and reason, keyed the way mobile expects."""
+        customer = User.objects.create_user(
+            email="rejected-history@example.com",
+            nama="Nasabah Ditolak",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        membership = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0705",
+            nama=customer.nama,
+            alamat="Jl. Melati",
+            no_hp="+628555555036",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        NasabahApprovalLog.objects.create(
+            nasabah=membership,
+            pengurus=self.user,
+            status=NasabahApprovalLog.Status.REJECTED,
+            catatan="Alamat tidak sesuai KTP",
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get("/api/v1/nasabah/me")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        riwayat = response.data[0]["riwayat_persetujuan"]
+        self.assertEqual(len(riwayat), 1)
+        entry = riwayat[0]
+        self.assertEqual(set(entry.keys()), {"status", "catatan", "created_at"})
+        self.assertEqual(entry["status"], "rejected")
+        self.assertEqual(entry["catatan"], "Alamat tidak sesuai KTP")
+        self.assertIsInstance(response.json()[0]["riwayat_persetujuan"][0]["created_at"], str)
+
 
 class HealthzTests(TestCase):
     def test_healthz_ok(self) -> None:
