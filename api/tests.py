@@ -3466,6 +3466,7 @@ class ProfilNasabahBerakunTests(APITestCase):
             user=self.pemilik_akun,
             nomor="NAS-0001",
             nama="Budi Santoso",
+            email=self.pemilik_akun.email,
             jenis_kelamin=Nasabah.Gender.MALE,
             no_hp="+628111111111",
             alamat="Jl. Mawar No. 12",
@@ -3474,6 +3475,7 @@ class ProfilNasabahBerakunTests(APITestCase):
     def _payload(self, **ubah: Any) -> dict[str, Any]:
         payload = {
             "kode": self.nasabah.nomor,
+            "email": self.nasabah.email,
             "nama": self.nasabah.nama,
             "jenis_kelamin": self.nasabah.jenis_kelamin,
             "no_hp": self.nasabah.no_hp,
@@ -3523,7 +3525,12 @@ class ProfilNasabahBerakunTests(APITestCase):
         self.nasabah.tanggal_lahir = date(1990, 1, 1)
         self.nasabah.save(update_fields=["tanggal_lahir"])
 
-        response = self._ubah(kode="NAS-0003", no_hp="08111111111", tanggal_lahir="1990-01-01")
+        response = self._ubah(
+            kode="NAS-0003",
+            email=" BUDI@EXAMPLE.COM ",
+            no_hp="08111111111",
+            tanggal_lahir="1990-01-01",
+        )
 
         self.assertEqual(response.status_code, 200)
         self.nasabah.refresh_from_db()
@@ -3535,6 +3542,7 @@ class ProfilNasabahBerakunTests(APITestCase):
             bank_sampah=self.bank,
             nomor="NAS-0009",
             nama="Siti Aminah",
+            email="siti@example.com",
             no_hp="+628222222222",
             alamat="Jl. Kenanga No. 5",
         )
@@ -3543,6 +3551,7 @@ class ProfilNasabahBerakunTests(APITestCase):
             f"/api/v1/nasabah/{tanpa_akun.id}",
             {
                 "kode": "NAS-0009",
+                "email": "siti@example.com",
                 "nama": "Siti Aminah Putri",
                 "jenis_kelamin": "perempuan",
                 "tanggal_lahir": "1992-05-17",
@@ -3563,6 +3572,13 @@ class ProfilNasabahBerakunTests(APITestCase):
         self.assertEqual(response.status_code, 403)
         self.nasabah.refresh_from_db()
         self.assertEqual(self.nasabah.no_hp, "+628111111111")
+
+    def test_ubah_email_nasabah_berakun_ditolak(self) -> None:
+        response = self._ubah(email="budi.baru@example.com")
+
+        self.assertEqual(response.status_code, 403)
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.email, "budi@example.com")
 
     def test_nasabah_berakun_nonaktif_menolak_dengan_pesan_nonaktif(self) -> None:
         # Dua penolakan bertumpuk; pesan yang muncul harus yang paling
