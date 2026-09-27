@@ -42,6 +42,7 @@ from api.models import (
     User,
 )
 from api.serializers import BankSampahApprovalListSerializer
+from api.services import NasabahApprovalService
 
 
 class APISpecTests(APITestCase):
@@ -3484,6 +3485,52 @@ class APISpecTests(APITestCase):
         self.assertEqual(entry["status"], "rejected")
         self.assertEqual(entry["catatan"], "Alamat tidak sesuai KTP")
         self.assertIsInstance(response.json()[0]["riwayat_persetujuan"][0]["created_at"], str)
+
+    def test_nasabah_self_view_riwayat_persetujuan_orders_reapply_history_newest_first(
+        self,
+    ) -> None:
+        """PIL-232: reject -> reapply -> approve reuses the same membership
+        row (per PIL-204's reapply rule), and both decisions must show up,
+        newest first, in that row's history."""
+        customer = User.objects.create_user(
+            email="reapplied-history@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1990-01-01",
+            no_hp="+628555555037",
+            alamat="Jl. Baru",
+            is_profile_complete=True,
+        )
+        membership = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0706",
+            nama=customer.nama,
+            alamat="Jl. Lama",
+            no_hp="+628555555037",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        NasabahApprovalService.reject(membership, self.user, catatan="Data belum lengkap")
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        post_response = self.client.post(
+            "/api/v1/onboarding/nasabah", {"bank_sampah_id": str(self.bank.id)}, format="json"
+        )
+        self.assertEqual(post_response.status_code, 201, post_response.data)
+        membership.refresh_from_db()
+        NasabahApprovalService.approve(membership, self.user, catatan="Sudah lengkap")
+
+        response = self.client.get("/api/v1/nasabah/me")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], str(membership.id))
+        riwayat = response.data[0]["riwayat_persetujuan"]
+        self.assertEqual([entry["status"] for entry in riwayat], ["approved", "rejected"])
+        self.assertEqual(riwayat[0]["catatan"], "Sudah lengkap")
+        self.assertEqual(riwayat[1]["catatan"], "Data belum lengkap")
 
 
 class HealthzTests(TestCase):
