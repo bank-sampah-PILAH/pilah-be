@@ -15,6 +15,7 @@ class NasabahHistoryContractTests(APITestCase):
             email="history@example.test", nama="Siti", role=User.Role.NASABAH
         )
         self.member = Nasabah.objects.create(
+            email="fixture-1@example.test",
             user=self.user,
             bank_sampah=self.bank,
             nomor="001",
@@ -64,6 +65,7 @@ class NasabahHistoryContractTests(APITestCase):
 
     def test_customer_cannot_override_owner_with_query_parameters(self) -> None:
         other = Nasabah.objects.create(
+            email="fixture-2@example.test",
             bank_sampah=self.bank,
             nomor="002",
             nama="Other",
