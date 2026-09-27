@@ -3313,6 +3313,7 @@ class APISpecTests(APITestCase):
         self.assertEqual(entry["status"], "pending")
         self.assertEqual(entry["bank_sampah"]["id"], str(self.bank.id))
         self.assertEqual(entry["bank_sampah"]["nama"], self.bank.nama)
+        self.assertEqual(entry["bank_sampah"]["alamat"], self.bank.alamat)
         self.assertIsNone(entry["alasan_penolakan"])
 
     def test_nasabah_self_view_accessible_before_profile_is_complete(self) -> None:
