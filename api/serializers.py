@@ -11,6 +11,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from api.kalkulasi import bulatkan_rupiah, format_ribuan
+from api.keanggotaan import punya_akun
 from api.models import (
     BankSampah,
     BankSampahApprovalLog,
@@ -309,6 +310,7 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
     kode = serializers.CharField(source="nomor", required=True, max_length=20)
     email = serializers.EmailField(required=True)
     total_saldo = serializers.SerializerMethodField()
+    punya_akun = serializers.SerializerMethodField()
 
     class Meta:
         model = Nasabah
@@ -325,6 +327,7 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
             "is_active",
             "status",
             "total_saldo",
+            "punya_akun",
             "created_at",
         ]
         read_only_fields = [
@@ -333,6 +336,7 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
             "is_active",
             "status",
             "total_saldo",
+            "punya_akun",
             "created_at",
         ]
 
@@ -375,6 +379,15 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
 
     def get_total_saldo(self, obj: Any) -> Any:
         return getattr(getattr(obj, "saldo", None), "total_saldo", Decimal("0.00"))
+
+    def get_punya_akun(self, obj: Any) -> bool:
+        """Menyatakan profil global keanggotaan ini dikelola pemiliknya sendiri.
+
+        Hanya penanda tampilan, supaya layar pengurus dapat menampilkan profil
+        sebagai read-only. Wewenangnya tetap ditegakkan di server oleh
+        ``api.keanggotaan.profil_terkunci`` (PIL-223), bukan oleh klien.
+        """
+        return punya_akun(obj)
 
 
 class NasabahSelfRegistrationSerializer(serializers.Serializer[Any]):
