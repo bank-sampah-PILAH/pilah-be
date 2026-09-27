@@ -78,6 +78,8 @@ admin.site.register(JenisSampah)
 admin.site.register(Transaksi)
 admin.site.register(DetailTransaksi)
 admin.site.register(BankSampahApprovalLog)
+
+
 @admin.register(Pencairan)
 class PencairanAdmin(admin.ModelAdmin):  # type: ignore[type-arg]  # stubs are generic, runtime is not
     # Read-only: writes must go through PencairanService so Saldo moves with the row.
