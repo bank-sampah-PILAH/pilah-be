@@ -58,3 +58,12 @@ def total_setoran(subtotal: Iterable[Decimal]) -> Decimal:
     berada di satu modul, sesuai aturan di ``AGENTS.md``.
     """
     return bulatkan_rupiah(sum(subtotal, Decimal(0)))
+
+
+def format_ribuan(nilai: Decimal) -> str:
+    """Tulis nilai sebagai rupiah penuh dengan pemisah ribuan, mis. "1.000".
+
+    Dipakai pesan galat, pesan WhatsApp, dan laporan supaya konvensi angkanya
+    hanya ditulis di satu tempat.
+    """
+    return f"{int(nilai):,}".replace(",", ".")
