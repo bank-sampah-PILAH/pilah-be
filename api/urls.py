@@ -7,6 +7,7 @@ from api.nasabah_home import (
     NasabahHistoryView,
     NasabahHomeView,
 )
+from api.nasabah_profile import NasabahProfileView
 from api.views import (
     AcceptInviteView,
     AuthMeView,
@@ -49,6 +50,7 @@ urlpatterns = [
     path("nasabah/me/saldo", NasabahBalanceView.as_view(), name="nasabah-own-balance"),
     path("nasabah/me/bank-sampah", NasabahBankView.as_view(), name="nasabah-own-bank"),
     path("nasabah/me/riwayat", NasabahHistoryView.as_view(), name="nasabah-own-history"),
+    path("nasabah/me/profil", NasabahProfileView.as_view(), name="nasabah-own-profile"),
     path("auth/google", GoogleAuthView.as_view(), name="auth-google"),
     path("auth/google/register", GoogleRegistrationView.as_view(), name="auth-google-register"),
     path("auth/google/start", GoogleOAuthStartView.as_view(), name="auth-google-start"),
