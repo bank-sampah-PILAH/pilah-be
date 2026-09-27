@@ -14,9 +14,9 @@ from typing import Any, Mapping
 from api.models import Nasabah
 
 # Profil global milik pemilik akun. Bukan `kode`, `is_active`, maupun `status`,
-# yang merupakan data keanggotaan pada satu bank sampah. Ketika PIL-154 sudah
-# masuk, `email` ikut ke daftar ini karena menjadi kunci penautan akun.
-FIELD_PROFIL_GLOBAL = ("nama", "jenis_kelamin", "tanggal_lahir", "alamat", "no_hp")
+# yang merupakan data keanggotaan pada satu bank sampah. Email juga terkunci
+# karena menjadi kunci penautan ke akun Google.
+FIELD_PROFIL_GLOBAL = ("nama", "jenis_kelamin", "tanggal_lahir", "alamat", "no_hp", "email")
 
 
 def punya_akun(nasabah: Nasabah) -> bool:

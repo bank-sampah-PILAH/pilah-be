@@ -20,17 +20,17 @@
 
 ## Aturan data nasabah
 
-- Profil nasabah (`nama`, `jenis_kelamin`, `tanggal_lahir`, `alamat`, `no_hp`)
-  milik pemilik akun dan berlaku lintas bank sampah. Nomor anggota (`kode`),
-  `is_active`, dan `status` adalah data keanggotaan pada satu bank sampah.
+- Profil nasabah (`nama`, `jenis_kelamin`, `tanggal_lahir`, `alamat`, `no_hp`,
+  `email`) milik pemilik akun dan berlaku lintas bank sampah. Nomor anggota
+  (`kode`), `is_active`, dan `status` adalah data keanggotaan pada satu bank
+  sampah.
 - Begitu `Nasabah.user` terisi, pengurus hanya boleh mengubah data keanggotaan.
   Perubahan profil ditolak dengan 403 (PIL-223, OWASP A01).
 - Nasabah tanpa akun tetap dapat dikelola penuh oleh pengurus, karena itulah
   satu-satunya pihak yang memegang datanya.
 - Semua pemeriksaan wewenang atas data nasabah lewat `api/keanggotaan.py`;
-  jangan menuliskan daftar field terkunci di view. Ketika PIL-154 masuk,
-  tambahkan `email` ke `FIELD_PROFIL_GLOBAL` karena email adalah kunci
-  penautan akun.
+  jangan menuliskan daftar field terkunci di view. Email adalah kunci
+  penautan akun dan ikut terkunci.
 - Bandingkan `serializer.validated_data`, bukan `request.data`, saat memeriksa
   perubahan: nomor HP dinormalisasi ke +62 dan tanggal dikonversi ke `date`.
 
