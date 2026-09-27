@@ -3532,6 +3532,52 @@ class APISpecTests(APITestCase):
         self.assertEqual(riwayat[0]["catatan"], "Sudah lengkap")
         self.assertEqual(riwayat[1]["catatan"], "Data belum lengkap")
 
+    def test_nasabah_self_view_riwayat_persetujuan_independent_per_membership(self) -> None:
+        """PIL-232: a user with rows at two different bank sampah (allowed,
+        since the one-membership guard is per bank) sees each row's own
+        history, not a mix of both."""
+        other_bank = BankSampah.objects.create(
+            nama="Bank Sampah Lain", alamat="Depok", kota="Depok", no_hp_pic="+628111222444"
+        )
+        customer = User.objects.create_user(
+            email="two-memberships@example.com",
+            nama="Nasabah Dua Bank",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        membership_a = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0707",
+            nama=customer.nama,
+            alamat="Jl. Melati",
+            no_hp="+628555555038",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        NasabahApprovalService.reject(membership_a, self.user, catatan="Alamat tidak sesuai")
+        membership_b = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=other_bank,
+            nomor="NAS-0001",
+            nama=customer.nama,
+            alamat="Jl. Melati",
+            no_hp="+628555555039",
+            status=Nasabah.Status.PENDING,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get("/api/v1/nasabah/me")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        by_id = {entry["id"]: entry for entry in response.data}
+        self.assertEqual(
+            [e["status"] for e in by_id[str(membership_a.id)]["riwayat_persetujuan"]],
+            ["rejected"],
+        )
+        self.assertEqual(by_id[str(membership_b.id)]["riwayat_persetujuan"], [])
+
 
 class HealthzTests(TestCase):
     def test_healthz_ok(self) -> None:
