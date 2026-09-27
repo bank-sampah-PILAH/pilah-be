@@ -18,6 +18,7 @@ class NasabahHomeTests(APITestCase):
             email="siti@example.test", nama="Siti", role=User.Role.NASABAH
         )
         self.member = Nasabah.objects.create(
+            email="fixture-1@example.test",
             user=self.user,
             bank_sampah=self.bank,
             nomor="001",
@@ -80,6 +81,7 @@ class NasabahHomeTests(APITestCase):
             email="other@example.test", nama="Other", role=User.Role.NASABAH
         )
         member = Nasabah.objects.create(
+            email="fixture-2@example.test",
             user=other,
             bank_sampah=self.bank,
             nomor="002",
@@ -98,6 +100,7 @@ class NasabahHomeTests(APITestCase):
     def test_multiple_memberships_require_explicit_selection(self) -> None:
         bank = BankSampah.objects.create(nama="Mawar", no_hp_pic="0899999")
         member = Nasabah.objects.create(
+            email="fixture-3@example.test",
             user=self.user,
             bank_sampah=bank,
             nomor="001",
@@ -120,7 +123,12 @@ class NasabahHomeTests(APITestCase):
                 tanggal=timezone.now() + timedelta(minutes=value),
             )
         other = Nasabah.objects.create(
-            bank_sampah=self.bank, nomor="002", nama="Other", alamat="Depok", no_hp="089999999"
+            email="fixture-4@example.test",
+            bank_sampah=self.bank,
+            nomor="002",
+            nama="Other",
+            alamat="Depok",
+            no_hp="089999999",
         )
         Transaksi.objects.create(
             nasabah=other, bank_sampah=self.bank, dicatat_oleh=self.manager, total_nilai=999
@@ -170,6 +178,7 @@ class NasabahHomeTests(APITestCase):
     def test_selected_bank_scopes_balance_and_history(self) -> None:
         bank = BankSampah.objects.create(nama="Mawar", no_hp_pic="0899999")
         member = Nasabah.objects.create(
+            email="fixture-5@example.test",
             user=self.user,
             bank_sampah=bank,
             nomor="001",
@@ -258,6 +267,7 @@ class NasabahHomeTests(APITestCase):
             email="foreign@example.test", nama="Other", role=User.Role.NASABAH
         )
         foreign = Nasabah.objects.create(
+            email="fixture-6@example.test",
             user=other,
             bank_sampah=self.bank,
             nomor="002",
