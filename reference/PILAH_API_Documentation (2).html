@@ -996,9 +996,10 @@
         <tr><td><code>items</code></td><td>array</td><td><span class="required">Required</span></td><td>Min 1 item</td></tr>
         <tr><td><code>items[].jenis_sampah_id</code></td><td>string (UUID)</td><td><span class="required">Required</span></td><td>Jenis sampah harus aktif</td></tr>
         <tr><td><code>items[].berat</code></td><td>number</td><td><span class="required">Required</span></td><td>Desimal max 3 digit, > 0</td></tr>
-        <tr><td><code>items[].harga_per_kg</code></td><td>number</td><td><span class="optional">Optional</span></td><td>Jika tidak diisi, gunakan harga aktif dari master. Pengelola bisa override per item</td></tr>
         <tr><td><code>catatan</code></td><td>string</td><td><span class="optional">Optional</span></td><td>Catatan tambahan transaksi</td></tr>
       </table>
+      <p class="note">Harga per kg diambil backend dari master jenis sampah yang aktif. Jangan kirim <code>items[].harga_per_kg</code>; field tersebut bukan bagian request dan jika disertakan akan ditolak dengan 422.</p>
+      <p class="note">Subtotal setiap item dihitung dari harga master dikalikan berat, lalu dibulatkan ke bawah ke rupiah penuh. Total transaksi adalah jumlah subtotal item.</p>
 
       <div class="block-label">Request Example</div>
       <div class="code-block">{
@@ -1006,13 +1007,11 @@
   <span class="key">"items"</span>: [
     {
       <span class="key">"jenis_sampah_id"</span>: <span class="str">"uuid-jenis-aaa"</span>,
-      <span class="key">"berat"</span>: <span class="num">2.5</span>,
-      <span class="key">"harga_per_kg"</span>: <span class="num">3500</span>  <span class="comment">// optional override</span>
+      <span class="key">"berat"</span>: <span class="num">2.5</span>
     },
     {
       <span class="key">"jenis_sampah_id"</span>: <span class="str">"uuid-jenis-bbb"</span>,
       <span class="key">"berat"</span>: <span class="num">1.200</span>
-      <span class="comment">// harga_per_kg tidak diisi → pakai harga master</span>
     }
   ],
   <span class="key">"catatan"</span>: <span class="str">"Setoran rutin bulan Juni"</span>
@@ -1058,6 +1057,7 @@
     <span class="key">"items[0].berat"</span>: [<span class="str">"Berat harus lebih dari 0"</span>]
   }
 }</div>
+      <p class="note">Untuk input harga yang ditolak, pesan dikembalikan pada <code>errors.items[0].harga_per_kg</code>: "Harga diambil dari master jenis sampah dan tidak dapat dikirim".</p>
     </div>
   </div>
 

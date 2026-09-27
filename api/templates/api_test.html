@@ -849,12 +849,13 @@
           nasabah_id: state.ids.nasabah,
           items: [
             { jenis_sampah_id: state.ids.jenis_sampah, berat: "2.500" },
-            { jenis_sampah_id: state.ids.jenis_sampah, berat: "1.200", harga_per_kg: "4000" }
+            { jenis_sampah_id: state.ids.jenis_sampah, berat: "1.200" }
           ],
           catatan: "Setoran from browser E2E runner"
         }, data => {
-          assert(money(data.total_nilai) === "13800.00", "Unexpected total nilai");
-          assert(money(data.saldo_setelah_transaksi) === "13800.00", "Unexpected saldo after transaction");
+          // Harga master Rp 3.600 (di-update di atas): 2,5 kg = 9.000 + 1,2 kg = 4.320.
+          assert(money(data.total_nilai) === "13320.00", "Unexpected total nilai");
+          assert(money(data.saldo_setelah_transaksi) === "13320.00", "Unexpected saldo after transaction");
           assert(data.items.length === 2, "Expected two transaction items");
           state.ids.transaksi = data.id;
         });
@@ -876,7 +877,7 @@
         });
 
         await call("Get nasabah saldo", "GET", `/nasabah/${state.ids.nasabah}/saldo`, 200, undefined, data => {
-          assert(money(data.total_saldo) === "13800.00", "Saldo endpoint did not match transaction total");
+          assert(money(data.total_saldo) === "13320.00", "Saldo endpoint did not match transaction total");
         });
 
         await call("Get dashboard stats", "GET", "/dashboard/stats", 200, undefined, data => {
@@ -1076,12 +1077,13 @@
           nasabah_id: state.ids.nasabah,
           items: [
             { jenis_sampah_id: state.ids.jenis_sampah, berat: "2.500" },
-            { jenis_sampah_id: state.ids.jenis_sampah, berat: "1.200", harga_per_kg: "4000" }
+            { jenis_sampah_id: state.ids.jenis_sampah, berat: "1.200" }
           ],
           catatan: "Setoran from Google token E2E runner"
         }, data => {
-          assert(money(data.total_nilai) === "13800.00", "Unexpected total nilai");
-          assert(money(data.saldo_setelah_transaksi) === "13800.00", "Unexpected saldo after transaction");
+          // Harga master Rp 3.500 (saat dibuat): 2,5 kg = 8.750 + 1,2 kg = 4.200.
+          assert(money(data.total_nilai) === "12950.00", "Unexpected total nilai");
+          assert(money(data.saldo_setelah_transaksi) === "12950.00", "Unexpected saldo after transaction");
           state.ids.transaksi = data.id;
         });
 
@@ -1094,7 +1096,7 @@
         });
 
         await call("Get nasabah saldo", "GET", `/nasabah/${state.ids.nasabah}/saldo`, 200, undefined, data => {
-          assert(money(data.total_saldo) === "13800.00", "Saldo endpoint did not match transaction total");
+          assert(money(data.total_saldo) === "12950.00", "Saldo endpoint did not match transaction total");
         });
 
         await call("Get dashboard stats", "GET", "/dashboard/stats", 200, undefined, data => {
