@@ -3420,6 +3420,32 @@ class APISpecTests(APITestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_nasabah_self_view_riwayat_persetujuan_empty_when_no_logs(self) -> None:
+        """PIL-232: a fresh pending application has no approval decisions
+        yet, so the history list is empty rather than absent."""
+        customer = User.objects.create_user(
+            email="fresh-pending@example.com",
+            nama="Nasabah Baru",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0704",
+            nama=customer.nama,
+            alamat="Jl. Melati",
+            no_hp="+628555555035",
+            status=Nasabah.Status.PENDING,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get("/api/v1/nasabah/me")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data[0]["riwayat_persetujuan"], [])
+
 
 class HealthzTests(TestCase):
     def test_healthz_ok(self) -> None:
