@@ -10,7 +10,8 @@ from uuid import UUID
 
 import requests
 from django.conf import settings
-from django.db import transaction
+from django.core import signing
+from django.db import IntegrityError, transaction
 from django.db.models import QuerySet, Sum
 from django.db.models.functions import Coalesce
 from django.http import HttpRequest
@@ -42,38 +43,221 @@ DEFAULT_WA_TEMPLATE = (
     "Terima kasih! 🌿"
 )
 
+REGISTRATION_TOKEN_MAX_AGE = 600
+REGISTRATION_TOKEN_SALT = "pilah-google-registration"
+
+
+class AuthServiceError(Exception):
+    def __init__(self, message: str, *, code: str, status_code: int) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+
 
 class AuthService:
     @staticmethod
     def login_with_google(raw_id_token: str) -> dict[str, Any]:
         profile = AuthService._verify_google_token(raw_id_token)
-        email = profile["email"]
+        email = str(profile["email"]).strip().lower()
         google_id = profile["sub"]
         name = profile.get("name") or email.split("@")[0]
-        # Google proves identity, not a user's PILAH authorization.
-        role = profile.get("_pilah_dev_role", User.Role.PENGELOLA)
+        dev_role = profile.get("_pilah_dev_role")
+        user = AuthService._user_for_email(email)
+        nasabah = Nasabah.objects.filter(email__iexact=email, is_active=True).first()
+        is_allowlisted = AuthService.is_superadmin_allowlisted(email)
 
-        user = User.objects.filter(email=email).first()
+        if user is None and nasabah is None and not is_allowlisted and dev_role is None:
+            registration_token = signing.dumps(
+                {
+                    "sub": google_id,
+                    "email": email,
+                    "name": name,
+                    "picture": profile.get("picture") or "",
+                },
+                salt=REGISTRATION_TOKEN_SALT,
+                compress=True,
+            )
+            return {
+                "registration_required": True,
+                "registration_token": registration_token,
+                "expires_in": REGISTRATION_TOKEN_MAX_AGE,
+                "google_profile": {
+                    "email": email,
+                    "name": name,
+                    "picture": profile.get("picture") or None,
+                },
+            }
+
         is_new_user = user is None
         if user is None:
-            user = User.objects.create_user(
-                email=email,
-                google_id=google_id,
-                nama=name,
-                role=role,
-                is_profile_complete=False,
-            )
+            if dev_role == User.Role.SUPERADMIN and not is_allowlisted:
+                raise AuthService._superadmin_not_allowlisted()
+            # A pre-existing Nasabah row is already a known account; preserve
+            # the legacy Pengelola profile bootstrap until the Nasabah flow is
+            # completed by its owning onboarding work.
+            role = User.Role.SUPERADMIN if is_allowlisted else dev_role or User.Role.PENGELOLA
+            try:
+                with transaction.atomic():
+                    user = User.objects.create_user(
+                        email=email,
+                        google_id=google_id,
+                        nama=name,
+                        role=role,
+                        is_profile_complete=role == User.Role.SUPERADMIN,
+                        is_staff=role == User.Role.SUPERADMIN,
+                        is_superuser=role == User.Role.SUPERADMIN,
+                    )
+            except IntegrityError:
+                # A concurrent Google request may have created this account
+                # after the initial lookup. Authenticate that account instead
+                # of turning a valid token into an uncaught server error.
+                user = AuthService._user_for_email(email)
+                if user is None:
+                    raise
+                is_new_user = False
+                AuthService._enforce_superadmin_allowlist(user, email)
+                AuthService._update_google_identity(user, google_id, str(name))
         else:
-            updates = []
-            if not user.google_id:
-                user.google_id = google_id
-                updates.append("google_id")
-            if not user.nama:
-                user.nama = name
-                updates.append("nama")
-            if updates:
-                user.save(update_fields=updates)
+            AuthService._enforce_superadmin_allowlist(user, email)
+            AuthService._update_google_identity(user, google_id, str(name))
 
+        AuthService._sync_nasabah_prefill(user)
+
+        return AuthService._session_response(user, is_new_user=is_new_user)
+
+    @staticmethod
+    def _sync_nasabah_prefill(user: User) -> None:
+        """Claim a pengurus-entered membership on first matching,
+        Google-verified login — but never copy its profile fields onto the
+        user. The user's own identity data is authoritative: they always
+        fill it in themselves via complete_profile, which then overrides
+        the Nasabah record (see
+        OnboardingService._propagate_profile_to_memberships), not the other
+        way around.
+
+        Gated on role because a pengurus-entered email can coincidentally
+        match an account that registered as something other than nasabah,
+        and that account must not be silently turned into a member.
+        """
+        if user.role != User.Role.NASABAH:
+            return
+        nasabah = Nasabah.objects.filter(
+            email__iexact=user.email, is_active=True, user__isnull=True
+        ).first()
+        if nasabah is None:
+            return
+        nasabah.user = user
+        nasabah.save(update_fields=["user", "updated_at"])
+
+    @staticmethod
+    def register_with_google(registration_token: str, role: str) -> tuple[dict[str, Any], bool]:
+        try:
+            profile = cast(
+                Mapping[str, Any],
+                signing.loads(
+                    registration_token,
+                    salt=REGISTRATION_TOKEN_SALT,
+                    max_age=REGISTRATION_TOKEN_MAX_AGE,
+                ),
+            )
+        except signing.SignatureExpired as exc:
+            raise AuthServiceError(
+                "Sesi pendaftaran kedaluwarsa. Silakan masuk dengan Google lagi.",
+                code="registration_token_expired",
+                status_code=400,
+            ) from exc
+        except signing.BadSignature as exc:
+            raise AuthServiceError(
+                "Sesi pendaftaran tidak valid. Silakan masuk dengan Google lagi.",
+                code="registration_token_invalid",
+                status_code=400,
+            ) from exc
+
+        email = str(profile.get("email") or "").strip().lower()
+        google_id = str(profile.get("sub") or "")
+        name = str(profile.get("name") or email.split("@")[0])
+        if not email or not google_id:
+            raise AuthServiceError(
+                "Sesi pendaftaran tidak valid. Silakan masuk dengan Google lagi.",
+                code="registration_token_invalid",
+                status_code=400,
+            )
+
+        user = AuthService._user_for_email(email)
+        created = False
+        if user is None:
+            is_allowlisted = email in AuthService._superadmin_emails()
+            registered_role = User.Role.SUPERADMIN if is_allowlisted else role
+            try:
+                with transaction.atomic():
+                    user = User.objects.create_user(
+                        email=email,
+                        google_id=google_id,
+                        nama=name,
+                        role=registered_role,
+                        is_profile_complete=is_allowlisted,
+                        is_staff=is_allowlisted,
+                        is_superuser=is_allowlisted,
+                    )
+                    created = True
+            except IntegrityError:
+                user = AuthService._user_for_email(email)
+                if user is None:
+                    raise
+
+        AuthService._enforce_superadmin_allowlist(user, email)
+        AuthService._update_google_identity(user, google_id, name)
+        return AuthService._session_response(user, is_new_user=created), created
+
+    @staticmethod
+    def _user_for_email(email: str) -> User | None:
+        matches = list(User.objects.filter(email__iexact=email)[:2])
+        if len(matches) > 1:
+            raise AuthServiceError(
+                "Beberapa akun menggunakan alamat email ini. Hubungi dukungan untuk memperbaikinya.",
+                code="ambiguous_email_match",
+                status_code=409,
+            )
+        return matches[0] if matches else None
+
+    @staticmethod
+    def _superadmin_not_allowlisted() -> AuthServiceError:
+        return AuthServiceError(
+            "Email Superadmin tidak terdaftar pada whitelist",
+            code="superadmin_not_allowlisted",
+            status_code=403,
+        )
+
+    @staticmethod
+    def _enforce_superadmin_allowlist(user: User, email: str) -> None:
+        if user.role != User.Role.SUPERADMIN:
+            return
+        if not AuthService._sync_superadmin_admin_flags(user, email):
+            raise AuthService._superadmin_not_allowlisted()
+
+    @staticmethod
+    def _sync_superadmin_admin_flags(user: User, email: str) -> bool:
+        is_allowlisted = AuthService.is_superadmin_allowlisted(email)
+        if user.is_staff != is_allowlisted or user.is_superuser != is_allowlisted:
+            user.is_staff = is_allowlisted
+            user.is_superuser = is_allowlisted
+            user.save(update_fields=["is_staff", "is_superuser", "updated_at"])
+        return is_allowlisted
+
+    @staticmethod
+    def _update_google_identity(user: User, google_id: str, name: str) -> None:
+        updates = []
+        if not user.google_id:
+            user.google_id = google_id
+            updates.append("google_id")
+        if not user.nama:
+            user.nama = name
+            updates.append("nama")
+        if updates:
+            user.save(update_fields=updates)
+
+    @staticmethod
+    def _session_response(user: User, *, is_new_user: bool) -> dict[str, Any]:
         refresh = RefreshToken.for_user(user)
         access = refresh.access_token
         if user.bank_sampah_id:
@@ -94,6 +278,10 @@ class AuthService:
                 "name": user.nama,
                 "nama": user.nama,
                 "email": user.email,
+                "no_hp": user.no_hp,
+                "jenis_kelamin": user.jenis_kelamin,
+                "tanggal_lahir": user.tanggal_lahir.isoformat() if user.tanggal_lahir else None,
+                "alamat": user.alamat,
                 "role": user.role,
                 "bank_sampah_id": str(user.bank_sampah_id) if user.bank_sampah_id else None,
                 "bank_sampah_nama": bank.nama if bank else None,
@@ -110,12 +298,19 @@ class AuthService:
     def user_state(user: User) -> str:
         if user.role == User.Role.SUPERADMIN:
             return "superadmin_dashboard"
-        if user.role == User.Role.PENGELOLA_INDUK:
-            return "pengelola_induk_dashboard"
-        if user.role == User.Role.NASABAH:
-            return "nasabah_dashboard"
         if not user.is_profile_complete:
             return "complete_profile"
+        if user.role == User.Role.PENGELOLA_INDUK:
+            return (
+                "pengelola_induk_dashboard" if user.bank_sampah_id else "register_bank_sampah_induk"
+            )
+        if user.role == User.Role.NASABAH:
+            # Routing doesn't gate on approval: a membership application, once
+            # submitted, sends the user straight to their own beranda
+            # regardless of status. Pending/rejected states — and appealing a
+            # rejection by reapplying — are handled there (GET /nasabah/me),
+            # not by stalling onboarding on a blocking screen.
+            return "nasabah_dashboard" if user.keanggotaan_nasabah.exists() else "register_nasabah"
         bank = user.bank_sampah
         if not user.bank_sampah_id or bank is None:
             return "register_bank_sampah"
@@ -130,6 +325,7 @@ class AuthService:
         if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN:
             dev_roles = {
                 "dev-superadmin:": ("dev-superadmin", User.Role.SUPERADMIN),
+                "dev-pengelola:": ("dev-pengelola", User.Role.PENGELOLA),
                 "dev-pengelola-induk:": ("dev-pengelola-induk", User.Role.PENGELOLA_INDUK),
                 "dev-nasabah:": ("dev-nasabah", User.Role.NASABAH),
             }
@@ -166,11 +362,24 @@ class AuthService:
             raise serializers.ValidationError(
                 {"id_token": ["ID Token tidak memuat email atau subject yang diperlukan"]}
             )
+        if verified_profile.get("email_verified") is not True:
+            raise serializers.ValidationError({"id_token": ["Email Google belum terverifikasi"]})
         return {
             "sub": profile_subject,
             "email": profile_email,
             "name": verified_profile.get("name"),
+            "picture": verified_profile.get("picture"),
         }
+
+    @staticmethod
+    def _superadmin_emails() -> frozenset[str]:
+        configured = settings.PILAH_SUPERADMIN_EMAILS
+        values = configured.split(",") if isinstance(configured, str) else configured
+        return frozenset(str(value).strip().lower() for value in values if str(value).strip())
+
+    @staticmethod
+    def is_superadmin_allowlisted(email: str) -> bool:
+        return email.strip().lower() in AuthService._superadmin_emails()
 
 
 class NumberingService:
@@ -189,7 +398,11 @@ class OnboardingService:
     @staticmethod
     @transaction.atomic
     def complete_profile(user: User, profile_data: Mapping[str, Any]) -> User:
-        if user.is_profile_complete:
+        # One-shot, except a nasabah can still fix it while pengurus hasn't
+        # decided on their registration yet.
+        if user.is_profile_complete and not OnboardingService._has_pending_nasabah_registration(
+            user
+        ):
             raise ValueError("Profil sudah lengkap")
         for field, value in profile_data.items():
             setattr(user, field, value)
@@ -200,11 +413,50 @@ class OnboardingService:
                 "no_hp",
                 "jenis_kelamin",
                 "tanggal_lahir",
+                "alamat",
                 "is_profile_complete",
                 "updated_at",
             ]
         )
+        if user.role == User.Role.NASABAH:
+            OnboardingService._propagate_profile_to_memberships(user)
         return user
+
+    @staticmethod
+    def _has_pending_nasabah_registration(user: User) -> bool:
+        return (
+            user.role == User.Role.NASABAH
+            and user.keanggotaan_nasabah.filter(status=Nasabah.Status.PENDING).exists()
+        )
+
+    @staticmethod
+    def _propagate_profile_to_memberships(user: User) -> None:
+        """The user's own profile is authoritative: whatever they just
+        entered overrides any pengurus-entered data on their linked
+        Nasabah record(s) — the opposite direction from PIL-154's original
+        design, where the Nasabah record won."""
+        for nasabah in user.keanggotaan_nasabah.all():
+            nasabah.nama = user.nama
+            nasabah.jenis_kelamin = user.jenis_kelamin
+            nasabah.tanggal_lahir = user.tanggal_lahir
+            nasabah.alamat = user.alamat
+            nasabah.no_hp = user.no_hp
+            try:
+                with transaction.atomic():
+                    nasabah.save(
+                        update_fields=[
+                            "nama",
+                            "jenis_kelamin",
+                            "tanggal_lahir",
+                            "alamat",
+                            "no_hp",
+                            "updated_at",
+                        ]
+                    )
+            except IntegrityError as exc:
+                raise ValueError(
+                    "Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus"
+                ) from exc
 
     @staticmethod
     @transaction.atomic
@@ -231,6 +483,90 @@ class OnboardingService:
         user.is_primary_pengelola = True
         user.save(update_fields=["bank_sampah", "is_primary_pengelola", "updated_at"])
         return bank
+
+    @staticmethod
+    @transaction.atomic
+    def register_nasabah(user: User, payload: Mapping[str, Any]) -> Nasabah:
+        if user.role != User.Role.NASABAH:
+            raise PermissionError("Hanya nasabah yang dapat mengajukan keanggotaan")
+        if not user.alamat.strip():
+            raise ValueError("Lengkapi alamat pada profil Anda terlebih dahulu")
+
+        bank = BankSampah.objects.filter(id=payload["bank_sampah_id"]).first()
+        if (
+            not bank
+            or bank.status != BankSampah.Status.ACTIVE
+            or not bank.is_active
+            or bank.jenis_organisasi == BankSampah.OrganizationType.INDUK
+        ):
+            raise ValueError("Bank sampah tidak ditemukan atau belum tersedia")
+
+        own_record = Nasabah.objects.filter(bank_sampah=bank, user=user).first()
+        if own_record is not None:
+            if own_record.status != Nasabah.Status.REJECTED:
+                raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
+            # A rejection is correctable, not a permanent lockout: resubmit
+            # the same row as a fresh application rather than raising.
+            #
+            # Conditional UPDATE, not own_record.save(): guards against two
+            # concurrent reapply requests both passing the check above.
+            # A losing request affects 0 rows and falls through to the
+            # error below instead of silently double-applying.
+            updated = Nasabah.objects.filter(
+                pk=own_record.pk, status=Nasabah.Status.REJECTED
+            ).update(
+                nama=user.nama,
+                jenis_kelamin=user.jenis_kelamin,
+                tanggal_lahir=user.tanggal_lahir,
+                alamat=user.alamat,
+                status=Nasabah.Status.PENDING,
+                is_active=True,
+                updated_at=timezone.now(),
+            )
+            if updated == 0:
+                raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
+            own_record.refresh_from_db()
+            Saldo.objects.get_or_create(nasabah=own_record)
+            return own_record
+
+        # A pengurus-entered record for this same person converges onto
+        # `own_record` above at first Google login (AuthService matches on
+        # verified `email`, not on this self-declared `no_hp`), so reaching
+        # here with a phone collision means it belongs to someone else.
+        if Nasabah.objects.filter(bank_sampah=bank, no_hp=user.no_hp).exists():
+            raise ValueError("Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus")
+
+        nasabah = Nasabah(
+            bank_sampah=bank,
+            user=user,
+            nomor=OnboardingService._next_nasabah_nomor(bank),
+            nama=user.nama,
+            jenis_kelamin=user.jenis_kelamin,
+            tanggal_lahir=user.tanggal_lahir,
+            no_hp=user.no_hp,
+            email=user.email,
+            alamat=user.alamat,
+            # A self-registration awaits pengurus review (PIL-188); the model
+            # default of APPROVED is for records a pengurus enters directly,
+            # who has already vetted them by typing them in.
+            status=Nasabah.Status.PENDING,
+        )
+        for _ in range(5):
+            try:
+                with transaction.atomic():
+                    nasabah.save()
+                break
+            except IntegrityError:
+                nasabah.nomor = OnboardingService._next_nasabah_nomor(bank)
+        else:
+            raise ValueError("Gagal membuat nomor nasabah, silakan coba lagi")
+        Saldo.objects.create(nasabah=nasabah)
+        return nasabah
+
+    @staticmethod
+    def _next_nasabah_nomor(bank: BankSampah) -> str:
+        count = Nasabah.objects.filter(bank_sampah=bank).count()
+        return f"NAS-{count + 1:04d}"
 
     @staticmethod
     @transaction.atomic
