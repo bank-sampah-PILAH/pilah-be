@@ -2991,6 +2991,47 @@ class APISpecTests(APITestCase):
         # (bank, user) pair.
         self.assertEqual(Nasabah.objects.filter(user=customer, bank_sampah=self.bank).count(), 1)
 
+    def test_nasabah_reapply_with_pesan_records_appealed_log_entry(self) -> None:
+        customer = User.objects.create_user(
+            email="appealing-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1990-01-01",
+            no_hp="+628555555021",
+            alamat="Jl. Baru No. 3",
+            is_profile_complete=True,
+        )
+        rejected = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-9003",
+            nama=customer.nama,
+            alamat="Jl. Lama",
+            no_hp="+628555555021",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            "/api/v1/onboarding/nasabah",
+            {
+                "bank_sampah_id": str(self.bank.id),
+                "pesan": "Dokumen sudah saya lengkapi, mohon ditinjau ulang",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        rejected.refresh_from_db()
+        self.assertEqual(rejected.status, Nasabah.Status.PENDING)
+        log = rejected.approval_logs.first()
+        self.assertEqual(log.status, NasabahApprovalLog.Status.APPEALED)
+        self.assertEqual(log.catatan, "Dokumen sudah saya lengkapi, mohon ditinjau ulang")
+        self.assertIsNone(log.pengurus)
+
     def test_nasabah_reapply_race_loser_gets_already_registered_error(self) -> None:
         """Backfill for the conditional-update race guard added in
         abe9623: two concurrent reapply requests can both read
