@@ -3028,6 +3028,7 @@ class APISpecTests(APITestCase):
         rejected.refresh_from_db()
         self.assertEqual(rejected.status, Nasabah.Status.PENDING)
         log = rejected.approval_logs.first()
+        assert log is not None
         self.assertEqual(log.status, NasabahApprovalLog.Status.APPEALED)
         self.assertEqual(log.catatan, "Dokumen sudah saya lengkapi, mohon ditinjau ulang")
         self.assertIsNone(log.pengurus)

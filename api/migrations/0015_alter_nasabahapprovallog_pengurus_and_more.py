@@ -6,20 +6,32 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('api', '0014_alter_nasabah_unique_together_alter_nasabah_email_and_more'),
+        ("api", "0014_alter_nasabah_unique_together_alter_nasabah_email_and_more"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='nasabahapprovallog',
-            name='pengurus',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='nasabah_approval_logs', to=settings.AUTH_USER_MODEL),
+            model_name="nasabahapprovallog",
+            name="pengurus",
+            field=models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="nasabah_approval_logs",
+                to=settings.AUTH_USER_MODEL,
+            ),
         ),
         migrations.AlterField(
-            model_name='nasabahapprovallog',
-            name='status',
-            field=models.CharField(choices=[('approved', 'Approved'), ('rejected', 'Rejected'), ('appealed', 'Appealed')], max_length=20),
+            model_name="nasabahapprovallog",
+            name="status",
+            field=models.CharField(
+                choices=[
+                    ("approved", "Approved"),
+                    ("rejected", "Rejected"),
+                    ("appealed", "Appealed"),
+                ],
+                max_length=20,
+            ),
         ),
     ]
