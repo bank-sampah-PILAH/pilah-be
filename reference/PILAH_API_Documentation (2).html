@@ -642,6 +642,7 @@
       <span class="key">"tanggal_daftar"</span>: <span class="str">"2026-05-12"</span>,
       <span class="key">"is_active"</span>: <span class="bool">true</span>,
       <span class="key">"total_saldo"</span>: <span class="num">450000.00</span>,
+      <span class="key">"punya_akun"</span>: <span class="bool">true</span>,
       <span class="key">"created_at"</span>: <span class="str">"2026-05-12T10:00:00Z"</span>
     }
   ]
@@ -684,6 +685,7 @@
   <span class="key">"tanggal_daftar"</span>: <span class="str">"2026-06-20"</span>,  <span class="comment">// auto-set by server</span>
   <span class="key">"is_active"</span>: <span class="bool">true</span>,  <span class="comment">// auto-set true</span>
   <span class="key">"total_saldo"</span>: <span class="num">0.00</span>,
+  <span class="key">"punya_akun"</span>: <span class="bool">false</span>,  <span class="comment">// belum tertaut ke akun</span>
   <span class="key">"created_at"</span>: <span class="str">"2026-06-20T09:30:00Z"</span>
 }</div>
       <span class="response-tag r-422">422</span> — Validasi gagal
@@ -723,6 +725,7 @@
   <span class="key">"tanggal_daftar"</span>: <span class="str">"2026-05-12"</span>,
   <span class="key">"is_active"</span>: <span class="bool">true</span>,
   <span class="key">"total_saldo"</span>: <span class="num">450000.00</span>,
+  <span class="key">"punya_akun"</span>: <span class="bool">true</span>,
   <span class="key">"ringkasan_transaksi"</span>: {
     <span class="key">"jumlah_transaksi"</span>: <span class="num">18</span>,
     <span class="key">"total_kg"</span>: <span class="num">120.5</span>,
@@ -754,6 +757,8 @@
       <span class="response-tag r-200">200 OK</span> — Objek nasabah terbaru<br>
       <span class="response-tag r-422">422</span> — Validasi gagal<br>
       <span class="response-tag r-403">403</span> — Nasabah nonaktif tidak bisa diedit
+      <p class="note">Nasabah yang sudah tertaut ke akun (<code>punya_akun: true</code>) hanya dapat diubah pada data keanggotaan, yaitu <code>kode</code> beserta status aktifnya. Mengubah <code>nama</code>, <code>jenis_kelamin</code>, <code>tanggal_lahir</code>, <code>alamat</code>, <code>no_hp</code>, atau <code>email</code> ditolak dengan 403 dan pesan "Nasabah dengan akun hanya bisa diubah pada data keanggotaan". Mengirim ulang nilai profil yang sama diperbolehkan, sehingga form yang mengirim seluruh data tetap dapat menyimpan perubahan nomor anggota.</p>
+      <p class="note">Gunakan <code>punya_akun</code> pada respons untuk menampilkan field profil sebagai read-only sebelum pengurus mengisi form. Field itu penanda tampilan; wewenangnya tetap diperiksa server pada setiap permintaan.</p>
     </div>
   </div>
 

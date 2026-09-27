@@ -26,6 +26,9 @@
   sampah.
 - Begitu `Nasabah.user` terisi, pengurus hanya boleh mengubah data keanggotaan.
   Perubahan profil ditolak dengan 403 (PIL-223, OWASP A01).
+- Respons nasabah membawa `punya_akun` (read-only) supaya klien dapat
+  menampilkan profil sebagai read-only alih-alih menunggu 403. Penanda
+  tampilan saja; jangan pindahkan keputusan wewenang ke klien (PIL-281).
 - Nasabah tanpa akun tetap dapat dikelola penuh oleh pengurus, karena itulah
   satu-satunya pihak yang memegang datanya.
 - Semua pemeriksaan wewenang atas data nasabah lewat `api/keanggotaan.py`;
