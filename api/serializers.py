@@ -530,7 +530,7 @@ class NasabahSelfBankSampahSerializer(serializers.ModelSerializer[Model]):
 
     class Meta:
         model = BankSampah
-        fields = ["id", "nama", "kota"]
+        fields = ["id", "nama", "kota", "alamat"]
         read_only_fields = fields
 
 
