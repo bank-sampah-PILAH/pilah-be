@@ -4570,6 +4570,7 @@ class PencairanRiwayatTests(APITestCase):
             bank_sampah=self.bank,
             nomor="NAS-0001",
             nama="Ahmad Ridwan",
+            email="ahmad@example.com",
             no_hp="+628123456789",
             alamat="Jl. Mawar No. 12",
         )
@@ -4577,6 +4578,7 @@ class PencairanRiwayatTests(APITestCase):
             bank_sampah=self.bank,
             nomor="NAS-0002",
             nama="Siti Aminah",
+            email="siti@example.com",
             no_hp="+628126666666",
             alamat="Jl. Melati No. 2",
         )
