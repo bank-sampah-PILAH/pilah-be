@@ -87,6 +87,7 @@ class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
     nasabah_id = serializers.UUIDField(source="nasabah.id")
     nasabah_nama = serializers.CharField(source="nasabah.nama")
     bank_sampah_id = serializers.UUIDField(source="bank_sampah.id")
+    bank_sampah_nama = serializers.CharField(source="bank_sampah.nama")
     dicatat_oleh = serializers.UUIDField(source="dicatat_oleh.id")
     dicatat_oleh_nama = serializers.CharField(source="dicatat_oleh.nama")
     diperbarui = serializers.SerializerMethodField()
@@ -99,6 +100,7 @@ class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
             "nasabah_id",
             "nasabah_nama",
             "bank_sampah_id",
+            "bank_sampah_nama",
             "dicatat_oleh",
             "dicatat_oleh_nama",
             "tanggal",
