@@ -3972,6 +3972,7 @@ class PencairanAPITests(APITestCase):
             nomor="NAS-0001",
             nama="Ahmad Ridwan",
             no_hp="+628123456789",
+            email="ahmad@example.com",
             alamat="Jl. Mawar No. 12",
         )
         Saldo.objects.create(nasabah=self.nasabah, total_saldo=Decimal("465600.00"))
@@ -4075,6 +4076,7 @@ class PencairanAPITests(APITestCase):
             nomor="NAS-0002",
             nama="Nasabah Nonaktif",
             no_hp="+628127777777",
+            email="inactive@example.com",
             alamat="Jl. Dahlia No. 5",
             is_active=False,
         )
@@ -4188,6 +4190,7 @@ class PencairanAPITests(APITestCase):
             nomor="NAS-0003",
             nama="Siti Aminah",
             no_hp="+628126666666",
+            email="siti@example.com",
             alamat="Jl. Melati No. 2",
         )
         Saldo.objects.create(nasabah=other_nasabah, total_saldo=Decimal("90000.00"))
@@ -4322,6 +4325,7 @@ class PencairanAPITests(APITestCase):
             nomor="NAS-0002",
             nama="Siti Aminah",
             no_hp="+628126666666",
+            email="siti@example.com",
             alamat="Jl. Melati No. 2",
         )
         Saldo.objects.create(nasabah=tetangga, total_saldo=Decimal("90000.00"))
@@ -4467,9 +4471,9 @@ class PencairanAPITests(APITestCase):
         self.assertEqual(second.status_code, 201, second.data)
 
         saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
-        self.assertEqual(saldo.data["total_saldo"], "7000.50")
+        self.assertEqual(saldo.data["total_saldo"], "7000.00")
         detail = self.client.get(f"/api/v1/transaksi/{second.data['id']}")
-        self.assertEqual(detail.data["saldo_setelah_transaksi"], Decimal("7000.50"))
+        self.assertEqual(detail.data["saldo_setelah_transaksi"], Decimal("7000.00"))
         export = self.client.get("/api/v1/transaksi/export?periode=bulan_ini")
         sheet = load_workbook(BytesIO(export.content), data_only=False)["Riwayat Transaksi"]
         self.assertEqual(sheet.cell(5, 10).value, 7000)

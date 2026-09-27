@@ -10,7 +10,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0011_nasabah_status_nasabahapprovallog"),
+        ("api", "0014_alter_nasabah_unique_together_alter_nasabah_email_and_more"),
     ]
 
     operations = [

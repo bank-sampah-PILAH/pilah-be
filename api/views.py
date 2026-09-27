@@ -34,10 +34,10 @@ from api.models import (
 )
 from api.permissions import (
     IsActivePengelola,
+    IsActivePengelolaOrNasabah,
     IsJadwalViewer,
     IsNasabah,
     IsNasabahRole,
-    IsActivePengelolaOrNasabah,
     IsPengelola,
     IsPrimaryPengelola,
     IsRegistrationRole,
