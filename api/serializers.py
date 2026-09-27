@@ -534,8 +534,12 @@ class NasabahSelfBankSampahSerializer(serializers.ModelSerializer[Model]):
         read_only_fields = fields
 
 
-class NasabahApprovalLogSerializer(serializers.ModelSerializer[Model]):
-    """One decision entry in a membership row's approval history (PIL-232)."""
+class NasabahSelfApprovalLogSerializer(serializers.ModelSerializer[Model]):
+    """One decision entry in a membership row's approval history, as shown
+    to the nasabah themself (PIL-232). Deliberately smaller than
+    `NasabahApprovalLogSerializer` (used pengurus-side), which also exposes
+    `id`, `nasabah_id`, and `pengurus_email` that a nasabah has no use for.
+    """
 
     class Meta:
         model = NasabahApprovalLog
@@ -572,10 +576,7 @@ class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
         return log.catatan if log else None
 
     def get_riwayat_persetujuan(self, obj: Nasabah) -> Any:
-        log = obj.approval_logs.first()
-        if not log:
-            return []
-        return NasabahApprovalLogSerializer([log], many=True).data
+        return NasabahSelfApprovalLogSerializer(obj.approval_logs.all(), many=True).data
 
 
 class NasabahDetailSerializer(NasabahSerializer):
