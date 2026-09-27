@@ -74,9 +74,9 @@ class IsActivePengelolaOrNasabah(BasePermission):
     message = "Endpoint ini hanya untuk pengelola aktif atau nasabah"
 
     def has_permission(self, request: Request, view: APIView) -> bool:
-        return IsActivePengelola().has_permission(request, view) or IsActiveNasabah().has_permission(
+        return IsActivePengelola().has_permission(
             request, view
-        )
+        ) or IsActiveNasabah().has_permission(request, view)
 
 
 class IsPrimaryPengelola(IsActivePengelola):
