@@ -4069,6 +4069,7 @@ class PencairanAPITests(APITestCase):
             nama="Nasabah Lain",
             no_hp="+628129999999",
             alamat="Jl. Kenanga No. 1",
+            email="nasabah-lain@example.test",
         )
         Saldo.objects.create(nasabah=other_nasabah, total_saldo=Decimal("100000.00"))
         inactive_nasabah = Nasabah.objects.create(

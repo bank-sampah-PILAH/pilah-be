@@ -74,9 +74,9 @@ class IsActivePengelolaOrNasabah(BasePermission):
     message = "Endpoint ini hanya untuk pengelola aktif atau nasabah"
 
     def has_permission(self, request: Request, view: APIView) -> bool:
-        return IsActivePengelola().has_permission(request, view) or IsNasabahRole().has_permission(
+        return IsActivePengelola().has_permission(
             request, view
-        )
+        ) or IsActiveNasabah().has_permission(request, view)
 
 
 class IsPrimaryPengelola(IsActivePengelola):
@@ -108,3 +108,15 @@ class IsSuperAdmin(BasePermission):
             and user.role == User.Role.SUPERADMIN
             and AuthService.is_superadmin_allowlisted(user.email)
         )
+
+
+class IsActiveNasabah(BasePermission):
+    """Require an active nasabah account, not active membership or bank status."""
+
+    message = "Endpoint ini hanya untuk nasabah"
+
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        user = request.user
+        if not user.is_authenticated:
+            return False
+        return bool(user.is_active and user.role == User.Role.NASABAH)
