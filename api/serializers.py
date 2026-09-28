@@ -15,6 +15,7 @@ from api.models import (
     BankSampah,
     DetailTransaksi,
     JadwalKegiatan,
+    JenisSampah,
     Nasabah,
     NasabahApprovalLog,
     Pencairan,
@@ -23,8 +24,10 @@ from api.models import (
     Transaksi,
     User,
 )
-from api.kalkulasi import format_ribuan
-from apps.ledger.services import PencairanService
+from api.kalkulasi import bulatkan_rupiah, format_ribuan
+from apps.ledger.services import BalanceService, PencairanService
+from apps.membership.serializers import NasabahSerializer
+from shared_kernel.validators import get_initials
 
 
 def _validate_tanggal_pencairan(value: datetime) -> datetime:
@@ -236,6 +239,213 @@ class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
         return NasabahSelfApprovalLogSerializer(obj.approval_logs.all(), many=True).data
 
 
+class NasabahDetailSerializer(NasabahSerializer):
+    ringkasan_transaksi = serializers.SerializerMethodField()
+
+    class Meta(NasabahSerializer.Meta):
+        fields = NasabahSerializer.Meta.fields + ["ringkasan_transaksi"]
+
+    def get_ringkasan_transaksi(self, obj: Any) -> Any:
+        items = DetailTransaksi.objects.filter(transaksi__nasabah=obj)
+        total_kg = sum((item.berat for item in items), Decimal(0))
+        last_transaction = obj.transaksi.order_by("-tanggal").first()
+        return {
+            "jumlah_transaksi": obj.transaksi.count(),
+            "total_kg": total_kg,
+            "tanggal_transaksi_terakhir": last_transaction.tanggal if last_transaction else None,
+        }
+
+
+class StatusSerializer(serializers.Serializer[Any]):
+    is_active = serializers.BooleanField(required=True)
+
+
+class JenisSampahSerializer(serializers.ModelSerializer[Model]):
+    satuan = serializers.SerializerMethodField()
+    kode = serializers.CharField(source="nomor", required=True, max_length=20)
+
+    class Meta:
+        model = JenisSampah
+        fields = [
+            "id",
+            "kode",
+            "nama_sampah",
+            "kategori",
+            "deskripsi",
+            "satuan",
+            "harga_per_kg",
+            "is_active",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "satuan", "is_active", "updated_at"]
+
+    def validate_kode(self, value: Any) -> Any:
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Kode sampah wajib diisi")
+        return value
+
+    def validate_nama_sampah(self, value: Any) -> Any:
+        value = value.strip()
+        if not 2 <= len(value) <= 50:
+            raise serializers.ValidationError("Nama jenis sampah wajib diisi")
+        return value
+
+    def validate_deskripsi(self, value: Any) -> Any:
+        if value and len(value) > 200:
+            raise serializers.ValidationError("Deskripsi maksimal 200 karakter")
+        return value
+
+    def validate_harga_per_kg(self, value: Any) -> Any:
+        if value <= 0:
+            raise serializers.ValidationError("Harga harus berupa angka positif")
+        if value >= Decimal(1000000000):
+            raise serializers.ValidationError("Harga maksimal 9 digit")
+        return value
+
+    def get_satuan(self, obj: Any) -> Any:
+        return "kg"
+
+
+# Batas berat dari PM (PIL-224): di atas angka ini hampir pasti salah ketik.
+BERAT_MAKS_PER_ITEM = Decimal(500)
+BERAT_MAKS_PER_SETORAN = Decimal(1000)
+
+
+class TransactionItemInputSerializer(serializers.Serializer[Any]):
+    jenis_sampah_id = serializers.UUIDField(required=True)
+    berat = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        min_value=Decimal("0.001"),
+        max_value=BERAT_MAKS_PER_ITEM,
+        error_messages={
+            "max_value": f"Berat maksimal {format_ribuan(BERAT_MAKS_PER_ITEM)} kg untuk satu jenis sampah"
+        },
+    )
+
+
+class TransactionCreateSerializer(serializers.Serializer[Any]):
+    nasabah_id = serializers.UUIDField(required=True)
+    items = TransactionItemInputSerializer(many=True, required=True)
+    catatan = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    def validate_items(self, value: Any) -> Any:
+        if not value:
+            raise serializers.ValidationError("Minimal 1 item setoran diperlukan")
+        if sum(item["berat"] for item in value) > BERAT_MAKS_PER_SETORAN:
+            raise serializers.ValidationError(
+                f"Total berat satu setoran maksimal {format_ribuan(BERAT_MAKS_PER_SETORAN)} kg"
+            )
+        return value
+
+    def validate(self, attrs: Any) -> Any:
+        # Harga hanya boleh berasal dari master jenis sampah. Menerima harga
+        # dari client membuat nilai setoran bisa diatur dari luar sistem, jadi
+        # request yang masih mengirimnya ditolak, bukan diabaikan diam-diam.
+        raw_items = self.initial_data.get("items")
+        if isinstance(raw_items, list):
+            item_errors: list[dict[str, list[str]]] = [
+                {"harga_per_kg": ["Harga diambil dari master jenis sampah dan tidak dapat dikirim"]}
+                if isinstance(item, dict) and "harga_per_kg" in item
+                else {}
+                for item in raw_items
+            ]
+            if any(item_errors):
+                raise serializers.ValidationError({"items": item_errors})
+        return attrs
+
+
+class DetailTransaksiSerializer(serializers.ModelSerializer[Model]):
+    jenis_sampah_id = serializers.UUIDField()
+
+    class Meta:
+        model = DetailTransaksi
+        fields = [
+            "id",
+            "jenis_sampah_id",
+            "nama_sampah_snapshot",
+            "harga_snapshot",
+            "berat",
+            "subtotal",
+        ]
+
+
+class TransactionDetailSerializer(serializers.ModelSerializer[Transaksi]):
+    nasabah_id = serializers.UUIDField(source="nasabah.id")
+    nasabah_nama = serializers.CharField(source="nasabah.nama")
+    bank_sampah_id = serializers.UUIDField(source="bank_sampah.id")
+    dicatat_oleh = serializers.UUIDField(source="dicatat_oleh.id")
+    items = DetailTransaksiSerializer(many=True)
+    saldo_setelah_transaksi = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Transaksi
+        fields = [
+            "id",
+            "nasabah_id",
+            "nasabah_nama",
+            "bank_sampah_id",
+            "dicatat_oleh",
+            "tanggal",
+            "total_nilai",
+            "catatan",
+            "status_wa",
+            "items",
+            "saldo_setelah_transaksi",
+        ]
+
+    def get_saldo_setelah_transaksi(self, obj: Any) -> Any:
+        return bulatkan_rupiah(
+            BalanceService.saldo_at(obj.bank_sampah, obj.nasabah_id, obj.tanggal, obj.id)
+        )
+
+
+class TransactionListSerializer(serializers.ModelSerializer[Model]):
+    nasabah_id = serializers.UUIDField(source="nasabah.id")
+    nasabah_nama = serializers.CharField(source="nasabah.nama")
+    nasabah_inisial = serializers.SerializerMethodField()
+    jenis_sampah_utama = serializers.SerializerMethodField()
+    total_berat_kg = serializers.SerializerMethodField()
+    dicatat_oleh = serializers.UUIDField(source="dicatat_oleh.id")
+
+    class Meta:
+        model = Transaksi
+        fields = [
+            "id",
+            "nasabah_id",
+            "nasabah_nama",
+            "nasabah_inisial",
+            "jenis_sampah_utama",
+            "total_berat_kg",
+            "total_nilai",
+            "tanggal",
+            "status_wa",
+            "dicatat_oleh",
+        ]
+
+    def get_nasabah_inisial(self, obj: Any) -> Any:
+        return get_initials(obj.nasabah.nama)
+
+    def get_jenis_sampah_utama(self, obj: Any) -> Any:
+        item = max(obj.items.all(), key=lambda detail: detail.berat, default=None)
+        return item.nama_sampah_snapshot if item else None
+
+    def get_total_berat_kg(self, obj: Any) -> Any:
+        return sum((item.berat for item in obj.items.all()), Decimal(0))
+
+
+class SaldoSerializer(serializers.ModelSerializer[Model]):
+    nasabah_id = serializers.UUIDField(source="nasabah.id")
+    nasabah_nama = serializers.CharField(source="nasabah.nama")
+
+    class Meta:
+        model = Saldo
+        fields = ["nasabah_id", "nasabah_nama", "total_saldo", "updated_at"]
+
+
+class WATemplateSerializer(serializers.Serializer[Any]):
+    template = serializers.CharField(required=True, allow_blank=False)
 
 
 class JadwalKegiatanSerializer(serializers.ModelSerializer[Model]):
