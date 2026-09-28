@@ -74,6 +74,25 @@ class NasabahProfileTests(APITestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.no_hp, "+6281234567890")
 
+    def test_patch_propagates_profile_to_linked_memberships(self) -> None:
+        bank = BankSampah.objects.create(
+            nama="Bank A", no_hp_pic="08123", is_active=True, status=BankSampah.Status.ACTIVE
+        )
+        member = Nasabah.objects.create(
+            email="fixture-2@example.test",
+            user=self.user,
+            bank_sampah=bank,
+            nomor="002",
+            nama="Siti Aminah",
+            alamat="Old address",
+            no_hp="08111",
+        )
+        response = self.client.patch(self.url, {"alamat": "Jl. Merdeka 10", "nama": "Siti A."})
+        self.assertEqual(response.status_code, 200)
+        member.refresh_from_db()
+        self.assertEqual(member.alamat, "Jl. Merdeka 10")
+        self.assertEqual(member.nama, "Siti A.")
+
     def test_patch_cannot_change_identity_fields(self) -> None:
         original_id = str(self.user.id)
         response = self.client.patch(
