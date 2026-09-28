@@ -27,9 +27,11 @@ CONFIRMATION = "SEED-PILAH-STAGING-DATA"
 
 ACTIVE_BANK_ID = UUID("00000000-0000-4000-8000-000000000001")
 PENDING_BANK_ID = UUID("00000000-0000-4000-8000-000000000002")
+INDUK_BANK_ID = UUID("00000000-0000-4000-8000-000000000003")
 PENGURUS_ID = UUID("00000000-0000-4000-8000-000000000011")
 PENDING_PENGURUS_ID = UUID("00000000-0000-4000-8000-000000000012")
 SUPERADMIN_ID = UUID("00000000-0000-4000-8000-000000000013")
+INDUK_PENGELOLA_ID = UUID("00000000-0000-4000-8000-000000000014")
 CUSTOMER_ONE_USER_ID = UUID("00000000-0000-4000-8000-000000000021")
 CUSTOMER_TWO_USER_ID = UUID("00000000-0000-4000-8000-000000000022")
 CUSTOMER_ONE_ID = UUID("00000000-0000-4000-8000-000000000031")
@@ -57,6 +59,7 @@ class SeedIdentities:
     customer_two_email: str
     superadmin_email: str
     pending_pengurus_email: str
+    induk_email: str
 
 
 class Command(BaseCommand):
@@ -97,6 +100,10 @@ class Command(BaseCommand):
                 or "pending.pengurus.demo@example.com"
             ),
         )
+        parser.add_argument(
+            "--induk-email",
+            default=os.getenv("PILAH_SEED_INDUK_EMAIL", "induk.demo@example.com"),
+        )
 
     def handle(self, *args: object, **options: object) -> None:
         environment = str(options["environment"])
@@ -112,6 +119,7 @@ class Command(BaseCommand):
             customer_two_email=self._normalize_email(options["customer_two_email"]),
             superadmin_email=self._normalize_email(options["superadmin_email"]),
             pending_pengurus_email=self._normalize_email(options["pending_pengurus_email"]),
+            induk_email=self._normalize_email(options["induk_email"]),
         )
 
         with transaction.atomic():
@@ -119,7 +127,7 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(f"Seeded testing data for {environment} environment"))
         self.stdout.write(
-            "Fixture includes 2 banks, 5 users, 2 customers, 4 waste types, "
+            "Fixture includes 3 banks, 6 users, 2 customers, 4 waste types, "
             "3 transactions, and recalculated balances."
         )
 
@@ -164,6 +172,22 @@ class Command(BaseCommand):
                 "invite_token_expires": None,
             },
         )[0]
+        induk_bank = BankSampah.objects.update_or_create(
+            pk=INDUK_BANK_ID,
+            defaults={
+                "nama": "Bank Sampah Induk PILAH E2E",
+                "alamat": "Jl. E2E Induk No. 1",
+                "kota": "Depok",
+                "no_hp_pic": "+628222222223",
+                "jenis_organisasi": BankSampah.OrganizationType.INDUK,
+                "parent": None,
+                "status": BankSampah.Status.ACTIVE,
+                "is_active": True,
+                "wa_template": DEFAULT_WA_TEMPLATE,
+                "invite_token": "",
+                "invite_token_expires": None,
+            },
+        )[0]
 
         pengurus = self._upsert_user(
             user_id=PENGURUS_ID,
@@ -179,6 +203,14 @@ class Command(BaseCommand):
             name="Pengurus Pending PILAH E2E",
             role=User.Role.PENGELOLA,
             bank=pending_bank,
+            is_primary=True,
+        )
+        self._upsert_user(
+            user_id=INDUK_PENGELOLA_ID,
+            email=identities.induk_email,
+            name="Pengelola Induk PILAH E2E",
+            role=User.Role.PENGELOLA_INDUK,
+            bank=induk_bank,
             is_primary=True,
         )
         superadmin = self._upsert_user(
@@ -207,6 +239,10 @@ class Command(BaseCommand):
             role=User.Role.NASABAH,
             bank=None,
             is_primary=False,
+            no_hp="+628333333331",
+            alamat="Jl. Mawar E2E No. 1",
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir=date(1990, 1, 1),
         )
         customer_two_user = self._upsert_user(
             user_id=CUSTOMER_TWO_USER_ID,
@@ -215,6 +251,10 @@ class Command(BaseCommand):
             role=User.Role.NASABAH,
             bank=None,
             is_primary=False,
+            no_hp="+628333333332",
+            alamat="Jl. Melati E2E No. 2",
+            jenis_kelamin=User.Gender.FEMALE,
+            tanggal_lahir=date(1992, 2, 2),
         )
 
         customer_one = self._upsert_customer(
@@ -328,6 +368,10 @@ class Command(BaseCommand):
         is_primary: bool,
         is_staff: bool = False,
         is_superuser: bool = False,
+        no_hp: str = "",
+        alamat: str = "",
+        jenis_kelamin: str = "",
+        tanggal_lahir: date | None = None,
     ) -> User:
         user = User.objects.filter(pk=user_id).first()
         if user is None:
@@ -374,6 +418,15 @@ class Command(BaseCommand):
         user.is_active = True
         user.is_staff = is_staff
         user.is_superuser = is_superuser
+        # A nasabah account's own profile mirrors the Nasabah record it's
+        # linked to below — a blank no_hp/alamat here despite
+        # is_profile_complete=True doesn't match any state the real login
+        # flow produces, and register_nasabah's alamat guard would reject
+        # this account outright if it ever tried to self-register.
+        user.no_hp = no_hp
+        user.alamat = alamat
+        user.jenis_kelamin = jenis_kelamin
+        user.tanggal_lahir = tanggal_lahir
         user.save(
             update_fields=[
                 "email",
@@ -385,6 +438,10 @@ class Command(BaseCommand):
                 "is_active",
                 "is_staff",
                 "is_superuser",
+                "no_hp",
+                "alamat",
+                "jenis_kelamin",
+                "tanggal_lahir",
                 "updated_at",
             ]
         )
@@ -414,6 +471,7 @@ class Command(BaseCommand):
                 "tanggal_lahir": birth_date,
                 "alamat": address,
                 "no_hp": phone,
+                "email": user.email,
                 "is_active": True,
             },
         )

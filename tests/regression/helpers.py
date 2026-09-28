@@ -18,10 +18,15 @@ def nasabah_payload(**overrides: Any) -> dict[str, Any]:
         "tanggal_lahir": "1990-01-01",
         "no_hp": "081234567890",
         "alamat": "Jl. Anggrek No. 3",
+        "email": "budi@example.com",
     }
     payload.update(overrides)
     if "no_hp" not in overrides and payload["kode"] != "NAS-0001":
         payload["no_hp"] = "081234567891"
+    if "email" not in overrides and payload["kode"] != "NAS-0001":
+        # PIL-204: email must be unique within the bank sampah.
+        seq = payload["kode"].split("-")[-1]
+        payload["email"] = f"nasabah-{seq}@example.com"
     return payload
 
 
@@ -63,7 +68,13 @@ class RegressionTestCase(APITestCase):
     @classmethod
     def setUpClass(cls) -> None:
         super().setUpClass()
-        cls._fake_tokens = override_settings(DEBUG=True, PILAH_ALLOW_FAKE_GOOGLE_TOKEN=True)
+        # CI sets no PILAH_SUPERADMIN_EMAILS; superadmin-authed regression
+        # tests need one allowlisted email to get past the login gate.
+        cls._fake_tokens = override_settings(
+            DEBUG=True,
+            PILAH_ALLOW_FAKE_GOOGLE_TOKEN=True,
+            PILAH_SUPERADMIN_EMAILS=("admin@example.com",),
+        )
         cls._fake_tokens.enable()
 
     @classmethod

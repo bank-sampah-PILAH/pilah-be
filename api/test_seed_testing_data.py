@@ -32,6 +32,15 @@ class SeedTestingDataCommandTests(TestCase):
             defaults = self._parse_seed_arguments()
         self.assertEqual(defaults.pengurus_email, "pengurus.demo@example.com")
         self.assertEqual(defaults.pending_pengurus_email, "pending.pengurus.demo@example.com")
+        self.assertEqual(defaults.induk_email, "induk.demo@example.com")
+
+        with patch.dict(
+            os.environ,
+            {"PILAH_SEED_INDUK_EMAIL": "configured.induk@example.com"},
+            clear=True,
+        ):
+            configured_induk = self._parse_seed_arguments()
+        self.assertEqual(configured_induk.induk_email, "configured.induk@example.com")
 
         with patch.dict(
             os.environ,
@@ -94,7 +103,19 @@ class SeedTestingDataCommandTests(TestCase):
                 nama="Bank Sampah PILAH E2E Pending", status=BankSampah.Status.PENDING
             ).exists()
         )
+        self.assertTrue(
+            BankSampah.objects.filter(
+                nama="Bank Sampah Induk PILAH E2E",
+                jenis_organisasi=BankSampah.OrganizationType.INDUK,
+                status=BankSampah.Status.ACTIVE,
+            ).exists()
+        )
         self.assertTrue(User.objects.filter(email="pengurus.demo@example.com").exists())
+        self.assertTrue(
+            User.objects.filter(
+                email="induk.demo@example.com", role=User.Role.PENGELOLA_INDUK
+            ).exists()
+        )
         self.assertTrue(User.objects.filter(email="superadmin.demo@example.com").exists())
         self.assertEqual(Nasabah.objects.count(), 2)
         self.assertEqual(JenisSampah.objects.count(), 4)
@@ -148,6 +169,7 @@ class SeedTestingDataCommandTests(TestCase):
             customer_two_email="staging.customer.two@example.com",
             superadmin_email="staging.admin@example.com",
             pending_pengurus_email="staging.pending@example.com",
+            induk_email="staging.induk@example.com",
         )
 
         unrelated_bank.refresh_from_db()
@@ -157,6 +179,7 @@ class SeedTestingDataCommandTests(TestCase):
         self.assertTrue(User.objects.filter(email="staging.customer.two@example.com").exists())
         self.assertTrue(User.objects.filter(email="staging.admin@example.com").exists())
         self.assertTrue(User.objects.filter(email="staging.pending@example.com").exists())
+        self.assertTrue(User.objects.filter(email="staging.induk@example.com").exists())
 
     @override_settings(DEBUG=False)
     def test_local_environment_requires_debug(self) -> None:

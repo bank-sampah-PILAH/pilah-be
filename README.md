@@ -152,8 +152,15 @@ Auth and app variables:
 ```env
 GOOGLE_CLIENT_ID=
 PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false
+PILAH_SUPERADMIN_EMAILS=admin@example.com
 PILAH_PUBLIC_APP_URL=https://pilah.example.com
+PILAH_SUPERADMIN_EMAILS=admin@example.com,another-admin@example.com
 ```
+
+Set `PILAH_SUPERADMIN_EMAILS` on Fly and as a GitHub repository variable for
+Cloud Run. It is the authoritative comma-separated list of Superadmin Google
+accounts. The deploy workflow stops before deployment if the repository
+variable is empty.
 
 WhatsApp gateway variables:
 
@@ -178,7 +185,7 @@ Pengelola:
 
 ```json
 {
-  "id_token": "dev:user@example.com:User Name"
+  "id_token": "dev-pengelola:user@example.com:User Name"
 }
 ```
 
@@ -189,6 +196,10 @@ SuperAdmin:
   "id_token": "dev-superadmin:admin@example.com:Admin Name"
 }
 ```
+
+The `/api-test/` Run Full Flow runner uses the first address in
+`PILAH_SUPERADMIN_EMAILS` as its stable SuperAdmin identity. For local fake-auth
+runs, use an address that is allowlisted and belongs to a SuperAdmin test account.
 
 Pengelola Induk and Nasabah:
 
@@ -204,16 +215,16 @@ Pengelola Induk and Nasabah:
 }
 ```
 
-These role-specific token prefixes are local test helpers and work only while
-`PILAH_ALLOW_FAKE_GOOGLE_TOKEN=true`. For Google Sign-In, PILAH uses the role
-stored on the existing user account. Google profile claims cannot assign a
-PILAH role.
+Role-specific token prefixes are local test helpers and work only while
+`PILAH_ALLOW_FAKE_GOOGLE_TOKEN=true`. A new identity using `dev:email:name`
+still goes through role selection; an existing account signs in with its stored
+role. Google profile claims cannot assign a PILAH role.
 
 Use only real Google ID tokens in production.
 
 ## Staging E2E data and Google accounts
 
-Staging keeps genuine Google OAuth enabled. Add the five staging test-account
+Staging keeps genuine Google OAuth enabled. Add the staging test-account
 emails to the Google OAuth consent screen's test-user list, and configure the
 same values as GitHub `staging` environment variables:
 
@@ -223,12 +234,22 @@ PILAH_SEED_CUSTOMER_EMAIL
 PILAH_SEED_CUSTOMER_TWO_EMAIL
 PILAH_SEED_SUPERADMIN_EMAIL
 PILAH_SEED_PENDING_PENGURUS_EMAIL
+PILAH_SEED_INDUK_EMAIL
 ```
+
+`PILAH_SEED_INDUK_EMAIL` is optional and defaults to
+`induk.demo@example.com` in both the workflow and seed command.
 
 The old `PILAH_SEED_OPERATOR_EMAIL` and
 `PILAH_SEED_PENDING_OPERATOR_EMAIL` names remain supported as temporary
 fallbacks; the Pengurus names take precedence. The command also accepts the
 old `--operator-email` and `--pending-operator-email` flags.
+
+Set `PILAH_SUPERADMIN_EMAILS` on Fly to the comma-separated authoritative
+Superadmin Google accounts; the seeded Superadmin email must be included. The
+Cloud Run workflow reads the production allowlist from the GitHub variable with
+the same name.
+Existing Superadmin accounts not present in this list cannot use Google login.
 
 Run the confirmation-gated **Seed Staging Testing Data** GitHub Actions
 workflow and enter `SEED-PILAH-STAGING-DATA` exactly. The workflow connects to
@@ -274,6 +295,7 @@ SuperAdmin flow:
 Authentication:
 
 - `POST /api/v1/auth/google`
+- `POST /api/v1/auth/google/register`
 - `POST /api/v1/auth/refresh`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
@@ -315,6 +337,15 @@ Transaksi:
 - `POST /api/v1/transaksi/:id/notify-wa`
 - `GET /api/v1/transaksi/export`
 
+Pencairan:
+
+- `GET /api/v1/pencairan`
+- `GET /api/v1/pencairan?nasabah_id=:id&periode=:periode&search=:nama`
+- `POST /api/v1/pencairan`
+- `GET /api/v1/pencairan/:id`
+- `PATCH /api/v1/pencairan/:id`
+- `GET /api/v1/pencairan/:id/riwayat`
+
 Dashboard and settings:
 
 - `GET /api/v1/dashboard/stats`
@@ -328,6 +359,88 @@ SuperAdmin:
 - `GET /api/v1/superadmin/bank-sampah/:id`
 - `POST /api/v1/superadmin/bank-sampah/:id/approve`
 - `POST /api/v1/superadmin/bank-sampah/:id/reject`
+
+## Pencairan
+
+Pengurus record a payout for a nasabah. There is no payment gateway: the API
+only records what was paid out and lowers the saldo once, atomically.
+
+```http
+POST /api/v1/pencairan
+{
+  "nasabah_id": "uuid",
+  "nominal": "200000",
+  "metode": "tunai",
+  "tanggal": "2026-09-20T10:15:00+07:00",
+  "keterangan": "Diambil pagi"
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `nasabah_id` | Required. Active nasabah of the pengurus' own bank sampah. |
+| `nominal` | Required. Greater than zero, whole rupiah, not above the saldo. |
+| `metode` | Required. `tunai` or `transfer`. |
+| `tanggal` | Optional, defaults to now. Cannot be in the future, or earlier than the nasabah's latest setoran or pencairan. |
+| `keterangan` | Optional, max 255 characters. |
+
+The response carries `status` (`tercatat`) plus the `saldo_sebelum` and
+`saldo_sesudah` snapshots taken when the payout was recorded. `saldo_sesudah`
+is rounded down to whole rupiah, and saldo history (`saldo_setelah_transaksi`,
+export) debits `saldo_sebelum - saldo_sesudah`, so it matches the stored saldo.
+
+Only pengurus record pencairan. `GET /api/v1/pencairan` and
+`GET /api/v1/pencairan/:id` also accept nasabah accounts, which see only the
+pencairan on their own memberships. Django admin shows pencairan read-only.
+
+### Riwayat pencairan filters
+
+`GET /api/v1/pencairan` accepts, in any combination:
+
+| Parameter | Values | Notes |
+| --- | --- | --- |
+| `periode` | `hari_ini`, `minggu_ini`, `bulan_ini`, `bulan_lalu`, `custom` | Same values as the transaksi list. Omitted means the whole history (transaksi defaults to `hari_ini` instead). An unrecognized value is ignored rather than rejected, also as on the transaksi list, so it reads as the whole history too. |
+| `dari_tanggal`, `sampai_tanggal` | `YYYY-MM-DD` | Required with `periode=custom`: missing returns 422, an end before the start returns 400. |
+| `nasabah_id` | UUID | One nasabah's riwayat. |
+| `search` | 2+ characters | Case-insensitive match on the nasabah name. A shorter value is ignored, so clients should not send one. |
+
+Results are always limited to the pengurus' own bank sampah, newest first, paginated.
+
+### Editing a pencairan
+
+Pengurus correct a recorded payout with `PATCH /api/v1/pencairan/:id`. Every
+edit keeps the replaced version as an append-only revision.
+
+```http
+PATCH /api/v1/pencairan/:id
+{
+  "nominal": "150000",
+  "tanggal": "2026-09-19T10:15:00+07:00",
+  "metode": "transfer",
+  "keterangan": "Ditransfer ke BRI",
+  "alasan": "Salah ketik nominal"
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `alasan` | Required, max 255 characters. Stored with the replaced version. |
+| `nominal`, `metode`, `keterangan` | Optional, same rules as recording. |
+| `tanggal` | Optional. Not in the future, and at most `BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI` (7) days before the tanggal the pencairan was first recorded with, however many edits follow. |
+
+An edit that changes nothing returns 422. Changing `nominal` or `tanggal`
+recomputes `saldo_sebelum`/`saldo_sesudah` of this and every later pencairan of
+the nasabah and moves the saldo by the difference, all in one transaction. The
+edit is rejected (422 on `nominal`) if the saldo would not cover this or any
+later pencairan. Later pencairan are not marked as edited.
+
+Pencairan responses carry `diperbarui` (true once edited) and
+`tanggal_edit_minimum`, the earliest tanggal an edit may set.
+
+`GET /api/v1/pencairan/:id/riwayat` (pengurus only) returns the current
+`pencairan` and its replaced versions in `revisi`, newest first, each with
+`versi`, the old values and snapshots, `alasan`, `diubah_oleh_nama` and
+`diubah_pada`. Django admin shows revisions read-only.
 
 ## Report Export
 
@@ -462,6 +575,59 @@ Run tests:
 ```bash
 python manage.py test
 ```
+
+## Nasabah home API (PIL-225)
+
+All endpoints require a Bearer JWT for an active user with role `nasabah`.
+
+| GET endpoint | Response |
+| --- | --- |
+| `/api/v1/nasabah/me/beranda` | `user`, `keanggotaan`, `bank_sampah`, `saldo`, and up to five `aktivitas_terbaru` |
+| `/api/v1/nasabah/me/saldo` | `total_saldo` (decimal string), `updated_at` |
+| `/api/v1/nasabah/me/bank-sampah` | Public details of the selected membership's bank |
+| `/api/v1/nasabah/me/riwayat` | Paginated `count`, `next`, `previous`, `results`; newest transactions first |
+
+The membership must belong to the authenticated user, have status `approved`,
+and be active. Its bank must also have status `active` and be active.
+No request can select another user's data. Bank credentials and invite tokens
+are excluded from responses. Reads never create or update balances.
+
+Pass `?keanggotaan_id=<UUID>` to select a membership. When omitted, the API uses
+the user's only eligible membership. If several are eligible, it returns 422
+with `errors.keanggotaan_id` and `errors.pilihan` containing the available IDs
+and bank names. Invalid UUIDs also return 422, another user's or missing
+membership returns 404, and ineligible memberships return 403.
+History supports `page` and `page_size` (default 20, maximum 100); retain the
+membership selection when requesting subsequent pages.
+
+Balances without a row return `"0.00"` and `updated_at: null`; empty history
+returns an empty list. Activity fields are `id`, `tanggal`, `tipe`, and
+`total_nilai`. These represent the transactions available in staging
+(currently deposits); this change does not implement withdrawals.
+
+Mobile integration must handle staging's `next_step: "nasabah_dashboard"`,
+then load this API to check membership eligibility. Bank status from the
+login payload alone is not proof of active membership. The existing mobile
+preview is still mock data until its repository/state layer calls these APIs.
+This backend branch does not modify the mobile application or login contract.
+
+## Nasabah profile API (PIL-226)
+
+`GET /api/v1/nasabah/me/profil` requires a Bearer JWT for an active user with
+role `nasabah`. It returns only `id`, `nama`, `email`, and `role` from the
+authenticated account. Query parameters cannot select a different user.
+Profile access does not require active bank membership.
+
+Anonymous or invalid-token requests return 401; management roles return 403.
+POST, PUT, PATCH, and DELETE return 405. This endpoint does not expose bank
+management settings and does not implement profile editing or logout.
+
+Mobile may load this endpoint to refresh the read-only profile; the existing
+login response and `GET /api/v1/auth/me` remain unchanged. Staging returns
+`nasabah_dashboard` as the nasabah login state, which must be handled by the
+mobile router. This backend branch does not modify the mobile application.
+PIL-226 is based directly on staging and can be integrated independently of
+the PIL-225 backend branch.
 
 ## Notes
 
