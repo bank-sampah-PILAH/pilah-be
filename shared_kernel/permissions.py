@@ -1,8 +1,7 @@
+from django.conf import settings
 from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.views import APIView
-
-from django.conf import settings
 
 from api.models import BankSampah, User
 

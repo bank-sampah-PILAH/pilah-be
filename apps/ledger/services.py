@@ -12,9 +12,17 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from api.kalkulasi import bulatkan_rupiah, harga_berlaku, hitung_subtotal, total_setoran
-from api.models import BankSampah, DetailTransaksi, JenisSampah, Nasabah, Pencairan, PencairanRevisi, Saldo, Transaksi, User
-from apps.catalog.api import get_active_jenis
-from apps.membership.api import get_locked_nasabah
+from api.models import (
+    BankSampah,
+    DetailTransaksi,
+    JenisSampah,
+    Nasabah,
+    Pencairan,
+    PencairanRevisi,
+    Saldo,
+    Transaksi,
+    User,
+)
 from apps.reporting import exporter
 
 
@@ -99,58 +107,6 @@ class TransactionService:
         queryset: QuerySet[Transaksi], request: HttpRequest | None = None
     ) -> tuple[bytes, str]:
         return exporter.export_excel(queryset, request)
-
-
-class TransactionFilterService:
-    @staticmethod
-    def apply_period(
-        queryset: QuerySet[Transaksi], request: HttpRequest, default: str | None = "hari_ini"
-    ) -> QuerySet[Transaksi]:
-        """Filter a queryset with a `tanggal` field by the `periode` query param.
-
-        Without `periode`, [default] applies; `None` means no date filter.
-        """
-        periode = request.GET.get("periode", default)
-        if periode is None:
-            return queryset
-        today = timezone.localdate()
-        if periode == "hari_ini":
-            start, end = today, today
-        elif periode == "minggu_ini":
-            start, end = today - timedelta(days=today.weekday()), today
-        elif periode == "bulan_ini":
-            start, end = today.replace(day=1), today
-        elif periode == "bulan_lalu":
-            first_this_month = today.replace(day=1)
-            last_previous_month = first_this_month - timedelta(days=1)
-            start = last_previous_month.replace(day=1)
-            end = last_previous_month
-        elif periode == "custom":
-            parsed_start = TransactionFilterService._parse_date(request.GET.get("dari_tanggal"))
-            parsed_end = TransactionFilterService._parse_date(request.GET.get("sampai_tanggal"))
-            if not parsed_start or not parsed_end:
-                raise serializers.ValidationError(
-                    {"error": "dari_tanggal dan sampai_tanggal wajib diisi"}
-                )
-            if parsed_end < parsed_start:
-                raise ValueError("Tanggal akhir tidak boleh lebih awal dari tanggal awal")
-            start, end = parsed_start, parsed_end
-        else:
-            return queryset
-
-        tz = timezone.get_current_timezone()
-        start_dt = timezone.make_aware(datetime.combine(start, time.min), tz)
-        end_dt = timezone.make_aware(datetime.combine(end, time.max), tz)
-        return queryset.filter(tanggal__range=(start_dt, end_dt))
-
-    @staticmethod
-    def _parse_date(value: str | None) -> date | None:
-        if not value:
-            return None
-        try:
-            return date.fromisoformat(value)
-        except ValueError as exc:
-            raise serializers.ValidationError({"error": "Format tanggal harus YYYY-MM-DD"}) from exc
 
 
 # ponytail: pencairan edit-window constant (PIL-2xx), shared with tests.
@@ -438,4 +394,3 @@ class BalanceService:
             total=Coalesce(Sum(F("saldo_sebelum") - F("saldo_sesudah")), Decimal("0.00"))
         )["total"]
         return cast(Decimal, masuk - keluar)
-

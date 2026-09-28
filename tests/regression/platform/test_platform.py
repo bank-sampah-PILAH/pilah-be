@@ -6,12 +6,12 @@ from django.core.files.storage import default_storage
 from django.core.signing import TimestampSigner
 from django.test import TestCase
 from rest_framework import serializers
+from tests.regression.helpers import RegressionTestCase
 
 from api.models import BankSampah, User
-from apps.membership.api import next_nasabah_number
 from apps.catalog.api import next_jenis_number
+from apps.membership.api import next_nasabah_number
 from shared_kernel.validators import get_initials, normalize_indonesian_phone
-from tests.regression.helpers import RegressionTestCase
 
 
 class PlatformRouteTests(RegressionTestCase):

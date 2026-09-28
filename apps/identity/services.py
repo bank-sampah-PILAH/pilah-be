@@ -15,7 +15,6 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from api.models import BankSampah, Nasabah, NasabahApprovalLog, Saldo, User
 from apps.notify.api import DEFAULT_WA_TEMPLATE
 
-
 REGISTRATION_TOKEN_MAX_AGE = 600
 REGISTRATION_TOKEN_SALT = "pilah-google-registration"
 
@@ -277,7 +276,6 @@ class AuthService:
             return
         nasabah.user = user
         nasabah.save(update_fields=["user", "updated_at"])
-
 
     @staticmethod
     def user_state(user: User) -> str:

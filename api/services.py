@@ -6,10 +6,11 @@ re-exported here so patch targets and historical imports keep working.
 """
 
 import requests
-
 from google.oauth2 import id_token as google_id_token  # noqa: F401  (patch target)
 
-from apps.catalog.api import next_jenis_number  # noqa: F401  (was NumberingService.next_jenis_number)
+from apps.catalog.api import (
+    next_jenis_number,  # noqa: F401  (was NumberingService.next_jenis_number)
+)
 from apps.identity.services import (
     REGISTRATION_TOKEN_MAX_AGE,
     REGISTRATION_TOKEN_SALT,
@@ -18,8 +19,10 @@ from apps.identity.services import (
     OnboardingService,
     TeamService,
 )
-from apps.membership.api import next_nasabah_number  # noqa: F401  (was NumberingService.next_nasabah_number)
 from apps.ledger.services import PencairanService, TransactionFilterService
+from apps.membership.api import (
+    next_nasabah_number,  # noqa: F401  (was NumberingService.next_nasabah_number)
+)
 from apps.membership.services import NasabahApprovalService
 from apps.notify.services import WhatsAppService
 

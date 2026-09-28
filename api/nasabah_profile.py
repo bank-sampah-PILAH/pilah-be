@@ -5,10 +5,10 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from api.models import User
-from shared_kernel.permissions import IsActiveNasabah
-from apps.identity.services import OnboardingService
-from shared_kernel.validators import normalize_indonesian_phone
 from api.views import _user
+from apps.identity.services import OnboardingService
+from shared_kernel.permissions import IsActiveNasabah
+from shared_kernel.validators import normalize_indonesian_phone
 
 
 class NasabahProfileSerializer(serializers.ModelSerializer[User]):

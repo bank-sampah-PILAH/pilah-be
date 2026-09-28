@@ -2,15 +2,16 @@
 
 ponytail: PR48 ports these into apps.* contexts as they stabilize.
 """
-from datetime import date, datetime, time
 
-from django.utils import timezone
+from datetime import datetime
 from decimal import Decimal
-from typing import Any, Mapping, cast
+from typing import Any, cast
 
 from django.db.models import Model
+from django.utils import timezone
 from rest_framework import serializers
 
+from api.kalkulasi import bulatkan_rupiah, format_ribuan
 from api.models import (
     BankSampah,
     DetailTransaksi,
@@ -24,9 +25,9 @@ from api.models import (
     Transaksi,
     User,
 )
-from api.kalkulasi import bulatkan_rupiah, format_ribuan
 from apps.ledger.services import BalanceService, PencairanService
 from apps.membership.serializers import NasabahSerializer
+from apps.organization.serializers import BankSampahApprovalListSerializer  # noqa: F401
 from shared_kernel.validators import get_initials
 
 
@@ -43,6 +44,7 @@ def _validate_nominal_pencairan(value: Decimal) -> Decimal:
         raise serializers.ValidationError("Nominal harus dalam rupiah bulat tanpa desimal")
     return value
 
+
 class PencairanCreateSerializer(serializers.Serializer[Any]):
     nasabah_id = serializers.UUIDField(required=True)
     nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=True)
@@ -57,8 +59,6 @@ class PencairanCreateSerializer(serializers.Serializer[Any]):
 
     def validate_tanggal(self, value: datetime) -> datetime:
         return _validate_tanggal_pencairan(value)
-
-
 
 
 class PencairanEditSerializer(serializers.Serializer[Any]):
@@ -82,8 +82,6 @@ class PencairanEditSerializer(serializers.Serializer[Any]):
 
     def validate_tanggal(self, value: datetime) -> datetime:
         return _validate_tanggal_pencairan(value)
-
-
 
 
 class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
@@ -127,8 +125,6 @@ class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
         )
 
 
-
-
 class PencairanRevisiSerializer(serializers.ModelSerializer[Model]):
     diubah_oleh = serializers.UUIDField(source="diubah_oleh.id")
     diubah_oleh_nama = serializers.CharField(source="diubah_oleh.nama")
@@ -150,13 +146,9 @@ class PencairanRevisiSerializer(serializers.ModelSerializer[Model]):
         ]
 
 
-
-
 class GoogleRegistrationSerializer(serializers.Serializer[Any]):
     registration_token = serializers.CharField(required=True)
     role = serializers.ChoiceField(choices=User.GOOGLE_REGISTRATION_ROLES)
-
-
 
 
 class NasabahSelfRegistrationSerializer(serializers.Serializer[Any]):
@@ -174,8 +166,6 @@ class NasabahSelfRegistrationSerializer(serializers.Serializer[Any]):
     pesan = serializers.CharField(required=False, allow_blank=True, default="")
 
 
-
-
 class NasabahSelfBankSampahSerializer(serializers.ModelSerializer[Model]):
     """The bank sampah facet of a nasabah's own membership listing.
 
@@ -190,8 +180,6 @@ class NasabahSelfBankSampahSerializer(serializers.ModelSerializer[Model]):
         read_only_fields = fields
 
 
-
-
 class NasabahSelfApprovalLogSerializer(serializers.ModelSerializer[Model]):
     """One decision entry in a membership row's approval history, as shown
     to the nasabah themself (PIL-232). Deliberately smaller than
@@ -203,8 +191,6 @@ class NasabahSelfApprovalLogSerializer(serializers.ModelSerializer[Model]):
         model = NasabahApprovalLog
         fields = ["status", "catatan", "created_at"]
         read_only_fields = fields
-
-
 
 
 class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
@@ -569,7 +555,3 @@ class BankSampahDirectorySerializer(serializers.ModelSerializer[Model]):
     class Meta:
         model = BankSampah
         fields = ["id", "nama", "alamat", "kota", "foto_logo"]
-        read_only_fields = fields
-
-# ponytail: canonical home is apps.organization.serializers.
-from apps.organization.serializers import BankSampahApprovalListSerializer  # noqa: F401

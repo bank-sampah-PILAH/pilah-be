@@ -3,49 +3,21 @@
 ponytail: PR48 ports these into apps.* contexts as they stabilize; until
 then they stay here so api.urls has one import point.
 """
-import json
-import requests
-from decimal import Decimal
-from io import BytesIO
-from typing import Any, cast
 
-from django.core import signing
-from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
+from typing import Any
+
 from django.db import transaction
 from django.db.models import Exists, OuterRef, Q, QuerySet
-from django.http import Http404
-from django.http import HttpRequest
 from django.utils import timezone
 from django.utils.dateparse import parse_date
-from rest_framework import serializers, status
-from rest_framework.generics import GenericAPIView
+from rest_framework import serializers, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
-from shared_kernel.permissions import (
-    IsActiveNasabah,
-    IsActivePengelola,
-    IsActivePengelolaOrNasabah,
-    IsJadwalViewer,
-    IsNasabah,
-    IsNasabahRole,
-)
-from api.models import BankSampah, JadwalKegiatan, Nasabah, Pencairan, User
-from rest_framework.renderers import JSONRenderer
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework import status, viewsets
-from rest_framework.decorators import action
 
-from api.services import (
-    AuthService,
-    AuthServiceError,
-    OnboardingService,
-    PencairanService,
-    TransactionFilterService,
-)
-from apps.membership.serializers import NasabahSerializer
-
+from api.models import BankSampah, JadwalKegiatan, Nasabah, Pencairan, User
 from api.serializers import (
     BankSampahDirectorySerializer,
     GoogleRegistrationSerializer,
@@ -57,6 +29,21 @@ from api.serializers import (
     PencairanEditSerializer,
     PencairanRevisiSerializer,
 )
+from api.services import (
+    AuthService,
+    AuthServiceError,
+    OnboardingService,
+    PencairanService,
+    TransactionFilterService,
+)
+from apps.membership.serializers import NasabahSerializer
+from shared_kernel.permissions import (
+    IsActivePengelola,
+    IsActivePengelolaOrNasabah,
+    IsJadwalViewer,
+    IsNasabah,
+    IsNasabahRole,
+)
 
 
 def _user(request: Request) -> User:
@@ -64,16 +51,15 @@ def _user(request: Request) -> User:
     return request.user
 
 
-
 def _auth_service_error_response(error: AuthServiceError) -> Response:
     return Response({"error": str(error), "code": error.code}, status=error.status_code)
-
 
 
 def _bank_sampah(request: Request) -> BankSampah:
     bank = _user(request).bank_sampah
     assert bank is not None  # ponytail: IsActivePengelola guarantees bank membership
     return bank
+
 
 class GoogleRegistrationView(APIView):
     permission_classes = [AllowAny]
@@ -91,8 +77,6 @@ class GoogleRegistrationView(APIView):
         except AuthServiceError as exc:
             return _auth_service_error_response(exc)
         return Response(payload, status=201 if created else 200)
-
-
 
 
 class RegisterNasabahView(APIView):
@@ -113,8 +97,6 @@ class RegisterNasabahView(APIView):
         return Response(data, status=201)
 
 
-
-
 class NasabahSelfView(APIView):
     """A nasabah's own membership rows (beranda-first onboarding, PIL-204):
     status, and the pengurus's reason when rejected, so the app can show
@@ -128,8 +110,6 @@ class NasabahSelfView(APIView):
     def get(self, request: Request) -> Response:
         memberships = Nasabah.objects.filter(user=_user(request)).select_related("bank_sampah")
         return Response(NasabahSelfViewSerializer(memberships, many=True).data)
-
-
 
 
 class BankSampahDirectoryView(APIView):
@@ -150,8 +130,6 @@ class BankSampahDirectoryView(APIView):
             .order_by("nama")
         )
         return Response(BankSampahDirectorySerializer(banks, many=True).data)
-
-
 
 
 class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
@@ -310,8 +288,6 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
         )
 
 
-
-
 class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
     permission_classes = [IsActivePengelola]
     serializer_class = PencairanDetailSerializer
@@ -374,5 +350,3 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
                 "revisi": PencairanRevisiSerializer(revisi, many=True).data,
             }
         )
-
-

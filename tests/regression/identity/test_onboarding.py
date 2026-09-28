@@ -2,9 +2,10 @@
 
 from typing import Any
 
+from tests.regression.helpers import RegressionTestCase, logo
+
 from api.models import User
 from apps.identity.services import OnboardingService
-from tests.regression.helpers import RegressionTestCase, logo
 
 
 class OnboardingRegressionTests(RegressionTestCase):
