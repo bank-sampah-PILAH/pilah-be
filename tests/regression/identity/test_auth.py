@@ -106,10 +106,16 @@ class AuthRegressionTests(RegressionTestCase):
 
     def test_login_next_steps_per_account_state(self) -> None:
         self.client.credentials()
+        # PIL-180: a Google email with no account and no verified Nasabah row
+        # gets the registration gate, so these logins use the dev-role token
+        # (default role PENGELOLA) to exercise the "account exists" next-step
+        # states below.
         for email in ("fresh@example.com", "incomplete@example.com"):
             with self.subTest(email=email):
                 response = self.client.post(
-                    "/api/v1/auth/google", {"id_token": f"dev:{email}:N"}, format="json"
+                    "/api/v1/auth/google",
+                    {"id_token": f"dev-pengelola:{email}:N"},
+                    format="json",
                 )
                 self.assertEqual(response.status_code, 200)
                 self.assertIn("next_step", response.data)
