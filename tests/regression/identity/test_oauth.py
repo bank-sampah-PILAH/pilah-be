@@ -110,7 +110,11 @@ class OAuthRegressionTests(RegressionTestCase):
             override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False, GOOGLE_CLIENT_ID="cid"),
             patch(
                 "api.services.google_id_token.verify_oauth2_token",
-                return_value={"sub": "sub-1", "email": "real@example.com"},
+                return_value={
+                    "sub": "sub-1",
+                    "email": "real@example.com",
+                    "email_verified": True,
+                },
             ),
         ):
             response = self.client.post(
