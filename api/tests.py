@@ -3825,7 +3825,7 @@ class ProfilNasabahBerakunTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.nasabah.refresh_from_db()
-        self.assertEqual(self.nasabah.no_hp, "+628233333333")
+        self.assertEqual(self.nasabah.no_hp, "+6282333333333")
 
     def test_ubah_email_nasabah_berakun_ditolak(self) -> None:
         # Satu-satunya field yang tetap terkunci: email adalah kunci penautan

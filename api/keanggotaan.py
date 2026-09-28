@@ -13,10 +13,15 @@ from typing import Any, Mapping
 
 from api.models import Nasabah
 
-# Profil global milik pemilik akun. Bukan `kode`, `is_active`, maupun `status`,
-# yang merupakan data keanggotaan pada satu bank sampah. Email juga terkunci
-# karena menjadi kunci penautan ke akun Google.
-FIELD_PROFIL_GLOBAL = ("nama", "jenis_kelamin", "tanggal_lahir", "alamat", "no_hp", "email")
+# Email adalah kunci penautan keanggotaan ke akun Google, dan tidak ada
+# penjaga lain pada jalur update: pemeriksaan email yang ada hanya keunikan
+# dalam satu bank sampah dan validasi format. Tanpa penguncian ini pengurus
+# dapat memindahkan keanggotaan ke alamat lain dan memutus tautan akunnya.
+#
+# Sisa profil sengaja tidak ikut terkunci. PIL-223 sempat mengunci keenamnya,
+# lalu client memutuskan pengurus tetap perlu dapat memperbaiki data nasabah
+# di lapangan (PIL-288).
+FIELD_PROFIL_GLOBAL = ("email",)
 
 
 def punya_akun(nasabah: Nasabah) -> bool:

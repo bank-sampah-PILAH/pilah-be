@@ -501,7 +501,7 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         serializer.is_valid(raise_exception=True)
         if profil_terkunci(instance, serializer.validated_data):
             return Response(
-                {"error": "Nasabah dengan akun hanya bisa diubah pada data keanggotaan"},
+                {"error": "Email nasabah dengan akun tidak dapat diubah"},
                 status=403,
             )
         no_hp = serializer.validated_data.get("no_hp")
