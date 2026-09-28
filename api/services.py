@@ -156,7 +156,7 @@ class AuthService:
         user. The user's own identity data is authoritative: they always
         fill it in themselves via complete_profile, which then overrides
         the Nasabah record (see
-        OnboardingService._propagate_profile_to_memberships), not the other
+        OnboardingService.propagate_profile_to_memberships), not the other
         way around.
 
         Gated on role because a pengurus-entered email can coincidentally
@@ -443,7 +443,7 @@ class OnboardingService:
             ]
         )
         if user.role == User.Role.NASABAH:
-            OnboardingService._propagate_profile_to_memberships(user)
+            OnboardingService.propagate_profile_to_memberships(user)
         return user
 
     @staticmethod
@@ -454,11 +454,16 @@ class OnboardingService:
         )
 
     @staticmethod
-    def _propagate_profile_to_memberships(user: User) -> None:
+    def propagate_profile_to_memberships(user: User) -> None:
         """The user's own profile is authoritative: whatever they just
         entered overrides any pengurus-entered data on their linked
         Nasabah record(s) — the opposite direction from PIL-154's original
-        design, where the Nasabah record won."""
+        design, where the Nasabah record won.
+
+        Public because both `complete_profile` (onboarding) and the
+        nasabah `me/profil` PATCH endpoint (PIL-283, later self-edits) call
+        it: any User profile write must reach every linked Nasabah row.
+        """
         for nasabah in user.keanggotaan_nasabah.all():
             nasabah.nama = user.nama
             nasabah.jenis_kelamin = user.jenis_kelamin

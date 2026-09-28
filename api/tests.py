@@ -1461,7 +1461,7 @@ class APISpecTests(APITestCase):
         Nasabah record: even a fully-populated matching record must not
         prefill or auto-complete the user's profile on login. They still go
         through complete_profile themselves (see
-        OnboardingService._propagate_profile_to_memberships for the
+        OnboardingService.propagate_profile_to_memberships for the
         opposite, intended direction: user data overrides the Nasabah
         record, once they submit it)."""
         self.client.credentials()
