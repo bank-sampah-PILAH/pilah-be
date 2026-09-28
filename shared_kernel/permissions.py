@@ -2,8 +2,9 @@ from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.views import APIView
 
+from django.conf import settings
+
 from api.models import BankSampah, User
-from apps.identity.services import AuthService
 
 
 def _auth_user(request: Request) -> User:
@@ -102,12 +103,15 @@ class IsSuperAdmin(BasePermission):
     message = "Endpoint ini hanya untuk superadmin"
 
     def has_permission(self, request: Request, view: APIView) -> bool:
+        # Allowlist check inlined (PIL-180): the kernel cannot import
+        # apps.identity, and the check is 3 lines — not worth a second module.
         user = request.user
-        return (
-            user.is_authenticated
-            and user.role == User.Role.SUPERADMIN
-            and AuthService.is_superadmin_allowlisted(user.email)
-        )
+        if not user.is_authenticated or user.role != User.Role.SUPERADMIN:
+            return False
+        configured = getattr(settings, "PILAH_SUPERADMIN_EMAILS", ())
+        values = configured.split(",") if isinstance(configured, str) else configured
+        allowlist = frozenset(str(v).strip().lower() for v in values if str(v).strip())
+        return user.email.strip().lower() in allowlist
 
 
 class IsActiveNasabah(BasePermission):

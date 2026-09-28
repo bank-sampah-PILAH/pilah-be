@@ -39,11 +39,13 @@ class UserProfileSerializer(serializers.ModelSerializer[Model]):
             "no_hp",
             "jenis_kelamin",
             "tanggal_lahir",
+            "alamat",
             "role",
             "is_profile_complete",
             "is_primary_pengelola",
         ]
         read_only_fields = ["id", "email", "role", "is_profile_complete", "is_primary_pengelola"]
+        extra_kwargs = {"alamat": {"required": False, "allow_blank": True}}
 
     def validate_nama(self, value: Any) -> Any:
         value = value.strip()
@@ -63,6 +65,18 @@ class UserProfileSerializer(serializers.ModelSerializer[Model]):
         if value > timezone.localdate():
             raise serializers.ValidationError("Tanggal lahir tidak boleh di masa depan")
         return value
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        # alamat is only meaningful (and required) for nasabah accounts —
+        # pengelola/pengelola induk give their organization's address on a
+        # separate step and have no use for a personal one here.
+        instance = self.instance
+        if isinstance(instance, User) and instance.role == User.Role.NASABAH:
+            alamat = attrs.get("alamat", instance.alamat).strip()
+            if not alamat:
+                raise serializers.ValidationError({"alamat": "Alamat wajib diisi"})
+            attrs["alamat"] = alamat
+        return attrs
 
 
 class TeamMemberSerializer(serializers.ModelSerializer[Model]):

@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.models import Nasabah, Saldo
+from apps.membership.keanggotaan import profil_terkunci
 from apps.membership.serializers import (
     NasabahApprovalLogSerializer,
     NasabahDetailSerializer,
@@ -96,6 +97,11 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             instance, data=request.data, partial=kwargs.pop("partial", False)
         )
         serializer.is_valid(raise_exception=True)
+        if profil_terkunci(instance, serializer.validated_data):
+            return Response(
+                {"error": "Nasabah dengan akun hanya bisa diubah pada data keanggotaan"},
+                status=403,
+            )
         no_hp = serializer.validated_data.get("no_hp")
         if (
             no_hp

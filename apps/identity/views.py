@@ -23,12 +23,22 @@ from apps.identity.serializers import (
     TeamMemberSerializer,
     UserProfileSerializer,
 )
-from apps.identity.services import AuthService, OnboardingService, TeamService
+from apps.identity.services import (
+    AuthService,
+    AuthServiceError,
+    OnboardingService,
+    TeamService,
+)
 from apps.organization.serializers import (
     BankSampahRegistrationSerializer,
     BankSampahSerializer,
 )
-from shared_kernel.permissions import IsActivePengelola, IsPengelola, IsPrimaryPengelola
+from shared_kernel.permissions import (
+    IsActivePengelola,
+    IsPengelola,
+    IsPrimaryPengelola,
+    IsRegistrationRole,
+)
 from shared_kernel.scoping import current_bank, current_user
 
 
@@ -42,6 +52,8 @@ class GoogleAuthView(APIView):
             return Response({"errors": {"id_token": ["Google ID Token wajib diisi"]}}, status=422)
         try:
             return Response(AuthService.login_with_google(token))
+        except AuthServiceError as exc:
+            return Response({"error": str(exc), "code": exc.code}, status=exc.status_code)
         except Exception:
             return Response({"error": "ID Token invalid atau expired"}, status=401)
 
@@ -152,11 +164,14 @@ class RefreshTokenView(APIView):
             access = refresh.access_token
             user = User.objects.filter(id=refresh["user_id"]).first()
             if user:
+                AuthService._enforce_superadmin_allowlist(user, user.email)
                 if user.bank_sampah_id:
                     access["bank_sampah_id"] = str(user.bank_sampah_id)
                 access["role"] = user.role
                 access["email"] = user.email
             return Response({"access_token": str(access), "expires_in": 86400})
+        except AuthServiceError as exc:
+            return Response({"error": str(exc), "code": exc.code}, status=exc.status_code)
         except Exception:
             return Response({"error": "Refresh token invalid / expired"}, status=401)
 
@@ -184,7 +199,7 @@ class AuthMeView(APIView):
 
 
 class CompleteProfileView(APIView):
-    permission_classes = [IsPengelola]
+    permission_classes = [IsRegistrationRole]
     serializer_class = UserProfileSerializer
 
     def put(self, request: Request) -> Response:

@@ -11,11 +11,13 @@ from typing import Any, cast
 
 from django.core import signing
 from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.db import transaction
-from django.db.models import Q, QuerySet
+from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.http import Http404
 from django.http import HttpRequest
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from rest_framework import serializers, status
 from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
@@ -35,6 +37,15 @@ from rest_framework.views import APIView
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 
+from api.services import (
+    AuthService,
+    AuthServiceError,
+    OnboardingService,
+    PencairanService,
+    TransactionFilterService,
+)
+from apps.membership.serializers import NasabahSerializer
+
 from api.serializers import (
     BankSampahDirectorySerializer,
     GoogleRegistrationSerializer,
@@ -51,6 +62,18 @@ from api.serializers import (
 def _user(request: Request) -> User:
     assert isinstance(request.user, User)  # ponytail: DRF authentication rejects AnonymousUser
     return request.user
+
+
+
+def _auth_service_error_response(error: AuthServiceError) -> Response:
+    return Response({"error": str(error), "code": error.code}, status=error.status_code)
+
+
+
+def _bank_sampah(request: Request) -> BankSampah:
+    bank = _user(request).bank_sampah
+    assert bank is not None  # ponytail: IsActivePengelola guarantees bank membership
+    return bank
 
 class GoogleRegistrationView(APIView):
     permission_classes = [AllowAny]

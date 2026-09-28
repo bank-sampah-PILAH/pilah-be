@@ -3,8 +3,10 @@
 ponytail: PR48 ports these into apps.* contexts as they stabilize.
 """
 from datetime import date, datetime, time
+
+from django.utils import timezone
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from django.db.models import Model
 from rest_framework import serializers
@@ -22,6 +24,13 @@ from api.models import (
     User,
 )
 from api.kalkulasi import format_ribuan
+from apps.ledger.services import PencairanService
+
+
+def _validate_tanggal_pencairan(value: datetime) -> datetime:
+    if value > timezone.now():
+        raise serializers.ValidationError("Tanggal pencairan tidak boleh di masa depan")
+    return value
 
 
 def _validate_nominal_pencairan(value: Decimal) -> Decimal:

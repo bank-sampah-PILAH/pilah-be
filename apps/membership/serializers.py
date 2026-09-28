@@ -6,6 +6,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from api.models import DetailTransaksi, Nasabah, NasabahApprovalLog, Saldo
+from apps.membership.keanggotaan import punya_akun
 from shared_kernel.validators import normalize_indonesian_phone
 
 
@@ -21,6 +22,7 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
     kode = serializers.CharField(source="nomor", required=True, max_length=20)
     email = serializers.EmailField(required=False, allow_blank=True, allow_null=True)
     total_saldo = serializers.SerializerMethodField()
+    punya_akun = serializers.SerializerMethodField()
 
     class Meta:
         model = Nasabah
@@ -37,6 +39,7 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
             "is_active",
             "status",
             "total_saldo",
+            "punya_akun",
             "created_at",
         ]
         read_only_fields = [
@@ -45,6 +48,7 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
             "is_active",
             "status",
             "total_saldo",
+            "punya_akun",
             "created_at",
         ]
 
@@ -84,6 +88,15 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
         if len(value) < 10:
             raise serializers.ValidationError("Alamat wajib diisi")
         return value
+
+    def get_punya_akun(self, obj: Any) -> bool:
+        """Menyatakan profil global keanggotaan ini dikelola pemiliknya sendiri.
+
+        Hanya penanda tampilan, supaya layar pengurus dapat menampilkan profil
+        sebagai read-only. Wewenangnya tetap ditegakkan di server oleh
+        ``api.keanggotaan.profil_terkunci`` (PIL-223), bukan oleh klien.
+        """
+        return punya_akun(obj)
 
     def get_total_saldo(self, obj: Any) -> Any:
         return getattr(getattr(obj, "saldo", None), "total_saldo", Decimal("0.00"))

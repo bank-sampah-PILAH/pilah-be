@@ -12,7 +12,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.worksheet import Worksheet
 
-from api.models import DetailTransaksi, Transaksi
+from api.kalkulasi import bulatkan_rupiah
+from api.models import DetailTransaksi, Pencairan, Transaksi
 
 
 def export_excel(
@@ -127,10 +128,31 @@ def _saldo_after_by_transaction(queryset: QuerySet[Transaksi]) -> dict[UUID, Dec
         .only("id", "nasabah_id", "total_nilai", "tanggal")
         .order_by("nasabah_id", "tanggal", "id")
     )
-    for trans in transactions:
-        running_balances[trans.nasabah_id] += trans.total_nilai
-        if trans.id in target_ids:
-            saldo_after[trans.id] = running_balances[trans.nasabah_id]
+    pencairan = (
+        Pencairan.objects.filter(
+            bank_sampah=bank_sampah,
+            nasabah_id__in=nasabah_ids,
+            tanggal__lte=latest_transaction.tanggal,
+        )
+        .only("id", "nasabah_id", "saldo_sebelum", "saldo_sesudah", "tanggal")
+        .order_by("nasabah_id", "tanggal", "id")
+    )
+    # Merge both ledgers so a setoran recorded after a pencairan reports the
+    # balance that actually remains.
+    events: list[tuple[UUID, datetime, UUID, Decimal, bool]] = [
+        (trans.nasabah_id, trans.tanggal, trans.id, trans.total_nilai, True)
+        for trans in transactions
+    ]
+    events.extend(
+        (cair.nasabah_id, cair.tanggal, cair.id, cair.saldo_sesudah - cair.saldo_sebelum, False)
+        for cair in pencairan
+    )
+    events.sort(key=lambda event: (str(event[0]), event[1], not event[4], str(event[2])))
+    for nasabah_id, _tanggal, event_id, delta, is_transaksi in events:
+        running_balances[nasabah_id] += delta
+        if is_transaksi and event_id in target_ids:
+            # History matches the stored saldo, which is rounded down to full Rupiah.
+            saldo_after[event_id] = bulatkan_rupiah(running_balances[nasabah_id])
 
     return saldo_after
 
