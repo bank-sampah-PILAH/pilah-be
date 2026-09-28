@@ -22,8 +22,8 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.keanggotaan import (
+    email_terkunci,
     no_hp_bentrok_di_keanggotaan_lain,
-    profil_terkunci,
     sinkronkan_profil_ke_akun,
 )
 from api.models import (
@@ -503,7 +503,7 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             instance, data=request.data, partial=kwargs.pop("partial", False)
         )
         serializer.is_valid(raise_exception=True)
-        if profil_terkunci(instance, serializer.validated_data):
+        if email_terkunci(instance, serializer.validated_data):
             return Response(
                 {"error": "Email nasabah dengan akun tidak dapat diubah"},
                 status=403,
