@@ -714,7 +714,7 @@ class DetailTransaksiSerializer(serializers.ModelSerializer[Model]):
         ]
 
 
-class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
+class TransactionDetailSerializer(serializers.ModelSerializer[Transaksi]):
     nasabah_id = serializers.UUIDField(source="nasabah.id")
     nasabah_nama = serializers.CharField(source="nasabah.nama")
     bank_sampah_id = serializers.UUIDField(source="bank_sampah.id")
