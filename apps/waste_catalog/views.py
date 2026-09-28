@@ -7,8 +7,8 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from api.models import JenisSampah
-from apps.catalog.serializers import JenisSampahSerializer
-from apps.membership.serializers import StatusSerializer
+from apps.nasabah.serializers import StatusSerializer
+from apps.waste_catalog.serializers import JenisSampahSerializer
 from shared_kernel.permissions import IsActivePengelola
 from shared_kernel.scoping import current_bank
 

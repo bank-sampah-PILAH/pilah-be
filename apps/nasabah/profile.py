@@ -5,9 +5,9 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from api.models import User
-from api.views import _user
-from apps.identity.services import OnboardingService
+from apps.nasabah.api import propagate_profile_to_memberships
 from shared_kernel.permissions import IsActiveNasabah
+from shared_kernel.scoping import current_user
 from shared_kernel.validators import normalize_indonesian_phone
 
 
@@ -40,10 +40,10 @@ class NasabahProfileView(GenericAPIView[User]):
         return Response(self.get_serializer(request.user).data)
 
     def patch(self, request: Request) -> Response:
-        user = _user(request)
+        user = current_user(request)
         serializer = self.get_serializer(user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         with transaction.atomic():
             serializer.save()
-            OnboardingService.propagate_profile_to_memberships(user)
+            propagate_profile_to_memberships(user)
         return Response(serializer.data)

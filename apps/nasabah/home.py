@@ -11,7 +11,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from api.models import BankSampah, Nasabah, Transaksi, User
-from api.serializers import TransactionDetailSerializer
+from apps.ledger.serializers import TransactionDetailSerializer
 from shared_kernel.pagination import StandardPagination
 from shared_kernel.permissions import IsActiveNasabah
 
@@ -192,7 +192,7 @@ class NasabahHistoryView(ListAPIView[Transaksi]):
 
 class NasabahTransactionDetailView(GenericAPIView[Transaksi]):
     permission_classes = [IsActiveNasabah]
-    serializer_class = NasabahTransactionDetailSerializer
+    serializer_class = NasabahTransactionDetailSerializer  # type: ignore[assignment]  # DRF stubs type serializer_class too narrowly
 
     def get(self, request: Request, pk: UUID) -> Response:
         member = MembershipService.get_active_membership(request)

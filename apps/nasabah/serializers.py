@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from api.models import DetailTransaksi, Nasabah, NasabahApprovalLog, Saldo
-from apps.membership.keanggotaan import punya_akun
+from apps.nasabah.keanggotaan import punya_akun
 from shared_kernel.validators import normalize_indonesian_phone
 
 

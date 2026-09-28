@@ -24,9 +24,9 @@ from api.models import (
     Transaksi,
     User,
 )
+from apps.bank_sampah.serializers import BankSampahApprovalListSerializer  # noqa: F401
 from apps.ledger.services import BalanceService, PencairanService
-from apps.membership.serializers import NasabahSerializer
-from apps.organization.serializers import BankSampahApprovalListSerializer  # noqa: F401
+from apps.nasabah.serializers import NasabahSerializer
 from shared_kernel.kalkulasi import bulatkan_rupiah, format_ribuan
 from shared_kernel.validators import get_initials
 

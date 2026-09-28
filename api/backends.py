@@ -2,7 +2,7 @@ from django.contrib.auth.backends import ModelBackend
 from django.contrib.auth.models import AnonymousUser
 
 from api.models import User
-from apps.identity.services import AuthService
+from apps.authentication.services import AuthService
 
 
 class AllowlistedSuperadminBackend(ModelBackend):

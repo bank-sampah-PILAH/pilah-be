@@ -36,7 +36,7 @@ from api.services import (
     PencairanService,
     TransactionFilterService,
 )
-from apps.membership.serializers import NasabahSerializer
+from apps.nasabah.serializers import NasabahSerializer
 from shared_kernel.permissions import (
     IsActivePengelola,
     IsActivePengelolaOrNasabah,

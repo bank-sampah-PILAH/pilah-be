@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.models import Transaksi
-from apps.identity.serializers import AuthUserSerializer
+from apps.authentication.serializers import AuthUserSerializer
 from apps.ledger.serializers import TransactionListSerializer
 from apps.reporting.services import DashboardService
 from shared_kernel.permissions import IsActivePengelola

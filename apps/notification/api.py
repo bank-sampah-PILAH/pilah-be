@@ -8,7 +8,7 @@ queue, only this function changes.
 from typing import Any
 
 from api.models import Transaksi
-from apps.notify.services import (  # noqa: F401  # re-exported: notify owns the template default
+from apps.notification.services import (  # noqa: F401  # re-exported: notify owns the template default
     DEFAULT_WA_TEMPLATE,
     WhatsAppService,
 )

@@ -2,8 +2,8 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.notify.serializers import WATemplateSerializer
-from apps.notify.services import WhatsAppService
+from apps.notification.serializers import WATemplateSerializer
+from apps.notification.services import WhatsAppService
 from shared_kernel.permissions import IsActivePengelola
 from shared_kernel.scoping import current_bank
 

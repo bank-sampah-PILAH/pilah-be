@@ -14,7 +14,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.models import User
-from apps.identity.serializers import (
+from apps.authentication.serializers import (
     AuthUserSerializer,
     GoogleAuthSerializer,
     InviteAcceptSerializer,
@@ -23,13 +23,13 @@ from apps.identity.serializers import (
     TeamMemberSerializer,
     UserProfileSerializer,
 )
-from apps.identity.services import (
+from apps.authentication.services import (
     AuthService,
     AuthServiceError,
     OnboardingService,
     TeamService,
 )
-from apps.organization.serializers import (
+from apps.bank_sampah.serializers import (
     BankSampahRegistrationSerializer,
     BankSampahSerializer,
 )

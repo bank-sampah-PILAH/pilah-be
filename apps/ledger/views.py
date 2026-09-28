@@ -12,7 +12,7 @@ from apps.ledger.serializers import (
     TransactionListSerializer,
 )
 from apps.ledger.services import TransactionFilterService, TransactionService
-from apps.notify.api import send_setoran_receipt
+from apps.notification.api import send_setoran_receipt
 from shared_kernel.permissions import IsActivePengelola
 from shared_kernel.scoping import current_bank, current_user
 

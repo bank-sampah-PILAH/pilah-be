@@ -12,13 +12,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.models import BankSampah
-from apps.organization.serializers import (
+from apps.bank_sampah.serializers import (
     ApprovalDecisionSerializer,
     ApprovalLogSerializer,
     BankSampahApprovalListSerializer,
     BankSampahSerializer,
 )
-from apps.organization.services import ApprovalService
+from apps.bank_sampah.services import ApprovalService
 from shared_kernel.permissions import IsActivePengelola, IsSuperAdmin
 from shared_kernel.scoping import current_bank, current_user
 

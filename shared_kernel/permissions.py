@@ -103,7 +103,7 @@ class IsSuperAdmin(BasePermission):
 
     def has_permission(self, request: Request, view: APIView) -> bool:
         # Allowlist check inlined (PIL-180): the kernel cannot import
-        # apps.identity, and the check is 3 lines — not worth a second module.
+        # apps.authentication, and the check is 3 lines — not worth a second module.
         user = request.user
         if not user.is_authenticated or user.role != User.Role.SUPERADMIN:
             return False

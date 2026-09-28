@@ -13,7 +13,8 @@ from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.models import BankSampah, Nasabah, NasabahApprovalLog, Saldo, User
-from apps.notify.api import DEFAULT_WA_TEMPLATE
+from apps.nasabah.api import propagate_profile_to_memberships
+from apps.notification.api import DEFAULT_WA_TEMPLATE
 
 REGISTRATION_TOKEN_MAX_AGE = 600
 REGISTRATION_TOKEN_SALT = "pilah-google-registration"
@@ -384,7 +385,7 @@ class OnboardingService:
             ]
         )
         if user.role == User.Role.NASABAH:
-            OnboardingService.propagate_profile_to_memberships(user)
+            propagate_profile_to_memberships(user)
         return user
 
     @staticmethod

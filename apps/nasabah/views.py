@@ -8,20 +8,20 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.models import Nasabah, Saldo
-from apps.membership.keanggotaan import (
+from apps.bank_sampah.serializers import ApprovalDecisionSerializer
+from apps.nasabah.keanggotaan import (
     email_terkunci,
     no_hp_bentrok_di_keanggotaan_lain,
     sinkronkan_profil_ke_akun,
 )
-from apps.membership.serializers import (
+from apps.nasabah.serializers import (
     NasabahApprovalLogSerializer,
     NasabahDetailSerializer,
     NasabahSerializer,
     SaldoSerializer,
     StatusSerializer,
 )
-from apps.membership.services import NasabahApprovalService
-from apps.organization.serializers import ApprovalDecisionSerializer
+from apps.nasabah.services import NasabahApprovalService
 from shared_kernel.permissions import IsActivePengelola
 from shared_kernel.scoping import current_bank, current_user
 
