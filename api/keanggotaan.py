@@ -24,6 +24,11 @@ from api.models import Nasabah
 FIELD_PROFIL_GLOBAL = ("email",)
 
 
+# Profil yang dimiliki akun dan berlaku lintas bank sampah (PRD F21). Email
+# tidak ikut: ia kunci penautan, bukan data profil yang boleh disunting.
+FIELD_PROFIL_AKUN = ("nama", "jenis_kelamin", "tanggal_lahir", "alamat", "no_hp")
+
+
 def punya_akun(nasabah: Nasabah) -> bool:
     """``True`` bila keanggotaan ini sudah tertaut ke akun pengguna."""
     return nasabah.user_id is not None
@@ -46,3 +51,30 @@ def profil_terkunci(nasabah: Nasabah, data: Mapping[str, Any]) -> bool:
     return any(
         field in data and data[field] != getattr(nasabah, field) for field in FIELD_PROFIL_GLOBAL
     )
+
+
+def sinkronkan_profil_ke_akun(nasabah: Nasabah) -> None:
+    """Tulis profil keanggotaan ini ke akun pemiliknya.
+
+    Profil dimiliki akun dan berlaku lintas bank sampah, sedangkan baris
+    keanggotaan hanya menyimpan salinannya. Karena itu setiap penyimpanan
+    profil oleh nasabah menimpa seluruh keanggotaan tertaut lewat
+    ``OnboardingService.propagate_profile_to_memberships``. Tanpa penulisan
+    balik ini, perbaikan pengurus akan hilang pada penyimpanan berikutnya.
+
+    Sengaja hanya menyentuh lima field profil: email adalah kunci penautan dan
+    tetap terkunci, sedangkan role serta flag akun bukan urusan pengurus.
+    """
+    user = nasabah.user
+    if user is None:
+        return
+    berubah = [
+        field
+        for field in FIELD_PROFIL_AKUN
+        if getattr(user, field) != getattr(nasabah, field)
+    ]
+    if not berubah:
+        return
+    for field in berubah:
+        setattr(user, field, getattr(nasabah, field))
+    user.save(update_fields=[*berubah, "updated_at"])

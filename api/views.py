@@ -21,7 +21,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.keanggotaan import profil_terkunci
+from api.keanggotaan import profil_terkunci, sinkronkan_profil_ke_akun
 from api.models import (
     BankSampah,
     JadwalKegiatan,
@@ -524,6 +524,11 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
                 status=422,
             )
         self.perform_update(serializer)
+        # Profil dimiliki akun dan berlaku lintas bank sampah, jadi perbaikan
+        # pengurus harus sampai ke akunnya. Kalau hanya baris keanggotaan yang
+        # ditulis, penyimpanan profil berikutnya oleh nasabah akan
+        # mengembalikan nilai lama (PIL-288).
+        sinkronkan_profil_ke_akun(instance)
         return Response(serializer.data)
 
     @action(detail=True, methods=["patch"], url_path="status")
