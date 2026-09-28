@@ -67,6 +67,28 @@ class NasabahProfileTests(APITestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.alamat, "Jl. Merdeka 10")
 
+    def test_patch_cannot_change_identity_fields(self) -> None:
+        original_id = str(self.user.id)
+        response = self.client.patch(
+            self.url,
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "email": "hijacked@example.test",
+                "role": User.Role.SUPERADMIN,
+                "nama": "Siti Updated",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id"], original_id)
+        self.assertEqual(response.data["email"], "siti@example.test")
+        self.assertEqual(response.data["role"], "nasabah")
+        self.user.refresh_from_db()
+        self.assertEqual(str(self.user.id), original_id)
+        self.assertEqual(self.user.email, "siti@example.test")
+        self.assertEqual(self.user.role, User.Role.NASABAH)
+        self.assertEqual(self.user.nama, "Siti Updated")
+
     def test_jwt_authentication(self) -> None:
         from rest_framework_simplejwt.tokens import AccessToken
 
