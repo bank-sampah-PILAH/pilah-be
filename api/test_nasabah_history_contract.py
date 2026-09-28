@@ -1,5 +1,7 @@
 from datetime import timedelta
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -106,7 +108,35 @@ class NasabahHistoryContractTests(APITestCase):
             subtotal="5000.00",
         )
 
-        response = self.client.get(f"{self.url}/{transaction.id}")
+        with CaptureQueriesContext(connection) as one_item_queries:
+            single_item_response = self.client.get(f"{self.url}/{transaction.id}")
+        self.assertEqual(single_item_response.status_code, 200)
+
+        transaction.total_nilai = "7500.00"
+        transaction.save(update_fields=["total_nilai"])
+        second_kind = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="PLS-002",
+            nama_sampah="Karton",
+            harga_per_kg="2500.00",
+        )
+        second_item = DetailTransaksi.objects.create(
+            transaksi=transaction,
+            jenis_sampah=second_kind,
+            nama_sampah_snapshot="Karton",
+            kategori_snapshot="kertas",
+            harga_snapshot="2500.00",
+            berat="1.000",
+            subtotal="2500.00",
+        )
+        with CaptureQueriesContext(connection) as multiple_item_queries:
+            response = self.client.get(f"{self.url}/{transaction.id}")
+
+        self.assertEqual(
+            len(one_item_queries),
+            len(multiple_item_queries),
+            "detail query count must not grow with the number of items",
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
@@ -122,7 +152,7 @@ class NasabahHistoryContractTests(APITestCase):
             },
         )
         self.assertEqual(response.data["tipe"], "setoran")
-        self.assertEqual(response.data["total_nilai"], "5000.00")
+        self.assertEqual(response.data["total_nilai"], "7500.00")
         self.assertEqual(response.data["catatan"], "Setoran rutin")
         self.assertEqual(
             response.data["items"],
@@ -134,7 +164,15 @@ class NasabahHistoryContractTests(APITestCase):
                     "harga_snapshot": "5000.00",
                     "berat": "1.000",
                     "subtotal": "5000.00",
-                }
+                },
+                {
+                    "id": str(second_item.id),
+                    "jenis_sampah_id": str(second_kind.id),
+                    "nama_sampah_snapshot": "Karton",
+                    "harga_snapshot": "2500.00",
+                    "berat": "1.000",
+                    "subtotal": "2500.00",
+                },
             ],
         )
         self.assertNotIn("status_wa", response.data)

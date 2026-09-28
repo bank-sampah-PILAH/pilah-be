@@ -700,7 +700,7 @@ class TransactionCreateSerializer(serializers.Serializer[Any]):
 
 
 class DetailTransaksiSerializer(serializers.ModelSerializer[Model]):
-    jenis_sampah_id = serializers.UUIDField(source="jenis_sampah.id")
+    jenis_sampah_id = serializers.UUIDField()
 
     class Meta:
         model = DetailTransaksi
