@@ -10,8 +10,17 @@ from api.permissions import IsActiveNasabah
 class NasabahProfileSerializer(serializers.ModelSerializer[User]):
     class Meta:
         model = User
-        fields = ["id", "nama", "email", "role"]
-        read_only_fields = fields
+        fields = [
+            "id",
+            "nama",
+            "email",
+            "no_hp",
+            "jenis_kelamin",
+            "tanggal_lahir",
+            "alamat",
+            "role",
+        ]
+        read_only_fields = ["id", "email", "role"]
 
 
 class NasabahProfileView(GenericAPIView[User]):

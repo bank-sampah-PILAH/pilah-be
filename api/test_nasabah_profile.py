@@ -20,6 +20,10 @@ class NasabahProfileTests(APITestCase):
                 "id": str(self.user.id),
                 "nama": "Siti Aminah",
                 "email": "siti@example.test",
+                "no_hp": "",
+                "jenis_kelamin": "",
+                "tanggal_lahir": None,
+                "alamat": "",
                 "role": "nasabah",
             },
         )
