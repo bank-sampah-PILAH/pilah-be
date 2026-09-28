@@ -68,7 +68,13 @@ class RegressionTestCase(APITestCase):
     @classmethod
     def setUpClass(cls) -> None:
         super().setUpClass()
-        cls._fake_tokens = override_settings(DEBUG=True, PILAH_ALLOW_FAKE_GOOGLE_TOKEN=True)
+        # CI sets no PILAH_SUPERADMIN_EMAILS; superadmin-authed regression
+        # tests need one allowlisted email to get past the login gate.
+        cls._fake_tokens = override_settings(
+            DEBUG=True,
+            PILAH_ALLOW_FAKE_GOOGLE_TOKEN=True,
+            PILAH_SUPERADMIN_EMAILS=("admin@example.com",),
+        )
         cls._fake_tokens.enable()
 
     @classmethod
