@@ -24,10 +24,16 @@ class NasabahProfileSerializer(serializers.ModelSerializer[User]):
 
 
 class NasabahProfileView(GenericAPIView[User]):
-    """Read the authenticated identity without loading management settings."""
+    """Read and edit the authenticated nasabah's own profile fields."""
 
     permission_classes = [IsActiveNasabah]
     serializer_class = NasabahProfileSerializer
 
     def get(self, request: Request) -> Response:
         return Response(self.get_serializer(request.user).data)
+
+    def patch(self, request: Request) -> Response:
+        serializer = self.get_serializer(request.user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)

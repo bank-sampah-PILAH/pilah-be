@@ -54,11 +54,18 @@ class NasabahProfileTests(APITestCase):
             self.assertEqual(response.status_code, 403)
             self.assertEqual(response.data, {"error": "Endpoint ini hanya untuk nasabah"})
 
-    def test_profile_is_read_only(self) -> None:
-        for method in (self.client.post, self.client.put, self.client.patch, self.client.delete):
+    def test_post_put_delete_are_not_allowed(self) -> None:
+        for method in (self.client.post, self.client.put, self.client.delete):
             self.assertEqual(method(self.url, {"nama": "Changed"}).status_code, 405)
         self.user.refresh_from_db()
         self.assertEqual(self.user.nama, "Siti Aminah")
+
+    def test_patch_updates_editable_field(self) -> None:
+        response = self.client.patch(self.url, {"alamat": "Jl. Merdeka 10"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["alamat"], "Jl. Merdeka 10")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.alamat, "Jl. Merdeka 10")
 
     def test_jwt_authentication(self) -> None:
         from rest_framework_simplejwt.tokens import AccessToken
