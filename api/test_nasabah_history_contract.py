@@ -3,7 +3,7 @@ from datetime import timedelta
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from api.models import BankSampah, Nasabah, Transaksi, User
+from api.models import BankSampah, DetailTransaksi, JenisSampah, Nasabah, Transaksi, User
 
 
 class NasabahHistoryContractTests(APITestCase):
@@ -82,6 +82,97 @@ class NasabahHistoryContractTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["results"], [])
 
-    def test_anonymous_cannot_read_history(self) -> None:
+    def test_customer_can_read_own_transaction_detail(self) -> None:
+        transaction = Transaksi.objects.create(
+            nasabah=self.member,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.manager,
+            total_nilai="5000.00",
+            catatan="Setoran rutin",
+        )
+        kind = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="PLS-001",
+            nama_sampah="Plastik PET",
+            harga_per_kg="5000.00",
+        )
+        item = DetailTransaksi.objects.create(
+            transaksi=transaction,
+            jenis_sampah=kind,
+            nama_sampah_snapshot="Plastik PET",
+            kategori_snapshot="plastik",
+            harga_snapshot="5000.00",
+            berat="1.000",
+            subtotal="5000.00",
+        )
+
+        response = self.client.get(f"{self.url}/{transaction.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            set(response.data),
+            {
+                "id",
+                "tanggal",
+                "tipe",
+                "total_nilai",
+                "catatan",
+                "items",
+                "saldo_setelah_transaksi",
+            },
+        )
+        self.assertEqual(response.data["tipe"], "setoran")
+        self.assertEqual(response.data["total_nilai"], "5000.00")
+        self.assertEqual(response.data["catatan"], "Setoran rutin")
+        self.assertEqual(
+            response.data["items"],
+            [
+                {
+                    "id": str(item.id),
+                    "jenis_sampah_id": str(kind.id),
+                    "nama_sampah_snapshot": "Plastik PET",
+                    "harga_snapshot": "5000.00",
+                    "berat": "1.000",
+                    "subtotal": "5000.00",
+                }
+            ],
+        )
+        self.assertNotIn("status_wa", response.data)
+        self.assertNotIn("dicatat_oleh", response.data)
+
+    def test_customer_cannot_read_another_members_transaction_detail(self) -> None:
+        other = Nasabah.objects.create(
+            email="fixture-2@example.test",
+            bank_sampah=self.bank,
+            nomor="002",
+            nama="Other",
+            alamat="Depok",
+            no_hp="08999999",
+        )
+        transaction = Transaksi.objects.create(
+            nasabah=other,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.manager,
+            total_nilai=999,
+        )
+
+        response = self.client.get(f"{self.url}/{transaction.id}")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_pengurus_cannot_use_nasabah_transaction_detail(self) -> None:
+        self.client.force_authenticate(self.manager)
+
+        response = self.client.get(
+            f"{self.url}/00000000-0000-0000-0000-000000000001"
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_anonymous_cannot_read_history_or_transaction_detail(self) -> None:
         self.client.force_authenticate(None)
         self.assertEqual(self.client.get(self.url).status_code, 401)
+        self.assertEqual(
+            self.client.get(f"{self.url}/00000000-0000-0000-0000-000000000001").status_code,
+            401,
+        )

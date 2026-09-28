@@ -3,6 +3,7 @@ from typing import Any, cast
 from uuid import UUID
 
 from django.db.models import QuerySet
+from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.generics import GenericAPIView, ListAPIView
@@ -12,6 +13,7 @@ from rest_framework.response import Response
 from api.models import BankSampah, Nasabah, Transaksi, User
 from api.pagination import StandardPagination
 from api.permissions import IsActiveNasabah
+from api.serializers import TransactionDetailSerializer
 
 
 class BankUnitSerializer(serializers.ModelSerializer[BankSampah]):
@@ -34,6 +36,19 @@ class ActivitySerializer(serializers.ModelSerializer[Transaksi]):
     class Meta:
         model = Transaksi
         fields = ["id", "tanggal", "tipe", "total_nilai"]
+
+
+class NasabahTransactionDetailSerializer(TransactionDetailSerializer):
+    class Meta(TransactionDetailSerializer.Meta):
+        fields = [
+            "id",
+            "tanggal",
+            "tipe",
+            "total_nilai",
+            "catatan",
+            "items",
+            "saldo_setelah_transaksi",
+        ]
 
 
 class MembershipSerializer(serializers.ModelSerializer[Nasabah]):
@@ -173,3 +188,18 @@ class NasabahHistoryView(ListAPIView[Transaksi]):
 
     def get_queryset(self) -> QuerySet[Transaksi]:
         return activities(MembershipService.get_active_membership(self.request))
+
+
+class NasabahTransactionDetailView(GenericAPIView[Transaksi]):
+    permission_classes = [IsActiveNasabah]
+    serializer_class = NasabahTransactionDetailSerializer
+
+    def get(self, request: Request, pk: UUID) -> Response:
+        member = MembershipService.get_active_membership(request)
+        transaction = get_object_or_404(
+            activities(member)
+            .select_related("nasabah", "bank_sampah")
+            .prefetch_related("items"),
+            pk=pk,
+        )
+        return Response(self.get_serializer(transaction).data)
