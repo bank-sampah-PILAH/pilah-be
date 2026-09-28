@@ -3,7 +3,6 @@ from argparse import ArgumentParser
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import cast
 from uuid import UUID
 
 from django.conf import settings
@@ -430,7 +429,7 @@ class Command(BaseCommand):
                     - timedelta(days=365)
                     + timedelta(days=358 * row_index // (HISTORY_ROWS_PER_CUSTOMER - 1))
                 )
-                total = cast(Decimal, jenis.harga_per_kg) * weight
+                total = jenis.harga_per_kg * weight
                 self._upsert_transaction(
                     transaction_id=UUID(
                         int=HISTORY_TRANSACTION_ID_BASE.int + customer_offset + row_index
@@ -449,16 +448,16 @@ class Command(BaseCommand):
                 nominal = (total / 2).quantize(Decimal(1))
                 saldo_sebelum = running_balance + total
                 saldo_sesudah = saldo_sebelum - nominal
+                metode = Pencairan.Metode.TUNAI if row_index % 2 == 0 else Pencairan.Metode.TRANSFER
+                keterangan = f"Pencairan historis {row_index + 1:03d}"
                 defaults = {
                     "nasabah": customer,
                     "bank_sampah": bank,
                     "dicatat_oleh": pengurus,
                     "tanggal": transaction_time,
                     "nominal": nominal,
-                    "metode": (
-                        Pencairan.Metode.TUNAI if row_index % 2 == 0 else Pencairan.Metode.TRANSFER
-                    ),
-                    "keterangan": f"Pencairan historis {row_index + 1:03d}",
+                    "metode": metode,
+                    "keterangan": keterangan,
                     "saldo_sebelum": saldo_sebelum,
                     "saldo_sesudah": saldo_sesudah,
                 }
@@ -472,8 +471,8 @@ class Command(BaseCommand):
                     pencairan.bank_sampah = bank
                     pencairan.dicatat_oleh = pengurus
                     pencairan.nominal = nominal
-                    pencairan.metode = defaults["metode"]
-                    pencairan.keterangan = defaults["keterangan"]
+                    pencairan.metode = metode
+                    pencairan.keterangan = keterangan
                     pencairan.saldo_sebelum = saldo_sebelum
                     pencairan.saldo_sesudah = saldo_sesudah
                     pencairan.save()
