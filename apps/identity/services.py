@@ -30,18 +30,12 @@ class AuthService:
     @staticmethod
     def register_with_google(registration_token: str, role: str) -> tuple[dict[str, Any], bool]:
         try:
-            # Read the max-age through the compat shim so tests patching
-            # api.services.REGISTRATION_TOKEN_MAX_AGE take effect.
-            from api.services import REGISTRATION_TOKEN_MAX_AGE as max_age
-        except ImportError:
-            max_age = REGISTRATION_TOKEN_MAX_AGE
-        try:
             profile = cast(
                 Mapping[str, Any],
                 signing.loads(
                     registration_token,
                     salt=REGISTRATION_TOKEN_SALT,
-                    max_age=max_age,
+                    max_age=REGISTRATION_TOKEN_MAX_AGE,
                 ),
             )
         except signing.SignatureExpired as exc:

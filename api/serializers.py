@@ -11,7 +11,7 @@ from django.db.models import Model
 from django.utils import timezone
 from rest_framework import serializers
 
-from api.kalkulasi import bulatkan_rupiah, format_ribuan
+from shared_kernel.kalkulasi import bulatkan_rupiah, format_ribuan
 from api.models import (
     BankSampah,
     DetailTransaksi,

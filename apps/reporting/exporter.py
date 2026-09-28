@@ -12,7 +12,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.worksheet import Worksheet
 
-from api.kalkulasi import bulatkan_rupiah
+from shared_kernel.kalkulasi import bulatkan_rupiah
 from api.models import DetailTransaksi, Pencairan, Transaksi
 
 

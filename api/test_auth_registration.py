@@ -97,7 +97,7 @@ class GoogleRegistrationTests(APITestCase):
         )
         self.assertEqual(tampered.status_code, 400, tampered.data)
 
-        with patch("api.services.REGISTRATION_TOKEN_MAX_AGE", -1):
+        with patch("apps.identity.services.REGISTRATION_TOKEN_MAX_AGE", -1):
             expired = self.client.post(
                 "/api/v1/auth/google/register",
                 {

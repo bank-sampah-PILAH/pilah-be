@@ -12,8 +12,10 @@ aplikasi, pesan WhatsApp, dan laporan selalu sama.
 
 from collections.abc import Iterable
 from decimal import ROUND_DOWN, Decimal
+from typing import TYPE_CHECKING
 
-from api.models import JenisSampah
+if TYPE_CHECKING:
+    from api.models import JenisSampah
 
 RUPIAH = Decimal(1)
 
@@ -26,7 +28,7 @@ def bulatkan_rupiah(nilai: Decimal) -> Decimal:
     return nilai.quantize(RUPIAH, rounding=ROUND_DOWN)
 
 
-def harga_berlaku(jenis: JenisSampah) -> Decimal:
+def harga_berlaku(jenis: "JenisSampah") -> Decimal:
     """Harga per kg yang berlaku untuk ``jenis`` saat ini.
 
     Satu-satunya sumber harga untuk transaksi adalah harga master milik bank
