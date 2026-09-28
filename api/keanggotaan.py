@@ -53,6 +53,29 @@ def profil_terkunci(nasabah: Nasabah, data: Mapping[str, Any]) -> bool:
     )
 
 
+def no_hp_bentrok_di_keanggotaan_lain(nasabah: Nasabah, no_hp: str) -> bool:
+    """``True`` bila ``no_hp`` sudah dipakai nasabah lain pada bank sampah
+    tempat akun ini juga terdaftar.
+
+    Nomor HP unik per bank sampah. Karena profil ikut tersalin ke seluruh
+    keanggotaan tertaut, nomor yang bentrok di bank sampah lain baru meledak
+    saat nasabah menyimpan profilnya sendiri, dan pesannya ditujukan kepada
+    nasabah. Diperiksa lebih awal supaya pengurus yang mengetiknya yang
+    diberi tahu.
+    """
+    user = nasabah.user
+    if user is None or not no_hp:
+        return False
+    bank_lain = user.keanggotaan_nasabah.exclude(id=nasabah.id).values_list(
+        "bank_sampah_id", flat=True
+    )
+    return (
+        Nasabah.objects.filter(bank_sampah_id__in=list(bank_lain), no_hp=no_hp)
+        .exclude(user_id=user.id)
+        .exists()
+    )
+
+
 def sinkronkan_profil_ke_akun(nasabah: Nasabah) -> None:
     """Tulis profil keanggotaan ini ke akun pemiliknya.
 
