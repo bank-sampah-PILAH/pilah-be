@@ -23,17 +23,29 @@
 - Profil nasabah (`nama`, `jenis_kelamin`, `tanggal_lahir`, `alamat`, `no_hp`,
   `email`) milik pemilik akun dan berlaku lintas bank sampah. Nomor anggota
   (`kode`), `is_active`, dan `status` adalah data keanggotaan pada satu bank
-  sampah.
-- Begitu `Nasabah.user` terisi, pengurus hanya boleh mengubah data keanggotaan.
-  Perubahan profil ditolak dengan 403 (PIL-223, OWASP A01).
+  sampah. Daftar field yang terkunci ada di `FIELD_TERKUNCI`, dan yang ikut
+  ditulis ke akun ada di `FIELD_PROFIL_AKUN`; jangan menuliskannya ulang di
+  view.
+- Pengurus boleh memperbaiki profil nasabah berakun, karena ialah yang bertemu
+  nasabah di lapangan. Hanya `email` yang terkunci begitu `Nasabah.user`
+  terisi, dan perubahannya ditolak dengan 403 (PIL-288 merevisi PIL-223,
+  OWASP A01). Email adalah kunci penautan akun dan tidak dijaga oleh apa pun
+  selain aturan ini.
+- Perbaikan profil oleh pengurus ikut ditulis ke akun pemiliknya lewat
+  `sinkronkan_profil_ke_akun`. Tanpa itu perbaikannya tertimpa ketika nasabah
+  menyimpan profilnya sendiri, karena `propagate_profile_to_memberships`
+  memperlakukan profil akun sebagai sumber kebenaran.
+- Karena profil dimiliki akun, perbaikan di satu bank sampah ikut berlaku pada
+  keanggotaan nasabah itu di bank sampah lain. Nomor HP unik per bank sampah,
+  jadi periksa `no_hp_bentrok_di_keanggotaan_lain` sebelum menerima
+  penyimpanan, bukan menunggu galat saat propagasi.
 - Respons nasabah membawa `punya_akun` (read-only) supaya klien dapat
   menampilkan profil sebagai read-only alih-alih menunggu 403. Penanda
   tampilan saja; jangan pindahkan keputusan wewenang ke klien (PIL-281).
 - Nasabah tanpa akun tetap dapat dikelola penuh oleh pengurus, karena itulah
   satu-satunya pihak yang memegang datanya.
 - Semua pemeriksaan wewenang atas data nasabah lewat `api/keanggotaan.py`;
-  jangan menuliskan daftar field terkunci di view. Email adalah kunci
-  penautan akun dan ikut terkunci.
+  jangan menuliskan daftar field terkunci di view.
 - Bandingkan `serializer.validated_data`, bukan `request.data`, saat memeriksa
   perubahan: nomor HP dinormalisasi ke +62 dan tanggal dikonversi ke `date`.
 

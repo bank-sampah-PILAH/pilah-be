@@ -757,8 +757,9 @@
       <span class="response-tag r-200">200 OK</span> — Objek nasabah terbaru<br>
       <span class="response-tag r-422">422</span> — Validasi gagal<br>
       <span class="response-tag r-403">403</span> — Nasabah nonaktif tidak bisa diedit
-      <p class="note">Nasabah yang sudah tertaut ke akun (<code>punya_akun: true</code>) hanya dapat diubah pada data keanggotaan, yaitu <code>kode</code> beserta status aktifnya. Mengubah <code>nama</code>, <code>jenis_kelamin</code>, <code>tanggal_lahir</code>, <code>alamat</code>, <code>no_hp</code>, atau <code>email</code> ditolak dengan 403 dan pesan "Nasabah dengan akun hanya bisa diubah pada data keanggotaan". Mengirim ulang nilai profil yang sama diperbolehkan, sehingga form yang mengirim seluruh data tetap dapat menyimpan perubahan nomor anggota.</p>
-      <p class="note">Gunakan <code>punya_akun</code> pada respons untuk menampilkan field profil sebagai read-only sebelum pengurus mengisi form. Field itu penanda tampilan; wewenangnya tetap diperiksa server pada setiap permintaan.</p>
+      <p class="note">Untuk nasabah yang sudah tertaut ke akun (<code>punya_akun: true</code>), pengurus tetap dapat mengubah <code>nama</code>, <code>jenis_kelamin</code>, <code>tanggal_lahir</code>, <code>alamat</code>, dan <code>no_hp</code>. Hanya <code>email</code> yang terkunci, karena menjadi kunci penautan ke akun Google; mengubahnya ditolak dengan 403 dan pesan "Email nasabah dengan akun tidak dapat diubah". Mengirim ulang email yang sama diperbolehkan, sehingga form yang mengirim seluruh data tetap dapat menyimpan perubahan lainnya.</p>
+      <p class="note">Perbaikan profil oleh pengurus ikut ditulis ke akun nasabah, sehingga berlaku pada seluruh keanggotaannya di bank sampah lain dan tidak tertimpa ketika nasabah menyimpan profilnya sendiri. Karena nomor HP unik per bank sampah, nomor yang sudah dipakai nasabah lain di salah satu bank sampah tersebut ditolak dengan 422 pada <code>errors.no_hp</code>.</p>
+      <p class="note">Gunakan <code>punya_akun</code> pada respons untuk menampilkan field email sebagai read-only sebelum pengurus mengisi form. Field itu penanda tampilan; wewenangnya tetap diperiksa server pada setiap permintaan.</p>
     </div>
   </div>
 

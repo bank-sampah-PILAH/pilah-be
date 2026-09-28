@@ -3689,7 +3689,13 @@ class ProtectedMediaTests(TestCase):
 
 
 class ProfilNasabahBerakunTests(APITestCase):
-    """Nasabah yang sudah punya akun hanya bisa diubah pada data keanggotaan."""
+    """Pengurus boleh mengubah profil nasabah berakun, kecuali emailnya.
+
+    PIL-223 sempat mengunci seluruh profil global. Client kemudian memutuskan
+    pengurus tetap perlu dapat memperbaiki data nasabah di lapangan, sehingga
+    yang tersisa terkunci hanya email karena menjadi kunci penautan ke akun
+    Google (PIL-288).
+    """
 
     def setUp(self) -> None:
         self.bank = BankSampah.objects.create(
@@ -3738,16 +3744,15 @@ class ProfilNasabahBerakunTests(APITestCase):
             f"/api/v1/nasabah/{self.nasabah.id}", self._payload(**ubah), format="json"
         )
 
-    def test_ubah_nama_nasabah_berakun_ditolak(self) -> None:
+    def test_ubah_nama_nasabah_berakun_diterima(self) -> None:
+        # Kebalikan dari aturan PIL-223: pengurus yang bertemu nasabah di
+        # lapangan adalah pihak yang paling mungkin menemukan salah ketik,
+        # jadi client meminta kewenangan ini dikembalikan (PIL-288).
         response = self._ubah(nama="Budi Santosa")
 
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(
-            response.data["error"],
-            "Nasabah dengan akun hanya bisa diubah pada data keanggotaan",
-        )
+        self.assertEqual(response.status_code, 200)
         self.nasabah.refresh_from_db()
-        self.assertEqual(self.nasabah.nama, "Budi Santoso")
+        self.assertEqual(self.nasabah.nama, "Budi Santosa")
 
     def test_ubah_kode_nasabah_berakun_diterima(self) -> None:
         # Form pengurus mengirim seluruh data nasabah; yang berubah hanya nomor
@@ -3815,17 +3820,101 @@ class ProfilNasabahBerakunTests(APITestCase):
         self.assertEqual(tanpa_akun.nama, "Siti Aminah Putri")
         self.assertEqual(tanpa_akun.alamat, "Jl. Kenanga No. 7")
 
-    def test_ubah_no_hp_nasabah_berakun_ditolak(self) -> None:
+    def test_ubah_no_hp_nasabah_berakun_diterima(self) -> None:
         response = self._ubah(no_hp="082333333333")
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
         self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.no_hp, "+6282333333333")
+
+    def test_perbaikan_pengurus_bertahan_saat_nasabah_menyimpan_profilnya(
+        self,
+    ) -> None:
+        # Profil akun adalah sumber kebenaran: setiap kali nasabah menyimpan
+        # profilnya sendiri, `propagate_profile_to_memberships` menyalinnya ke
+        # seluruh keanggotaan tertaut. Kalau perbaikan pengurus hanya ditulis
+        # pada baris keanggotaan, penyimpanan berikutnya oleh nasabah akan
+        # mengembalikan nilai lama tanpa jejak.
+        self._ubah(nama="Budi Santosa", alamat="Jl. Mawar No. 21")
+
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(self.pemilik_akun).access_token}"
+        )
+        response = self.client.patch(
+            "/api/v1/nasabah/me/profil", {"no_hp": "081999999999"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.nama, "Budi Santosa")
+        self.assertEqual(self.nasabah.alamat, "Jl. Mawar No. 21")
+
+    def test_akun_tidak_ditulis_ketika_profilnya_sudah_sama(self) -> None:
+        # Form pengurus mengirim seluruh data nasabah, jadi menyimpan perubahan
+        # nomor anggota saja tidak boleh menyentuh baris akun sama sekali.
+        self.pemilik_akun.jenis_kelamin = self.nasabah.jenis_kelamin
+        self.pemilik_akun.tanggal_lahir = self.nasabah.tanggal_lahir
+        self.pemilik_akun.alamat = self.nasabah.alamat
+        self.pemilik_akun.no_hp = self.nasabah.no_hp
+        self.pemilik_akun.save()
+        self.pemilik_akun.refresh_from_db()
+        sebelum = self.pemilik_akun.updated_at
+
+        response = self._ubah(kode="NAS-0007")
+
+        self.assertEqual(response.status_code, 200)
+        self.pemilik_akun.refresh_from_db()
+        self.assertEqual(self.pemilik_akun.updated_at, sebelum)
+
+    def test_no_hp_yang_bentrok_di_bank_lain_ditolak_kepada_pengurus(self) -> None:
+        # Menulis profil ke akun membuat nomor HP ikut tersalin ke keanggotaan
+        # nasabah di bank sampah lain. Kalau di sana nomornya sudah dipakai
+        # orang lain, penyimpanan profil oleh nasabah nanti yang akan gagal,
+        # dengan pesan yang ditujukan kepada nasabah. Tolak lebih awal, kepada
+        # pengurus yang mengetiknya.
+        bank_lain = BankSampah.objects.create(
+            nama="Bank Sampah Melati", alamat="Depok", kota="Depok", no_hp_pic="+628123456780"
+        )
+        Nasabah.objects.create(
+            bank_sampah=bank_lain,
+            nomor="MLT-0001",
+            nama="Rina Hastuti",
+            email="rina@example.com",
+            no_hp="+628555555555",
+            alamat="Jl. Melati No. 1",
+        )
+        Nasabah.objects.create(
+            bank_sampah=bank_lain,
+            user=self.pemilik_akun,
+            nomor="MLT-0002",
+            nama="Budi Santoso",
+            email=self.pemilik_akun.email,
+            no_hp="+628111111111",
+            alamat="Jl. Mawar No. 12",
+        )
+
+        response = self._ubah(no_hp="08555555555")
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data["errors"]["no_hp"],
+            ["Nomor HP sudah digunakan nasabah lain di bank sampah tempat akun ini terdaftar"],
+        )
+        self.nasabah.refresh_from_db()
+        self.pemilik_akun.refresh_from_db()
         self.assertEqual(self.nasabah.no_hp, "+628111111111")
+        self.assertNotEqual(self.pemilik_akun.no_hp, "+628555555555")
 
     def test_ubah_email_nasabah_berakun_ditolak(self) -> None:
+        # Satu-satunya field yang tetap terkunci: email adalah kunci penautan
+        # ke akun Google, dan tidak ada penjaga lain pada jalur ini.
         response = self._ubah(email="budi.baru@example.com")
 
         self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.data["error"],
+            "Email nasabah dengan akun tidak dapat diubah",
+        )
         self.nasabah.refresh_from_db()
         self.assertEqual(self.nasabah.email, "budi@example.com")
 
