@@ -3827,6 +3827,28 @@ class ProfilNasabahBerakunTests(APITestCase):
         self.nasabah.refresh_from_db()
         self.assertEqual(self.nasabah.no_hp, "+6282333333333")
 
+    def test_perbaikan_pengurus_bertahan_saat_nasabah_menyimpan_profilnya(
+        self,
+    ) -> None:
+        # Profil akun adalah sumber kebenaran: setiap kali nasabah menyimpan
+        # profilnya sendiri, `propagate_profile_to_memberships` menyalinnya ke
+        # seluruh keanggotaan tertaut. Kalau perbaikan pengurus hanya ditulis
+        # pada baris keanggotaan, penyimpanan berikutnya oleh nasabah akan
+        # mengembalikan nilai lama tanpa jejak.
+        self._ubah(nama="Budi Santosa", alamat="Jl. Mawar No. 21")
+
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(self.pemilik_akun).access_token}"
+        )
+        response = self.client.patch(
+            "/api/v1/nasabah/me/profil", {"no_hp": "081999999999"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.nama, "Budi Santosa")
+        self.assertEqual(self.nasabah.alamat, "Jl. Mawar No. 21")
+
     def test_ubah_email_nasabah_berakun_ditolak(self) -> None:
         # Satu-satunya field yang tetap terkunci: email adalah kunci penautan
         # ke akun Google, dan tidak ada penjaga lain pada jalur ini.
