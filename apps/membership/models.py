@@ -35,7 +35,7 @@ class Nasabah(TimestampedModel):
     tanggal_lahir = models.DateField(blank=True, null=True)
     alamat = models.TextField()
     no_hp = models.CharField(max_length=20)
-    email = models.EmailField(blank=True, null=True, unique=True)
+    email = models.EmailField()
     tanggal_daftar = models.DateField(default=timezone.localdate)
     is_active = models.BooleanField(default=True)
     # Approval state of the membership (PIL-188): pending = self-registered
@@ -48,7 +48,11 @@ class Nasabah(TimestampedModel):
         # frozen so this move is code-only with zero migrations.
         app_label = "api"
         db_table = "nasabah"
-        unique_together = (("bank_sampah", "nomor"), ("bank_sampah", "no_hp"))
+        unique_together = (
+            ("bank_sampah", "nomor"),
+            ("bank_sampah", "no_hp"),
+            ("bank_sampah", "email"),
+        )
         ordering = ["nomor"]
         constraints = [
             models.UniqueConstraint(
@@ -90,11 +94,18 @@ class NasabahApprovalLog(models.Model):
     class Status(models.TextChoices):
         APPROVED = "approved", "Approved"
         REJECTED = "rejected", "Rejected"
+        # A nasabah's own resubmission message after a rejection (PIL-232),
+        # not a pengurus decision — `pengurus` is null on this entry.
+        APPEALED = "appealed", "Appealed"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     nasabah = models.ForeignKey(Nasabah, on_delete=models.CASCADE, related_name="approval_logs")
     pengurus = models.ForeignKey(
-        "api.User", on_delete=models.PROTECT, related_name="nasabah_approval_logs"
+        "api.User",
+        on_delete=models.PROTECT,
+        related_name="nasabah_approval_logs",
+        null=True,
+        blank=True,
     )
     status = models.CharField(max_length=20, choices=Status.choices)
     catatan = models.TextField(blank=True)

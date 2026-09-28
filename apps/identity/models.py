@@ -38,6 +38,8 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
         NASABAH = "nasabah", "Nasabah"
         SUPERADMIN = "superadmin", "Superadmin"
 
+    GOOGLE_REGISTRATION_ROLES = (Role.PENGELOLA, Role.PENGELOLA_INDUK, Role.NASABAH)
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     google_id = models.CharField(max_length=255, blank=True, unique=True, null=True)
     email = models.EmailField(unique=True)
@@ -45,6 +47,9 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
     no_hp = models.CharField(max_length=20, blank=True)
     jenis_kelamin = models.CharField(max_length=20, choices=Gender.choices, blank=True)
     tanggal_lahir = models.DateField(blank=True, null=True)
+    # Personal address, collected on complete_profile for nasabah accounts only
+    # (PIL-204) — copied onto each Nasabah membership row at registration time.
+    alamat = models.TextField(blank=True)
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.PENGELOLA)
     is_profile_complete = models.BooleanField(default=False)
     bank_sampah = models.ForeignKey(

@@ -68,7 +68,9 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         if Nasabah.objects.filter(bank_sampah=bank, no_hp=no_hp).exists():
             return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
         email = serializer.validated_data.get("email")
-        existing_by_email = Nasabah.objects.filter(email=email).first() if email else None
+        existing_by_email = (
+            Nasabah.objects.filter(bank_sampah=bank, email=email).first() if email else None
+        )
         if existing_by_email:
             return Response(
                 {"errors": {"email": [self._email_duplicate_error(existing_by_email, bank.id)]}},
@@ -112,7 +114,9 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
         email = serializer.validated_data.get("email")
         existing_by_email = (
-            Nasabah.objects.filter(email=email).exclude(id=instance.id).first() if email else None
+            Nasabah.objects.filter(bank_sampah=bank, email=email).exclude(id=instance.id).first()
+            if email
+            else None
         )
         if existing_by_email:
             return Response(
