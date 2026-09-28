@@ -89,6 +89,20 @@ class NasabahProfileTests(APITestCase):
         self.assertEqual(self.user.role, User.Role.NASABAH)
         self.assertEqual(self.user.nama, "Siti Updated")
 
+    def test_patch_rejects_invalid_jenis_kelamin(self) -> None:
+        response = self.client.patch(self.url, {"jenis_kelamin": "bukan-pilihan"})
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("jenis_kelamin", response.data["errors"])
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.jenis_kelamin, "")
+
+    def test_patch_rejects_invalid_tanggal_lahir(self) -> None:
+        response = self.client.patch(self.url, {"tanggal_lahir": "not-a-date"})
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("tanggal_lahir", response.data["errors"])
+        self.user.refresh_from_db()
+        self.assertIsNone(self.user.tanggal_lahir)
+
     def test_jwt_authentication(self) -> None:
         from rest_framework_simplejwt.tokens import AccessToken
 
