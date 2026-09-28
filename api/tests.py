@@ -42,7 +42,7 @@ from api.models import (
     User,
 )
 from api.serializers import BankSampahApprovalListSerializer
-from api.services import NasabahApprovalService
+from apps.membership.services import NasabahApprovalService
 
 
 class APISpecTests(APITestCase):

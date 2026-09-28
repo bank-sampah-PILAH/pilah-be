@@ -115,3 +115,7 @@ class TransactionFilterService:
             return date.fromisoformat(value)
         except ValueError as exc:
             raise serializers.ValidationError({"error": "Format tanggal harus YYYY-MM-DD"}) from exc
+
+
+# ponytail: pencairan edit-window constant (PIL-2xx), shared with tests.
+BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI = 7

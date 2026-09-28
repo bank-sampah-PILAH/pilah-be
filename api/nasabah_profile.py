@@ -5,9 +5,9 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from api.models import User
-from api.permissions import IsActiveNasabah
-from api.services import OnboardingService
-from api.validators import normalize_indonesian_phone
+from shared_kernel.permissions import IsActiveNasabah
+from apps.identity.services import OnboardingService
+from shared_kernel.validators import normalize_indonesian_phone
 from api.views import _user
 
 

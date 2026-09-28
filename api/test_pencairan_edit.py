@@ -12,7 +12,7 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.models import BankSampah, JenisSampah, Nasabah, Pencairan, PencairanRevisi, Saldo, User
-from api.services import BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI
+from apps.ledger.services import BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI
 
 
 class PencairanEditTests(APITestCase):

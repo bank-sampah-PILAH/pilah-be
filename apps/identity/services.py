@@ -174,6 +174,26 @@ class AuthService:
         }
 
 
+
+    @staticmethod
+    def _superadmin_emails() -> frozenset[str]:
+        configured = settings.PILAH_SUPERADMIN_EMAILS
+        values = configured.split(",") if isinstance(configured, str) else configured
+        return frozenset(str(value).strip().lower() for value in values if str(value).strip())
+
+    @staticmethod
+    def is_superadmin_allowlisted(email: str) -> bool:
+        return email.strip().lower() in AuthService._superadmin_emails()
+
+    @staticmethod
+    def _sync_superadmin_admin_flags(user: User, email: str) -> bool:
+        is_allowlisted = AuthService.is_superadmin_allowlisted(email)
+        if user.is_staff != is_allowlisted or user.is_superuser != is_allowlisted:
+            user.is_staff = is_allowlisted
+            user.is_superuser = is_allowlisted
+            user.save(update_fields=["is_staff", "is_superuser", "updated_at"])
+        return is_allowlisted
+
 class OnboardingService:
     @staticmethod
     @transaction.atomic

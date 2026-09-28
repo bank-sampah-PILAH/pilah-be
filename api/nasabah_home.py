@@ -10,8 +10,8 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from api.models import BankSampah, Nasabah, Transaksi, User
-from api.pagination import StandardPagination
-from api.permissions import IsActiveNasabah
+from shared_kernel.pagination import StandardPagination
+from shared_kernel.permissions import IsActiveNasabah
 
 
 class BankUnitSerializer(serializers.ModelSerializer[BankSampah]):

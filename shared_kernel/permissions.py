@@ -3,7 +3,7 @@ from rest_framework.request import Request
 from rest_framework.views import APIView
 
 from api.models import BankSampah, User
-from api.services import AuthService
+from apps.identity.services import AuthService
 
 
 def _auth_user(request: Request) -> User:
