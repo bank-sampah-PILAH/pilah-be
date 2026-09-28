@@ -15,16 +15,26 @@ from django.utils.http import urlencode
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.keanggotaan import profil_terkunci
-from api.models import BankSampah, JadwalKegiatan, JenisSampah, Nasabah, Saldo, Transaksi, User
+from api.models import (
+    BankSampah,
+    JadwalKegiatan,
+    JenisSampah,
+    Nasabah,
+    Pencairan,
+    Saldo,
+    Transaksi,
+    User,
+)
 from api.permissions import (
     IsActivePengelola,
+    IsActivePengelolaOrNasabah,
     IsJadwalViewer,
     IsNasabah,
     IsNasabahRole,
@@ -52,6 +62,10 @@ from api.serializers import (
     NasabahSelfRegistrationSerializer,
     NasabahSelfViewSerializer,
     NasabahSerializer,
+    PencairanCreateSerializer,
+    PencairanDetailSerializer,
+    PencairanEditSerializer,
+    PencairanRevisiSerializer,
     RefreshTokenSerializer,
     SaldoSerializer,
     StatusSerializer,
@@ -69,6 +83,7 @@ from api.services import (
     DashboardService,
     NasabahApprovalService,
     OnboardingService,
+    PencairanService,
     TeamService,
     TransactionFilterService,
     TransactionService,
@@ -861,6 +876,70 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         transaksi = self.get_object()
         result = WhatsAppService.notify(transaksi)
         return Response(result, status=200 if result["success"] else 400)
+
+
+class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
+    permission_classes = [IsActivePengelola]
+    serializer_class = PencairanDetailSerializer
+
+    def get_permissions(self) -> list[BasePermission]:
+        # Recording stays pengurus-only; nasabah may read their own riwayat.
+        if self.action in ("list", "retrieve"):
+            return [IsActivePengelolaOrNasabah()]
+        return [IsActivePengelola()]
+
+    def get_queryset(self) -> QuerySet[Pencairan]:
+        user = _user(self.request)
+        if user.role == User.Role.NASABAH:
+            qs = Pencairan.objects.filter(nasabah__user=user)
+        else:
+            qs = Pencairan.objects.filter(bank_sampah=_bank_sampah(self.request))
+        qs = qs.select_related("nasabah", "bank_sampah", "dicatat_oleh")
+        nasabah_id = self.request.query_params.get("nasabah_id")
+        search = self.request.query_params.get("search", "")
+        if nasabah_id:
+            qs = qs.filter(nasabah_id=nasabah_id)
+        if len(search) >= 2:
+            qs = qs.filter(nasabah__nama__icontains=search)
+        return PencairanService.dengan_info_revisi(qs)
+
+    def list(self, request: Request) -> Response:
+        # Unlike transaksi, no periode means the whole history (per-nasabah riwayat).
+        try:
+            qs = TransactionFilterService.apply_period(self.get_queryset(), request, default=None)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
+        # Pagination is configured globally (PAGE_SIZE), so a page always exists.
+        page = self.paginate_queryset(qs)
+        return self.get_paginated_response(PencairanDetailSerializer(page, many=True).data)
+
+    def create(self, request: Request) -> Response:
+        serializer = PencairanCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        pencairan = PencairanService.create_pencairan(_user(request), serializer.validated_data)
+        return Response(PencairanDetailSerializer(pencairan).data, status=status.HTTP_201_CREATED)
+
+    def retrieve(self, request: Request, pk: str | None = None) -> Response:
+        return Response(PencairanDetailSerializer(self.get_object()).data)
+
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
+        serializer = PencairanEditSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        pencairan = PencairanService.edit_pencairan(
+            _user(request), self.get_object(), serializer.validated_data
+        )
+        return Response(PencairanDetailSerializer(pencairan).data)
+
+    @action(detail=True, methods=["get"], url_path="riwayat")
+    def riwayat(self, request: Request, pk: str | None = None) -> Response:
+        pencairan = self.get_object()
+        revisi = pencairan.revisi.select_related("diubah_oleh").order_by("-versi")
+        return Response(
+            {
+                "pencairan": PencairanDetailSerializer(pencairan).data,
+                "revisi": PencairanRevisiSerializer(revisi, many=True).data,
+            }
+        )
 
 
 class SaldoView(APIView):
