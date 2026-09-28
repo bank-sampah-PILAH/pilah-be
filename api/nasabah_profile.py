@@ -5,6 +5,7 @@ from rest_framework.response import Response
 
 from api.models import User
 from api.permissions import IsActiveNasabah
+from api.validators import normalize_indonesian_phone
 
 
 class NasabahProfileSerializer(serializers.ModelSerializer[User]):
@@ -21,6 +22,9 @@ class NasabahProfileSerializer(serializers.ModelSerializer[User]):
             "role",
         ]
         read_only_fields = ["id", "email", "role"]
+
+    def validate_no_hp(self, value: str) -> str:
+        return normalize_indonesian_phone(value)
 
 
 class NasabahProfileView(GenericAPIView[User]):

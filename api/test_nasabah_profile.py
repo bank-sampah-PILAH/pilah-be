@@ -67,6 +67,13 @@ class NasabahProfileTests(APITestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.alamat, "Jl. Merdeka 10")
 
+    def test_patch_normalizes_no_hp(self) -> None:
+        response = self.client.patch(self.url, {"no_hp": "081234567890"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["no_hp"], "+6281234567890")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.no_hp, "+6281234567890")
+
     def test_patch_cannot_change_identity_fields(self) -> None:
         original_id = str(self.user.id)
         response = self.client.patch(
