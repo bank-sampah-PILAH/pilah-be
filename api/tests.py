@@ -3849,6 +3849,23 @@ class ProfilNasabahBerakunTests(APITestCase):
         self.assertEqual(self.nasabah.nama, "Budi Santosa")
         self.assertEqual(self.nasabah.alamat, "Jl. Mawar No. 21")
 
+    def test_akun_tidak_ditulis_ketika_profilnya_sudah_sama(self) -> None:
+        # Form pengurus mengirim seluruh data nasabah, jadi menyimpan perubahan
+        # nomor anggota saja tidak boleh menyentuh baris akun sama sekali.
+        self.pemilik_akun.jenis_kelamin = self.nasabah.jenis_kelamin
+        self.pemilik_akun.tanggal_lahir = self.nasabah.tanggal_lahir
+        self.pemilik_akun.alamat = self.nasabah.alamat
+        self.pemilik_akun.no_hp = self.nasabah.no_hp
+        self.pemilik_akun.save()
+        self.pemilik_akun.refresh_from_db()
+        sebelum = self.pemilik_akun.updated_at
+
+        response = self._ubah(kode="NAS-0007")
+
+        self.assertEqual(response.status_code, 200)
+        self.pemilik_akun.refresh_from_db()
+        self.assertEqual(self.pemilik_akun.updated_at, sebelum)
+
     def test_no_hp_yang_bentrok_di_bank_lain_ditolak_kepada_pengurus(self) -> None:
         # Menulis profil ke akun membuat nomor HP ikut tersalin ke keanggotaan
         # nasabah di bank sampah lain. Kalau di sana nomornya sudah dipakai
