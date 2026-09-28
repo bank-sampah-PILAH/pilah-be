@@ -551,6 +551,12 @@ class OnboardingService:
                 raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
             own_record.refresh_from_db()
             Saldo.objects.get_or_create(nasabah=own_record)
+            NasabahApprovalLog.objects.create(
+                nasabah=own_record,
+                pengurus=None,
+                status=NasabahApprovalLog.Status.APPEALED,
+                catatan=payload.get("pesan", ""),
+            )
             return own_record
 
         # A pengurus-entered record for this same person converges onto

@@ -518,6 +518,9 @@ class NasabahSelfRegistrationSerializer(serializers.Serializer[Any]):
     """
 
     bank_sampah_id = serializers.UUIDField()
+    # Only meaningful when reapplying after a rejection (PIL-232's appeal
+    # action) — ignored on a first-time application, nothing to appeal yet.
+    pesan = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class NasabahSelfBankSampahSerializer(serializers.ModelSerializer[Model]):
@@ -530,7 +533,20 @@ class NasabahSelfBankSampahSerializer(serializers.ModelSerializer[Model]):
 
     class Meta:
         model = BankSampah
-        fields = ["id", "nama", "kota"]
+        fields = ["id", "nama", "kota", "alamat"]
+        read_only_fields = fields
+
+
+class NasabahSelfApprovalLogSerializer(serializers.ModelSerializer[Model]):
+    """One decision entry in a membership row's approval history, as shown
+    to the nasabah themself (PIL-232). Deliberately smaller than
+    `NasabahApprovalLogSerializer` (used pengurus-side), which also exposes
+    `id`, `nasabah_id`, and `pengurus_email` that a nasabah has no use for.
+    """
+
+    class Meta:
+        model = NasabahApprovalLog
+        fields = ["status", "catatan", "created_at"]
         read_only_fields = fields
 
 
@@ -542,10 +558,18 @@ class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
 
     bank_sampah = NasabahSelfBankSampahSerializer(read_only=True)
     alasan_penolakan = serializers.SerializerMethodField()
+    riwayat_persetujuan = serializers.SerializerMethodField()
 
     class Meta:
         model = Nasabah
-        fields = ["id", "bank_sampah", "status", "is_active", "alasan_penolakan"]
+        fields = [
+            "id",
+            "bank_sampah",
+            "status",
+            "is_active",
+            "alasan_penolakan",
+            "riwayat_persetujuan",
+        ]
         read_only_fields = fields
 
     def get_alasan_penolakan(self, obj: Nasabah) -> str | None:
@@ -553,6 +577,9 @@ class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
             return None
         log = obj.approval_logs.filter(status=NasabahApprovalLog.Status.REJECTED).first()
         return log.catatan if log else None
+
+    def get_riwayat_persetujuan(self, obj: Nasabah) -> Any:
+        return NasabahSelfApprovalLogSerializer(obj.approval_logs.all(), many=True).data
 
 
 class NasabahDetailSerializer(NasabahSerializer):

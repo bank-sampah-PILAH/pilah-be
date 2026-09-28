@@ -42,6 +42,7 @@ from api.models import (
     User,
 )
 from api.serializers import BankSampahApprovalListSerializer
+from api.services import NasabahApprovalService
 
 
 class APISpecTests(APITestCase):
@@ -2990,6 +2991,48 @@ class APISpecTests(APITestCase):
         # (bank, user) pair.
         self.assertEqual(Nasabah.objects.filter(user=customer, bank_sampah=self.bank).count(), 1)
 
+    def test_nasabah_reapply_with_pesan_records_appealed_log_entry(self) -> None:
+        customer = User.objects.create_user(
+            email="appealing-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1990-01-01",
+            no_hp="+628555555021",
+            alamat="Jl. Baru No. 3",
+            is_profile_complete=True,
+        )
+        rejected = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-9003",
+            nama=customer.nama,
+            alamat="Jl. Lama",
+            no_hp="+628555555021",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            "/api/v1/onboarding/nasabah",
+            {
+                "bank_sampah_id": str(self.bank.id),
+                "pesan": "Dokumen sudah saya lengkapi, mohon ditinjau ulang",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        rejected.refresh_from_db()
+        self.assertEqual(rejected.status, Nasabah.Status.PENDING)
+        log = rejected.approval_logs.first()
+        assert log is not None
+        self.assertEqual(log.status, NasabahApprovalLog.Status.APPEALED)
+        self.assertEqual(log.catatan, "Dokumen sudah saya lengkapi, mohon ditinjau ulang")
+        self.assertIsNone(log.pengurus)
+
     def test_nasabah_reapply_race_loser_gets_already_registered_error(self) -> None:
         """Backfill for the conditional-update race guard added in
         abe9623: two concurrent reapply requests can both read
@@ -3312,6 +3355,7 @@ class APISpecTests(APITestCase):
         self.assertEqual(entry["status"], "pending")
         self.assertEqual(entry["bank_sampah"]["id"], str(self.bank.id))
         self.assertEqual(entry["bank_sampah"]["nama"], self.bank.nama)
+        self.assertEqual(entry["bank_sampah"]["alamat"], self.bank.alamat)
         self.assertIsNone(entry["alasan_penolakan"])
 
     def test_nasabah_self_view_accessible_before_profile_is_complete(self) -> None:
@@ -3419,6 +3463,169 @@ class APISpecTests(APITestCase):
         response = self.client.get("/api/v1/nasabah/me")
 
         self.assertEqual(response.status_code, 403)
+
+    def test_nasabah_self_view_riwayat_persetujuan_empty_when_no_logs(self) -> None:
+        """PIL-232: a fresh pending application has no approval decisions
+        yet, so the history list is empty rather than absent."""
+        customer = User.objects.create_user(
+            email="fresh-pending@example.com",
+            nama="Nasabah Baru",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0704",
+            nama=customer.nama,
+            alamat="Jl. Melati",
+            no_hp="+628555555035",
+            status=Nasabah.Status.PENDING,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get("/api/v1/nasabah/me")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data[0]["riwayat_persetujuan"], [])
+
+    def test_nasabah_self_view_riwayat_persetujuan_has_rejection_entry(self) -> None:
+        """PIL-232: a single rejection shows up as one history entry with
+        the pengurus's status and reason, keyed the way mobile expects."""
+        customer = User.objects.create_user(
+            email="rejected-history@example.com",
+            nama="Nasabah Ditolak",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        membership = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0705",
+            nama=customer.nama,
+            alamat="Jl. Melati",
+            no_hp="+628555555036",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        NasabahApprovalLog.objects.create(
+            nasabah=membership,
+            pengurus=self.user,
+            status=NasabahApprovalLog.Status.REJECTED,
+            catatan="Alamat tidak sesuai KTP",
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get("/api/v1/nasabah/me")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        riwayat = response.data[0]["riwayat_persetujuan"]
+        self.assertEqual(len(riwayat), 1)
+        entry = riwayat[0]
+        self.assertEqual(set(entry.keys()), {"status", "catatan", "created_at"})
+        self.assertEqual(entry["status"], "rejected")
+        self.assertEqual(entry["catatan"], "Alamat tidak sesuai KTP")
+        self.assertIsInstance(response.json()[0]["riwayat_persetujuan"][0]["created_at"], str)
+
+    def test_nasabah_self_view_riwayat_persetujuan_orders_reapply_history_newest_first(
+        self,
+    ) -> None:
+        """PIL-232: reject -> reapply -> approve reuses the same membership
+        row (per PIL-204's reapply rule), and both decisions must show up,
+        newest first, in that row's history."""
+        customer = User.objects.create_user(
+            email="reapplied-history@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1990-01-01",
+            no_hp="+628555555037",
+            alamat="Jl. Baru",
+            is_profile_complete=True,
+        )
+        membership = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0706",
+            nama=customer.nama,
+            alamat="Jl. Lama",
+            no_hp="+628555555037",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        NasabahApprovalService.reject(membership, self.user, catatan="Data belum lengkap")
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        post_response = self.client.post(
+            "/api/v1/onboarding/nasabah", {"bank_sampah_id": str(self.bank.id)}, format="json"
+        )
+        self.assertEqual(post_response.status_code, 201, post_response.data)
+        membership.refresh_from_db()
+        NasabahApprovalService.approve(membership, self.user, catatan="Sudah lengkap")
+
+        response = self.client.get("/api/v1/nasabah/me")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], str(membership.id))
+        riwayat = response.data[0]["riwayat_persetujuan"]
+        # The reapply itself now leaves its own "appealed" entry (PIL-232's
+        # appeal message) between the rejection it answers and the approval
+        # that follows it.
+        self.assertEqual(
+            [entry["status"] for entry in riwayat], ["approved", "appealed", "rejected"]
+        )
+        self.assertEqual(riwayat[0]["catatan"], "Sudah lengkap")
+        self.assertEqual(riwayat[1]["catatan"], "")
+        self.assertEqual(riwayat[2]["catatan"], "Data belum lengkap")
+
+    def test_nasabah_self_view_riwayat_persetujuan_independent_per_membership(self) -> None:
+        """PIL-232: a user with rows at two different bank sampah (allowed,
+        since the one-membership guard is per bank) sees each row's own
+        history, not a mix of both."""
+        other_bank = BankSampah.objects.create(
+            nama="Bank Sampah Lain", alamat="Depok", kota="Depok", no_hp_pic="+628111222444"
+        )
+        customer = User.objects.create_user(
+            email="two-memberships@example.com",
+            nama="Nasabah Dua Bank",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        membership_a = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0707",
+            nama=customer.nama,
+            alamat="Jl. Melati",
+            no_hp="+628555555038",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        NasabahApprovalService.reject(membership_a, self.user, catatan="Alamat tidak sesuai")
+        membership_b = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=other_bank,
+            nomor="NAS-0001",
+            nama=customer.nama,
+            alamat="Jl. Melati",
+            no_hp="+628555555039",
+            status=Nasabah.Status.PENDING,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get("/api/v1/nasabah/me")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        by_id = {entry["id"]: entry for entry in response.data}
+        self.assertEqual(
+            [e["status"] for e in by_id[str(membership_a.id)]["riwayat_persetujuan"]],
+            ["rejected"],
+        )
+        self.assertEqual(by_id[str(membership_b.id)]["riwayat_persetujuan"], [])
 
 
 class HealthzTests(TestCase):
