@@ -197,9 +197,7 @@ class NasabahTransactionDetailView(GenericAPIView[Transaksi]):
     def get(self, request: Request, pk: UUID) -> Response:
         member = MembershipService.get_active_membership(request)
         transaction = get_object_or_404(
-            activities(member)
-            .select_related("nasabah", "bank_sampah")
-            .prefetch_related("items"),
+            activities(member).select_related("nasabah", "bank_sampah").prefetch_related("items"),
             pk=pk,
         )
         return Response(self.get_serializer(transaction).data)

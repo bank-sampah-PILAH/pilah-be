@@ -163,9 +163,7 @@ class NasabahHistoryContractTests(APITestCase):
     def test_pengurus_cannot_use_nasabah_transaction_detail(self) -> None:
         self.client.force_authenticate(self.manager)
 
-        response = self.client.get(
-            f"{self.url}/00000000-0000-0000-0000-000000000001"
-        )
+        response = self.client.get(f"{self.url}/00000000-0000-0000-0000-000000000001")
 
         self.assertEqual(response.status_code, 403)
 
