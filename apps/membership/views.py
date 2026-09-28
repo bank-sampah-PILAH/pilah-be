@@ -8,7 +8,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.models import Nasabah, Saldo
-from apps.membership.keanggotaan import profil_terkunci
+from apps.membership.keanggotaan import (
+    email_terkunci,
+    no_hp_bentrok_di_keanggotaan_lain,
+    sinkronkan_profil_ke_akun,
+)
 from apps.membership.serializers import (
     NasabahApprovalLogSerializer,
     NasabahDetailSerializer,
@@ -51,12 +55,6 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             return NasabahDetailSerializer
         return NasabahSerializer
 
-    @staticmethod
-    def _email_duplicate_error(nasabah: Nasabah, bank_id: Any) -> str:
-        if nasabah.bank_sampah_id == bank_id:
-            return "Email sudah terdaftar sebagai nasabah di bank sampah ini"
-        return "Email sudah terdaftar sebagai nasabah di bank sampah lain"
-
     def create(self, request: Request) -> Response:
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -73,7 +71,7 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         )
         if existing_by_email:
             return Response(
-                {"errors": {"email": [self._email_duplicate_error(existing_by_email, bank.id)]}},
+                {"errors": {"email": ["Email sudah terdaftar sebagai nasabah di bank sampah ini"]}},
                 status=422,
             )
         nasabah = serializer.save(
@@ -99,9 +97,9 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             instance, data=request.data, partial=kwargs.pop("partial", False)
         )
         serializer.is_valid(raise_exception=True)
-        if profil_terkunci(instance, serializer.validated_data):
+        if email_terkunci(instance, serializer.validated_data):
             return Response(
-                {"error": "Nasabah dengan akun hanya bisa diubah pada data keanggotaan"},
+                {"error": "Email nasabah dengan akun tidak dapat diubah"},
                 status=403,
             )
         no_hp = serializer.validated_data.get("no_hp")
@@ -112,6 +110,18 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             .exists()
         ):
             return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
+        if no_hp and no_hp_bentrok_di_keanggotaan_lain(instance, no_hp):
+            return Response(
+                {
+                    "errors": {
+                        "no_hp": [
+                            "Nomor HP sudah digunakan nasabah lain di bank sampah "
+                            "tempat akun ini terdaftar"
+                        ]
+                    }
+                },
+                status=422,
+            )
         email = serializer.validated_data.get("email")
         existing_by_email = (
             Nasabah.objects.filter(bank_sampah=bank, email=email).exclude(id=instance.id).first()
@@ -120,10 +130,15 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         )
         if existing_by_email:
             return Response(
-                {"errors": {"email": [self._email_duplicate_error(existing_by_email, bank.id)]}},
+                {"errors": {"email": ["Email sudah terdaftar sebagai nasabah di bank sampah ini"]}},
                 status=422,
             )
         self.perform_update(serializer)
+        # Profil dimiliki akun dan berlaku lintas bank sampah, jadi perbaikan
+        # pengurus harus sampai ke akunnya. Kalau hanya baris keanggotaan yang
+        # ditulis, penyimpanan profil berikutnya oleh nasabah akan
+        # mengembalikan nilai lama (PIL-288).
+        sinkronkan_profil_ke_akun(instance)
         return Response(serializer.data)
 
     @action(detail=True, methods=["patch"], url_path="status")

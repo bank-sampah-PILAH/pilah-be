@@ -94,7 +94,7 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
 
         Hanya penanda tampilan, supaya layar pengurus dapat menampilkan profil
         sebagai read-only. Wewenangnya tetap ditegakkan di server oleh
-        ``api.keanggotaan.profil_terkunci`` (PIL-223), bukan oleh klien.
+        ``api.keanggotaan.email_terkunci`` (PIL-223, PIL-288), bukan klien.
         """
         return punya_akun(obj)
 
