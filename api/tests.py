@@ -3849,6 +3849,45 @@ class ProfilNasabahBerakunTests(APITestCase):
         self.assertEqual(self.nasabah.nama, "Budi Santosa")
         self.assertEqual(self.nasabah.alamat, "Jl. Mawar No. 21")
 
+    def test_no_hp_yang_bentrok_di_bank_lain_ditolak_kepada_pengurus(self) -> None:
+        # Menulis profil ke akun membuat nomor HP ikut tersalin ke keanggotaan
+        # nasabah di bank sampah lain. Kalau di sana nomornya sudah dipakai
+        # orang lain, penyimpanan profil oleh nasabah nanti yang akan gagal,
+        # dengan pesan yang ditujukan kepada nasabah. Tolak lebih awal, kepada
+        # pengurus yang mengetiknya.
+        bank_lain = BankSampah.objects.create(
+            nama="Bank Sampah Melati", alamat="Depok", kota="Depok", no_hp_pic="+628123456780"
+        )
+        Nasabah.objects.create(
+            bank_sampah=bank_lain,
+            nomor="MLT-0001",
+            nama="Rina Hastuti",
+            email="rina@example.com",
+            no_hp="+628555555555",
+            alamat="Jl. Melati No. 1",
+        )
+        Nasabah.objects.create(
+            bank_sampah=bank_lain,
+            user=self.pemilik_akun,
+            nomor="MLT-0002",
+            nama="Budi Santoso",
+            email=self.pemilik_akun.email,
+            no_hp="+628111111111",
+            alamat="Jl. Mawar No. 12",
+        )
+
+        response = self._ubah(no_hp="08555555555")
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data["errors"]["no_hp"],
+            ["Nomor HP sudah digunakan nasabah lain di bank sampah tempat akun ini terdaftar"],
+        )
+        self.nasabah.refresh_from_db()
+        self.pemilik_akun.refresh_from_db()
+        self.assertEqual(self.nasabah.no_hp, "+628111111111")
+        self.assertNotEqual(self.pemilik_akun.no_hp, "+628555555555")
+
     def test_ubah_email_nasabah_berakun_ditolak(self) -> None:
         # Satu-satunya field yang tetap terkunci: email adalah kunci penautan
         # ke akun Google, dan tidak ada penjaga lain pada jalur ini.
