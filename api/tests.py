@@ -3689,7 +3689,13 @@ class ProtectedMediaTests(TestCase):
 
 
 class ProfilNasabahBerakunTests(APITestCase):
-    """Nasabah yang sudah punya akun hanya bisa diubah pada data keanggotaan."""
+    """Pengurus boleh mengubah profil nasabah berakun, kecuali emailnya.
+
+    PIL-223 sempat mengunci seluruh profil global. Client kemudian memutuskan
+    pengurus tetap perlu dapat memperbaiki data nasabah di lapangan, sehingga
+    yang tersisa terkunci hanya email karena menjadi kunci penautan ke akun
+    Google (PIL-288).
+    """
 
     def setUp(self) -> None:
         self.bank = BankSampah.objects.create(
@@ -3738,16 +3744,15 @@ class ProfilNasabahBerakunTests(APITestCase):
             f"/api/v1/nasabah/{self.nasabah.id}", self._payload(**ubah), format="json"
         )
 
-    def test_ubah_nama_nasabah_berakun_ditolak(self) -> None:
+    def test_ubah_nama_nasabah_berakun_diterima(self) -> None:
+        # Kebalikan dari aturan PIL-223: pengurus yang bertemu nasabah di
+        # lapangan adalah pihak yang paling mungkin menemukan salah ketik,
+        # jadi client meminta kewenangan ini dikembalikan (PIL-288).
         response = self._ubah(nama="Budi Santosa")
 
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(
-            response.data["error"],
-            "Nasabah dengan akun hanya bisa diubah pada data keanggotaan",
-        )
+        self.assertEqual(response.status_code, 200)
         self.nasabah.refresh_from_db()
-        self.assertEqual(self.nasabah.nama, "Budi Santoso")
+        self.assertEqual(self.nasabah.nama, "Budi Santosa")
 
     def test_ubah_kode_nasabah_berakun_diterima(self) -> None:
         # Form pengurus mengirim seluruh data nasabah; yang berubah hanya nomor
@@ -3815,17 +3820,23 @@ class ProfilNasabahBerakunTests(APITestCase):
         self.assertEqual(tanpa_akun.nama, "Siti Aminah Putri")
         self.assertEqual(tanpa_akun.alamat, "Jl. Kenanga No. 7")
 
-    def test_ubah_no_hp_nasabah_berakun_ditolak(self) -> None:
+    def test_ubah_no_hp_nasabah_berakun_diterima(self) -> None:
         response = self._ubah(no_hp="082333333333")
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
         self.nasabah.refresh_from_db()
-        self.assertEqual(self.nasabah.no_hp, "+628111111111")
+        self.assertEqual(self.nasabah.no_hp, "+628233333333")
 
     def test_ubah_email_nasabah_berakun_ditolak(self) -> None:
+        # Satu-satunya field yang tetap terkunci: email adalah kunci penautan
+        # ke akun Google, dan tidak ada penjaga lain pada jalur ini.
         response = self._ubah(email="budi.baru@example.com")
 
         self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.data["error"],
+            "Email nasabah dengan akun tidak dapat diubah",
+        )
         self.nasabah.refresh_from_db()
         self.assertEqual(self.nasabah.email, "budi@example.com")
 
