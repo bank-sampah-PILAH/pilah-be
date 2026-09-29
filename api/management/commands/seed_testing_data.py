@@ -8,7 +8,7 @@ from uuid import UUID
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import F, Sum
 from django.utils import timezone
 
 from api.models import (
@@ -17,6 +17,7 @@ from api.models import (
     DetailTransaksi,
     JenisSampah,
     Nasabah,
+    Pencairan,
     Saldo,
     Transaksi,
     User,
@@ -50,6 +51,12 @@ DETAIL_TWO_ID = UUID("00000000-0000-4000-8000-000000000062")
 DETAIL_THREE_ID = UUID("00000000-0000-4000-8000-000000000063")
 DETAIL_FOUR_ID = UUID("00000000-0000-4000-8000-000000000064")
 APPROVAL_LOG_ID = UUID("00000000-0000-4000-8000-000000000071")
+HISTORY_TRANSACTION_ID_BASE = UUID("00000000-0000-4000-8000-000000000100")
+HISTORY_DETAIL_ID_BASE = UUID("00000000-0000-4000-8000-000000000300")
+HISTORY_PAYOUT_ID_BASE = UUID("00000000-0000-4000-8000-000000000500")
+DUMMY_CUSTOMER_ID_BASE = UUID("00000000-0000-4000-8000-000000000700")
+HISTORY_ROWS_PER_CUSTOMER = 110
+DUMMY_CUSTOMER_COUNT = 60
 
 
 @dataclass(frozen=True)
@@ -126,9 +133,13 @@ class Command(BaseCommand):
             self._seed(identities)
 
         self.stdout.write(self.style.SUCCESS(f"Seeded testing data for {environment} environment"))
+        customer_count = 2 + DUMMY_CUSTOMER_COUNT
+        history_count = HISTORY_ROWS_PER_CUSTOMER * 2
         self.stdout.write(
-            "Fixture includes 3 banks, 6 users, 2 customers, 4 waste types, "
-            "3 transactions, and recalculated balances."
+            "Fixture includes 3 banks, 6 users, "
+            f"{customer_count} customers, 4 waste types, "
+            f"{3 + history_count} setoran, {history_count} pencairan, "
+            "and recalculated balances."
         )
 
     @staticmethod
@@ -351,11 +362,121 @@ class Command(BaseCommand):
             items=((jenis_logam, Decimal("1.500")),),
         )
 
+        self._seed_extended_data(
+            bank=active_bank,
+            pengurus=pengurus,
+            customers=(customer_one, customer_two),
+            waste_types=(jenis_plastik, jenis_kardus, jenis_kaca, jenis_logam),
+            now=now,
+        )
+
         for customer in (customer_one, customer_two):
-            total = Transaksi.objects.filter(nasabah=customer).aggregate(total=Sum("total_nilai"))[
-                "total"
-            ] or Decimal("0.00")
-            Saldo.objects.update_or_create(nasabah=customer, defaults={"total_saldo": total})
+            setoran = Transaksi.objects.filter(nasabah=customer).aggregate(
+                total=Sum("total_nilai")
+            )["total"] or Decimal("0.00")
+            pencairan = Pencairan.objects.filter(nasabah=customer).aggregate(
+                total=Sum(F("saldo_sebelum") - F("saldo_sesudah"))
+            )["total"] or Decimal("0.00")
+            Saldo.objects.update_or_create(
+                nasabah=customer, defaults={"total_saldo": setoran - pencairan}
+            )
+
+    def _seed_extended_data(
+        self,
+        *,
+        bank: BankSampah,
+        pengurus: User,
+        customers: tuple[Nasabah, ...],
+        waste_types: tuple[JenisSampah, ...],
+        now: datetime,
+    ) -> None:
+        today = timezone.localdate()
+        for index in range(DUMMY_CUSTOMER_COUNT):
+            number = index + 1
+            status, is_active = (
+                (Nasabah.Status.APPROVED, True),
+                (Nasabah.Status.APPROVED, False),
+                (Nasabah.Status.PENDING, True),
+            )[index % 3]
+            Nasabah.objects.update_or_create(
+                pk=UUID(int=DUMMY_CUSTOMER_ID_BASE.int + index),
+                defaults={
+                    "user": None,
+                    "bank_sampah": bank,
+                    "nomor": f"NAS-DEMO-{number:04d}",
+                    "nama": f"Nasabah Demo {number:04d}",
+                    "jenis_kelamin": (
+                        Nasabah.Gender.MALE if index % 2 == 0 else Nasabah.Gender.FEMALE
+                    ),
+                    "tanggal_lahir": date(1970 + index % 30, 1 + index % 12, 1 + index % 27),
+                    "alamat": f"Jl. Demo No. {number}",
+                    "no_hp": f"+628155{number:07d}",
+                    "email": f"nasabah.demo.{number:04d}@example.test",
+                    "tanggal_daftar": today - timedelta(days=index),
+                    "is_active": is_active,
+                    "status": status,
+                },
+            )
+
+        for customer_index, customer in enumerate(customers):
+            running_balance = Decimal("0.00")
+            customer_offset = customer_index * HISTORY_ROWS_PER_CUSTOMER
+            for row_index in range(HISTORY_ROWS_PER_CUSTOMER):
+                jenis = waste_types[row_index % len(waste_types)]
+                weight = Decimal(1 + row_index % 5)
+                transaction_time = (
+                    now
+                    - timedelta(days=365)
+                    + timedelta(days=358 * row_index // (HISTORY_ROWS_PER_CUSTOMER - 1))
+                )
+                total = jenis.harga_per_kg * weight
+                self._upsert_transaction(
+                    transaction_id=UUID(
+                        int=HISTORY_TRANSACTION_ID_BASE.int + customer_offset + row_index
+                    ),
+                    detail_ids=(
+                        UUID(int=HISTORY_DETAIL_ID_BASE.int + customer_offset + row_index),
+                    ),
+                    bank=bank,
+                    pengurus=pengurus,
+                    customer=customer,
+                    transaction_time=transaction_time,
+                    note=f"Setoran historis {row_index + 1:03d}",
+                    items=((jenis, weight),),
+                )
+
+                nominal = (total / 2).quantize(Decimal(1))
+                saldo_sebelum = running_balance + total
+                saldo_sesudah = saldo_sebelum - nominal
+                metode = Pencairan.Metode.TUNAI if row_index % 2 == 0 else Pencairan.Metode.TRANSFER
+                keterangan = f"Pencairan historis {row_index + 1:03d}"
+                defaults = {
+                    "nasabah": customer,
+                    "bank_sampah": bank,
+                    "dicatat_oleh": pengurus,
+                    "tanggal": transaction_time,
+                    "nominal": nominal,
+                    "metode": metode,
+                    "keterangan": keterangan,
+                    "saldo_sebelum": saldo_sebelum,
+                    "saldo_sesudah": saldo_sesudah,
+                }
+                pencairan, created = Pencairan.objects.get_or_create(
+                    pk=UUID(int=HISTORY_PAYOUT_ID_BASE.int + customer_offset + row_index),
+                    defaults=defaults,
+                )
+                if not created:
+                    # Preserve the original event time on reruns, like setoran rows.
+                    pencairan.nasabah = customer
+                    pencairan.bank_sampah = bank
+                    pencairan.dicatat_oleh = pengurus
+                    pencairan.nominal = nominal
+                    pencairan.metode = metode
+                    pencairan.keterangan = keterangan
+                    pencairan.saldo_sebelum = saldo_sebelum
+                    pencairan.saldo_sesudah = saldo_sesudah
+                    pencairan.save()
+                running_balance = saldo_sesudah
 
     @staticmethod
     def _upsert_user(
@@ -473,6 +594,7 @@ class Command(BaseCommand):
                 "no_hp": phone,
                 "email": user.email,
                 "is_active": True,
+                "status": Nasabah.Status.APPROVED,
             },
         )
         return customer

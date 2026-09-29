@@ -1,11 +1,14 @@
 import os
 from argparse import ArgumentParser, Namespace
+from datetime import timedelta
+from decimal import Decimal
 from io import StringIO
 from unittest.mock import patch
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from api.management.commands.seed_testing_data import Command
 from api.models import (
@@ -14,6 +17,7 @@ from api.models import (
     DetailTransaksi,
     JenisSampah,
     Nasabah,
+    Pencairan,
     Saldo,
     Transaksi,
     User,
@@ -117,12 +121,58 @@ class SeedTestingDataCommandTests(TestCase):
             ).exists()
         )
         self.assertTrue(User.objects.filter(email="superadmin.demo@example.com").exists())
-        self.assertEqual(Nasabah.objects.count(), 2)
+        self.assertEqual(Nasabah.objects.count(), 62)
+        self.assertEqual(
+            Nasabah.objects.filter(
+                nomor__startswith="NAS-DEMO-",
+                status=Nasabah.Status.APPROVED,
+                is_active=True,
+            ).count(),
+            20,
+        )
+        self.assertEqual(
+            Nasabah.objects.filter(
+                nomor__startswith="NAS-DEMO-",
+                status=Nasabah.Status.APPROVED,
+                is_active=False,
+            ).count(),
+            20,
+        )
+        self.assertEqual(
+            Nasabah.objects.filter(
+                nomor__startswith="NAS-DEMO-", status=Nasabah.Status.PENDING
+            ).count(),
+            20,
+        )
         self.assertEqual(JenisSampah.objects.count(), 4)
-        self.assertEqual(Transaksi.objects.count(), 3)
-        self.assertEqual(DetailTransaksi.objects.count(), 4)
+        self.assertEqual(Transaksi.objects.count(), 223)
+        self.assertEqual(Pencairan.objects.count(), 220)
+        self.assertEqual(DetailTransaksi.objects.count(), 224)
         self.assertEqual(Saldo.objects.count(), 2)
         self.assertEqual(BankSampahApprovalLog.objects.count(), 1)
+
+        for customer in Nasabah.objects.filter(user__isnull=False):
+            self.assertGreaterEqual(Transaksi.objects.filter(nasabah=customer).count(), 100)
+            payouts = Pencairan.objects.filter(nasabah=customer)
+            self.assertGreaterEqual(payouts.count(), 100)
+            setoran_total = sum(
+                Transaksi.objects.filter(nasabah=customer).values_list("total_nilai", flat=True),
+                Decimal("0.00"),
+            )
+            payout_total = sum(
+                (payout.saldo_sebelum - payout.saldo_sesudah for payout in payouts),
+                Decimal("0.00"),
+            )
+            self.assertEqual(
+                Saldo.objects.get(nasabah=customer).total_saldo,
+                setoran_total - payout_total,
+            )
+        now = timezone.now()
+        oldest_setoran = Transaksi.objects.earliest("tanggal").tanggal
+        oldest_pencairan = Pencairan.objects.earliest("tanggal").tanggal
+        for oldest in (oldest_setoran, oldest_pencairan):
+            self.assertGreater(oldest, now - timedelta(days=366))
+            self.assertLessEqual(oldest, now - timedelta(days=365))
 
         counts = {
             "banks": BankSampah.objects.count(),
@@ -130,6 +180,7 @@ class SeedTestingDataCommandTests(TestCase):
             "nasabah": Nasabah.objects.count(),
             "jenis": JenisSampah.objects.count(),
             "transaksi": Transaksi.objects.count(),
+            "pencairan": Pencairan.objects.count(),
             "details": DetailTransaksi.objects.count(),
             "saldo": Saldo.objects.count(),
             "approval_logs": BankSampahApprovalLog.objects.count(),
@@ -147,6 +198,7 @@ class SeedTestingDataCommandTests(TestCase):
                 "nasabah": Nasabah.objects.count(),
                 "jenis": JenisSampah.objects.count(),
                 "transaksi": Transaksi.objects.count(),
+                "pencairan": Pencairan.objects.count(),
                 "details": DetailTransaksi.objects.count(),
                 "saldo": Saldo.objects.count(),
                 "approval_logs": BankSampahApprovalLog.objects.count(),
@@ -183,9 +235,7 @@ class SeedTestingDataCommandTests(TestCase):
 
     @override_settings(DEBUG=False)
     def test_local_environment_requires_debug(self) -> None:
-        with self.assertRaisesMessage(
-            CommandError, "Local testing data requires DJANGO_DEBUG=true"
-        ):
+        with self.assertRaisesRegex(CommandError, "Local testing data requires DJANGO_DEBUG=true"):
             call_command("seed_testing_data")
 
     @override_settings(DEBUG=True)
@@ -197,7 +247,7 @@ class SeedTestingDataCommandTests(TestCase):
             is_profile_complete=True,
         )
 
-        with self.assertRaisesMessage(CommandError, "non-fixture account"):
+        with self.assertRaisesRegex(CommandError, "non-fixture account"):
             call_command("seed_testing_data")
 
         user.refresh_from_db()
@@ -219,20 +269,25 @@ class SeedTestingDataCommandTests(TestCase):
         self.assertEqual(users.get().nama, "Pengurus PILAH E2E")
 
     @override_settings(DEBUG=True)
-    def test_reseed_preserves_transaction_dates(self) -> None:
+    def test_reseed_preserves_history_dates_and_does_not_duplicate_rows(self) -> None:
         call_command("seed_testing_data")
 
-        dates = {item.pk: item.tanggal for item in Transaksi.objects.all()}
-        self.assertEqual(len(dates), 3)
+        setoran_dates = {item.pk: item.tanggal for item in Transaksi.objects.all()}
+        pencairan_dates = {item.pk: item.tanggal for item in Pencairan.objects.all()}
+        self.assertEqual(len(setoran_dates), 223)
+        self.assertEqual(len(pencairan_dates), 220)
 
         call_command("seed_testing_data")
 
-        for pk, tanggal in dates.items():
+        for pk, tanggal in setoran_dates.items():
             self.assertEqual(Transaksi.objects.get(pk=pk).tanggal, tanggal)
+        for pk, tanggal in pencairan_dates.items():
+            self.assertEqual(Pencairan.objects.get(pk=pk).tanggal, tanggal)
+        self.assertEqual(Nasabah.objects.filter(nomor__startswith="NAS-DEMO-").count(), 60)
 
     @override_settings(DEBUG=False)
     def test_staging_requires_explicit_confirmation(self) -> None:
-        with self.assertRaisesMessage(CommandError, "SEED-PILAH-STAGING-DATA"):
+        with self.assertRaisesRegex(CommandError, "SEED-PILAH-STAGING-DATA"):
             call_command("seed_testing_data", environment="staging")
 
         call_command(
