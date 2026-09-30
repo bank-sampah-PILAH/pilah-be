@@ -12,7 +12,10 @@ aturannya tidak tersebar di beberapa view.
 
 from typing import Any, Mapping
 
+from rest_framework.exceptions import ValidationError
+
 from api.models import Nasabah
+from api.validators import normalize_indonesian_phone
 
 # Email adalah kunci penautan keanggotaan ke akun Google, dan tidak ada
 # penjaga lain pada jalur update: pemeriksaan email yang ada hanya keunikan
@@ -65,7 +68,22 @@ def profil_berbeda(nasabah: Nasabah) -> list[str]:
     akun = profil_akun(nasabah)
     if akun is None:
         return []
-    return [field for field in FIELD_PROFIL if akun[field] != getattr(nasabah, field)]
+    return [
+        field
+        for field in FIELD_PROFIL
+        if _nilai_banding(field, akun[field]) != _nilai_banding(field, getattr(nasabah, field))
+    ]
+
+
+def _nilai_banding(field: str, nilai: Any) -> Any:
+    """Nomor HP dibandingkan dalam bentuk +62, karena baris yang ditulis di luar
+    serializer dapat menyimpan ``08…`` untuk nomor yang sama dengan akunnya."""
+    if field != "no_hp":
+        return nilai
+    try:
+        return normalize_indonesian_phone(nilai)
+    except ValidationError:
+        return nilai
 
 
 def sinkronkan_dari_akun(nasabah: Nasabah) -> None:

@@ -6,7 +6,7 @@ import requests
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils import timezone
@@ -541,14 +541,23 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         if akun is None:
             return Response({"error": "Nasabah belum memiliki akun"}, status=400)
         no_hp = akun["no_hp"]
+        no_hp_terpakai = Response(
+            {"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422
+        )
         if (
             no_hp
             and Nasabah.objects.filter(bank_sampah=nasabah.bank_sampah, no_hp=no_hp)
             .exclude(id=nasabah.id)
             .exists()
         ):
-            return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
-        sinkronkan_dari_akun(nasabah)
+            return no_hp_terpakai
+        # Pemeriksaan di atas tidak menutup balapan: nomor yang sama dapat
+        # dikomit orang lain sebelum `save()`, dan constraint yang menolaknya.
+        try:
+            with transaction.atomic():
+                sinkronkan_dari_akun(nasabah)
+        except IntegrityError:
+            return no_hp_terpakai
         return Response(NasabahDetailSerializer(nasabah).data)
 
     @action(detail=True, methods=["patch"], url_path="status")

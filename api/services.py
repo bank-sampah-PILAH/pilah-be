@@ -495,6 +495,17 @@ class OnboardingService:
             # concurrent reapply requests both passing the check above.
             # A losing request affects 0 rows and falls through to the
             # error below instead of silently double-applying.
+            #
+            # The account's phone is copied too, with the same collision guard
+            # as a first application: it may now belong to another row here.
+            if (
+                Nasabah.objects.filter(bank_sampah=bank, no_hp=user.no_hp)
+                .exclude(pk=own_record.pk)
+                .exists()
+            ):
+                raise ValueError(
+                    "Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus"
+                )
             updated = Nasabah.objects.filter(
                 pk=own_record.pk, status=Nasabah.Status.REJECTED
             ).update(
@@ -502,6 +513,7 @@ class OnboardingService:
                 jenis_kelamin=user.jenis_kelamin,
                 tanggal_lahir=user.tanggal_lahir,
                 alamat=user.alamat,
+                no_hp=user.no_hp,
                 status=Nasabah.Status.PENDING,
                 is_active=True,
                 updated_at=timezone.now(),
