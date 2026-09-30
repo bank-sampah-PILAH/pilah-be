@@ -2,6 +2,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, cast
+from uuid import UUID
 
 from django.conf import settings
 from django.core.signing import TimestampSigner
@@ -699,7 +700,28 @@ class TransactionCreateSerializer(serializers.Serializer[Any]):
             raise serializers.ValidationError(
                 f"Total berat satu setoran maksimal {format_ribuan(BERAT_MAKS_PER_SETORAN)} kg"
             )
-        return value
+        # Item dengan jenis sampah sama digabung jadi satu baris (CPBI-08):
+        # berat dijumlah, harga tetap dari master sehingga aman digabung.
+        merged: dict[UUID, dict[str, Any]] = {}
+        for item in value:
+            jid = item["jenis_sampah_id"]
+            if jid in merged:
+                merged[jid]["berat"] += item["berat"]
+            else:
+                merged[jid] = dict(item)
+        items = list(merged.values())
+        kelebihan = [
+            {
+                "berat": [
+                    f"Berat maksimal {format_ribuan(BERAT_MAKS_PER_ITEM)} kg untuk satu jenis sampah"
+                ]
+            }
+            for item in items
+            if item["berat"] > BERAT_MAKS_PER_ITEM
+        ]
+        if kelebihan:
+            raise serializers.ValidationError({"items": kelebihan})
+        return items
 
     def validate(self, attrs: Any) -> Any:
         # Harga hanya boleh berasal dari master jenis sampah. Menerima harga

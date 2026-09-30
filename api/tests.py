@@ -4419,9 +4419,16 @@ class SetoranTestBase(APITestCase):
         self.jenis = JenisSampah.objects.create(
             bank_sampah=self.bank,
             nomor="PLS-001",
-            nama_sampah="Plastik PET",
+            nama_sampah="Pastik PET",
             kategori=JenisSampah.Kategori.PLASTIK,
             harga_per_kg=Decimal("3333.00"),
+        )
+        self.jenis_lain = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="KRS-001",
+            nama_sampah="Kardus",
+            kategori=JenisSampah.Kategori.KERTAS,
+            harga_per_kg=Decimal("1000.00"),
         )
 
     def _setor(self, items: list[dict[str, Any]]) -> Any:
@@ -4573,15 +4580,48 @@ class ValidasiInputSetoranTests(SetoranTestBase):
         self.assertEqual(self._saldo(), "0.00")
 
     def test_total_berat_tepat_1000_kg_diterima(self) -> None:
-        jenis_id = str(self.jenis.id)
         response = self._setor(
             [
-                {"jenis_sampah_id": jenis_id, "berat": "500.000"},
-                {"jenis_sampah_id": jenis_id, "berat": "500.000"},
+                {"jenis_sampah_id": str(self.jenis.id), "berat": "500.000"},
+                {"jenis_sampah_id": str(self.jenis_lain.id), "berat": "500.000"},
             ]
         )
 
         self.assertEqual(response.status_code, 201)
+
+    def test_item_jenis_sama_digabung_satu_baris(self) -> None:
+        # CPBI-08: dua item dengan jenis sama digabung jadi satu baris detail,
+        # bukan dua item terpisah; beratnya dijumlah sebelum divalidasi.
+        jenis_id = str(self.jenis.id)
+        response = self._setor(
+            [
+                {"jenis_sampah_id": jenis_id, "berat": "10.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "20.000"},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual([item["berat"] for item in response.data["items"]], ["30.000"])
+        self.assertEqual(
+            DetailTransaksi.objects.filter(transaksi_id=response.data["id"]).count(), 1
+        )
+
+    def test_item_jenis_sama_digabung_melewati_batas_500_kg_ditolak(self) -> None:
+        # Batas per item berlaku atas total berat per jenis setelah penggabungan.
+        jenis_id = str(self.jenis.id)
+        response = self._setor(
+            [
+                {"jenis_sampah_id": jenis_id, "berat": "300.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "300.000"},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data["errors"]["items"]["items"][0]["berat"],
+            ["Berat maksimal 500 kg untuk satu jenis sampah"],
+        )
+        self.assertEqual(self._saldo(), "0.00")
 
     def test_item_dengan_subtotal_di_bawah_satu_rupiah_ditolak(self) -> None:
         # Harga master dipertahankan presisinya, tetapi item yang nilainya
