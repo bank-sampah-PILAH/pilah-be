@@ -24,6 +24,7 @@ from api.models import (
     Transaksi,
     User,
 )
+from apps.authentication.serializers import AuthUserSerializer  # noqa: F401
 from apps.bank_sampah.serializers import BankSampahApprovalListSerializer  # noqa: F401
 from apps.ledger.services import BalanceService, PencairanService
 from apps.nasabah.serializers import NasabahSerializer
@@ -35,6 +36,10 @@ def _validate_tanggal_pencairan(value: datetime) -> datetime:
     if value > timezone.now():
         raise serializers.ValidationError("Tanggal pencairan tidak boleh di masa depan")
     return value
+
+# Nested `source` paths shared by several serializers (one definition each).
+_BANK_SAMPAH_ID = "bank_sampah.id"
+_DICATAT_OLEH_ID = "dicatat_oleh.id"
 
 
 def _validate_nominal_pencairan(value: Decimal) -> Decimal:
@@ -87,9 +92,9 @@ class PencairanEditSerializer(serializers.Serializer[Any]):
 class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
     nasabah_id = serializers.UUIDField(source="nasabah.id")
     nasabah_nama = serializers.CharField(source="nasabah.nama")
-    bank_sampah_id = serializers.UUIDField(source="bank_sampah.id")
+    bank_sampah_id = serializers.UUIDField(source=_BANK_SAMPAH_ID)
     bank_sampah_nama = serializers.CharField(source="bank_sampah.nama")
-    dicatat_oleh = serializers.UUIDField(source="dicatat_oleh.id")
+    dicatat_oleh = serializers.UUIDField(source=_DICATAT_OLEH_ID)
     dicatat_oleh_nama = serializers.CharField(source="dicatat_oleh.nama")
     diperbarui = serializers.SerializerMethodField()
     tanggal_edit_minimum = serializers.SerializerMethodField()
@@ -360,8 +365,8 @@ class DetailTransaksiSerializer(serializers.ModelSerializer[Model]):
 class TransactionDetailSerializer(serializers.ModelSerializer[Transaksi]):
     nasabah_id = serializers.UUIDField(source="nasabah.id")
     nasabah_nama = serializers.CharField(source="nasabah.nama")
-    bank_sampah_id = serializers.UUIDField(source="bank_sampah.id")
-    dicatat_oleh = serializers.UUIDField(source="dicatat_oleh.id")
+    bank_sampah_id = serializers.UUIDField(source=_BANK_SAMPAH_ID)
+    dicatat_oleh = serializers.UUIDField(source=_DICATAT_OLEH_ID)
     items = DetailTransaksiSerializer(many=True)
     saldo_setelah_transaksi = serializers.SerializerMethodField()
 
@@ -393,7 +398,7 @@ class TransactionListSerializer(serializers.ModelSerializer[Model]):
     nasabah_inisial = serializers.SerializerMethodField()
     jenis_sampah_utama = serializers.SerializerMethodField()
     total_berat_kg = serializers.SerializerMethodField()
-    dicatat_oleh = serializers.UUIDField(source="dicatat_oleh.id")
+    dicatat_oleh = serializers.UUIDField(source=_DICATAT_OLEH_ID)
 
     class Meta:
         model = Transaksi
@@ -435,7 +440,7 @@ class WATemplateSerializer(serializers.Serializer[Any]):
 
 
 class JadwalKegiatanSerializer(serializers.ModelSerializer[Model]):
-    bank_sampah_id = serializers.UUIDField(source="bank_sampah.id", read_only=True)
+    bank_sampah_id = serializers.UUIDField(source=_BANK_SAMPAH_ID, read_only=True)
     dibuat_oleh_id = serializers.UUIDField(source="dibuat_oleh.id", read_only=True)
     penerima_ids = serializers.PrimaryKeyRelatedField(
         source="penerima",
