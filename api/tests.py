@@ -3951,6 +3951,58 @@ class ProfilNasabahBerakunTests(APITestCase):
         for field, nilai in sebelum.items():
             self.assertEqual(getattr(self.pemilik_akun, field), nilai, field)
 
+    def _atur_akun(self, **profil: Any) -> None:
+        for field, nilai in profil.items():
+            setattr(self.pemilik_akun, field, nilai)
+        self.pemilik_akun.save()
+
+    def test_detail_menampilkan_profil_akun_dan_field_yang_berbeda(self) -> None:
+        # Catatan pengurus dan profil akun terpisah, jadi pengurus perlu melihat
+        # apa yang nasabah sendiri isikan dan bagian mana yang berbeda.
+        self._atur_akun(
+            nama="Budi Santoso",
+            jenis_kelamin=User.Gender.MALE,
+            no_hp="+628999999999",
+            alamat="Jl. Melati No. 99",
+        )
+
+        response = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["profil_akun"]["no_hp"], "+628999999999")
+        self.assertEqual(response.data["profil_akun"]["alamat"], "Jl. Melati No. 99")
+        self.assertCountEqual(response.data["profil_berbeda"], ["no_hp", "alamat"])
+
+    def test_detail_tanpa_perbedaan_tidak_menandai_apa_pun(self) -> None:
+        self._atur_akun(
+            nama=self.nasabah.nama,
+            jenis_kelamin=self.nasabah.jenis_kelamin,
+            tanggal_lahir=self.nasabah.tanggal_lahir,
+            no_hp=self.nasabah.no_hp,
+            alamat=self.nasabah.alamat,
+        )
+
+        response = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["profil_berbeda"], [])
+
+    def test_detail_nasabah_tanpa_akun_tidak_membawa_profil_akun(self) -> None:
+        tanpa_akun = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0009",
+            nama="Siti Aminah",
+            email="siti@example.com",
+            no_hp="+628222222222",
+            alamat="Jl. Kenanga No. 5",
+        )
+
+        response = self.client.get(f"/api/v1/nasabah/{tanpa_akun.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data["profil_akun"])
+        self.assertEqual(response.data["profil_berbeda"], [])
+
     def test_ubah_email_nasabah_berakun_ditolak(self) -> None:
         # Satu-satunya field yang tetap terkunci: email adalah kunci penautan
         # ke akun Google, dan tidak ada penjaga lain pada jalur ini.
