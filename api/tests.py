@@ -1748,6 +1748,51 @@ class APISpecTests(APITestCase):
         nasabah.refresh_from_db()
         self.assertEqual(nasabah.alamat, "Jl. Baru Yang Diperbaiki")
 
+    def test_nasabah_can_fix_phone_after_registration_failed_on_collision(self) -> None:
+        """Profile lands, register-nasabah fails on a phone already used in the
+        chosen bank; the nasabah must still be able to change the phone and
+        retry, not be stuck behind "Profil sudah lengkap"."""
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-9310",
+            nama="Orang Lain",
+            alamat="Jl. X",
+            no_hp="+628555555080",
+            status=Nasabah.Status.APPROVED,
+        )
+        customer = User.objects.create_user(
+            email="collide@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        def put_profile(no_hp: str) -> Any:
+            return self.client.put(
+                "/api/v1/onboarding/profile",
+                {
+                    "nama": "Nasabah PILAH",
+                    "jenis_kelamin": "laki-laki",
+                    "tanggal_lahir": "1990-01-01",
+                    "no_hp": no_hp,
+                    "alamat": "Jl. Baru",
+                },
+                format="json",
+            )
+
+        self.assertEqual(put_profile("+628555555080").status_code, 200)
+        failed = self.client.post(
+            "/api/v1/onboarding/nasabah", {"bank_sampah_id": str(self.bank.id)}, format="json"
+        )
+        self.assertEqual(failed.status_code, 400)
+
+        self.assertEqual(put_profile("+628555555081").status_code, 200)
+        retry = self.client.post(
+            "/api/v1/onboarding/nasabah", {"bank_sampah_id": str(self.bank.id)}, format="json"
+        )
+        self.assertEqual(retry.status_code, 201, retry.data)
+
     def test_complete_profile_refuses_resubmission_once_registration_approved(
         self,
     ) -> None:
