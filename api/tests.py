@@ -1605,12 +1605,12 @@ class APISpecTests(APITestCase):
         nasabah.refresh_from_db()
         self.assertIsNone(nasabah.user_id)
 
-    def test_complete_profile_overrides_linked_nasabah_record_with_users_own_data(
+    def test_complete_profile_leaves_linked_nasabah_record_untouched(
         self,
     ) -> None:
-        """The redesign's whole point: once linked, the user's own
-        complete_profile submission overrides whatever the pengurus
-        originally typed in, not the other way around."""
+        """The account's profile and the bank sampah's record of the nasabah
+        are separate: completing the profile never rewrites what the pengurus
+        typed into the linked Nasabah record."""
         nasabah = Nasabah.objects.create(
             bank_sampah=self.bank,
             nomor="NAS-0001",
@@ -1647,19 +1647,19 @@ class APISpecTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         nasabah.refresh_from_db()
-        self.assertEqual(nasabah.nama, "Nama Dari User")
-        self.assertEqual(nasabah.jenis_kelamin, "laki-laki")
-        self.assertEqual(str(nasabah.tanggal_lahir), "1995-06-06")
-        self.assertEqual(nasabah.no_hp, "+6281234500002")
-        self.assertEqual(nasabah.alamat, "Alamat Dari User")
+        self.assertEqual(nasabah.nama, "Nama Dari Pengurus")
+        self.assertEqual(nasabah.jenis_kelamin, "perempuan")
+        self.assertEqual(str(nasabah.tanggal_lahir), "1980-05-05")
+        self.assertEqual(nasabah.no_hp, "081234500001")
+        self.assertEqual(nasabah.alamat, "Alamat Dari Pengurus")
+        assert nasabah.user is not None
+        self.assertEqual(nasabah.user.nama, "Nama Dari User")
 
-    def test_complete_profile_rejects_no_hp_collision_with_unrelated_nasabah_record(
+    def test_complete_profile_ignores_no_hp_used_by_unrelated_nasabah_record(
         self,
     ) -> None:
-        """Propagating the user's own no_hp onto their linked Nasabah record
-        must not silently violate the (bank_sampah, no_hp) constraint by
-        colliding with someone else's unrelated record — same reasoning as
-        register_nasabah's phone-collision guard."""
+        """The account's phone is not copied onto the linked Nasabah record,
+        so it can't collide with someone else's record in that bank."""
         nasabah = Nasabah.objects.create(
             bank_sampah=self.bank,
             nomor="NAS-0001",
@@ -1697,19 +1697,18 @@ class APISpecTests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 200, response.data)
         nasabah.refresh_from_db()
         self.assertEqual(nasabah.no_hp, "081234500003")
         user = User.objects.get(email="collision-me@example.com")
-        self.assertFalse(user.is_profile_complete)
+        self.assertTrue(user.is_profile_complete)
 
     def test_complete_profile_resubmission_allowed_while_registration_pending(
         self,
     ) -> None:
         """A nasabah whose profile already landed can still fix it while
-        pengurus hasn't reviewed their registration yet — the edit
-        propagates to the pending Nasabah record, same as the first
-        submission."""
+        pengurus hasn't reviewed their registration yet; the pending
+        Nasabah record is the bank sampah's copy and stays as it was."""
         customer = User.objects.create_user(
             email="pending-edit@example.com",
             nama="Nasabah PILAH",
@@ -1746,7 +1745,9 @@ class APISpecTests(APITestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         nasabah.refresh_from_db()
-        self.assertEqual(nasabah.alamat, "Jl. Baru Yang Diperbaiki")
+        self.assertEqual(nasabah.alamat, "Jl. Lama")
+        customer.refresh_from_db()
+        self.assertEqual(customer.alamat, "Jl. Baru Yang Diperbaiki")
 
     def test_nasabah_can_fix_phone_after_registration_failed_on_collision(self) -> None:
         """Profile lands, register-nasabah fails on a phone already used in the
@@ -1795,7 +1796,7 @@ class APISpecTests(APITestCase):
 
     def test_nasabah_can_edit_profile_whatever_their_membership_status(self) -> None:
         """A nasabah owns their profile: approved or rejected memberships
-        don't lock it, and the edit propagates to the membership row."""
+        don't lock it, and the edit never reaches the membership row."""
         for index, status in enumerate([Nasabah.Status.APPROVED, Nasabah.Status.REJECTED]):
             with self.subTest(status=status):
                 customer = User.objects.create_user(
@@ -1834,8 +1835,50 @@ class APISpecTests(APITestCase):
                 )
 
                 self.assertEqual(response.status_code, 200, response.data)
+                customer.refresh_from_db()
+                self.assertEqual(customer.alamat, "Jl. Baru")
                 nasabah.refresh_from_db()
-                self.assertEqual(nasabah.alamat, "Jl. Baru")
+                self.assertEqual(nasabah.alamat, "Jl. Lama")
+
+    def test_own_profile_patch_leaves_membership_record_untouched(self) -> None:
+        """Editing your own profile changes the account only; each bank
+        sampah keeps its own record of the nasabah."""
+        customer = User.objects.create_user(
+            email="patch-me@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1990-01-01",
+            no_hp="+628555555090",
+            alamat="Jl. Lama",
+            is_profile_complete=True,
+        )
+        nasabah = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-9390",
+            email=customer.email,
+            nama="Nama Versi Pengurus",
+            alamat="Alamat Versi Pengurus",
+            no_hp="+628555555091",
+            status=Nasabah.Status.APPROVED,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.patch(
+            "/api/v1/nasabah/me/profil",
+            {"nama": "Nama Baru Nasabah", "no_hp": "081999999990"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        customer.refresh_from_db()
+        self.assertEqual(customer.nama, "Nama Baru Nasabah")
+        nasabah.refresh_from_db()
+        self.assertEqual(nasabah.nama, "Nama Versi Pengurus")
+        self.assertEqual(nasabah.alamat, "Alamat Versi Pengurus")
+        self.assertEqual(nasabah.no_hp, "+628555555091")
 
     def test_jenis_sampah_and_transaction_update_saldo(self) -> None:
         nasabah = Nasabah.objects.create(
