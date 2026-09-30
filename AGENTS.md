@@ -36,6 +36,11 @@
   PIL-223, OWASP A01). Email adalah kunci penautan akun dan tidak dijaga oleh
   apa pun selain aturan ini. Daftar field yang terkunci ada di
   `FIELD_TERKUNCI`.
+- Pengurus melihat profil yang diisikan nasabah sendiri lewat `profil_akun` dan
+  `profil_berbeda` pada detail nasabah (`api/keanggotaan.py`), dan dapat
+  menyamakan catatannya dengan `POST /nasabah/{id}/sinkron-profil`. Salinan itu
+  satu arah (akun ke baris), hanya untuk bank sampah pemanggil, dan sesudahnya
+  catatan tetap dapat disunting. Jangan menambah penyalinan otomatis.
 - Nomor HP unik per bank sampah pada tabel keanggotaan saja, dan hanya
   diperiksa pada baris yang sedang ditulis. `User.no_hp` tidak unik.
 - Respons nasabah membawa `punya_akun` (read-only) supaya klien dapat

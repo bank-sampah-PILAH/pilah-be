@@ -23,6 +23,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.keanggotaan import (
     email_terkunci,
+    profil_akun,
+    sinkronkan_dari_akun,
 )
 from api.models import (
     BankSampah,
@@ -527,6 +529,27 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             )
         self.perform_update(serializer)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="sinkron-profil")
+    def sinkron_profil(self, request: Request, pk: str | None = None) -> Response:
+        """Samakan catatan nasabah ini dengan profil yang diisikan nasabah
+        sendiri pada akunnya. Pengurus tetap dapat menyuntingnya lagi."""
+        nasabah = self.get_object()
+        if not nasabah.is_active:
+            return Response({"error": "Nasabah nonaktif tidak bisa diedit"}, status=403)
+        akun = profil_akun(nasabah)
+        if akun is None:
+            return Response({"error": "Nasabah belum memiliki akun"}, status=400)
+        no_hp = akun["no_hp"]
+        if (
+            no_hp
+            and Nasabah.objects.filter(bank_sampah=nasabah.bank_sampah, no_hp=no_hp)
+            .exclude(id=nasabah.id)
+            .exists()
+        ):
+            return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
+        sinkronkan_dari_akun(nasabah)
+        return Response(NasabahDetailSerializer(nasabah).data)
 
     @action(detail=True, methods=["patch"], url_path="status")
     def set_status(self, request: Request, pk: str | None = None) -> Response:

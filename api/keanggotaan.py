@@ -66,3 +66,17 @@ def profil_berbeda(nasabah: Nasabah) -> list[str]:
     if akun is None:
         return []
     return [field for field in FIELD_PROFIL if akun[field] != getattr(nasabah, field)]
+
+
+def sinkronkan_dari_akun(nasabah: Nasabah) -> None:
+    """Salin profil akun ke catatan bank sampah ini, atas permintaan pengurus.
+
+    Satu arah saja, dan hanya untuk baris ini: nomor anggota, email, dan status
+    tidak disentuh, begitu pula akun dan keanggotaan di bank sampah lain.
+    """
+    akun = profil_akun(nasabah)
+    if akun is None:
+        return
+    for field, nilai in akun.items():
+        setattr(nasabah, field, nilai)
+    nasabah.save(update_fields=[*akun, "updated_at"])
