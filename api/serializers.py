@@ -710,17 +710,9 @@ class TransactionCreateSerializer(serializers.Serializer[Any]):
             else:
                 merged[jid] = dict(item)
         items = list(merged.values())
-        kelebihan = [
-            {
-                "berat": [
-                    f"Berat maksimal {format_ribuan(BERAT_MAKS_PER_ITEM)} kg untuk satu jenis sampah"
-                ]
-            }
-            for item in items
-            if item["berat"] > BERAT_MAKS_PER_ITEM
-        ]
-        if kelebihan:
-            raise serializers.ValidationError({"items": kelebihan})
+        # Batas 500 kg tetap per baris input (sudah dijaga TransactionItemInputSerializer);
+        # total gabungan per jenis tidak di-cap tambahan — dua baris 300 kg yang sama-sama
+        # valid tidak boleh ditolak hanya karena kebetulan satu jenis (rev PR 70).
         return items
 
     def validate(self, attrs: Any) -> Any:

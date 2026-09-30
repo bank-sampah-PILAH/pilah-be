@@ -316,6 +316,9 @@ class Transaksi(TimestampedModel):
     status_wa = models.CharField(
         max_length=20, choices=StatusWA.choices, default=StatusWA.BELUM_DIKIRIM
     )
+    # PBI-12: kunci idempotensi POST setoran. Null boleh — setoran lama dan
+    # klien tanpa header tidak memilikinya.
+    idempotency_key = models.CharField(max_length=64, blank=True, null=True, unique=True)
 
     class Meta:
         db_table = "transaksi"

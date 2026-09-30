@@ -4438,8 +4438,54 @@ class SetoranTestBase(APITestCase):
             format="json",
         )
 
+    def _setor_dengan_key(self, items: list[dict[str, Any]], key: str) -> Any:
+        return self.client.post(
+            "/api/v1/transaksi",
+            {"nasabah_id": str(self.nasabah.id), "items": items},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=key,
+        )
+
     def _saldo(self) -> Any:
         return self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo").data["total_saldo"]
+
+
+class IdempotensiSetoranTests(SetoranTestBase):
+    """PBI-12: POST ulang dengan Idempotency-Key tidak mencatat setoran dua kali."""
+
+    def _items(self) -> list[dict[str, Any]]:
+        return [{"jenis_sampah_id": str(self.jenis.id), "berat": "1.000"}]
+
+    def test_post_ulang_dengan_key_sama_mengembalikan_transaksi_lama(self) -> None:
+        pertama = self._setor_dengan_key(self._items(), "retry-nasabah-0001")
+        ulang = self._setor_dengan_key(self._items(), "retry-nasabah-0001")
+
+        self.assertEqual(pertama.status_code, 201)
+        self.assertEqual(ulang.status_code, 200)
+        self.assertEqual(ulang.data["id"], pertama.data["id"])
+        self.assertEqual(Transaksi.objects.count(), 1)
+        # Saldo hanya masuk sekali.
+        self.assertEqual(self._saldo(), "3333.00")
+
+    def test_key_tanpa_header_tetap_buat_transaksi_biasa(self) -> None:
+        self._setor(self._items())
+        self._setor(self._items())
+
+        self.assertEqual(Transaksi.objects.count(), 2)
+
+    def test_key_berbeda_membuat_transaksi_terpisah(self) -> None:
+        self._setor_dengan_key(self._items(), "key-a")
+        self._setor_dengan_key(self._items(), "key-b")
+
+        self.assertEqual(Transaksi.objects.count(), 2)
+
+    def test_replay_tanpa_key_tetap_duplikat(self) -> None:
+        # Tanpa header, replay tetap duplikat — perlindungan hanya untuk
+        # klien yang mengirim Idempotency-Key.
+        self._setor_dengan_key(self._items(), "key-a")
+        self._setor(self._items())
+
+        self.assertEqual(Transaksi.objects.count(), 2)
 
 
 class KalkulasiSetoranTests(SetoranTestBase):
@@ -4606,8 +4652,28 @@ class ValidasiInputSetoranTests(SetoranTestBase):
             DetailTransaksi.objects.filter(transaksi_id=response.data["id"]).count(), 1
         )
 
-    def test_item_jenis_sama_digabung_melewati_batas_500_kg_ditolak(self) -> None:
-        # Batas per item berlaku atas total berat per jenis setelah penggabungan.
+    def test_item_jenis_sama_digabung_melewati_1000_kg_total_ditolak(self) -> None:
+        # Batas setoran tetap dari total semua item (1.000 kg), bukan cap
+        # tambahan per jenis: baris-baris valid boleh digabung, tapi total
+        # satu setoran tetap terjaga.
+        jenis_id = str(self.jenis.id)
+        response = self._setor(
+            [
+                {"jenis_sampah_id": jenis_id, "berat": "400.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "400.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "400.000"},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data["errors"]["items"], ["Total berat satu setoran maksimal 1.000 kg"]
+        )
+        self.assertEqual(self._saldo(), "0.00")
+
+    def test_item_jenis_sama_digabung_di_atas_500_kg_diterima(self) -> None:
+        # Penggabungan boleh melewati 500 kg per jenis: tiap baris input
+        # sudah lolos validator per item, gabungan baris valid tetap valid.
         jenis_id = str(self.jenis.id)
         response = self._setor(
             [
@@ -4616,12 +4682,8 @@ class ValidasiInputSetoranTests(SetoranTestBase):
             ]
         )
 
-        self.assertEqual(response.status_code, 422)
-        self.assertEqual(
-            response.data["errors"]["items"]["items"][0]["berat"],
-            ["Berat maksimal 500 kg untuk satu jenis sampah"],
-        )
-        self.assertEqual(self._saldo(), "0.00")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual([item["berat"] for item in response.data["items"]], ["600.000"])
 
     def test_item_dengan_subtotal_di_bawah_satu_rupiah_ditolak(self) -> None:
         # Harga master dipertahankan presisinya, tetapi item yang nilainya

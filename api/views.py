@@ -896,9 +896,21 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         return response
 
     def create(self, request: Request) -> Response:
+        # PBI-12: klien mengirim header Idempotency-Key agar POST ulang
+        # (retry/double-tap) tidak mencatat setoran dua kali. Key tanpa transaksi
+        # yang cocok dicatat; key yang sudah ada mengembalikan transaksi lama.
+        idempotency_key = request.headers.get("Idempotency-Key", "")[:64]
+        if idempotency_key:
+            existing = Transaksi.objects.filter(idempotency_key=idempotency_key).first()
+            if existing:
+                return Response(
+                    TransactionDetailSerializer(existing).data, status=status.HTTP_200_OK
+                )
         serializer = TransactionCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         transaksi = TransactionService.create_setoran(_user(request), serializer.validated_data)
+        if idempotency_key:
+            Transaksi.objects.filter(pk=transaksi.pk).update(idempotency_key=idempotency_key)
         return Response(TransactionDetailSerializer(transaksi).data, status=status.HTTP_201_CREATED)
 
     def retrieve(self, request: Request, pk: str | None = None) -> Response:
