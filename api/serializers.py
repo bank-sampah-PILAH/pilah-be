@@ -503,11 +503,12 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
         return getattr(getattr(obj, "saldo", None), "total_saldo", Decimal("0.00"))
 
     def get_punya_akun(self, obj: Any) -> bool:
-        """Menyatakan profil global keanggotaan ini dikelola pemiliknya sendiri.
+        """Menyatakan keanggotaan ini sudah tertaut ke akun nasabah.
 
-        Hanya penanda tampilan, supaya layar pengurus dapat menampilkan profil
-        sebagai read-only. Wewenangnya tetap ditegakkan di server oleh
-        ``api.keanggotaan.email_terkunci`` (PIL-223, PIL-288), bukan klien.
+        Hanya penanda tampilan, supaya layar pengurus dapat menonaktifkan field
+        email, satu-satunya yang terkunci begitu akun tertaut. Wewenangnya tetap
+        ditegakkan di server oleh ``api.keanggotaan.email_terkunci`` (PIL-288),
+        bukan klien.
         """
         return punya_akun(obj)
 
