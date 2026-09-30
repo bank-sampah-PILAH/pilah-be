@@ -12,12 +12,12 @@ from django.utils import timezone
 
 from api.models import BankSampah, JadwalKegiatan, Nasabah, Pencairan, Transaksi, User
 from api.serializers import (
-    AuthUserSerializer,
     JadwalKegiatanSerializer,
     PencairanDetailSerializer,
     TransactionDetailSerializer,
     TransactionListSerializer,
 )
+from apps.authentication.serializers import AuthUserSerializer
 
 
 class SerializerSourceTests(TestCase):

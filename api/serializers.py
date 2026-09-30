@@ -24,7 +24,6 @@ from api.models import (
     Transaksi,
     User,
 )
-from apps.authentication.serializers import AuthUserSerializer  # noqa: F401
 from apps.bank_sampah.serializers import BankSampahApprovalListSerializer  # noqa: F401
 from apps.ledger.services import BalanceService, PencairanService
 from apps.nasabah.serializers import NasabahSerializer
@@ -36,6 +35,7 @@ def _validate_tanggal_pencairan(value: datetime) -> datetime:
     if value > timezone.now():
         raise serializers.ValidationError("Tanggal pencairan tidak boleh di masa depan")
     return value
+
 
 # Nested `source` paths shared by several serializers (one definition each).
 _BANK_SAMPAH_ID = "bank_sampah.id"
