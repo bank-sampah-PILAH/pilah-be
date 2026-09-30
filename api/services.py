@@ -416,6 +416,9 @@ class NumberingService:
         return f"JS-{count:04d}"
 
 
+NO_HP_TERPAKAI_DI_BANK = "Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus"
+
+
 class OnboardingService:
     @staticmethod
     @transaction.atomic
@@ -503,21 +506,27 @@ class OnboardingService:
                 .exclude(pk=own_record.pk)
                 .exists()
             ):
-                raise ValueError(
-                    "Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus"
-                )
-            updated = Nasabah.objects.filter(
-                pk=own_record.pk, status=Nasabah.Status.REJECTED
-            ).update(
-                nama=user.nama,
-                jenis_kelamin=user.jenis_kelamin,
-                tanggal_lahir=user.tanggal_lahir,
-                alamat=user.alamat,
-                no_hp=user.no_hp,
-                status=Nasabah.Status.PENDING,
-                is_active=True,
-                updated_at=timezone.now(),
-            )
+                raise ValueError(NO_HP_TERPAKAI_DI_BANK)
+            # The check above does not close the race: the same phone can be
+            # committed elsewhere before this UPDATE, and the constraint then
+            # refuses it. Savepoint so the refusal does not poison the outer
+            # transaction before the ValueError leaves it.
+            try:
+                with transaction.atomic():
+                    updated = Nasabah.objects.filter(
+                        pk=own_record.pk, status=Nasabah.Status.REJECTED
+                    ).update(
+                        nama=user.nama,
+                        jenis_kelamin=user.jenis_kelamin,
+                        tanggal_lahir=user.tanggal_lahir,
+                        alamat=user.alamat,
+                        no_hp=user.no_hp,
+                        status=Nasabah.Status.PENDING,
+                        is_active=True,
+                        updated_at=timezone.now(),
+                    )
+            except IntegrityError as exc:
+                raise ValueError(NO_HP_TERPAKAI_DI_BANK) from exc
             if updated == 0:
                 raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
             own_record.refresh_from_db()
@@ -535,7 +544,7 @@ class OnboardingService:
         # verified `email`, not on this self-declared `no_hp`), so reaching
         # here with a phone collision means it belongs to someone else.
         if Nasabah.objects.filter(bank_sampah=bank, no_hp=user.no_hp).exists():
-            raise ValueError("Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus")
+            raise ValueError(NO_HP_TERPAKAI_DI_BANK)
 
         nasabah = Nasabah(
             bank_sampah=bank,
