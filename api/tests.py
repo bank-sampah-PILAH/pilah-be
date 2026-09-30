@@ -4003,6 +4003,105 @@ class ProfilNasabahBerakunTests(APITestCase):
         self.assertIsNone(response.data["profil_akun"])
         self.assertEqual(response.data["profil_berbeda"], [])
 
+    def _sinkron(self, nasabah: Nasabah | None = None) -> Any:
+        return self.client.post(f"/api/v1/nasabah/{(nasabah or self.nasabah).id}/sinkron-profil")
+
+    def test_sinkron_menyalin_profil_akun_ke_catatan_bank_sampah(self) -> None:
+        self._atur_akun(
+            nama="Budi Santosa Putra",
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir=date(1991, 2, 3),
+            no_hp="+628999999999",
+            alamat="Jl. Melati No. 99",
+        )
+
+        response = self._sinkron()
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.nama, "Budi Santosa Putra")
+        self.assertEqual(self.nasabah.tanggal_lahir, date(1991, 2, 3))
+        self.assertEqual(self.nasabah.no_hp, "+628999999999")
+        self.assertEqual(self.nasabah.alamat, "Jl. Melati No. 99")
+        self.assertEqual(self.nasabah.nomor, "NAS-0001")
+        self.assertEqual(response.data["profil_berbeda"], [])
+
+    def test_sinkron_lalu_pengurus_tetap_bisa_menyunting_lagi(self) -> None:
+        self._atur_akun(nama="Budi Santosa Putra", no_hp="+628999999999")
+        self._sinkron()
+
+        response = self._ubah(nama="Budi S.", no_hp="+628999999999")
+
+        self.assertEqual(response.status_code, 200)
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.nama, "Budi S.")
+        self.pemilik_akun.refresh_from_db()
+        self.assertEqual(self.pemilik_akun.nama, "Budi Santosa Putra")
+
+    def test_sinkron_ditolak_bila_no_hp_akun_dipakai_nasabah_lain_di_bank_ini(self) -> None:
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0002",
+            nama="Rina Hastuti",
+            email="rina@example.com",
+            no_hp="+628555555555",
+            alamat="Jl. Melati No. 1",
+        )
+        self._atur_akun(no_hp="+628555555555")
+
+        response = self._sinkron()
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.data["errors"]["no_hp"], ["Nomor HP nasabah sudah digunakan"])
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.no_hp, "+628111111111")
+
+    def test_sinkron_nasabah_tanpa_akun_ditolak(self) -> None:
+        tanpa_akun = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0009",
+            nama="Siti Aminah",
+            email="siti@example.com",
+            no_hp="+628222222222",
+            alamat="Jl. Kenanga No. 5",
+        )
+
+        response = self._sinkron(tanpa_akun)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["error"], "Nasabah belum memiliki akun")
+
+    def test_sinkron_nasabah_bank_sampah_lain_tidak_ditemukan(self) -> None:
+        bank_lain = BankSampah.objects.create(
+            nama="Bank Sampah Melati", alamat="Depok", kota="Depok", no_hp_pic="+628123456780"
+        )
+        milik_lain = Nasabah.objects.create(
+            bank_sampah=bank_lain,
+            user=self.pemilik_akun,
+            nomor="MLT-0001",
+            nama="Budi Santoso",
+            email=self.pemilik_akun.email,
+            no_hp="+628111111112",
+            alamat="Jl. Mawar No. 12",
+        )
+        self._atur_akun(nama="Budi Diubah Sendiri")
+
+        response = self._sinkron(milik_lain)
+
+        self.assertEqual(response.status_code, 404)
+        milik_lain.refresh_from_db()
+        self.assertEqual(milik_lain.nama, "Budi Santoso")
+
+    def test_sinkron_nasabah_nonaktif_ditolak(self) -> None:
+        self.nasabah.is_active = False
+        self.nasabah.save(update_fields=["is_active"])
+        self._atur_akun(nama="Budi Santosa Putra")
+
+        response = self._sinkron()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data["error"], "Nasabah nonaktif tidak bisa diedit")
+
     def test_ubah_email_nasabah_berakun_ditolak(self) -> None:
         # Satu-satunya field yang tetap terkunci: email adalah kunci penautan
         # ke akun Google, dan tidak ada penjaga lain pada jalur ini.
