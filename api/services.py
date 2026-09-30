@@ -153,11 +153,9 @@ class AuthService:
     def _sync_nasabah_prefill(user: User) -> None:
         """Claim a pengurus-entered membership on first matching,
         Google-verified login — but never copy its profile fields onto the
-        user. The user's own identity data is authoritative: they always
-        fill it in themselves via complete_profile, which then overrides
-        the Nasabah record (see
-        OnboardingService.propagate_profile_to_memberships), not the other
-        way around.
+        user, nor the user's onto it. The account's profile and the bank
+        sampah's record of the nasabah are separate data: the user fills
+        theirs in via complete_profile, and the pengurus keeps theirs.
 
         Gated on role because a pengurus-entered email can coincidentally
         match an account that registered as something other than nasabah,
@@ -441,43 +439,7 @@ class OnboardingService:
                 "updated_at",
             ]
         )
-        if user.role == User.Role.NASABAH:
-            OnboardingService.propagate_profile_to_memberships(user)
         return user
-
-    @staticmethod
-    def propagate_profile_to_memberships(user: User) -> None:
-        """The user's own profile is authoritative: whatever they just
-        entered overrides any pengurus-entered data on their linked
-        Nasabah record(s) — the opposite direction from PIL-154's original
-        design, where the Nasabah record won.
-
-        Public because both `complete_profile` (onboarding) and the
-        nasabah `me/profil` PATCH endpoint (PIL-283, later self-edits) call
-        it: any User profile write must reach every linked Nasabah row.
-        """
-        for nasabah in user.keanggotaan_nasabah.all():
-            nasabah.nama = user.nama
-            nasabah.jenis_kelamin = user.jenis_kelamin
-            nasabah.tanggal_lahir = user.tanggal_lahir
-            nasabah.alamat = user.alamat
-            nasabah.no_hp = user.no_hp
-            try:
-                with transaction.atomic():
-                    nasabah.save(
-                        update_fields=[
-                            "nama",
-                            "jenis_kelamin",
-                            "tanggal_lahir",
-                            "alamat",
-                            "no_hp",
-                            "updated_at",
-                        ]
-                    )
-            except IntegrityError as exc:
-                raise ValueError(
-                    "Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus"
-                ) from exc
 
     @staticmethod
     @transaction.atomic

@@ -1,4 +1,3 @@
-from django.db import transaction
 from rest_framework import serializers
 from rest_framework.generics import GenericAPIView
 from rest_framework.request import Request
@@ -6,7 +5,6 @@ from rest_framework.response import Response
 
 from api.models import User
 from api.permissions import IsActiveNasabah
-from api.services import OnboardingService
 from api.validators import normalize_indonesian_phone
 from api.views import _user
 
@@ -43,7 +41,5 @@ class NasabahProfileView(GenericAPIView[User]):
         user = _user(request)
         serializer = self.get_serializer(user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        with transaction.atomic():
-            serializer.save()
-            OnboardingService.propagate_profile_to_memberships(user)
+        serializer.save()
         return Response(serializer.data)
