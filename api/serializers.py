@@ -11,7 +11,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from api.kalkulasi import bulatkan_rupiah, format_ribuan
-from api.keanggotaan import punya_akun
+from api.keanggotaan import profil_akun, profil_berbeda, punya_akun
 from api.models import (
     BankSampah,
     BankSampahApprovalLog,
@@ -588,9 +588,23 @@ class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
 
 class NasabahDetailSerializer(NasabahSerializer):
     ringkasan_transaksi = serializers.SerializerMethodField()
+    profil_akun = serializers.SerializerMethodField()
+    profil_berbeda = serializers.SerializerMethodField()
 
     class Meta(NasabahSerializer.Meta):
-        fields = NasabahSerializer.Meta.fields + ["ringkasan_transaksi"]
+        fields = NasabahSerializer.Meta.fields + [
+            "ringkasan_transaksi",
+            "profil_akun",
+            "profil_berbeda",
+        ]
+
+    def get_profil_akun(self, obj: Any) -> Any:
+        """Profil yang diisikan nasabah sendiri, supaya pengurus dapat
+        membandingkannya dengan catatan bank sampahnya. ``None`` tanpa akun."""
+        return profil_akun(obj)
+
+    def get_profil_berbeda(self, obj: Any) -> list[str]:
+        return profil_berbeda(obj)
 
     def get_ringkasan_transaksi(self, obj: Any) -> Any:
         items = DetailTransaksi.objects.filter(transaksi__nasabah=obj)

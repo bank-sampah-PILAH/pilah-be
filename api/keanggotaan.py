@@ -25,6 +25,11 @@ from api.models import Nasabah
 FIELD_TERKUNCI = ("email",)
 
 
+# Lima field profil yang ada di akun dan di catatan bank sampah. Email tidak
+# ikut: ia kunci penautan, bukan data profil yang dibandingkan atau disalin.
+FIELD_PROFIL = ("nama", "jenis_kelamin", "tanggal_lahir", "alamat", "no_hp")
+
+
 def punya_akun(nasabah: Nasabah) -> bool:
     """``True`` bila keanggotaan ini sudah tertaut ke akun pengguna."""
     return nasabah.user_id is not None
@@ -44,3 +49,20 @@ def email_terkunci(nasabah: Nasabah, data: Mapping[str, Any]) -> bool:
     if not punya_akun(nasabah):
         return False
     return any(field in data and data[field] != getattr(nasabah, field) for field in FIELD_TERKUNCI)
+
+
+def profil_akun(nasabah: Nasabah) -> dict[str, Any] | None:
+    """Profil yang diisikan nasabah sendiri pada akunnya, atau ``None`` bila
+    keanggotaan ini belum tertaut ke akun."""
+    user = nasabah.user
+    if user is None:
+        return None
+    return {field: getattr(user, field) for field in FIELD_PROFIL}
+
+
+def profil_berbeda(nasabah: Nasabah) -> list[str]:
+    """Field yang isinya di catatan bank sampah berbeda dari profil akun."""
+    akun = profil_akun(nasabah)
+    if akun is None:
+        return []
+    return [field for field in FIELD_PROFIL if akun[field] != getattr(nasabah, field)]
