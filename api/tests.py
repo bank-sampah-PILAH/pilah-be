@@ -1793,48 +1793,49 @@ class APISpecTests(APITestCase):
         )
         self.assertEqual(retry.status_code, 201, retry.data)
 
-    def test_complete_profile_refuses_resubmission_once_registration_approved(
-        self,
-    ) -> None:
-        """The one-shot restriction still holds once pengurus has already
-        approved the membership — only a pending decision leaves room for
-        the nasabah to fix their own submission."""
-        customer = User.objects.create_user(
-            email="approved-edit@example.com",
-            nama="Nasabah PILAH",
-            role=User.Role.NASABAH,
-            jenis_kelamin=User.Gender.MALE,
-            tanggal_lahir="1990-01-01",
-            no_hp="+628555555071",
-            alamat="Jl. Lama",
-            is_profile_complete=True,
-        )
-        Nasabah.objects.create(
-            user=customer,
-            bank_sampah=self.bank,
-            nomor="NAS-9301",
-            nama=customer.nama,
-            alamat=customer.alamat,
-            no_hp=customer.no_hp,
-            status=Nasabah.Status.APPROVED,
-        )
-        refresh = RefreshToken.for_user(customer)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+    def test_nasabah_can_edit_profile_whatever_their_membership_status(self) -> None:
+        """A nasabah owns their profile: approved or rejected memberships
+        don't lock it, and the edit propagates to the membership row."""
+        for index, status in enumerate([Nasabah.Status.APPROVED, Nasabah.Status.REJECTED]):
+            with self.subTest(status=status):
+                customer = User.objects.create_user(
+                    email=f"always-edit-{index}@example.com",
+                    nama="Nasabah PILAH",
+                    role=User.Role.NASABAH,
+                    jenis_kelamin=User.Gender.MALE,
+                    tanggal_lahir="1990-01-01",
+                    no_hp=f"+62855555507{index}",
+                    alamat="Jl. Lama",
+                    is_profile_complete=True,
+                )
+                nasabah = Nasabah.objects.create(
+                    user=customer,
+                    bank_sampah=self.bank,
+                    nomor=f"NAS-930{index}",
+                    email=customer.email,
+                    nama=customer.nama,
+                    alamat=customer.alamat,
+                    no_hp=customer.no_hp,
+                    status=status,
+                )
+                refresh = RefreshToken.for_user(customer)
+                self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
-        response = self.client.put(
-            "/api/v1/onboarding/profile",
-            {
-                "nama": "Nasabah PILAH",
-                "jenis_kelamin": "laki-laki",
-                "tanggal_lahir": "1990-01-01",
-                "no_hp": "+628555555071",
-                "alamat": "Jl. Baru",
-            },
-            format="json",
-        )
+                response = self.client.put(
+                    "/api/v1/onboarding/profile",
+                    {
+                        "nama": "Nasabah PILAH",
+                        "jenis_kelamin": "laki-laki",
+                        "tanggal_lahir": "1990-01-01",
+                        "no_hp": f"+62855555507{index}",
+                        "alamat": "Jl. Baru",
+                    },
+                    format="json",
+                )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data["error"], "Profil sudah lengkap")
+                self.assertEqual(response.status_code, 200, response.data)
+                nasabah.refresh_from_db()
+                self.assertEqual(nasabah.alamat, "Jl. Baru")
 
     def test_jenis_sampah_and_transaction_update_saldo(self) -> None:
         nasabah = Nasabah.objects.create(
