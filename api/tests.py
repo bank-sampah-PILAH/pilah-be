@@ -3938,6 +3938,24 @@ class ProfilNasabahBerakunTests(APITestCase):
         self.assertEqual(self.nasabah.nama, "Budi Santosa")
         self.assertEqual(self.nasabah.alamat, "Jl. Mawar No. 21")
 
+    def test_perbaikan_pengurus_tidak_mengubah_profil_akun_nasabah(self) -> None:
+        # Baris keanggotaan adalah catatan bank sampah ini saja. Profil akun
+        # milik nasabah dan berlaku di bank sampah lain, jadi perbaikan
+        # pengurus tidak boleh menulisnya.
+        sebelum = {
+            field: getattr(self.pemilik_akun, field)
+            for field in ("nama", "jenis_kelamin", "tanggal_lahir", "alamat", "no_hp")
+        }
+
+        response = self._ubah(nama="Budi Santosa", alamat="Jl. Mawar No. 21", no_hp="082333333333")
+
+        self.assertEqual(response.status_code, 200)
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.nama, "Budi Santosa")
+        self.pemilik_akun.refresh_from_db()
+        for field, nilai in sebelum.items():
+            self.assertEqual(getattr(self.pemilik_akun, field), nilai, field)
+
     def test_akun_tidak_ditulis_ketika_profilnya_sudah_sama(self) -> None:
         # Form pengurus mengirim seluruh data nasabah, jadi menyimpan perubahan
         # nomor anggota saja tidak boleh menyentuh baris akun sama sekali.
