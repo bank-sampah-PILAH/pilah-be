@@ -20,25 +20,24 @@
 
 ## Aturan data nasabah
 
-- Profil nasabah (`nama`, `jenis_kelamin`, `tanggal_lahir`, `alamat`, `no_hp`,
-  `email`) milik pemilik akun dan berlaku lintas bank sampah. Nomor anggota
-  (`kode`), `is_active`, dan `status` adalah data keanggotaan pada satu bank
-  sampah. Daftar field yang terkunci ada di `FIELD_TERKUNCI`, dan yang ikut
-  ditulis ke akun ada di `FIELD_PROFIL_AKUN`; jangan menuliskannya ulang di
-  view.
-- Pengurus boleh memperbaiki profil nasabah berakun, karena ialah yang bertemu
-  nasabah di lapangan. Hanya `email` yang terkunci begitu `Nasabah.user`
-  terisi, dan perubahannya ditolak dengan 403 (PIL-288 merevisi PIL-223,
-  OWASP A01). Email adalah kunci penautan akun dan tidak dijaga oleh apa pun
-  selain aturan ini.
-- Perbaikan profil oleh pengurus ikut ditulis ke akun pemiliknya lewat
-  `sinkronkan_profil_ke_akun`. Tanpa itu perbaikannya tertimpa ketika nasabah
-  menyimpan profilnya sendiri, karena `propagate_profile_to_memberships`
-  memperlakukan profil akun sebagai sumber kebenaran.
-- Karena profil dimiliki akun, perbaikan di satu bank sampah ikut berlaku pada
-  keanggotaan nasabah itu di bank sampah lain. Nomor HP unik per bank sampah,
-  jadi periksa `no_hp_bentrok_di_keanggotaan_lain` sebelum menerima
-  penyimpanan, bukan menunggu galat saat propagasi.
+- Akun dan keanggotaan adalah dua data yang terpisah, dan tidak ada
+  penyalinan di antara keduanya setelah baris keanggotaan dibuat. Profil akun
+  (`User`: `nama`, `jenis_kelamin`, `tanggal_lahir`, `alamat`, `no_hp`) milik
+  nasabah; baris `Nasabah` adalah catatan satu bank sampah tentang nasabah itu,
+  bersama nomor anggota (`kode`), `is_active`, dan `status`. Nasabah yang
+  menyimpan profilnya tidak menimpa catatan pengurus, dan perbaikan pengurus
+  tidak menyentuh akun atau keanggotaan di bank sampah lain. Satu-satunya
+  penyalinan adalah saat pendaftaran keanggotaan (`register_nasabah`, termasuk
+  ajukan ulang setelah ditolak). Nasabah boleh menyimpan ulang profilnya kapan
+  saja; hanya pengelola yang dibatasi satu kali.
+- Pengurus boleh memperbaiki catatan nasabah berakun, karena ialah yang
+  bertemu nasabah di lapangan. Hanya `email` yang terkunci begitu
+  `Nasabah.user` terisi, dan perubahannya ditolak dengan 403 (PIL-288 merevisi
+  PIL-223, OWASP A01). Email adalah kunci penautan akun dan tidak dijaga oleh
+  apa pun selain aturan ini. Daftar field yang terkunci ada di
+  `FIELD_TERKUNCI`.
+- Nomor HP unik per bank sampah pada tabel keanggotaan saja, dan hanya
+  diperiksa pada baris yang sedang ditulis. `User.no_hp` tidak unik.
 - Respons nasabah membawa `punya_akun` (read-only) supaya klien dapat
   menampilkan profil sebagai read-only alih-alih menunggu 403. Penanda
   tampilan saja; jangan pindahkan keputusan wewenang ke klien (PIL-281).

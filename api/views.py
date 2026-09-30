@@ -23,8 +23,6 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.keanggotaan import (
     email_terkunci,
-    no_hp_bentrok_di_keanggotaan_lain,
-    sinkronkan_profil_ke_akun,
 )
 from api.models import (
     BankSampah,
@@ -516,18 +514,6 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             .exists()
         ):
             return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
-        if no_hp and no_hp_bentrok_di_keanggotaan_lain(instance, no_hp):
-            return Response(
-                {
-                    "errors": {
-                        "no_hp": [
-                            "Nomor HP sudah digunakan nasabah lain di bank sampah "
-                            "tempat akun ini terdaftar"
-                        ]
-                    }
-                },
-                status=422,
-            )
         email = serializer.validated_data.get("email")
         existing_by_email = (
             Nasabah.objects.filter(bank_sampah=bank, email=email).exclude(id=instance.id).first()
@@ -540,11 +526,6 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
                 status=422,
             )
         self.perform_update(serializer)
-        # Profil dimiliki akun dan berlaku lintas bank sampah, jadi perbaikan
-        # pengurus harus sampai ke akunnya. Kalau hanya baris keanggotaan yang
-        # ditulis, penyimpanan profil berikutnya oleh nasabah akan
-        # mengembalikan nilai lama (PIL-288).
-        sinkronkan_profil_ke_akun(instance)
         return Response(serializer.data)
 
     @action(detail=True, methods=["patch"], url_path="status")

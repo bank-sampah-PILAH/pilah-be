@@ -1460,10 +1460,8 @@ class APISpecTests(APITestCase):
         """The user's own profile is authoritative, not the pengurus-entered
         Nasabah record: even a fully-populated matching record must not
         prefill or auto-complete the user's profile on login. They still go
-        through complete_profile themselves (see
-        OnboardingService.propagate_profile_to_memberships for the
-        opposite, intended direction: user data overrides the Nasabah
-        record, once they submit it)."""
+        through complete_profile themselves (the account's profile and the
+        Nasabah record stay separate)."""
         self.client.credentials()
         Nasabah.objects.create(
             bank_sampah=self.bank,
@@ -3919,11 +3917,8 @@ class ProfilNasabahBerakunTests(APITestCase):
     def test_perbaikan_pengurus_bertahan_saat_nasabah_menyimpan_profilnya(
         self,
     ) -> None:
-        # Profil akun adalah sumber kebenaran: setiap kali nasabah menyimpan
-        # profilnya sendiri, `propagate_profile_to_memberships` menyalinnya ke
-        # seluruh keanggotaan tertaut. Kalau perbaikan pengurus hanya ditulis
-        # pada baris keanggotaan, penyimpanan berikutnya oleh nasabah akan
-        # mengembalikan nilai lama tanpa jejak.
+        # Catatan bank sampah dan profil akun terpisah, jadi nasabah yang
+        # menyimpan profilnya sendiri tidak menimpa perbaikan pengurus.
         self._ubah(nama="Budi Santosa", alamat="Jl. Mawar No. 21")
 
         self.client.credentials(
@@ -3955,62 +3950,6 @@ class ProfilNasabahBerakunTests(APITestCase):
         self.pemilik_akun.refresh_from_db()
         for field, nilai in sebelum.items():
             self.assertEqual(getattr(self.pemilik_akun, field), nilai, field)
-
-    def test_akun_tidak_ditulis_ketika_profilnya_sudah_sama(self) -> None:
-        # Form pengurus mengirim seluruh data nasabah, jadi menyimpan perubahan
-        # nomor anggota saja tidak boleh menyentuh baris akun sama sekali.
-        self.pemilik_akun.jenis_kelamin = self.nasabah.jenis_kelamin
-        self.pemilik_akun.tanggal_lahir = self.nasabah.tanggal_lahir
-        self.pemilik_akun.alamat = self.nasabah.alamat
-        self.pemilik_akun.no_hp = self.nasabah.no_hp
-        self.pemilik_akun.save()
-        self.pemilik_akun.refresh_from_db()
-        sebelum = self.pemilik_akun.updated_at
-
-        response = self._ubah(kode="NAS-0007")
-
-        self.assertEqual(response.status_code, 200)
-        self.pemilik_akun.refresh_from_db()
-        self.assertEqual(self.pemilik_akun.updated_at, sebelum)
-
-    def test_no_hp_yang_bentrok_di_bank_lain_ditolak_kepada_pengurus(self) -> None:
-        # Menulis profil ke akun membuat nomor HP ikut tersalin ke keanggotaan
-        # nasabah di bank sampah lain. Kalau di sana nomornya sudah dipakai
-        # orang lain, penyimpanan profil oleh nasabah nanti yang akan gagal,
-        # dengan pesan yang ditujukan kepada nasabah. Tolak lebih awal, kepada
-        # pengurus yang mengetiknya.
-        bank_lain = BankSampah.objects.create(
-            nama="Bank Sampah Melati", alamat="Depok", kota="Depok", no_hp_pic="+628123456780"
-        )
-        Nasabah.objects.create(
-            bank_sampah=bank_lain,
-            nomor="MLT-0001",
-            nama="Rina Hastuti",
-            email="rina@example.com",
-            no_hp="+628555555555",
-            alamat="Jl. Melati No. 1",
-        )
-        Nasabah.objects.create(
-            bank_sampah=bank_lain,
-            user=self.pemilik_akun,
-            nomor="MLT-0002",
-            nama="Budi Santoso",
-            email=self.pemilik_akun.email,
-            no_hp="+628111111111",
-            alamat="Jl. Mawar No. 12",
-        )
-
-        response = self._ubah(no_hp="08555555555")
-
-        self.assertEqual(response.status_code, 422)
-        self.assertEqual(
-            response.data["errors"]["no_hp"],
-            ["Nomor HP sudah digunakan nasabah lain di bank sampah tempat akun ini terdaftar"],
-        )
-        self.nasabah.refresh_from_db()
-        self.pemilik_akun.refresh_from_db()
-        self.assertEqual(self.nasabah.no_hp, "+628111111111")
-        self.assertNotEqual(self.pemilik_akun.no_hp, "+628555555555")
 
     def test_ubah_email_nasabah_berakun_ditolak(self) -> None:
         # Satu-satunya field yang tetap terkunci: email adalah kunci penautan
