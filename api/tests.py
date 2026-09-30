@@ -13,6 +13,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.core.signing import TimestampSigner
 from django.db import IntegrityError, connection, transaction
+from django.db.models import QuerySet
 from django.test import (
     Client,
     RequestFactory,
@@ -3158,6 +3159,53 @@ class APISpecTests(APITestCase):
         rejected.refresh_from_db()
         self.assertEqual(rejected.status, Nasabah.Status.REJECTED)
         self.assertEqual(rejected.no_hp, "+628555555034")
+
+    def test_nasabah_reapply_phone_race_is_a_400_not_a_500(self) -> None:
+        # Another row can take the same phone after the collision check but
+        # before the UPDATE; the (bank_sampah, no_hp) constraint then refuses it.
+        customer = User.objects.create_user(
+            email="reapply-race@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1990-01-01",
+            no_hp="+628555555041",
+            alamat="Jl. Baru No. 2",
+            is_profile_complete=True,
+        )
+        rejected = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-9041",
+            nama=customer.nama,
+            email=customer.email,
+            alamat="Jl. Lama",
+            no_hp="+628555555040",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        original_update = QuerySet.update
+
+        def update_that_collides(queryset: Any, **fields: Any) -> int:
+            if queryset.model is Nasabah and "no_hp" in fields:
+                raise IntegrityError("duplicate")
+            return int(original_update(queryset, **fields))
+
+        with patch.object(QuerySet, "update", update_that_collides):
+            response = self.client.post(
+                "/api/v1/onboarding/nasabah", {"bank_sampah_id": str(self.bank.id)}, format="json"
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["error"],
+            "Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus",
+        )
+        rejected.refresh_from_db()
+        self.assertEqual(rejected.status, Nasabah.Status.REJECTED)
+        self.assertEqual(rejected.no_hp, "+628555555040")
 
     def test_nasabah_reapply_with_pesan_records_appealed_log_entry(self) -> None:
         customer = User.objects.create_user(
