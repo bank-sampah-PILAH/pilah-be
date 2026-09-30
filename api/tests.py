@@ -13,7 +13,6 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.core.signing import TimestampSigner
 from django.db import IntegrityError, connection, transaction
-from django.db.models import QuerySet
 from django.test import (
     Client,
     RequestFactory,
@@ -3186,14 +3185,8 @@ class APISpecTests(APITestCase):
         )
         refresh = RefreshToken.for_user(customer)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
-        original_update = QuerySet.update
 
-        def update_that_collides(queryset: Any, **fields: Any) -> int:
-            if queryset.model is Nasabah and "no_hp" in fields:
-                raise IntegrityError("duplicate")
-            return int(original_update(queryset, **fields))
-
-        with patch.object(QuerySet, "update", update_that_collides):
+        with patch("django.db.models.QuerySet.update", side_effect=IntegrityError("duplicate")):
             response = self.client.post(
                 "/api/v1/onboarding/nasabah", {"bank_sampah_id": str(self.bank.id)}, format="json"
             )
