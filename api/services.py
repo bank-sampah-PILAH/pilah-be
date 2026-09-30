@@ -422,11 +422,10 @@ class OnboardingService:
     @staticmethod
     @transaction.atomic
     def complete_profile(user: User, profile_data: Mapping[str, Any]) -> User:
-        # One-shot, except a nasabah can still fix it until pengurus decides on
-        # their registration — including the window before any registration
-        # exists, when a failed final submit (e.g. phone already in the chosen
-        # bank) leaves the profile saved but the membership not created.
-        if user.is_profile_complete and not OnboardingService._is_nasabah_still_onboarding(user):
+        # One-shot for pengelola, whose profile step gates their bank
+        # registration. A nasabah owns their profile and may re-submit it at
+        # any time, whatever their membership status.
+        if user.is_profile_complete and user.role != User.Role.NASABAH:
             raise ValueError("Profil sudah lengkap")
         for field, value in profile_data.items():
             setattr(user, field, value)
@@ -445,15 +444,6 @@ class OnboardingService:
         if user.role == User.Role.NASABAH:
             OnboardingService.propagate_profile_to_memberships(user)
         return user
-
-    @staticmethod
-    def _is_nasabah_still_onboarding(user: User) -> bool:
-        """True while a nasabah has no decided membership: none yet, or only
-        pending ones."""
-        return (
-            user.role == User.Role.NASABAH
-            and not user.keanggotaan_nasabah.exclude(status=Nasabah.Status.PENDING).exists()
-        )
 
     @staticmethod
     def propagate_profile_to_memberships(user: User) -> None:
