@@ -28,6 +28,7 @@ from openpyxl import load_workbook
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
+from api.keanggotaan import sinkronkan_dari_akun
 from api.models import (
     BankSampah,
     BankSampahApprovalLog,
@@ -4070,6 +4071,24 @@ class ProfilNasabahBerakunTests(APITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["error"], "Nasabah belum memiliki akun")
+
+    def test_sinkronkan_dari_akun_tanpa_akun_tidak_mengubah_catatan(self) -> None:
+        # Penjaga pada helper itu sendiri: view menolak lebih dulu, tetapi helper
+        # tidak boleh menulis apa pun bila dipanggil untuk baris tanpa akun.
+        tanpa_akun = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0009",
+            nama="Siti Aminah",
+            email="siti@example.com",
+            no_hp="+628222222222",
+            alamat="Jl. Kenanga No. 5",
+        )
+
+        sinkronkan_dari_akun(tanpa_akun)
+
+        tanpa_akun.refresh_from_db()
+        self.assertEqual(tanpa_akun.nama, "Siti Aminah")
+        self.assertEqual(tanpa_akun.no_hp, "+628222222222")
 
     def test_sinkron_nasabah_bank_sampah_lain_tidak_ditemukan(self) -> None:
         bank_lain = BankSampah.objects.create(
