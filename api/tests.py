@@ -3079,6 +3079,86 @@ class APISpecTests(APITestCase):
         # (bank, user) pair.
         self.assertEqual(Nasabah.objects.filter(user=customer, bank_sampah=self.bank).count(), 1)
 
+    def test_nasabah_reapply_copies_the_accounts_current_phone(self) -> None:
+        customer = User.objects.create_user(
+            email="reapply-phone@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1990-01-01",
+            no_hp="+628555555031",
+            alamat="Jl. Baru No. 2",
+            is_profile_complete=True,
+        )
+        rejected = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-9031",
+            nama=customer.nama,
+            email=customer.email,
+            alamat="Jl. Lama",
+            no_hp="+628555555030",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            "/api/v1/onboarding/nasabah", {"bank_sampah_id": str(self.bank.id)}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        rejected.refresh_from_db()
+        self.assertEqual(rejected.no_hp, "+628555555031")
+
+    def test_nasabah_reapply_is_refused_when_the_phone_belongs_to_another_row(self) -> None:
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-9033",
+            nama="Orang Lain",
+            email="orang-lain@example.com",
+            alamat="Jl. X",
+            no_hp="+628555555033",
+            status=Nasabah.Status.APPROVED,
+        )
+        customer = User.objects.create_user(
+            email="reapply-collide@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1990-01-01",
+            no_hp="+628555555033",
+            alamat="Jl. Baru No. 2",
+            is_profile_complete=True,
+        )
+        rejected = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-9034",
+            nama=customer.nama,
+            email=customer.email,
+            alamat="Jl. Lama",
+            no_hp="+628555555034",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            "/api/v1/onboarding/nasabah", {"bank_sampah_id": str(self.bank.id)}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["error"],
+            "Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus",
+        )
+        rejected.refresh_from_db()
+        self.assertEqual(rejected.status, Nasabah.Status.REJECTED)
+        self.assertEqual(rejected.no_hp, "+628555555034")
+
     def test_nasabah_reapply_with_pesan_records_appealed_log_entry(self) -> None:
         customer = User.objects.create_user(
             email="appealing-nasabah@example.com",
@@ -4056,6 +4136,34 @@ class ProfilNasabahBerakunTests(APITestCase):
         self.assertEqual(response.data["errors"]["no_hp"], ["Nomor HP nasabah sudah digunakan"])
         self.nasabah.refresh_from_db()
         self.assertEqual(self.nasabah.no_hp, "+628111111111")
+
+    def test_sinkron_balapan_no_hp_dijawab_422_bukan_500(self) -> None:
+        # Nomor yang sama dapat dikomit orang lain setelah pemeriksaan `exists()`
+        # tetapi sebelum `save()`; constraint (bank_sampah, no_hp) lalu menolak.
+        self._atur_akun(no_hp="+628999999999")
+
+        with patch.object(Nasabah, "save", side_effect=IntegrityError("duplicate")):
+            response = self._sinkron()
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.data["errors"]["no_hp"], ["Nomor HP nasabah sudah digunakan"])
+
+    def test_perbedaan_format_no_hp_bukan_perbedaan_profil(self) -> None:
+        # Baris yang ditulis di luar serializer dapat menyimpan `08…` sementara
+        # akun menyimpan `+62…`. Itu nomor yang sama, jadi jangan ditandai.
+        Nasabah.objects.filter(pk=self.nasabah.pk).update(no_hp="08111111111")
+        self._atur_akun(
+            nama=self.nasabah.nama,
+            jenis_kelamin=self.nasabah.jenis_kelamin,
+            tanggal_lahir=self.nasabah.tanggal_lahir,
+            no_hp="+628111111111",
+            alamat=self.nasabah.alamat,
+        )
+
+        response = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["profil_berbeda"], [])
 
     def test_sinkron_nasabah_tanpa_akun_ditolak(self) -> None:
         tanpa_akun = Nasabah.objects.create(
