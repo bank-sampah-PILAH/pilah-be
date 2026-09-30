@@ -6,7 +6,7 @@ import requests
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils import timezone
@@ -23,8 +23,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.keanggotaan import (
     email_terkunci,
-    no_hp_bentrok_di_keanggotaan_lain,
-    sinkronkan_profil_ke_akun,
+    profil_akun,
+    sinkronkan_dari_akun,
 )
 from api.models import (
     BankSampah,
@@ -516,18 +516,6 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             .exists()
         ):
             return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
-        if no_hp and no_hp_bentrok_di_keanggotaan_lain(instance, no_hp):
-            return Response(
-                {
-                    "errors": {
-                        "no_hp": [
-                            "Nomor HP sudah digunakan nasabah lain di bank sampah "
-                            "tempat akun ini terdaftar"
-                        ]
-                    }
-                },
-                status=422,
-            )
         email = serializer.validated_data.get("email")
         existing_by_email = (
             Nasabah.objects.filter(bank_sampah=bank, email=email).exclude(id=instance.id).first()
@@ -540,12 +528,37 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
                 status=422,
             )
         self.perform_update(serializer)
-        # Profil dimiliki akun dan berlaku lintas bank sampah, jadi perbaikan
-        # pengurus harus sampai ke akunnya. Kalau hanya baris keanggotaan yang
-        # ditulis, penyimpanan profil berikutnya oleh nasabah akan
-        # mengembalikan nilai lama (PIL-288).
-        sinkronkan_profil_ke_akun(instance)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="sinkron-profil")
+    def sinkron_profil(self, request: Request, pk: str | None = None) -> Response:
+        """Samakan catatan nasabah ini dengan profil yang diisikan nasabah
+        sendiri pada akunnya. Pengurus tetap dapat menyuntingnya lagi."""
+        nasabah = self.get_object()
+        if not nasabah.is_active:
+            return Response({"error": "Nasabah nonaktif tidak bisa diedit"}, status=403)
+        akun = profil_akun(nasabah)
+        if akun is None:
+            return Response({"error": "Nasabah belum memiliki akun"}, status=400)
+        no_hp = akun["no_hp"]
+        no_hp_terpakai = Response(
+            {"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422
+        )
+        if (
+            no_hp
+            and Nasabah.objects.filter(bank_sampah=nasabah.bank_sampah, no_hp=no_hp)
+            .exclude(id=nasabah.id)
+            .exists()
+        ):
+            return no_hp_terpakai
+        # Pemeriksaan di atas tidak menutup balapan: nomor yang sama dapat
+        # dikomit orang lain sebelum `save()`, dan constraint yang menolaknya.
+        try:
+            with transaction.atomic():
+                sinkronkan_dari_akun(nasabah)
+        except IntegrityError:
+            return no_hp_terpakai
+        return Response(NasabahDetailSerializer(nasabah).data)
 
     @action(detail=True, methods=["patch"], url_path="status")
     def set_status(self, request: Request, pk: str | None = None) -> Response:

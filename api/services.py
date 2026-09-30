@@ -153,11 +153,9 @@ class AuthService:
     def _sync_nasabah_prefill(user: User) -> None:
         """Claim a pengurus-entered membership on first matching,
         Google-verified login — but never copy its profile fields onto the
-        user. The user's own identity data is authoritative: they always
-        fill it in themselves via complete_profile, which then overrides
-        the Nasabah record (see
-        OnboardingService.propagate_profile_to_memberships), not the other
-        way around.
+        user, nor the user's onto it. The account's profile and the bank
+        sampah's record of the nasabah are separate data: the user fills
+        theirs in via complete_profile, and the pengurus keeps theirs.
 
         Gated on role because a pengurus-entered email can coincidentally
         match an account that registered as something other than nasabah,
@@ -418,15 +416,17 @@ class NumberingService:
         return f"JS-{count:04d}"
 
 
+NO_HP_TERPAKAI_DI_BANK = "Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus"
+
+
 class OnboardingService:
     @staticmethod
     @transaction.atomic
     def complete_profile(user: User, profile_data: Mapping[str, Any]) -> User:
-        # One-shot, except a nasabah can still fix it while pengurus hasn't
-        # decided on their registration yet.
-        if user.is_profile_complete and not OnboardingService._has_pending_nasabah_registration(
-            user
-        ):
+        # One-shot for pengelola, whose profile step gates their bank
+        # registration. A nasabah owns their profile and may re-submit it at
+        # any time, whatever their membership status.
+        if user.is_profile_complete and user.role != User.Role.NASABAH:
             raise ValueError("Profil sudah lengkap")
         for field, value in profile_data.items():
             setattr(user, field, value)
@@ -442,50 +442,7 @@ class OnboardingService:
                 "updated_at",
             ]
         )
-        if user.role == User.Role.NASABAH:
-            OnboardingService.propagate_profile_to_memberships(user)
         return user
-
-    @staticmethod
-    def _has_pending_nasabah_registration(user: User) -> bool:
-        return (
-            user.role == User.Role.NASABAH
-            and user.keanggotaan_nasabah.filter(status=Nasabah.Status.PENDING).exists()
-        )
-
-    @staticmethod
-    def propagate_profile_to_memberships(user: User) -> None:
-        """The user's own profile is authoritative: whatever they just
-        entered overrides any pengurus-entered data on their linked
-        Nasabah record(s) — the opposite direction from PIL-154's original
-        design, where the Nasabah record won.
-
-        Public because both `complete_profile` (onboarding) and the
-        nasabah `me/profil` PATCH endpoint (PIL-283, later self-edits) call
-        it: any User profile write must reach every linked Nasabah row.
-        """
-        for nasabah in user.keanggotaan_nasabah.all():
-            nasabah.nama = user.nama
-            nasabah.jenis_kelamin = user.jenis_kelamin
-            nasabah.tanggal_lahir = user.tanggal_lahir
-            nasabah.alamat = user.alamat
-            nasabah.no_hp = user.no_hp
-            try:
-                with transaction.atomic():
-                    nasabah.save(
-                        update_fields=[
-                            "nama",
-                            "jenis_kelamin",
-                            "tanggal_lahir",
-                            "alamat",
-                            "no_hp",
-                            "updated_at",
-                        ]
-                    )
-            except IntegrityError as exc:
-                raise ValueError(
-                    "Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus"
-                ) from exc
 
     @staticmethod
     @transaction.atomic
@@ -541,17 +498,35 @@ class OnboardingService:
             # concurrent reapply requests both passing the check above.
             # A losing request affects 0 rows and falls through to the
             # error below instead of silently double-applying.
-            updated = Nasabah.objects.filter(
-                pk=own_record.pk, status=Nasabah.Status.REJECTED
-            ).update(
-                nama=user.nama,
-                jenis_kelamin=user.jenis_kelamin,
-                tanggal_lahir=user.tanggal_lahir,
-                alamat=user.alamat,
-                status=Nasabah.Status.PENDING,
-                is_active=True,
-                updated_at=timezone.now(),
-            )
+            #
+            # The account's phone is copied too, with the same collision guard
+            # as a first application: it may now belong to another row here.
+            if (
+                Nasabah.objects.filter(bank_sampah=bank, no_hp=user.no_hp)
+                .exclude(pk=own_record.pk)
+                .exists()
+            ):
+                raise ValueError(NO_HP_TERPAKAI_DI_BANK)
+            # The check above does not close the race: the same phone can be
+            # committed elsewhere before this UPDATE, and the constraint then
+            # refuses it. Savepoint so the refusal does not poison the outer
+            # transaction before the ValueError leaves it.
+            try:
+                with transaction.atomic():
+                    updated = Nasabah.objects.filter(
+                        pk=own_record.pk, status=Nasabah.Status.REJECTED
+                    ).update(
+                        nama=user.nama,
+                        jenis_kelamin=user.jenis_kelamin,
+                        tanggal_lahir=user.tanggal_lahir,
+                        alamat=user.alamat,
+                        no_hp=user.no_hp,
+                        status=Nasabah.Status.PENDING,
+                        is_active=True,
+                        updated_at=timezone.now(),
+                    )
+            except IntegrityError as exc:
+                raise ValueError(NO_HP_TERPAKAI_DI_BANK) from exc
             if updated == 0:
                 raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
             own_record.refresh_from_db()
@@ -569,7 +544,7 @@ class OnboardingService:
         # verified `email`, not on this self-declared `no_hp`), so reaching
         # here with a phone collision means it belongs to someone else.
         if Nasabah.objects.filter(bank_sampah=bank, no_hp=user.no_hp).exists():
-            raise ValueError("Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus")
+            raise ValueError(NO_HP_TERPAKAI_DI_BANK)
 
         nasabah = Nasabah(
             bank_sampah=bank,

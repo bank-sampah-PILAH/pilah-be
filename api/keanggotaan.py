@@ -1,12 +1,10 @@
 """Batas wewenang pengurus atas data nasabah (PIL-223, direvisi PIL-288).
 
-Profil nasabah dimiliki pemilik akun dan berlaku di seluruh bank sampah tempat
-ia terdaftar, sedangkan nomor anggota dan status keanggotaan adalah data bank
-sampah. Pengurus boleh memperbaiki profil nasabah berakun, karena ialah yang
-bertemu nasabah di lapangan, kecuali email yang menjadi kunci penautan akun.
-
-Perbaikan pengurus ikut ditulis ke akun supaya tidak tertimpa ketika nasabah
-menyimpan profilnya sendiri.
+Baris keanggotaan adalah catatan bank sampah tentang nasabah, terpisah dari
+profil akun milik nasabah itu sendiri: tidak ada penyalinan di kedua arah.
+Pengurus boleh memperbaiki catatan nasabah berakun, karena ialah yang bertemu
+nasabah di lapangan, kecuali email yang menjadi kunci penautan akun. Perbaikan
+itu hanya berlaku di bank sampahnya dan tidak menyentuh akun.
 
 Semua pemeriksaan wewenang atas data nasabah harus lewat modul ini supaya
 aturannya tidak tersebar di beberapa view.
@@ -14,7 +12,10 @@ aturannya tidak tersebar di beberapa view.
 
 from typing import Any, Mapping
 
+from rest_framework.exceptions import ValidationError
+
 from api.models import Nasabah
+from api.validators import normalize_indonesian_phone
 
 # Email adalah kunci penautan keanggotaan ke akun Google, dan tidak ada
 # penjaga lain pada jalur update: pemeriksaan email yang ada hanya keunikan
@@ -27,9 +28,9 @@ from api.models import Nasabah
 FIELD_TERKUNCI = ("email",)
 
 
-# Profil yang dimiliki akun dan berlaku lintas bank sampah (PRD F21). Email
-# tidak ikut: ia kunci penautan, bukan data profil yang boleh disunting.
-FIELD_PROFIL_AKUN = ("nama", "jenis_kelamin", "tanggal_lahir", "alamat", "no_hp")
+# Lima field profil yang ada di akun dan di catatan bank sampah. Email tidak
+# ikut: ia kunci penautan, bukan data profil yang dibandingkan atau disalin.
+FIELD_PROFIL = ("nama", "jenis_kelamin", "tanggal_lahir", "alamat", "no_hp")
 
 
 def punya_akun(nasabah: Nasabah) -> bool:
@@ -53,49 +54,47 @@ def email_terkunci(nasabah: Nasabah, data: Mapping[str, Any]) -> bool:
     return any(field in data and data[field] != getattr(nasabah, field) for field in FIELD_TERKUNCI)
 
 
-def no_hp_bentrok_di_keanggotaan_lain(nasabah: Nasabah, no_hp: str) -> bool:
-    """``True`` bila ``no_hp`` sudah dipakai nasabah lain pada bank sampah
-    tempat akun ini juga terdaftar.
-
-    Nomor HP unik per bank sampah. Karena profil ikut tersalin ke seluruh
-    keanggotaan tertaut, nomor yang bentrok di bank sampah lain baru meledak
-    saat nasabah menyimpan profilnya sendiri, dan pesannya ditujukan kepada
-    nasabah. Diperiksa lebih awal supaya pengurus yang mengetiknya yang
-    diberi tahu.
-    """
-    user = nasabah.user
-    if user is None or not no_hp:
-        return False
-    bank_lain = user.keanggotaan_nasabah.exclude(id=nasabah.id).values_list(
-        "bank_sampah_id", flat=True
-    )
-    return (
-        Nasabah.objects.filter(bank_sampah_id__in=list(bank_lain), no_hp=no_hp)
-        .exclude(user_id=user.id)
-        .exists()
-    )
-
-
-def sinkronkan_profil_ke_akun(nasabah: Nasabah) -> None:
-    """Tulis profil keanggotaan ini ke akun pemiliknya.
-
-    Profil dimiliki akun dan berlaku lintas bank sampah, sedangkan baris
-    keanggotaan hanya menyimpan salinannya. Karena itu setiap penyimpanan
-    profil oleh nasabah menimpa seluruh keanggotaan tertaut lewat
-    ``OnboardingService.propagate_profile_to_memberships``. Tanpa penulisan
-    balik ini, perbaikan pengurus akan hilang pada penyimpanan berikutnya.
-
-    Sengaja hanya menyentuh lima field profil: email adalah kunci penautan dan
-    tetap terkunci, sedangkan role serta flag akun bukan urusan pengurus.
-    """
+def profil_akun(nasabah: Nasabah) -> dict[str, Any] | None:
+    """Profil yang diisikan nasabah sendiri pada akunnya, atau ``None`` bila
+    keanggotaan ini belum tertaut ke akun."""
     user = nasabah.user
     if user is None:
-        return
-    berubah = [
-        field for field in FIELD_PROFIL_AKUN if getattr(user, field) != getattr(nasabah, field)
+        return None
+    return {field: getattr(user, field) for field in FIELD_PROFIL}
+
+
+def profil_berbeda(nasabah: Nasabah) -> list[str]:
+    """Field yang isinya di catatan bank sampah berbeda dari profil akun."""
+    akun = profil_akun(nasabah)
+    if akun is None:
+        return []
+    return [
+        field
+        for field in FIELD_PROFIL
+        if _nilai_banding(field, akun[field]) != _nilai_banding(field, getattr(nasabah, field))
     ]
-    if not berubah:
+
+
+def _nilai_banding(field: str, nilai: Any) -> Any:
+    """Nomor HP dibandingkan dalam bentuk +62, karena baris yang ditulis di luar
+    serializer dapat menyimpan ``08…`` untuk nomor yang sama dengan akunnya."""
+    if field != "no_hp":
+        return nilai
+    try:
+        return normalize_indonesian_phone(nilai)
+    except ValidationError:
+        return nilai
+
+
+def sinkronkan_dari_akun(nasabah: Nasabah) -> None:
+    """Salin profil akun ke catatan bank sampah ini, atas permintaan pengurus.
+
+    Satu arah saja, dan hanya untuk baris ini: nomor anggota, email, dan status
+    tidak disentuh, begitu pula akun dan keanggotaan di bank sampah lain.
+    """
+    akun = profil_akun(nasabah)
+    if akun is None:
         return
-    for field in berubah:
-        setattr(user, field, getattr(nasabah, field))
-    user.save(update_fields=[*berubah, "updated_at"])
+    for field, nilai in akun.items():
+        setattr(nasabah, field, nilai)
+    nasabah.save(update_fields=[*akun, "updated_at"])
