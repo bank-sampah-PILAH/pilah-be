@@ -422,11 +422,11 @@ class OnboardingService:
     @staticmethod
     @transaction.atomic
     def complete_profile(user: User, profile_data: Mapping[str, Any]) -> User:
-        # One-shot, except a nasabah can still fix it while pengurus hasn't
-        # decided on their registration yet.
-        if user.is_profile_complete and not OnboardingService._has_pending_nasabah_registration(
-            user
-        ):
+        # One-shot, except a nasabah can still fix it until pengurus decides on
+        # their registration — including the window before any registration
+        # exists, when a failed final submit (e.g. phone already in the chosen
+        # bank) leaves the profile saved but the membership not created.
+        if user.is_profile_complete and not OnboardingService._is_nasabah_still_onboarding(user):
             raise ValueError("Profil sudah lengkap")
         for field, value in profile_data.items():
             setattr(user, field, value)
@@ -447,10 +447,12 @@ class OnboardingService:
         return user
 
     @staticmethod
-    def _has_pending_nasabah_registration(user: User) -> bool:
+    def _is_nasabah_still_onboarding(user: User) -> bool:
+        """True while a nasabah has no decided membership: none yet, or only
+        pending ones."""
         return (
             user.role == User.Role.NASABAH
-            and user.keanggotaan_nasabah.filter(status=Nasabah.Status.PENDING).exists()
+            and not user.keanggotaan_nasabah.exclude(status=Nasabah.Status.PENDING).exists()
         )
 
     @staticmethod
