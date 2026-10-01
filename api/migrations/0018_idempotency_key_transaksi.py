@@ -12,6 +12,18 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="transaksi",
             name="idempotency_key",
-            field=models.CharField(blank=True, max_length=64, null=True, unique=True),
+            field=models.UUIDField(blank=True, null=True),
+        ),
+        migrations.AddField(
+            model_name="transaksi",
+            name="idempotency_request_hash",
+            field=models.CharField(blank=True, max_length=64, null=True),
+        ),
+        migrations.AddConstraint(
+            model_name="transaksi",
+            constraint=models.UniqueConstraint(
+                fields=("bank_sampah", "idempotency_key"),
+                name="transaksi_bank_idempotency_key_unique",
+            ),
         ),
     ]

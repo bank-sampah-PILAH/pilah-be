@@ -318,11 +318,18 @@ class Transaksi(TimestampedModel):
     )
     # PBI-12: kunci idempotensi POST setoran. Null boleh — setoran lama dan
     # klien tanpa header tidak memilikinya.
-    idempotency_key = models.CharField(max_length=64, blank=True, null=True, unique=True)
+    idempotency_key = models.UUIDField(blank=True, null=True)
+    idempotency_request_hash = models.CharField(max_length=64, blank=True, null=True)
 
     class Meta:
         db_table = "transaksi"
         ordering = ["-tanggal"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["bank_sampah", "idempotency_key"],
+                name="transaksi_bank_idempotency_key_unique",
+            ),
+        ]
 
 
 class DetailTransaksi(models.Model):
