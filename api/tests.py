@@ -25,7 +25,7 @@ from django.urls import Resolver404, resolve
 from django.utils import timezone
 from django.views.static import serve
 from openpyxl import load_workbook
-from rest_framework.test import APITestCase
+from rest_framework.test import APIClient, APITestCase
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from api.keanggotaan import sinkronkan_dari_akun
@@ -4423,6 +4423,13 @@ class SetoranTestBase(APITestCase):
             kategori=JenisSampah.Kategori.PLASTIK,
             harga_per_kg=Decimal("3333.00"),
         )
+        self.jenis_lain = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="KRS-001",
+            nama_sampah="Kardus",
+            kategori=JenisSampah.Kategori.KERTAS,
+            harga_per_kg=Decimal("1000.00"),
+        )
 
     def _setor(self, items: list[dict[str, Any]]) -> Any:
         return self.client.post(
@@ -4431,8 +4438,143 @@ class SetoranTestBase(APITestCase):
             format="json",
         )
 
+    def _setor_dengan_key(self, items: list[dict[str, Any]], key: str) -> Any:
+        return self.client.post(
+            "/api/v1/transaksi",
+            {"nasabah_id": str(self.nasabah.id), "items": items},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=key,
+        )
+
     def _saldo(self) -> Any:
         return self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo").data["total_saldo"]
+
+
+class IdempotensiSetoranTests(SetoranTestBase):
+    """PBI-12: POST ulang dengan Idempotency-Key tidak mencatat setoran dua kali."""
+
+    KEY = "00000000-0000-4000-8000-000000000001"
+    OTHER_KEY = "00000000-0000-4000-8000-000000000002"
+
+    def _items(self) -> list[dict[str, Any]]:
+        return [{"jenis_sampah_id": str(self.jenis.id), "berat": "1.000"}]
+
+    def test_post_ulang_dengan_key_sama_mengembalikan_transaksi_lama(self) -> None:
+        pertama = self._setor_dengan_key(self._items(), self.KEY)
+        ulang = self._setor_dengan_key(self._items(), self.KEY)
+
+        self.assertEqual(pertama.status_code, 201)
+        self.assertEqual(ulang.status_code, 200)
+        self.assertEqual(ulang.data["id"], pertama.data["id"])
+        transaksi = Transaksi.objects.get(pk=pertama.data["id"])
+        self.assertEqual(str(transaksi.idempotency_key), self.KEY)
+        self.assertTrue(transaksi.idempotency_request_hash)
+        self.assertEqual(Transaksi.objects.count(), 1)
+        self.assertEqual(self._saldo(), "3333.00")
+
+    def test_key_sama_dengan_payload_berbeda_ditolak(self) -> None:
+        self._setor_dengan_key(self._items(), self.KEY)
+
+        response = self._setor_dengan_key(
+            [{"jenis_sampah_id": str(self.jenis_lain.id), "berat": "1.000"}], self.KEY
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(Transaksi.objects.count(), 1)
+        self.assertEqual(self._saldo(), "3333.00")
+
+    def test_key_yang_sama_boleh_dipakai_di_bank_berbeda(self) -> None:
+        self._setor_dengan_key(self._items(), self.KEY)
+        bank_lain = BankSampah.objects.create(
+            nama="Bank Sampah Lain", alamat="Bogor", kota="Bogor", no_hp_pic="+628123456780"
+        )
+        user_lain = User.objects.create_user(
+            email="pengelola-lain@example.com",
+            nama="Pengelola Lain",
+            bank_sampah=bank_lain,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        nasabah_lain = Nasabah.objects.create(
+            bank_sampah=bank_lain,
+            nomor="NAS-0001",
+            nama="Nasabah Lain",
+            no_hp="+628123456781",
+            alamat="Bogor",
+        )
+        jenis_lain = JenisSampah.objects.create(
+            bank_sampah=bank_lain,
+            nomor="PLS-001",
+            nama_sampah="Plastik PET",
+            kategori=JenisSampah.Kategori.PLASTIK,
+            harga_per_kg=Decimal("3333.00"),
+        )
+        client_lain = APIClient()
+        token_lain = RefreshToken.for_user(user_lain)
+        client_lain.credentials(HTTP_AUTHORIZATION=f"Bearer {token_lain.access_token}")
+
+        response = client_lain.post(
+            "/api/v1/transaksi",
+            {
+                "nasabah_id": str(nasabah_lain.id),
+                "items": [{"jenis_sampah_id": str(jenis_lain.id), "berat": "1.000"}],
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=self.KEY,
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["nasabah_id"], str(nasabah_lain.id))
+        self.assertEqual(Transaksi.objects.filter(idempotency_key=self.KEY).count(), 2)
+
+    def test_key_tanpa_header_tetap_buat_transaksi_biasa(self) -> None:
+        self._setor(self._items())
+        self._setor(self._items())
+
+        self.assertEqual(Transaksi.objects.count(), 2)
+
+    def test_key_berbeda_membuat_transaksi_terpisah(self) -> None:
+        self._setor_dengan_key(self._items(), self.KEY)
+        self._setor_dengan_key(self._items(), self.OTHER_KEY)
+
+        self.assertEqual(Transaksi.objects.count(), 2)
+
+    def test_replay_tanpa_key_tetap_duplikat(self) -> None:
+        # Tanpa header, replay tetap duplikat — perlindungan hanya untuk
+        # klien yang mengirim Idempotency-Key.
+        self._setor_dengan_key(self._items(), self.KEY)
+        self._setor(self._items())
+
+        self.assertEqual(Transaksi.objects.count(), 2)
+
+    def test_key_bukan_uuid_v4_ditolak_tanpa_dipotong(self) -> None:
+        for key in ("", "   ", "x" * 65):
+            with self.subTest(key=key):
+                response = self._setor_dengan_key(self._items(), key)
+                self.assertEqual(response.status_code, 400)
+
+    def test_validasi_gagal_tidak_menghabiskan_key(self) -> None:
+        invalid = self._setor_dengan_key(
+            [{"jenis_sampah_id": str(self.jenis.id), "berat": "0"}], self.KEY
+        )
+        valid = self._setor_dengan_key(self._items(), self.KEY)
+
+        self.assertEqual(invalid.status_code, 422)
+        self.assertEqual(valid.status_code, 201)
+        self.assertEqual(Transaksi.objects.count(), 1)
+
+    def test_integrity_error_karena_replay_mengembalikan_transaksi_awal(self) -> None:
+        pertama = self._setor_dengan_key(self._items(), self.KEY)
+        existing = Transaksi.objects.get(pk=pertama.data["id"])
+        with (
+            patch("api.views._find_idempotent_transaction", side_effect=[None, existing]),
+            patch("api.views.TransactionService.create_setoran", side_effect=IntegrityError),
+        ):
+            ulang = self._setor_dengan_key(self._items(), self.KEY)
+
+        self.assertEqual(ulang.status_code, 200)
+        self.assertEqual(ulang.data["id"], pertama.data["id"])
+        self.assertEqual(Transaksi.objects.count(), 1)
 
 
 class KalkulasiSetoranTests(SetoranTestBase):
@@ -4573,15 +4715,64 @@ class ValidasiInputSetoranTests(SetoranTestBase):
         self.assertEqual(self._saldo(), "0.00")
 
     def test_total_berat_tepat_1000_kg_diterima(self) -> None:
-        jenis_id = str(self.jenis.id)
         response = self._setor(
             [
-                {"jenis_sampah_id": jenis_id, "berat": "500.000"},
-                {"jenis_sampah_id": jenis_id, "berat": "500.000"},
+                {"jenis_sampah_id": str(self.jenis.id), "berat": "500.000"},
+                {"jenis_sampah_id": str(self.jenis_lain.id), "berat": "500.000"},
             ]
         )
 
         self.assertEqual(response.status_code, 201)
+
+    def test_item_jenis_sama_digabung_satu_baris(self) -> None:
+        # CPBI-08: dua item dengan jenis sama digabung jadi satu baris detail,
+        # bukan dua item terpisah; beratnya dijumlah sebelum divalidasi.
+        jenis_id = str(self.jenis.id)
+        response = self._setor(
+            [
+                {"jenis_sampah_id": jenis_id, "berat": "10.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "20.000"},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual([item["berat"] for item in response.data["items"]], ["30.000"])
+        self.assertEqual(
+            DetailTransaksi.objects.filter(transaksi_id=response.data["id"]).count(), 1
+        )
+
+    def test_item_jenis_sama_digabung_melewati_1000_kg_total_ditolak(self) -> None:
+        # Batas setoran tetap dari total semua item (1.000 kg), bukan cap
+        # tambahan per jenis: baris-baris valid boleh digabung, tapi total
+        # satu setoran tetap terjaga.
+        jenis_id = str(self.jenis.id)
+        response = self._setor(
+            [
+                {"jenis_sampah_id": jenis_id, "berat": "400.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "400.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "400.000"},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data["errors"]["items"], ["Total berat satu setoran maksimal 1.000 kg"]
+        )
+        self.assertEqual(self._saldo(), "0.00")
+
+    def test_item_jenis_sama_digabung_di_atas_500_kg_diterima(self) -> None:
+        # Penggabungan boleh melewati 500 kg per jenis: tiap baris input
+        # sudah lolos validator per item, gabungan baris valid tetap valid.
+        jenis_id = str(self.jenis.id)
+        response = self._setor(
+            [
+                {"jenis_sampah_id": jenis_id, "berat": "300.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "300.000"},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual([item["berat"] for item in response.data["items"]], ["600.000"])
 
     def test_item_dengan_subtotal_di_bawah_satu_rupiah_ditolak(self) -> None:
         # Harga master dipertahankan presisinya, tetapi item yang nilainya

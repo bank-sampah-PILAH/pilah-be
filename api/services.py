@@ -680,7 +680,12 @@ class NasabahApprovalService:
 class TransactionService:
     @staticmethod
     @transaction.atomic
-    def create_setoran(user: User, payload: Mapping[str, Any]) -> Transaksi:
+    def create_setoran(
+        user: User,
+        payload: Mapping[str, Any],
+        idempotency_key: UUID | None = None,
+        idempotency_request_hash: str | None = None,
+    ) -> Transaksi:
         bank = user.bank_sampah
         assert bank is not None  # ponytail: views gate on IsActivePengelola
         nasabah = (
@@ -704,6 +709,8 @@ class TransactionService:
             bank_sampah=bank,
             dicatat_oleh=user,
             catatan=payload.get("catatan") or None,
+            idempotency_key=idempotency_key,
+            idempotency_request_hash=idempotency_request_hash,
         )
 
         subtotal_items: list[Decimal] = []
