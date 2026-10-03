@@ -1,4 +1,3 @@
-from collections.abc import Mapping
 from typing import Any
 
 from django.db.models import Model
@@ -83,39 +82,6 @@ class UserProfileSerializer(serializers.ModelSerializer[Model]):
         return attrs
 
 
-class TeamMemberSerializer(serializers.ModelSerializer[Model]):
-    is_current_user = serializers.SerializerMethodField()
-
-    class Meta:
-        model = User
-        fields = [
-            "id",
-            "nama",
-            "email",
-            "role",
-            "is_primary_pengelola",
-            "is_current_user",
-            "created_at",
-        ]
-
-    def get_is_current_user(self, obj: Any) -> Any:
-        request = self.context.get("request")
-        return bool(request and request.user.id == obj.id)
-
-
-class InviteAcceptSerializer(serializers.Serializer[Any]):
-    token = serializers.CharField(required=False, allow_blank=True)
-    invite_token = serializers.CharField(required=False, allow_blank=True, write_only=True)
-
-    def validate(self, attrs: Mapping[str, Any]) -> dict[str, Any]:
-        mutable = dict(attrs)
-        token = mutable.get("token") or mutable.get("invite_token")
-        if not token:
-            raise serializers.ValidationError({"token": ["Token undangan wajib diisi"]})
-        mutable["token"] = token
-        return mutable
-
-
 class GoogleAuthSerializer(serializers.Serializer[Any]):
     id_token = serializers.CharField(required=True)
 
@@ -126,3 +92,8 @@ class RefreshTokenSerializer(serializers.Serializer[Any]):
 
 class LogoutSerializer(serializers.Serializer[Any]):
     refresh_token = serializers.CharField(required=False, allow_blank=True)
+
+
+class GoogleRegistrationSerializer(serializers.Serializer[Any]):
+    registration_token = serializers.CharField(required=True)
+    role = serializers.ChoiceField(choices=User.GOOGLE_REGISTRATION_ROLES)

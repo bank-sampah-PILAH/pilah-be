@@ -98,19 +98,22 @@ class IsJadwalViewer(BasePermission):
         return user.role == User.Role.NASABAH and user.is_active
 
 
+def superadmin_allowlist() -> frozenset[str]:
+    """Parsed PILAH_SUPERADMIN_EMAILS. Kernel-owned so the auth service and the
+    IsSuperAdmin permission share one parser instead of duplicating it."""
+    configured = getattr(settings, "PILAH_SUPERADMIN_EMAILS", ())
+    values = configured.split(",") if isinstance(configured, str) else configured
+    return frozenset(str(v).strip().lower() for v in values if str(v).strip())
+
+
 class IsSuperAdmin(BasePermission):
     message = "Endpoint ini hanya untuk superadmin"
 
     def has_permission(self, request: Request, view: APIView) -> bool:
-        # Allowlist check inlined (PIL-180): the kernel cannot import
-        # apps.authentication, and the check is 3 lines — not worth a second module.
         user = request.user
         if not user.is_authenticated or user.role != User.Role.SUPERADMIN:
             return False
-        configured = getattr(settings, "PILAH_SUPERADMIN_EMAILS", ())
-        values = configured.split(",") if isinstance(configured, str) else configured
-        allowlist = frozenset(str(v).strip().lower() for v in values if str(v).strip())
-        return user.email.strip().lower() in allowlist
+        return user.email.strip().lower() in superadmin_allowlist()
 
 
 class IsActiveNasabah(BasePermission):

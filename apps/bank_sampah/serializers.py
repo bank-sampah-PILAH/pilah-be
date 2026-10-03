@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from typing import Any
 
 from django.conf import settings
@@ -6,7 +7,7 @@ from django.db.models import Model
 from django.urls import reverse
 from rest_framework import serializers
 
-from api.models import BankSampah, BankSampahApprovalLog
+from api.models import BankSampah, BankSampahApprovalLog, User
 from shared_kernel.validators import normalize_indonesian_phone
 
 
@@ -141,3 +142,49 @@ class ApprovalLogSerializer(serializers.ModelSerializer[Model]):
     class Meta:
         model = BankSampahApprovalLog
         fields = ["id", "bank_sampah_id", "superadmin_email", "status", "catatan", "created_at"]
+
+
+class TeamMemberSerializer(serializers.ModelSerializer[Model]):
+    is_current_user = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "nama",
+            "email",
+            "role",
+            "is_primary_pengelola",
+            "is_current_user",
+            "created_at",
+        ]
+
+    def get_is_current_user(self, obj: Any) -> Any:
+        request = self.context.get("request")
+        return bool(request and request.user.id == obj.id)
+
+
+class InviteAcceptSerializer(serializers.Serializer[Any]):
+    token = serializers.CharField(required=False, allow_blank=True)
+    invite_token = serializers.CharField(required=False, allow_blank=True, write_only=True)
+
+    def validate(self, attrs: Mapping[str, Any]) -> dict[str, Any]:
+        mutable = dict(attrs)
+        token = mutable.get("token") or mutable.get("invite_token")
+        if not token:
+            raise serializers.ValidationError({"token": ["Token undangan wajib diisi"]})
+        mutable["token"] = token
+        return mutable
+
+
+class BankSampahDirectorySerializer(serializers.ModelSerializer[Model]):
+    """Public-facing listing for the calon-nasabah bank-sampah picker.
+
+    Deliberately excludes `pengelola`, `no_hp_pic`, and `wa_gateway_token` —
+    `BankSampahSerializer` carries those for the owning pengelola, not for a
+    prospective member browsing banks to join.
+    """
+
+    class Meta:
+        model = BankSampah
+        fields = ["id", "nama", "alamat", "kota", "foto_logo"]

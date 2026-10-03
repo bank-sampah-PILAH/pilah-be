@@ -51,10 +51,11 @@ class ArchitectureTest(SimpleTestCase):
                         violations.append(f"{path}: forbidden {module}")
                 elif module == "apps" or module.startswith("apps."):
                     parts = module.split(".")
-                    if (
-                        len(parts) > 2
-                        and parts[1] != context
-                        and parts[2] not in ("api", "serializers")
+                    # Depth 2 (`from apps.other import x`) reaches past the
+                    # port: cross-context imports must name apps.<bc>.api or
+                    # apps.<bc>.serializers explicitly.
+                    if parts[1] != context and (
+                        len(parts) < 3 or parts[2] not in ("api", "serializers")
                     ):
                         violations.append(f"{path}: cross-context {module}")
         self.assertEqual(violations, [])

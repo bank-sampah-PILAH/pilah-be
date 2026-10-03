@@ -5,8 +5,8 @@ from django.test import override_settings
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.backends import AllowlistedSuperadminBackend
 from api.models import BankSampah, Nasabah, User
+from apps.authentication.backends import AllowlistedSuperadminBackend
 
 GOOGLE_PROFILE = {
     "sub": "google-new-user",

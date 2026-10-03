@@ -172,9 +172,9 @@ jobs:
         with:
           args: >
             -Dsonar.projectKey=${{ steps.pick.outputs.key }}
-            -Dsonar.sources=api,apps,config,shared_kernel
-            -Dsonar.tests=api
-            -Dsonar.test.inclusions=**/tests.py
+            -Dsonar.sources=api,apps,config,shared_kernel,tests
+            -Dsonar.tests=api,tests
+            -Dsonar.test.inclusions=**/tests.py,**/test_*.py
             -Dsonar.python.coverage.reportPaths=coverage.xml
             -Dsonar.exclusions=**/migrations/**,**/*.pyc,**/__pycache__/**,**/staticfiles/**,reference/**
             -Dsonar.python.version=3.12

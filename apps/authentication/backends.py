@@ -1,7 +1,7 @@
 from django.contrib.auth.backends import ModelBackend
 from django.contrib.auth.models import AnonymousUser
 
-from api.models import User
+from api.models import User  # the frozen app registry
 from apps.authentication.services import AuthService
 
 

@@ -3,7 +3,7 @@
 from typing import Any
 
 from api.models import User
-from api.services import OnboardingService
+from apps.bank_sampah.services import BankOnboardingService as OnboardingService
 from tests.regression.helpers import RegressionTestCase, logo
 
 

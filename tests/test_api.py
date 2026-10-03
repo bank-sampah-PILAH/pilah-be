@@ -612,7 +612,7 @@ class APISpecTests(APITestCase):
         self.assertNotIn("peringatan_jadwal_bertumpuk", selected_data)
 
     def test_nasabah_serializer_omits_manager_fields_before_serializing(self) -> None:
-        from api.serializers import JadwalKegiatanSerializer
+        from apps.jadwal.serializers import JadwalKegiatanSerializer
 
         nasabah_user = User.objects.create_user(
             email="serializer-nasabah@example.com",
@@ -652,7 +652,7 @@ class APISpecTests(APITestCase):
         self.assertNotIn("peringatan_jadwal_bertumpuk", serializer.data)
 
     def test_nasabah_queryset_skips_manager_only_work(self) -> None:
-        from api.views import JadwalKegiatanViewSet
+        from apps.jadwal.views import JadwalKegiatanViewSet
 
         nasabah_user = User.objects.create_user(
             email="queryset-nasabah@example.com",
@@ -677,7 +677,7 @@ class APISpecTests(APITestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_transition_does_not_overwrite_a_concurrent_status_change(self) -> None:
-        from api.views import JadwalKegiatanViewSet
+        from apps.jadwal.views import JadwalKegiatanViewSet
 
         starts_at = timezone.now() + timedelta(days=4)
         created = self.client.post(
@@ -709,7 +709,7 @@ class APISpecTests(APITestCase):
         )
 
     def test_transition_response_uses_fresh_schedule_after_concurrent_edit(self) -> None:
-        from api.views import JadwalKegiatanViewSet
+        from apps.jadwal.views import JadwalKegiatanViewSet
 
         recipient_before = self._create_pending_nasabah()
         recipient_before.status = Nasabah.Status.APPROVED
@@ -763,7 +763,7 @@ class APISpecTests(APITestCase):
         self.assertTrue(response.data["peringatan_jadwal_bertumpuk"])
 
     def test_edit_does_not_overwrite_a_concurrent_terminal_transition(self) -> None:
-        from api.views import JadwalKegiatanViewSet
+        from apps.jadwal.views import JadwalKegiatanViewSet
 
         starts_at = timezone.now() + timedelta(days=4)
         created = self.client.post(
@@ -2017,7 +2017,7 @@ class APISpecTests(APITestCase):
             nomor="JS-0002",
             nama_sampah="Kardus",
             kategori="kertas",
-            harga_per_kg=Decimal("2000"),
+            harga_per_kg=Decimal(2000),
         )
         transaksi = self.client.post(
             "/api/v1/transaksi",
@@ -2112,14 +2112,14 @@ class APISpecTests(APITestCase):
             nomor="JS-0003",
             nama_sampah="kertas hvs",
             kategori="kertas",
-            harga_per_kg=Decimal("1500"),
+            harga_per_kg=Decimal(1500),
         )
         botol = JenisSampah.objects.create(
             bank_sampah=self.bank,
             nomor="JS-0004",
             nama_sampah="botol kaca",
             kategori="kaca",
-            harga_per_kg=Decimal("1000"),
+            harga_per_kg=Decimal(1000),
         )
         transaksi = self.client.post(
             "/api/v1/transaksi",
@@ -5233,7 +5233,7 @@ class PencairanAPITests(APITestCase):
 
         self.assertEqual(response.status_code, 403, response.data)
         self.assertEqual(Pencairan.objects.count(), 0)
-        self.assertEqual(Saldo.objects.get(nasabah=self.nasabah).total_saldo, Decimal("465600"))
+        self.assertEqual(Saldo.objects.get(nasabah=self.nasabah).total_saldo, Decimal(465600))
 
     def test_pencairan_cannot_predate_latest_nasabah_activity(self) -> None:
         Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))

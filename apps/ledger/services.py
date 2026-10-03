@@ -22,7 +22,6 @@ from api.models import (
     Transaksi,
     User,
 )
-from apps.reporting import exporter
 from shared_kernel.kalkulasi import (
     bulatkan_rupiah,
     harga_berlaku,
@@ -113,12 +112,6 @@ class TransactionService:
         saldo.total_saldo = bulatkan_rupiah(saldo.total_saldo + total_nilai)
         saldo.save(update_fields=["total_saldo", "updated_at"])
         return transaksi
-
-    @staticmethod
-    def export_excel(
-        queryset: QuerySet[Transaksi], request: HttpRequest | None = None
-    ) -> tuple[bytes, str]:
-        return exporter.export_excel(queryset, request)
 
 
 # ponytail: pencairan edit-window constant (PIL-2xx), shared with tests.

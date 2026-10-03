@@ -6,8 +6,7 @@ from django.conf import settings
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.http import HttpResponse, HttpResponseRedirect
 from django.utils.http import urlencode
-from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -17,29 +16,20 @@ from api.models import User
 from apps.authentication.serializers import (
     AuthUserSerializer,
     GoogleAuthSerializer,
-    InviteAcceptSerializer,
+    GoogleRegistrationSerializer,
     LogoutSerializer,
     RefreshTokenSerializer,
-    TeamMemberSerializer,
     UserProfileSerializer,
 )
 from apps.authentication.services import (
     AuthService,
     AuthServiceError,
     OnboardingService,
-    TeamService,
-)
-from apps.bank_sampah.serializers import (
-    BankSampahRegistrationSerializer,
-    BankSampahSerializer,
 )
 from shared_kernel.permissions import (
-    IsActivePengelola,
-    IsPengelola,
-    IsPrimaryPengelola,
     IsRegistrationRole,
 )
-from shared_kernel.scoping import current_bank, current_user
+from shared_kernel.scoping import current_user
 
 
 class GoogleAuthView(APIView):
@@ -216,82 +206,23 @@ class CompleteProfileView(APIView):
         return Response(data)
 
 
-class RegisterBankSampahView(APIView):
-    permission_classes = [IsPengelola]
-    parser_classes = [MultiPartParser, FormParser, JSONParser]
-    serializer_class = BankSampahRegistrationSerializer
+def _auth_service_error_response(error: AuthServiceError) -> Response:
+    return Response({"error": str(error), "code": error.code}, status=error.status_code)
+
+
+class GoogleRegistrationView(APIView):
+    permission_classes = [AllowAny]
+    serializer_class = GoogleRegistrationSerializer
 
     def post(self, request: Request) -> Response:
-        serializer = BankSampahRegistrationSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        serializer = GoogleRegistrationSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({"errors": serializer.errors}, status=422)
         try:
-            bank = OnboardingService.register_bank_sampah(
-                current_user(request), serializer.validated_data
+            payload, created = AuthService.register_with_google(
+                serializer.validated_data["registration_token"],
+                serializer.validated_data["role"],
             )
-        except PermissionError as exc:
-            return Response({"error": str(exc)}, status=403)
-        except ValueError as exc:
-            return Response({"error": str(exc)}, status=400)
-        data = BankSampahSerializer(bank).data
-        data["next_step"] = AuthService.user_state(current_user(request))
-        return Response(data, status=201)
-
-
-class AcceptInviteView(APIView):
-    permission_classes = [IsAuthenticated]
-    serializer_class = InviteAcceptSerializer
-
-    def post(self, request: Request) -> Response:
-        serializer = InviteAcceptSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        try:
-            bank, outcome = OnboardingService.accept_invite(
-                current_user(request), serializer.validated_data["token"]
-            )
-        except PermissionError as exc:
-            return Response({"error": str(exc)}, status=403)
-        except ValueError as exc:
-            return Response({"error": str(exc)}, status=400)
-        data = BankSampahSerializer(bank).data
-        data["next_step"] = AuthService.user_state(current_user(request))
-        data["outcome"] = outcome
-        data["bank_sampah_id"] = str(bank.id)
-        data["bank_sampah_nama"] = bank.nama
-        if outcome == "already_member":
-            data["message"] = "Anda sudah terdaftar pada bank sampah ini"
-        else:
-            data["message"] = f"Berhasil bergabung ke Bank Sampah {bank.nama}"
-        return Response(data)
-
-
-class TeamView(APIView):
-    permission_classes = [IsActivePengelola]
-    serializer_class = TeamMemberSerializer
-
-    def get(self, request: Request) -> Response:
-        members = User.objects.filter(
-            bank_sampah=current_bank(request), role=User.Role.PENGELOLA, is_active=True
-        ).order_by("-is_primary_pengelola", "nama")
-        return Response(
-            {"members": TeamMemberSerializer(members, many=True, context={"request": request}).data}
-        )
-
-
-class GenerateInviteView(APIView):
-    permission_classes = [IsPrimaryPengelola]
-    serializer_class = InviteAcceptSerializer
-
-    def post(self, request: Request) -> Response:
-        bank = current_bank(request)
-        token = TeamService.generate_invite(bank)
-        invite_path = f"/invite?{urlencode({'token': token})}"
-        base_url = request.build_absolute_uri("/")[:-1]
-        public_base = getattr(settings, "PILAH_PUBLIC_APP_URL", "") or base_url
-        return Response(
-            {
-                "token": token,
-                "invite_url": f"{public_base}{invite_path}",
-                "expires_at": bank.invite_token_expires,
-            },
-            status=201,
-        )
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
+        return Response(payload, status=201 if created else 200)

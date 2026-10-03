@@ -1,12 +1,14 @@
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
 from django.db.models import Model
+from django.utils import timezone
 from rest_framework import serializers
 
-from api.models import DetailTransaksi, Transaksi
-from apps.ledger.services import BalanceService
+from api.models import DetailTransaksi, Pencairan, PencairanRevisi, Transaksi
+from apps.ledger.services import BalanceService, PencairanService
 from shared_kernel.kalkulasi import bulatkan_rupiah, format_ribuan
 from shared_kernel.validators import get_initials
 
@@ -149,3 +151,123 @@ class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
         return bulatkan_rupiah(
             BalanceService.saldo_at(obj.bank_sampah, obj.nasabah_id, obj.tanggal, obj.id)
         )
+
+
+def _validate_tanggal_pencairan(value: datetime) -> datetime:
+    if value > timezone.now():
+        raise serializers.ValidationError("Tanggal pencairan tidak boleh di masa depan")
+    return value
+
+
+# Nested `source` paths shared by several serializers (one definition each).
+_BANK_SAMPAH_ID = "bank_sampah.id"
+_DICATAT_OLEH_ID = "dicatat_oleh.id"
+
+
+def _validate_nominal_pencairan(value: Decimal) -> Decimal:
+    if value <= 0:
+        raise serializers.ValidationError("Nominal harus lebih dari nol")
+    if value != value.to_integral_value():
+        raise serializers.ValidationError("Nominal harus dalam rupiah bulat tanpa desimal")
+    return value
+
+
+class PencairanCreateSerializer(serializers.Serializer[Any]):
+    nasabah_id = serializers.UUIDField(required=True)
+    nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=True)
+    metode = serializers.ChoiceField(choices=Pencairan.Metode.choices, required=True)
+    tanggal = serializers.DateTimeField(required=False)
+    keterangan = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True, max_length=255
+    )
+
+    def validate_nominal(self, value: Decimal) -> Decimal:
+        return _validate_nominal_pencairan(value)
+
+    def validate_tanggal(self, value: datetime) -> datetime:
+        return _validate_tanggal_pencairan(value)
+
+
+class PencairanEditSerializer(serializers.Serializer[Any]):
+    nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
+    metode = serializers.ChoiceField(choices=Pencairan.Metode.choices, required=False)
+    tanggal = serializers.DateTimeField(required=False)
+    keterangan = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True, max_length=255
+    )
+    alasan = serializers.CharField(
+        required=True,
+        max_length=255,
+        error_messages={
+            "required": "Alasan perubahan wajib diisi",
+            "blank": "Alasan perubahan wajib diisi",
+        },
+    )
+
+    def validate_nominal(self, value: Decimal) -> Decimal:
+        return _validate_nominal_pencairan(value)
+
+    def validate_tanggal(self, value: datetime) -> datetime:
+        return _validate_tanggal_pencairan(value)
+
+
+class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
+    nasabah_id = serializers.UUIDField(source="nasabah.id")
+    nasabah_nama = serializers.CharField(source="nasabah.nama")
+    bank_sampah_id = serializers.UUIDField(source=_BANK_SAMPAH_ID)
+    bank_sampah_nama = serializers.CharField(source="bank_sampah.nama")
+    dicatat_oleh = serializers.UUIDField(source=_DICATAT_OLEH_ID)
+    dicatat_oleh_nama = serializers.CharField(source="dicatat_oleh.nama")
+    diperbarui = serializers.SerializerMethodField()
+    tanggal_edit_minimum = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Pencairan
+        fields = [
+            "id",
+            "nasabah_id",
+            "nasabah_nama",
+            "bank_sampah_id",
+            "bank_sampah_nama",
+            "dicatat_oleh",
+            "dicatat_oleh_nama",
+            "tanggal",
+            "nominal",
+            "metode",
+            "keterangan",
+            "status",
+            "saldo_sebelum",
+            "saldo_sesudah",
+            "diperbarui",
+            "tanggal_edit_minimum",
+            "created_at",
+        ]
+
+    def get_diperbarui(self, obj: Pencairan) -> bool:
+        return PencairanService.diperbarui(obj)
+
+    def get_tanggal_edit_minimum(self, obj: Pencairan) -> str:
+        return serializers.DateTimeField().to_representation(
+            PencairanService.tanggal_edit_minimum(obj)
+        )
+
+
+class PencairanRevisiSerializer(serializers.ModelSerializer[Model]):
+    diubah_oleh = serializers.UUIDField(source="diubah_oleh.id")
+    diubah_oleh_nama = serializers.CharField(source="diubah_oleh.nama")
+
+    class Meta:
+        model = PencairanRevisi
+        fields = [
+            "versi",
+            "tanggal",
+            "nominal",
+            "metode",
+            "keterangan",
+            "saldo_sebelum",
+            "saldo_sesudah",
+            "alasan",
+            "diubah_oleh",
+            "diubah_oleh_nama",
+            "diubah_pada",
+        ]

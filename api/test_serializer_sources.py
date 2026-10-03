@@ -11,12 +11,10 @@ from django.test import TestCase
 from django.utils import timezone
 
 from api.models import BankSampah, JadwalKegiatan, Nasabah, Pencairan, Transaksi, User
-from api.serializers import (
-    JadwalKegiatanSerializer,
-    PencairanDetailSerializer,
-)
 from apps.authentication.serializers import AuthUserSerializer
+from apps.jadwal.serializers import JadwalKegiatanSerializer
 from apps.ledger.serializers import (
+    PencairanDetailSerializer,
     TransactionDetailSerializer,
     TransactionListSerializer,
 )

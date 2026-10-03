@@ -172,7 +172,7 @@ STORAGES = {
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "api.User"
-AUTHENTICATION_BACKENDS = ("api.backends.AllowlistedSuperadminBackend",)
+AUTHENTICATION_BACKENDS = ("apps.authentication.backends.AllowlistedSuperadminBackend",)
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (

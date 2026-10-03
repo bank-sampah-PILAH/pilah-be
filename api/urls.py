@@ -1,29 +1,29 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from api.views import (
-    BankSampahDirectoryView,
-    GoogleRegistrationView,
-    JadwalKegiatanViewSet,
-    NasabahSelfView,
-    PencairanViewSet,
-    RegisterNasabahView,
-)
+# ponytail: views live in their canonical bounded-context homes; routes and
+# names are frozen so this compose is behavior-neutral.
 from apps.authentication.views import (
-    AcceptInviteView,
     AuthMeView,
     CompleteProfileView,
-    GenerateInviteView,
     GoogleAuthView,
     GoogleOAuthCallbackView,
     GoogleOAuthStartView,
+    GoogleRegistrationView,
     LogoutView,
     RefreshTokenView,
+)
+from apps.bank_sampah.views import (
+    AcceptInviteView,
+    BankSampahDirectoryView,
+    BankSampahMeView,
+    GenerateInviteView,
     RegisterBankSampahView,
+    SuperAdminBankSampahViewSet,
     TeamView,
 )
-from apps.bank_sampah.views import BankSampahMeView, SuperAdminBankSampahViewSet
-from apps.ledger.views import TransaksiViewSet
+from apps.jadwal.views import JadwalKegiatanViewSet
+from apps.ledger.views import PencairanViewSet, TransaksiViewSet
 
 # ponytail: views are imported from their canonical bounded-context homes;
 # routes and names are frozen so this compose is behavior-neutral.
@@ -35,7 +35,7 @@ from apps.nasabah.home import (
     NasabahTransactionDetailView,
 )
 from apps.nasabah.profile import NasabahProfileView
-from apps.nasabah.views import NasabahViewSet, SaldoView
+from apps.nasabah.views import NasabahSelfView, NasabahViewSet, RegisterNasabahView, SaldoView
 from apps.notification.views import WATemplateView
 from apps.reporting.views import DashboardRecentTransactionsView, DashboardStatsView
 from apps.waste_catalog.views import JenisSampahViewSet

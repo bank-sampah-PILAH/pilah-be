@@ -8,19 +8,27 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.models import Nasabah, Saldo
+from api.models import Nasabah, Saldo, User
+from apps.authentication.api import register_nasabah, user_state_hint
 from apps.bank_sampah.serializers import ApprovalDecisionSerializer
 from apps.nasabah.keanggotaan import email_terkunci, profil_akun, sinkronkan_dari_akun
 from apps.nasabah.serializers import (
     NasabahApprovalLogSerializer,
     NasabahDetailSerializer,
+    NasabahSelfRegistrationSerializer,
+    NasabahSelfViewSerializer,
     NasabahSerializer,
     SaldoSerializer,
     StatusSerializer,
 )
 from apps.nasabah.services import NasabahApprovalService
-from shared_kernel.permissions import IsActivePengelola
+from shared_kernel.permissions import IsActivePengelola, IsNasabah, IsNasabahRole
 from shared_kernel.scoping import current_bank, current_user
+
+
+def _user(request: Request) -> User:
+    assert isinstance(request.user, User)  # ponytail: DRF authentication rejects AnonymousUser
+    return request.user
 
 
 class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
@@ -220,3 +228,36 @@ class SaldoView(APIView):
             return Response({"error": "Resource tidak ditemukan"}, status=404)
         saldo, _ = Saldo.objects.get_or_create(nasabah=nasabah)
         return Response(SaldoSerializer(saldo).data)
+
+
+class RegisterNasabahView(APIView):
+    permission_classes = [IsNasabah]
+    serializer_class = NasabahSelfRegistrationSerializer
+
+    def post(self, request: Request) -> Response:
+        serializer = NasabahSelfRegistrationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            nasabah = register_nasabah(_user(request), serializer.validated_data)
+        except PermissionError as exc:
+            return Response({"error": str(exc)}, status=403)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
+        data = NasabahSerializer(nasabah).data
+        data["next_step"] = user_state_hint(_user(request))
+        return Response(data, status=201)
+
+
+class NasabahSelfView(APIView):
+    """A nasabah's own membership rows (beranda-first onboarding, PIL-204):
+    status, and the pengurus's reason when rejected, so the app can show
+    it and let the user appeal by reapplying via `RegisterNasabahView`
+    rather than being stalled on a blocking approval screen.
+    """
+
+    permission_classes = [IsNasabahRole]
+    serializer_class = NasabahSelfViewSerializer
+
+    def get(self, request: Request) -> Response:
+        memberships = Nasabah.objects.filter(user=_user(request)).select_related("bank_sampah")
+        return Response(NasabahSelfViewSerializer(memberships, many=True).data)

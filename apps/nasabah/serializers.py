@@ -5,7 +5,7 @@ from django.db.models import Model
 from django.utils import timezone
 from rest_framework import serializers
 
-from api.models import DetailTransaksi, Nasabah, NasabahApprovalLog, Saldo
+from api.models import BankSampah, DetailTransaksi, Nasabah, NasabahApprovalLog, Saldo
 from apps.nasabah.keanggotaan import profil_akun, profil_berbeda, punya_akun
 from shared_kernel.validators import normalize_indonesian_phone
 
@@ -145,3 +145,77 @@ class SaldoSerializer(serializers.ModelSerializer[Model]):
     class Meta:
         model = Saldo
         fields = ["nasabah_id", "nasabah_nama", "total_saldo", "updated_at"]
+
+
+class NasabahSelfRegistrationSerializer(serializers.Serializer[Any]):
+    """Input for a calon nasabah applying to join a bank sampah (PIL-204).
+
+    Only `bank_sampah_id` is asked for here: `nama`, `jenis_kelamin`,
+    `tanggal_lahir`, `no_hp`, and `alamat` were already collected on the
+    shared `complete_profile` onboarding step and are copied from the User
+    by the service.
+    """
+
+    bank_sampah_id = serializers.UUIDField()
+    # Only meaningful when reapplying after a rejection (PIL-232's appeal
+    # action) — ignored on a first-time application, nothing to appeal yet.
+    pesan = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class NasabahSelfBankSampahSerializer(serializers.ModelSerializer[Model]):
+    """The bank sampah facet of a nasabah's own membership listing.
+
+    Deliberately smaller than `BankSampahSerializer` — a nasabah viewing
+    their own membership has no use for the owning pengelola's contact
+    details, only enough to identify which bank the row belongs to.
+    """
+
+    class Meta:
+        model = BankSampah
+        fields = ["id", "nama", "kota", "alamat"]
+        read_only_fields = fields
+
+
+class NasabahSelfApprovalLogSerializer(serializers.ModelSerializer[Model]):
+    """One decision entry in a membership row's approval history, as shown
+    to the nasabah themself (PIL-232). Deliberately smaller than
+    `NasabahApprovalLogSerializer` (used pengurus-side), which also exposes
+    `id`, `nasabah_id`, and `pengurus_email` that a nasabah has no use for.
+    """
+
+    class Meta:
+        model = NasabahApprovalLog
+        fields = ["status", "catatan", "created_at"]
+        read_only_fields = fields
+
+
+class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
+    """A calon/active nasabah's own membership row (PIL-204's beranda-first
+    onboarding): status, and — only while rejected — the pengurus's reason,
+    so the beranda can show it and let the user appeal by reapplying.
+    """
+
+    bank_sampah = NasabahSelfBankSampahSerializer(read_only=True)
+    alasan_penolakan = serializers.SerializerMethodField()
+    riwayat_persetujuan = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Nasabah
+        fields = [
+            "id",
+            "bank_sampah",
+            "status",
+            "is_active",
+            "alasan_penolakan",
+            "riwayat_persetujuan",
+        ]
+        read_only_fields = fields
+
+    def get_alasan_penolakan(self, obj: Nasabah) -> str | None:
+        if obj.status != Nasabah.Status.REJECTED:
+            return None
+        log = obj.approval_logs.filter(status=NasabahApprovalLog.Status.REJECTED).first()
+        return log.catatan if log else None
+
+    def get_riwayat_persetujuan(self, obj: Nasabah) -> Any:
+        return NasabahSelfApprovalLogSerializer(obj.approval_logs.all(), many=True).data

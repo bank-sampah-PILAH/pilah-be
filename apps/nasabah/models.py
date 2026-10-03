@@ -79,17 +79,6 @@ class Nasabah(TimestampedModel):
         return f"{self.nomor} - {self.nama}"
 
 
-class Saldo(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    nasabah = models.OneToOneField(Nasabah, on_delete=models.CASCADE, related_name="saldo")
-    total_saldo = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        app_label = "api"
-        db_table = "saldo"
-
-
 class NasabahApprovalLog(models.Model):
     class Status(models.TextChoices):
         APPROVED = "approved", "Approved"
