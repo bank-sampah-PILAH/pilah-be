@@ -1,42 +1,44 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from api.nasabah_home import (
+# ponytail: views live in their canonical bounded-context homes; routes and
+# names are frozen so this compose is behavior-neutral.
+from apps.authentication.views import (
+    AuthMeView,
+    CompleteProfileView,
+    GoogleAuthView,
+    GoogleOAuthCallbackView,
+    GoogleOAuthStartView,
+    GoogleRegistrationView,
+    LogoutView,
+    RefreshTokenView,
+)
+from apps.bank_sampah.views import (
+    AcceptInviteView,
+    BankSampahDirectoryView,
+    BankSampahMeView,
+    GenerateInviteView,
+    RegisterBankSampahView,
+    SuperAdminBankSampahViewSet,
+    TeamView,
+)
+from apps.jadwal.views import JadwalKegiatanViewSet
+from apps.ledger.views import PencairanViewSet, TransaksiViewSet
+
+# ponytail: views are imported from their canonical bounded-context homes;
+# routes and names are frozen so this compose is behavior-neutral.
+from apps.nasabah.home import (
     NasabahBalanceView,
     NasabahBankView,
     NasabahHistoryView,
     NasabahHomeView,
     NasabahTransactionDetailView,
 )
-from api.nasabah_profile import NasabahProfileView
-from api.views import (
-    AcceptInviteView,
-    AuthMeView,
-    BankSampahDirectoryView,
-    BankSampahMeView,
-    CompleteProfileView,
-    DashboardRecentTransactionsView,
-    DashboardStatsView,
-    GenerateInviteView,
-    GoogleAuthView,
-    GoogleOAuthCallbackView,
-    GoogleOAuthStartView,
-    GoogleRegistrationView,
-    JadwalKegiatanViewSet,
-    JenisSampahViewSet,
-    LogoutView,
-    NasabahSelfView,
-    NasabahViewSet,
-    PencairanViewSet,
-    RefreshTokenView,
-    RegisterBankSampahView,
-    RegisterNasabahView,
-    SaldoView,
-    SuperAdminBankSampahViewSet,
-    TeamView,
-    TransaksiViewSet,
-    WATemplateView,
-)
+from apps.nasabah.profile import NasabahProfileView
+from apps.nasabah.views import NasabahSelfView, NasabahViewSet, RegisterNasabahView, SaldoView
+from apps.notification.views import WATemplateView
+from apps.reporting.views import DashboardRecentTransactionsView, DashboardStatsView
+from apps.waste_catalog.views import JenisSampahViewSet
 
 router = DefaultRouter(trailing_slash=False)
 router.register("nasabah", NasabahViewSet, basename="nasabah")

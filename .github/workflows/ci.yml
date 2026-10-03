@@ -98,7 +98,7 @@ jobs:
       # Plain `manage.py test` = discovery across every Django app, so tests
       # in future apps (not just api/) still gate the build.
       - name: Run tests with coverage
-        run: coverage run --source=api manage.py test -v 2
+        run: coverage run --source=api,apps,shared_kernel manage.py test -v 2
 
       - name: Coverage report (fail under 80%)
         run: coverage report --show-missing --skip-covered --fail-under=80
@@ -134,7 +134,7 @@ jobs:
       # checking, django-stubs plugin resolves models/FKs. Blocking — new
       # code must be fully typed.
       - name: mypy strict
-        run: mypy api config
+        run: mypy api apps config shared_kernel tests
 
       # --- SonarQube analysis (was its own sonar.yml workflow) ---
       #
@@ -172,9 +172,9 @@ jobs:
         with:
           args: >
             -Dsonar.projectKey=${{ steps.pick.outputs.key }}
-            -Dsonar.sources=api,config
-            -Dsonar.tests=api
-            -Dsonar.test.inclusions=**/tests.py
+            -Dsonar.sources=api,apps,config,shared_kernel,tests
+            -Dsonar.tests=api,apps,tests
+            -Dsonar.test.inclusions=**/tests.py,**/test_*.py
             -Dsonar.python.coverage.reportPaths=coverage.xml
             -Dsonar.exclusions=**/migrations/**,**/*.pyc,**/__pycache__/**,**/staticfiles/**,reference/**
             -Dsonar.python.version=3.12
