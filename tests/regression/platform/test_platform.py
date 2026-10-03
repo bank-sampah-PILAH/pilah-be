@@ -43,7 +43,7 @@ class PlatformRouteTests(RegressionTestCase):
             # WinError 32 on Windows). response.close() directly would fire
             # request_finished unguarded and kill the shared test DB
             # connection for subsequent tests.
-            b"".join(response.streaming_content)
+            b"".join(response.streaming_content)  # type: ignore[attr-defined]
             wrong_prefix = TimestampSigner(salt="bank-sampah-kegiatan").sign("other/x.jpg")
             self.assertEqual(self.client.get(f"/media/activity/{wrong_prefix}").status_code, 404)
         finally:
