@@ -19,7 +19,7 @@ GOOGLE_PROFILE = {
 
 @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False, PILAH_SUPERADMIN_EMAILS=())
 class GoogleRegistrationTests(APITestCase):
-    @patch("api.services.google_id_token.verify_oauth2_token")
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     def test_unknown_verified_identity_requires_registration_without_creating_user(
         self, verify: Mock
     ) -> None:
@@ -36,7 +36,7 @@ class GoogleRegistrationTests(APITestCase):
         self.assertIn("registration_token", response.data)
         self.assertFalse(User.objects.filter(email=GOOGLE_PROFILE["email"]).exists())
 
-    @patch("api.services.google_id_token.verify_oauth2_token")
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     def test_each_registration_role_creates_an_incomplete_account(self, verify: Mock) -> None:
         for index, role in enumerate(
             (User.Role.PENGELOLA, User.Role.PENGELOLA_INDUK, User.Role.NASABAH), start=1
@@ -62,7 +62,7 @@ class GoogleRegistrationTests(APITestCase):
                 user = User.objects.get(email=profile["email"])
                 self.assertFalse(user.is_profile_complete)
 
-    @patch("api.services.google_id_token.verify_oauth2_token")
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     def test_existing_account_logs_in_with_its_stored_role(self, verify: Mock) -> None:
         user = User.objects.create_user(
             email=str(GOOGLE_PROFILE["email"]),
@@ -109,7 +109,7 @@ class GoogleRegistrationTests(APITestCase):
         self.assertEqual(expired.status_code, 400, expired.data)
         self.assertEqual(expired.data["code"], "registration_token_expired")
 
-    @patch("api.services.google_id_token.verify_oauth2_token")
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     def test_repeated_registration_authenticates_the_stored_role(self, verify: Mock) -> None:
         verify.return_value = GOOGLE_PROFILE
         token = self._registration_token()
@@ -129,7 +129,7 @@ class GoogleRegistrationTests(APITestCase):
         self.assertEqual(second.data["user"]["role"], User.Role.NASABAH)
 
     def _registration_token(self) -> str:
-        with patch("api.services.google_id_token.verify_oauth2_token") as verify:
+        with patch("apps.authentication.services.google_id_token.verify_oauth2_token") as verify:
             verify.return_value = GOOGLE_PROFILE
             response = self.client.post(
                 "/api/v1/auth/google", {"id_token": "signed-google-token"}, format="json"
@@ -178,7 +178,7 @@ class SuperadminWhitelistTests(APITestCase):
             )
         )
 
-    @patch("api.services.google_id_token.verify_oauth2_token")
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     @override_settings(PILAH_SUPERADMIN_EMAILS=("admin@example.com",))
     def test_whitelist_is_case_insensitive_and_provisions_superadmin(self, verify: Mock) -> None:
         verify.return_value = {
@@ -195,7 +195,7 @@ class SuperadminWhitelistTests(APITestCase):
         self.assertEqual(response.data["user"]["role"], User.Role.SUPERADMIN)
         self.assertEqual(response.data["next_step"], "superadmin_dashboard")
 
-    @patch("api.services.google_id_token.verify_oauth2_token")
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     @override_settings(PILAH_SUPERADMIN_EMAILS=("admin@example.com",))
     def test_unverified_google_email_cannot_use_the_allowlist(self, verify: Mock) -> None:
         verify.return_value = {
@@ -211,7 +211,7 @@ class SuperadminWhitelistTests(APITestCase):
         self.assertEqual(response.status_code, 401, response.data)
         self.assertFalse(User.objects.filter(email="admin@example.com").exists())
 
-    @patch("api.services.google_id_token.verify_oauth2_token")
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     @override_settings(PILAH_SUPERADMIN_EMAILS=())
     def test_existing_superadmin_removed_from_whitelist_is_rejected(self, verify: Mock) -> None:
         User.objects.create_user(
@@ -234,7 +234,7 @@ class SuperadminWhitelistTests(APITestCase):
         self.assertFalse(former_admin.is_staff)
         self.assertFalse(former_admin.is_superuser)
 
-    @patch("api.services.google_id_token.verify_oauth2_token")
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     @override_settings(
         STORAGES={
             "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
@@ -352,7 +352,7 @@ class SuperadminWhitelistTests(APITestCase):
                 self.client.login(username=email, password="correct horse battery staple")
             )
 
-    @patch("api.services.google_id_token.verify_oauth2_token")
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     def test_case_variant_duplicate_emails_are_rejected(self, verify: Mock) -> None:
         User.objects.create_user(email="Case@example.com", nama="First")
         User.objects.create_user(email="case@example.com", nama="Second")
@@ -392,7 +392,7 @@ class SuperadminWhitelistTests(APITestCase):
         self.assertTrue(response.data["registration_required"])
         self.assertFalse(User.objects.filter(email="unknown@example.com").exists())
 
-    @patch("api.services.google_id_token.verify_oauth2_token")
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     @override_settings(PILAH_SUPERADMIN_EMAILS=("admin@example.com",))
     def test_allowlisted_existing_account_keeps_its_database_role(self, verify: Mock) -> None:
         user = User.objects.create_user(
@@ -415,7 +415,7 @@ class SuperadminWhitelistTests(APITestCase):
         self.assertFalse(user.is_staff)
         self.assertFalse(user.is_superuser)
 
-    @patch("api.services.google_id_token.verify_oauth2_token")
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     @override_settings(PILAH_SUPERADMIN_EMAILS=("member@example.com",))
     def test_allowlisted_nasabah_keeps_role_and_membership(self, verify: Mock) -> None:
         bank = BankSampah.objects.create(

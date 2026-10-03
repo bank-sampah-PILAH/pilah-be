@@ -1,11 +1,18 @@
+import hashlib
+import json
+from typing import Any
+from uuid import UUID
+
+from django.db import IntegrityError
 from django.db.models import QuerySet
 from django.http import HttpResponse
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ParseError
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from api.models import Transaksi
+from api.models import BankSampah, Transaksi
 from apps.ledger.serializers import (
     TransactionCreateSerializer,
     TransactionDetailSerializer,
@@ -15,6 +22,50 @@ from apps.ledger.services import TransactionFilterService, TransactionService
 from apps.notification.api import send_setoran_receipt
 from shared_kernel.permissions import IsActivePengelola
 from shared_kernel.scoping import current_bank, current_user
+
+
+def _user(request: Request) -> Any:
+    assert isinstance(request.user, object)  # ponytail: DRF authentication rejects AnonymousUser
+    return request.user
+
+
+def _bank_sampah(request: Request) -> BankSampah:
+    bank = request.user.bank_sampah  # type: ignore[union-attr]
+    assert bank is not None  # ponytail: IsActivePengelola guarantees bank membership
+    return bank
+
+
+def _idempotency_key(request: Request) -> UUID | None:
+    raw_key = request.headers.get("Idempotency-Key")
+    if raw_key is None:
+        return None
+    try:
+        key = UUID(raw_key)
+    except ValueError:
+        raise ParseError("Idempotency-Key harus berupa UUID v4") from None
+    if key.version != 4 or str(key) != raw_key.lower():
+        raise ParseError("Idempotency-Key harus berupa UUID v4")
+    return key
+
+
+def _transaction_payload_hash(payload: dict[str, Any]) -> str:
+    canonical_payload = {
+        "nasabah_id": str(payload["nasabah_id"]),
+        "items": [
+            {
+                "jenis_sampah_id": str(item["jenis_sampah_id"]),
+                "berat": format(item["berat"], "f"),
+            }
+            for item in payload["items"]
+        ],
+        "catatan": payload.get("catatan"),
+    }
+    canonical_json = json.dumps(canonical_payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical_json.encode()).hexdigest()
+
+
+def _find_idempotent_transaction(bank: BankSampah, key: UUID) -> Transaksi | None:
+    return Transaksi.objects.filter(bank_sampah=bank, idempotency_key=key).first()
 
 
 class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
@@ -78,9 +129,41 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
     def create(self, request: Request) -> Response:
         serializer = TransactionCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        transaksi = TransactionService.create_setoran(
-            current_user(request), serializer.validated_data
-        )
+        try:
+            idempotency_key = _idempotency_key(request)
+        except ParseError as exc:
+            return Response({"error": exc.detail}, status=status.HTTP_400_BAD_REQUEST)
+        payload = serializer.validated_data
+        payload_hash = _transaction_payload_hash(payload) if idempotency_key else None
+        bank = _bank_sampah(request)
+
+        def replay(existing: Transaksi) -> Response:
+            if existing.idempotency_request_hash != payload_hash:
+                return Response(
+                    {"error": "Idempotency-Key sudah digunakan untuk data setoran berbeda"},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            return Response(TransactionDetailSerializer(existing).data, status=status.HTTP_200_OK)
+
+        if idempotency_key:
+            existing = _find_idempotent_transaction(bank, idempotency_key)
+            if existing:
+                return replay(existing)
+
+        try:
+            transaksi = TransactionService.create_setoran(
+                current_user(request),
+                payload,
+                idempotency_key=idempotency_key,
+                idempotency_request_hash=payload_hash,
+            )
+        except IntegrityError:
+            if idempotency_key is None:
+                raise
+            existing = _find_idempotent_transaction(bank, idempotency_key)
+            if existing is None:
+                raise
+            return replay(existing)
         return Response(TransactionDetailSerializer(transaksi).data, status=status.HTTP_201_CREATED)
 
     def retrieve(self, request: Request, pk: str | None = None) -> Response:

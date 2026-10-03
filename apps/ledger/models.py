@@ -78,6 +78,10 @@ class Transaksi(TimestampedModel):
     status_wa = models.CharField(
         max_length=20, choices=StatusWA.choices, default=StatusWA.BELUM_DIKIRIM
     )
+    # PBI-12: kunci idempotensi POST setoran. Null boleh — setoran lama dan
+    # klien tanpa header tidak memilikinya.
+    idempotency_key = models.UUIDField(blank=True, null=True)
+    idempotency_request_hash = models.CharField(max_length=64, blank=True, null=True)
 
     class Meta:
         # ponytail: single Django app label until the squash migration; db_table
@@ -85,6 +89,12 @@ class Transaksi(TimestampedModel):
         app_label = "api"
         db_table = "transaksi"
         ordering = ["-tanggal"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["bank_sampah", "idempotency_key"],
+                name="transaksi_bank_idempotency_key_unique",
+            ),
+        ]
 
 
 class DetailTransaksi(models.Model):

@@ -83,7 +83,7 @@ class OAuthRegressionTests(RegressionTestCase):
         with (
             override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False, GOOGLE_CLIENT_ID="cid"),
             patch(
-                "api.services.google_id_token.verify_oauth2_token",
+                "apps.authentication.services.google_id_token.verify_oauth2_token",
                 side_effect=Exception("bad"),
             ),
         ):
@@ -97,7 +97,7 @@ class OAuthRegressionTests(RegressionTestCase):
         with (
             override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False, GOOGLE_CLIENT_ID="cid"),
             patch(
-                "api.services.google_id_token.verify_oauth2_token",
+                "apps.authentication.services.google_id_token.verify_oauth2_token",
                 return_value={"sub": "x", "email": ""},
             ),
         ):
@@ -111,7 +111,7 @@ class OAuthRegressionTests(RegressionTestCase):
         with (
             override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False, GOOGLE_CLIENT_ID="cid"),
             patch(
-                "api.services.google_id_token.verify_oauth2_token",
+                "apps.authentication.services.google_id_token.verify_oauth2_token",
                 return_value={
                     "sub": "sub-1",
                     "email": "real@example.com",

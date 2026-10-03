@@ -25,7 +25,7 @@ from django.urls import Resolver404, resolve
 from django.utils import timezone
 from django.views.static import serve
 from openpyxl import load_workbook
-from rest_framework.test import APITestCase
+from rest_framework.test import APIClient, APITestCase
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from api.models import (
@@ -42,6 +42,7 @@ from api.models import (
     User,
 )
 from apps.bank_sampah.serializers import BankSampahApprovalListSerializer
+from apps.nasabah.keanggotaan import sinkronkan_dari_akun
 from apps.nasabah.services import NasabahApprovalService
 
 
@@ -1460,10 +1461,8 @@ class APISpecTests(APITestCase):
         """The user's own profile is authoritative, not the pengurus-entered
         Nasabah record: even a fully-populated matching record must not
         prefill or auto-complete the user's profile on login. They still go
-        through complete_profile themselves (see
-        OnboardingService.propagate_profile_to_memberships for the
-        opposite, intended direction: user data overrides the Nasabah
-        record, once they submit it)."""
+        through complete_profile themselves (the account's profile and the
+        Nasabah record stay separate)."""
         self.client.credentials()
         Nasabah.objects.create(
             bank_sampah=self.bank,
@@ -1605,12 +1604,12 @@ class APISpecTests(APITestCase):
         nasabah.refresh_from_db()
         self.assertIsNone(nasabah.user_id)
 
-    def test_complete_profile_overrides_linked_nasabah_record_with_users_own_data(
+    def test_complete_profile_leaves_linked_nasabah_record_untouched(
         self,
     ) -> None:
-        """The redesign's whole point: once linked, the user's own
-        complete_profile submission overrides whatever the pengurus
-        originally typed in, not the other way around."""
+        """The account's profile and the bank sampah's record of the nasabah
+        are separate: completing the profile never rewrites what the pengurus
+        typed into the linked Nasabah record."""
         nasabah = Nasabah.objects.create(
             bank_sampah=self.bank,
             nomor="NAS-0001",
@@ -1647,19 +1646,19 @@ class APISpecTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         nasabah.refresh_from_db()
-        self.assertEqual(nasabah.nama, "Nama Dari User")
-        self.assertEqual(nasabah.jenis_kelamin, "laki-laki")
-        self.assertEqual(str(nasabah.tanggal_lahir), "1995-06-06")
-        self.assertEqual(nasabah.no_hp, "+6281234500002")
-        self.assertEqual(nasabah.alamat, "Alamat Dari User")
+        self.assertEqual(nasabah.nama, "Nama Dari Pengurus")
+        self.assertEqual(nasabah.jenis_kelamin, "perempuan")
+        self.assertEqual(str(nasabah.tanggal_lahir), "1980-05-05")
+        self.assertEqual(nasabah.no_hp, "081234500001")
+        self.assertEqual(nasabah.alamat, "Alamat Dari Pengurus")
+        assert nasabah.user is not None
+        self.assertEqual(nasabah.user.nama, "Nama Dari User")
 
-    def test_complete_profile_rejects_no_hp_collision_with_unrelated_nasabah_record(
+    def test_complete_profile_ignores_no_hp_used_by_unrelated_nasabah_record(
         self,
     ) -> None:
-        """Propagating the user's own no_hp onto their linked Nasabah record
-        must not silently violate the (bank_sampah, no_hp) constraint by
-        colliding with someone else's unrelated record — same reasoning as
-        register_nasabah's phone-collision guard."""
+        """The account's phone is not copied onto the linked Nasabah record,
+        so it can't collide with someone else's record in that bank."""
         nasabah = Nasabah.objects.create(
             bank_sampah=self.bank,
             nomor="NAS-0001",
@@ -1697,19 +1696,18 @@ class APISpecTests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 200, response.data)
         nasabah.refresh_from_db()
         self.assertEqual(nasabah.no_hp, "081234500003")
         user = User.objects.get(email="collision-me@example.com")
-        self.assertFalse(user.is_profile_complete)
+        self.assertTrue(user.is_profile_complete)
 
     def test_complete_profile_resubmission_allowed_while_registration_pending(
         self,
     ) -> None:
         """A nasabah whose profile already landed can still fix it while
-        pengurus hasn't reviewed their registration yet — the edit
-        propagates to the pending Nasabah record, same as the first
-        submission."""
+        pengurus hasn't reviewed their registration yet; the pending
+        Nasabah record is the bank sampah's copy and stays as it was."""
         customer = User.objects.create_user(
             email="pending-edit@example.com",
             nama="Nasabah PILAH",
@@ -1746,50 +1744,140 @@ class APISpecTests(APITestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         nasabah.refresh_from_db()
-        self.assertEqual(nasabah.alamat, "Jl. Baru Yang Diperbaiki")
+        self.assertEqual(nasabah.alamat, "Jl. Lama")
+        customer.refresh_from_db()
+        self.assertEqual(customer.alamat, "Jl. Baru Yang Diperbaiki")
 
-    def test_complete_profile_refuses_resubmission_once_registration_approved(
-        self,
-    ) -> None:
-        """The one-shot restriction still holds once pengurus has already
-        approved the membership — only a pending decision leaves room for
-        the nasabah to fix their own submission."""
+    def test_nasabah_can_fix_phone_after_registration_failed_on_collision(self) -> None:
+        """Profile lands, register-nasabah fails on a phone already used in the
+        chosen bank; the nasabah must still be able to change the phone and
+        retry, not be stuck behind "Profil sudah lengkap"."""
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-9310",
+            nama="Orang Lain",
+            alamat="Jl. X",
+            no_hp="+628555555080",
+            status=Nasabah.Status.APPROVED,
+        )
         customer = User.objects.create_user(
-            email="approved-edit@example.com",
+            email="collide@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        def put_profile(no_hp: str) -> Any:
+            return self.client.put(
+                "/api/v1/onboarding/profile",
+                {
+                    "nama": "Nasabah PILAH",
+                    "jenis_kelamin": "laki-laki",
+                    "tanggal_lahir": "1990-01-01",
+                    "no_hp": no_hp,
+                    "alamat": "Jl. Baru",
+                },
+                format="json",
+            )
+
+        self.assertEqual(put_profile("+628555555080").status_code, 200)
+        failed = self.client.post(
+            "/api/v1/onboarding/nasabah", {"bank_sampah_id": str(self.bank.id)}, format="json"
+        )
+        self.assertEqual(failed.status_code, 400)
+
+        self.assertEqual(put_profile("+628555555081").status_code, 200)
+        retry = self.client.post(
+            "/api/v1/onboarding/nasabah", {"bank_sampah_id": str(self.bank.id)}, format="json"
+        )
+        self.assertEqual(retry.status_code, 201, retry.data)
+
+    def test_nasabah_can_edit_profile_whatever_their_membership_status(self) -> None:
+        """A nasabah owns their profile: approved or rejected memberships
+        don't lock it, and the edit never reaches the membership row."""
+        for index, status in enumerate([Nasabah.Status.APPROVED, Nasabah.Status.REJECTED]):
+            with self.subTest(status=status):
+                customer = User.objects.create_user(
+                    email=f"always-edit-{index}@example.com",
+                    nama="Nasabah PILAH",
+                    role=User.Role.NASABAH,
+                    jenis_kelamin=User.Gender.MALE,
+                    tanggal_lahir="1990-01-01",
+                    no_hp=f"+62855555507{index}",
+                    alamat="Jl. Lama",
+                    is_profile_complete=True,
+                )
+                nasabah = Nasabah.objects.create(
+                    user=customer,
+                    bank_sampah=self.bank,
+                    nomor=f"NAS-930{index}",
+                    email=customer.email,
+                    nama=customer.nama,
+                    alamat=customer.alamat,
+                    no_hp=customer.no_hp,
+                    status=status,
+                )
+                refresh = RefreshToken.for_user(customer)
+                self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+                response = self.client.put(
+                    "/api/v1/onboarding/profile",
+                    {
+                        "nama": "Nasabah PILAH",
+                        "jenis_kelamin": "laki-laki",
+                        "tanggal_lahir": "1990-01-01",
+                        "no_hp": f"+62855555507{index}",
+                        "alamat": "Jl. Baru",
+                    },
+                    format="json",
+                )
+
+                self.assertEqual(response.status_code, 200, response.data)
+                customer.refresh_from_db()
+                self.assertEqual(customer.alamat, "Jl. Baru")
+                nasabah.refresh_from_db()
+                self.assertEqual(nasabah.alamat, "Jl. Lama")
+
+    def test_own_profile_patch_leaves_membership_record_untouched(self) -> None:
+        """Editing your own profile changes the account only; each bank
+        sampah keeps its own record of the nasabah."""
+        customer = User.objects.create_user(
+            email="patch-me@example.com",
             nama="Nasabah PILAH",
             role=User.Role.NASABAH,
             jenis_kelamin=User.Gender.MALE,
             tanggal_lahir="1990-01-01",
-            no_hp="+628555555071",
+            no_hp="+628555555090",
             alamat="Jl. Lama",
             is_profile_complete=True,
         )
-        Nasabah.objects.create(
+        nasabah = Nasabah.objects.create(
             user=customer,
             bank_sampah=self.bank,
-            nomor="NAS-9301",
-            nama=customer.nama,
-            alamat=customer.alamat,
-            no_hp=customer.no_hp,
+            nomor="NAS-9390",
+            email=customer.email,
+            nama="Nama Versi Pengurus",
+            alamat="Alamat Versi Pengurus",
+            no_hp="+628555555091",
             status=Nasabah.Status.APPROVED,
         )
         refresh = RefreshToken.for_user(customer)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
-        response = self.client.put(
-            "/api/v1/onboarding/profile",
-            {
-                "nama": "Nasabah PILAH",
-                "jenis_kelamin": "laki-laki",
-                "tanggal_lahir": "1990-01-01",
-                "no_hp": "+628555555071",
-                "alamat": "Jl. Baru",
-            },
+        response = self.client.patch(
+            "/api/v1/nasabah/me/profil",
+            {"nama": "Nama Baru Nasabah", "no_hp": "081999999990"},
             format="json",
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data["error"], "Profil sudah lengkap")
+        self.assertEqual(response.status_code, 200, response.data)
+        customer.refresh_from_db()
+        self.assertEqual(customer.nama, "Nama Baru Nasabah")
+        nasabah.refresh_from_db()
+        self.assertEqual(nasabah.nama, "Nama Versi Pengurus")
+        self.assertEqual(nasabah.alamat, "Alamat Versi Pengurus")
+        self.assertEqual(nasabah.no_hp, "+628555555091")
 
     def test_jenis_sampah_and_transaction_update_saldo(self) -> None:
         nasabah = Nasabah.objects.create(
@@ -1913,7 +2001,7 @@ class APISpecTests(APITestCase):
         self.assertEqual(sheet["I6"].value, 8750)
         self.assertEqual(sheet["J6"].value, 8750)
 
-    @patch("api.services.requests.post")
+    @patch("apps.notification.services.requests.post")
     def test_transaction_notify_wa_uses_twilio(self, post: Mock) -> None:
         post.return_value = Mock(status_code=201, json=lambda: {"sid": "SM123"}, text="")
         nasabah = Nasabah.objects.create(
@@ -1999,7 +2087,7 @@ class APISpecTests(APITestCase):
         WHATSAPP_GATEWAY_URL="https://wa.example.test/send",
         WHATSAPP_GATEWAY_TOKEN="test-token",
     )
-    @patch("api.services.requests.post")
+    @patch("apps.notification.services.requests.post")
     def test_wa_template_item_variables_match_sent_payload(self, post: Mock) -> None:
         post.return_value = Mock(status_code=200, text="")
         self.client.put(
@@ -2608,7 +2696,7 @@ class APISpecTests(APITestCase):
                 self.assertEqual(response.status_code, 403)
 
     @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False)
-    @patch("api.services.google_id_token.verify_oauth2_token")
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     def test_google_profile_claim_cannot_assign_pilah_role(self, verify: Mock) -> None:
         verify.return_value = {
             "sub": "google-123",
@@ -2627,7 +2715,7 @@ class APISpecTests(APITestCase):
         self.assertFalse(User.objects.filter(email="claim@example.com").exists())
 
     @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False)
-    @patch("api.services.google_id_token.verify_oauth2_token")
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     def test_google_profile_without_email_is_rejected(self, verify: Mock) -> None:
         verify.return_value = {"sub": "google-without-email", "name": "Missing Email"}
 
@@ -2990,6 +3078,127 @@ class APISpecTests(APITestCase):
         # Re-uses the row rather than creating a second one for the same
         # (bank, user) pair.
         self.assertEqual(Nasabah.objects.filter(user=customer, bank_sampah=self.bank).count(), 1)
+
+    def test_nasabah_reapply_copies_the_accounts_current_phone(self) -> None:
+        customer = User.objects.create_user(
+            email="reapply-phone@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1990-01-01",
+            no_hp="+628555555031",
+            alamat="Jl. Baru No. 2",
+            is_profile_complete=True,
+        )
+        rejected = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-9031",
+            nama=customer.nama,
+            email=customer.email,
+            alamat="Jl. Lama",
+            no_hp="+628555555030",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            "/api/v1/onboarding/nasabah", {"bank_sampah_id": str(self.bank.id)}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        rejected.refresh_from_db()
+        self.assertEqual(rejected.no_hp, "+628555555031")
+
+    def test_nasabah_reapply_is_refused_when_the_phone_belongs_to_another_row(self) -> None:
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-9033",
+            nama="Orang Lain",
+            email="orang-lain@example.com",
+            alamat="Jl. X",
+            no_hp="+628555555033",
+            status=Nasabah.Status.APPROVED,
+        )
+        customer = User.objects.create_user(
+            email="reapply-collide@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1990-01-01",
+            no_hp="+628555555033",
+            alamat="Jl. Baru No. 2",
+            is_profile_complete=True,
+        )
+        rejected = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-9034",
+            nama=customer.nama,
+            email=customer.email,
+            alamat="Jl. Lama",
+            no_hp="+628555555034",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            "/api/v1/onboarding/nasabah", {"bank_sampah_id": str(self.bank.id)}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["error"],
+            "Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus",
+        )
+        rejected.refresh_from_db()
+        self.assertEqual(rejected.status, Nasabah.Status.REJECTED)
+        self.assertEqual(rejected.no_hp, "+628555555034")
+
+    def test_nasabah_reapply_phone_race_is_a_400_not_a_500(self) -> None:
+        # Another row can take the same phone after the collision check but
+        # before the UPDATE; the (bank_sampah, no_hp) constraint then refuses it.
+        customer = User.objects.create_user(
+            email="reapply-race@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1990-01-01",
+            no_hp="+628555555041",
+            alamat="Jl. Baru No. 2",
+            is_profile_complete=True,
+        )
+        rejected = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-9041",
+            nama=customer.nama,
+            email=customer.email,
+            alamat="Jl. Lama",
+            no_hp="+628555555040",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        with patch("django.db.models.QuerySet.update", side_effect=IntegrityError("duplicate")):
+            response = self.client.post(
+                "/api/v1/onboarding/nasabah", {"bank_sampah_id": str(self.bank.id)}, format="json"
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["error"],
+            "Nomor HP ini sudah terdaftar di bank sampah ini, hubungi pengurus",
+        )
+        rejected.refresh_from_db()
+        self.assertEqual(rejected.status, Nasabah.Status.REJECTED)
+        self.assertEqual(rejected.no_hp, "+628555555040")
 
     def test_nasabah_reapply_with_pesan_records_appealed_log_entry(self) -> None:
         customer = User.objects.create_user(
@@ -3830,11 +4039,8 @@ class ProfilNasabahBerakunTests(APITestCase):
     def test_perbaikan_pengurus_bertahan_saat_nasabah_menyimpan_profilnya(
         self,
     ) -> None:
-        # Profil akun adalah sumber kebenaran: setiap kali nasabah menyimpan
-        # profilnya sendiri, `propagate_profile_to_memberships` menyalinnya ke
-        # seluruh keanggotaan tertaut. Kalau perbaikan pengurus hanya ditulis
-        # pada baris keanggotaan, penyimpanan berikutnya oleh nasabah akan
-        # mengembalikan nilai lama tanpa jejak.
+        # Catatan bank sampah dan profil akun terpisah, jadi nasabah yang
+        # menyimpan profilnya sendiri tidak menimpa perbaikan pengurus.
         self._ubah(nama="Budi Santosa", alamat="Jl. Mawar No. 21")
 
         self.client.credentials(
@@ -3849,61 +4055,220 @@ class ProfilNasabahBerakunTests(APITestCase):
         self.assertEqual(self.nasabah.nama, "Budi Santosa")
         self.assertEqual(self.nasabah.alamat, "Jl. Mawar No. 21")
 
-    def test_akun_tidak_ditulis_ketika_profilnya_sudah_sama(self) -> None:
-        # Form pengurus mengirim seluruh data nasabah, jadi menyimpan perubahan
-        # nomor anggota saja tidak boleh menyentuh baris akun sama sekali.
-        self.pemilik_akun.jenis_kelamin = self.nasabah.jenis_kelamin
-        self.pemilik_akun.tanggal_lahir = self.nasabah.tanggal_lahir
-        self.pemilik_akun.alamat = self.nasabah.alamat
-        self.pemilik_akun.no_hp = self.nasabah.no_hp
-        self.pemilik_akun.save()
-        self.pemilik_akun.refresh_from_db()
-        sebelum = self.pemilik_akun.updated_at
+    def test_perbaikan_pengurus_tidak_mengubah_profil_akun_nasabah(self) -> None:
+        # Baris keanggotaan adalah catatan bank sampah ini saja. Profil akun
+        # milik nasabah dan berlaku di bank sampah lain, jadi perbaikan
+        # pengurus tidak boleh menulisnya.
+        sebelum = {
+            field: getattr(self.pemilik_akun, field)
+            for field in ("nama", "jenis_kelamin", "tanggal_lahir", "alamat", "no_hp")
+        }
 
-        response = self._ubah(kode="NAS-0007")
+        response = self._ubah(nama="Budi Santosa", alamat="Jl. Mawar No. 21", no_hp="082333333333")
 
         self.assertEqual(response.status_code, 200)
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.nama, "Budi Santosa")
         self.pemilik_akun.refresh_from_db()
-        self.assertEqual(self.pemilik_akun.updated_at, sebelum)
+        for field, nilai in sebelum.items():
+            self.assertEqual(getattr(self.pemilik_akun, field), nilai, field)
 
-    def test_no_hp_yang_bentrok_di_bank_lain_ditolak_kepada_pengurus(self) -> None:
-        # Menulis profil ke akun membuat nomor HP ikut tersalin ke keanggotaan
-        # nasabah di bank sampah lain. Kalau di sana nomornya sudah dipakai
-        # orang lain, penyimpanan profil oleh nasabah nanti yang akan gagal,
-        # dengan pesan yang ditujukan kepada nasabah. Tolak lebih awal, kepada
-        # pengurus yang mengetiknya.
-        bank_lain = BankSampah.objects.create(
-            nama="Bank Sampah Melati", alamat="Depok", kota="Depok", no_hp_pic="+628123456780"
+    def _atur_akun(self, **profil: Any) -> None:
+        for field, nilai in profil.items():
+            setattr(self.pemilik_akun, field, nilai)
+        self.pemilik_akun.save()
+
+    def test_detail_menampilkan_profil_akun_dan_field_yang_berbeda(self) -> None:
+        # Catatan pengurus dan profil akun terpisah, jadi pengurus perlu melihat
+        # apa yang nasabah sendiri isikan dan bagian mana yang berbeda.
+        self._atur_akun(
+            nama="Budi Santoso",
+            jenis_kelamin=User.Gender.MALE,
+            no_hp="+628999999999",
+            alamat="Jl. Melati No. 99",
         )
+
+        response = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["profil_akun"]["no_hp"], "+628999999999")
+        self.assertEqual(response.data["profil_akun"]["alamat"], "Jl. Melati No. 99")
+        self.assertCountEqual(response.data["profil_berbeda"], ["no_hp", "alamat"])
+
+    def test_detail_tanpa_perbedaan_tidak_menandai_apa_pun(self) -> None:
+        self._atur_akun(
+            nama=self.nasabah.nama,
+            jenis_kelamin=self.nasabah.jenis_kelamin,
+            tanggal_lahir=self.nasabah.tanggal_lahir,
+            no_hp=self.nasabah.no_hp,
+            alamat=self.nasabah.alamat,
+        )
+
+        response = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["profil_berbeda"], [])
+
+    def test_detail_nasabah_tanpa_akun_tidak_membawa_profil_akun(self) -> None:
+        tanpa_akun = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0009",
+            nama="Siti Aminah",
+            email="siti@example.com",
+            no_hp="+628222222222",
+            alamat="Jl. Kenanga No. 5",
+        )
+
+        response = self.client.get(f"/api/v1/nasabah/{tanpa_akun.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data["profil_akun"])
+        self.assertEqual(response.data["profil_berbeda"], [])
+
+    def _sinkron(self, nasabah: Nasabah | None = None) -> Any:
+        return self.client.post(f"/api/v1/nasabah/{(nasabah or self.nasabah).id}/sinkron-profil")
+
+    def test_sinkron_menyalin_profil_akun_ke_catatan_bank_sampah(self) -> None:
+        self._atur_akun(
+            nama="Budi Santosa Putra",
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir=date(1991, 2, 3),
+            no_hp="+628999999999",
+            alamat="Jl. Melati No. 99",
+        )
+
+        response = self._sinkron()
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.nama, "Budi Santosa Putra")
+        self.assertEqual(self.nasabah.tanggal_lahir, date(1991, 2, 3))
+        self.assertEqual(self.nasabah.no_hp, "+628999999999")
+        self.assertEqual(self.nasabah.alamat, "Jl. Melati No. 99")
+        self.assertEqual(self.nasabah.nomor, "NAS-0001")
+        self.assertEqual(response.data["profil_berbeda"], [])
+
+    def test_sinkron_lalu_pengurus_tetap_bisa_menyunting_lagi(self) -> None:
+        self._atur_akun(nama="Budi Santosa Putra", no_hp="+628999999999")
+        self._sinkron()
+
+        response = self._ubah(nama="Budi S.", no_hp="+628999999999")
+
+        self.assertEqual(response.status_code, 200)
+        self.nasabah.refresh_from_db()
+        self.assertEqual(self.nasabah.nama, "Budi S.")
+        self.pemilik_akun.refresh_from_db()
+        self.assertEqual(self.pemilik_akun.nama, "Budi Santosa Putra")
+
+    def test_sinkron_ditolak_bila_no_hp_akun_dipakai_nasabah_lain_di_bank_ini(self) -> None:
         Nasabah.objects.create(
-            bank_sampah=bank_lain,
-            nomor="MLT-0001",
+            bank_sampah=self.bank,
+            nomor="NAS-0002",
             nama="Rina Hastuti",
             email="rina@example.com",
             no_hp="+628555555555",
             alamat="Jl. Melati No. 1",
         )
-        Nasabah.objects.create(
-            bank_sampah=bank_lain,
-            user=self.pemilik_akun,
-            nomor="MLT-0002",
-            nama="Budi Santoso",
-            email=self.pemilik_akun.email,
-            no_hp="+628111111111",
-            alamat="Jl. Mawar No. 12",
-        )
+        self._atur_akun(no_hp="+628555555555")
 
-        response = self._ubah(no_hp="08555555555")
+        response = self._sinkron()
 
         self.assertEqual(response.status_code, 422)
-        self.assertEqual(
-            response.data["errors"]["no_hp"],
-            ["Nomor HP sudah digunakan nasabah lain di bank sampah tempat akun ini terdaftar"],
-        )
+        self.assertEqual(response.data["errors"]["no_hp"], ["Nomor HP nasabah sudah digunakan"])
         self.nasabah.refresh_from_db()
-        self.pemilik_akun.refresh_from_db()
         self.assertEqual(self.nasabah.no_hp, "+628111111111")
-        self.assertNotEqual(self.pemilik_akun.no_hp, "+628555555555")
+
+    def test_sinkron_balapan_no_hp_dijawab_422_bukan_500(self) -> None:
+        # Nomor yang sama dapat dikomit orang lain setelah pemeriksaan `exists()`
+        # tetapi sebelum `save()`; constraint (bank_sampah, no_hp) lalu menolak.
+        self._atur_akun(no_hp="+628999999999")
+
+        with patch.object(Nasabah, "save", side_effect=IntegrityError("duplicate")):
+            response = self._sinkron()
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.data["errors"]["no_hp"], ["Nomor HP nasabah sudah digunakan"])
+
+    def test_perbedaan_format_no_hp_bukan_perbedaan_profil(self) -> None:
+        # Baris yang ditulis di luar serializer dapat menyimpan `08…` sementara
+        # akun menyimpan `+62…`. Itu nomor yang sama, jadi jangan ditandai.
+        Nasabah.objects.filter(pk=self.nasabah.pk).update(no_hp="08111111111")
+        self._atur_akun(
+            nama=self.nasabah.nama,
+            jenis_kelamin=self.nasabah.jenis_kelamin,
+            tanggal_lahir=self.nasabah.tanggal_lahir,
+            no_hp="+628111111111",
+            alamat=self.nasabah.alamat,
+        )
+
+        response = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["profil_berbeda"], [])
+
+    def test_sinkron_nasabah_tanpa_akun_ditolak(self) -> None:
+        tanpa_akun = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0009",
+            nama="Siti Aminah",
+            email="siti@example.com",
+            no_hp="+628222222222",
+            alamat="Jl. Kenanga No. 5",
+        )
+
+        response = self._sinkron(tanpa_akun)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["error"], "Nasabah belum memiliki akun")
+
+    def test_sinkronkan_dari_akun_tanpa_akun_tidak_mengubah_catatan(self) -> None:
+        # Penjaga pada helper itu sendiri: view menolak lebih dulu, tetapi helper
+        # tidak boleh menulis apa pun bila dipanggil untuk baris tanpa akun.
+        tanpa_akun = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0009",
+            nama="Siti Aminah",
+            email="siti@example.com",
+            no_hp="+628222222222",
+            alamat="Jl. Kenanga No. 5",
+        )
+
+        sinkronkan_dari_akun(tanpa_akun)
+
+        tanpa_akun.refresh_from_db()
+        self.assertEqual(tanpa_akun.nama, "Siti Aminah")
+        self.assertEqual(tanpa_akun.no_hp, "+628222222222")
+
+    def test_sinkron_nasabah_bank_sampah_lain_tidak_ditemukan(self) -> None:
+        bank_lain = BankSampah.objects.create(
+            nama="Bank Sampah Melati", alamat="Depok", kota="Depok", no_hp_pic="+628123456780"
+        )
+        milik_lain = Nasabah.objects.create(
+            bank_sampah=bank_lain,
+            user=self.pemilik_akun,
+            nomor="MLT-0001",
+            nama="Budi Santoso",
+            email=self.pemilik_akun.email,
+            no_hp="+628111111112",
+            alamat="Jl. Mawar No. 12",
+        )
+        self._atur_akun(nama="Budi Diubah Sendiri")
+
+        response = self._sinkron(milik_lain)
+
+        self.assertEqual(response.status_code, 404)
+        milik_lain.refresh_from_db()
+        self.assertEqual(milik_lain.nama, "Budi Santoso")
+
+    def test_sinkron_nasabah_nonaktif_ditolak(self) -> None:
+        self.nasabah.is_active = False
+        self.nasabah.save(update_fields=["is_active"])
+        self._atur_akun(nama="Budi Santosa Putra")
+
+        response = self._sinkron()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data["error"], "Nasabah nonaktif tidak bisa diedit")
 
     def test_ubah_email_nasabah_berakun_ditolak(self) -> None:
         # Satu-satunya field yang tetap terkunci: email adalah kunci penautan
@@ -4058,6 +4423,13 @@ class SetoranTestBase(APITestCase):
             kategori=JenisSampah.Kategori.PLASTIK,
             harga_per_kg=Decimal("3333.00"),
         )
+        self.jenis_lain = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="KRS-001",
+            nama_sampah="Kardus",
+            kategori=JenisSampah.Kategori.KERTAS,
+            harga_per_kg=Decimal("1000.00"),
+        )
 
     def _setor(self, items: list[dict[str, Any]]) -> Any:
         return self.client.post(
@@ -4066,8 +4438,145 @@ class SetoranTestBase(APITestCase):
             format="json",
         )
 
+    def _setor_dengan_key(self, items: list[dict[str, Any]], key: str) -> Any:
+        return self.client.post(
+            "/api/v1/transaksi",
+            {"nasabah_id": str(self.nasabah.id), "items": items},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=key,
+        )
+
     def _saldo(self) -> Any:
         return self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo").data["total_saldo"]
+
+
+class IdempotensiSetoranTests(SetoranTestBase):
+    """PBI-12: POST ulang dengan Idempotency-Key tidak mencatat setoran dua kali."""
+
+    KEY = "00000000-0000-4000-8000-000000000001"
+    OTHER_KEY = "00000000-0000-4000-8000-000000000002"
+
+    def _items(self) -> list[dict[str, Any]]:
+        return [{"jenis_sampah_id": str(self.jenis.id), "berat": "1.000"}]
+
+    def test_post_ulang_dengan_key_sama_mengembalikan_transaksi_lama(self) -> None:
+        pertama = self._setor_dengan_key(self._items(), self.KEY)
+        ulang = self._setor_dengan_key(self._items(), self.KEY)
+
+        self.assertEqual(pertama.status_code, 201)
+        self.assertEqual(ulang.status_code, 200)
+        self.assertEqual(ulang.data["id"], pertama.data["id"])
+        transaksi = Transaksi.objects.get(pk=pertama.data["id"])
+        self.assertEqual(str(transaksi.idempotency_key), self.KEY)
+        self.assertTrue(transaksi.idempotency_request_hash)
+        self.assertEqual(Transaksi.objects.count(), 1)
+        self.assertEqual(self._saldo(), "3333.00")
+
+    def test_key_sama_dengan_payload_berbeda_ditolak(self) -> None:
+        self._setor_dengan_key(self._items(), self.KEY)
+
+        response = self._setor_dengan_key(
+            [{"jenis_sampah_id": str(self.jenis_lain.id), "berat": "1.000"}], self.KEY
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(Transaksi.objects.count(), 1)
+        self.assertEqual(self._saldo(), "3333.00")
+
+    def test_key_yang_sama_boleh_dipakai_di_bank_berbeda(self) -> None:
+        self._setor_dengan_key(self._items(), self.KEY)
+        bank_lain = BankSampah.objects.create(
+            nama="Bank Sampah Lain", alamat="Bogor", kota="Bogor", no_hp_pic="+628123456780"
+        )
+        user_lain = User.objects.create_user(
+            email="pengelola-lain@example.com",
+            nama="Pengelola Lain",
+            bank_sampah=bank_lain,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        nasabah_lain = Nasabah.objects.create(
+            bank_sampah=bank_lain,
+            nomor="NAS-0001",
+            nama="Nasabah Lain",
+            no_hp="+628123456781",
+            alamat="Bogor",
+        )
+        jenis_lain = JenisSampah.objects.create(
+            bank_sampah=bank_lain,
+            nomor="PLS-001",
+            nama_sampah="Plastik PET",
+            kategori=JenisSampah.Kategori.PLASTIK,
+            harga_per_kg=Decimal("3333.00"),
+        )
+        client_lain = APIClient()
+        token_lain = RefreshToken.for_user(user_lain)
+        client_lain.credentials(HTTP_AUTHORIZATION=f"Bearer {token_lain.access_token}")
+
+        response = client_lain.post(
+            "/api/v1/transaksi",
+            {
+                "nasabah_id": str(nasabah_lain.id),
+                "items": [{"jenis_sampah_id": str(jenis_lain.id), "berat": "1.000"}],
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=self.KEY,
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["nasabah_id"], str(nasabah_lain.id))
+        self.assertEqual(Transaksi.objects.filter(idempotency_key=self.KEY).count(), 2)
+
+    def test_key_tanpa_header_tetap_buat_transaksi_biasa(self) -> None:
+        self._setor(self._items())
+        self._setor(self._items())
+
+        self.assertEqual(Transaksi.objects.count(), 2)
+
+    def test_key_berbeda_membuat_transaksi_terpisah(self) -> None:
+        self._setor_dengan_key(self._items(), self.KEY)
+        self._setor_dengan_key(self._items(), self.OTHER_KEY)
+
+        self.assertEqual(Transaksi.objects.count(), 2)
+
+    def test_replay_tanpa_key_tetap_duplikat(self) -> None:
+        # Tanpa header, replay tetap duplikat — perlindungan hanya untuk
+        # klien yang mengirim Idempotency-Key.
+        self._setor_dengan_key(self._items(), self.KEY)
+        self._setor(self._items())
+
+        self.assertEqual(Transaksi.objects.count(), 2)
+
+    def test_key_bukan_uuid_v4_ditolak_tanpa_dipotong(self) -> None:
+        for key in ("", "   ", "x" * 65):
+            with self.subTest(key=key):
+                response = self._setor_dengan_key(self._items(), key)
+                self.assertEqual(response.status_code, 400)
+
+    def test_validasi_gagal_tidak_menghabiskan_key(self) -> None:
+        invalid = self._setor_dengan_key(
+            [{"jenis_sampah_id": str(self.jenis.id), "berat": "0"}], self.KEY
+        )
+        valid = self._setor_dengan_key(self._items(), self.KEY)
+
+        self.assertEqual(invalid.status_code, 422)
+        self.assertEqual(valid.status_code, 201)
+        self.assertEqual(Transaksi.objects.count(), 1)
+
+    def test_integrity_error_karena_replay_mengembalikan_transaksi_awal(self) -> None:
+        pertama = self._setor_dengan_key(self._items(), self.KEY)
+        existing = Transaksi.objects.get(pk=pertama.data["id"])
+        with (
+            patch("apps.ledger.views._find_idempotent_transaction", side_effect=[None, existing]),
+            patch(
+                "apps.ledger.services.TransactionService.create_setoran", side_effect=IntegrityError
+            ),
+        ):
+            ulang = self._setor_dengan_key(self._items(), self.KEY)
+
+        self.assertEqual(ulang.status_code, 200)
+        self.assertEqual(ulang.data["id"], pertama.data["id"])
+        self.assertEqual(Transaksi.objects.count(), 1)
 
 
 class KalkulasiSetoranTests(SetoranTestBase):
@@ -4208,15 +4717,64 @@ class ValidasiInputSetoranTests(SetoranTestBase):
         self.assertEqual(self._saldo(), "0.00")
 
     def test_total_berat_tepat_1000_kg_diterima(self) -> None:
-        jenis_id = str(self.jenis.id)
         response = self._setor(
             [
-                {"jenis_sampah_id": jenis_id, "berat": "500.000"},
-                {"jenis_sampah_id": jenis_id, "berat": "500.000"},
+                {"jenis_sampah_id": str(self.jenis.id), "berat": "500.000"},
+                {"jenis_sampah_id": str(self.jenis_lain.id), "berat": "500.000"},
             ]
         )
 
         self.assertEqual(response.status_code, 201)
+
+    def test_item_jenis_sama_digabung_satu_baris(self) -> None:
+        # CPBI-08: dua item dengan jenis sama digabung jadi satu baris detail,
+        # bukan dua item terpisah; beratnya dijumlah sebelum divalidasi.
+        jenis_id = str(self.jenis.id)
+        response = self._setor(
+            [
+                {"jenis_sampah_id": jenis_id, "berat": "10.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "20.000"},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual([item["berat"] for item in response.data["items"]], ["30.000"])
+        self.assertEqual(
+            DetailTransaksi.objects.filter(transaksi_id=response.data["id"]).count(), 1
+        )
+
+    def test_item_jenis_sama_digabung_melewati_1000_kg_total_ditolak(self) -> None:
+        # Batas setoran tetap dari total semua item (1.000 kg), bukan cap
+        # tambahan per jenis: baris-baris valid boleh digabung, tapi total
+        # satu setoran tetap terjaga.
+        jenis_id = str(self.jenis.id)
+        response = self._setor(
+            [
+                {"jenis_sampah_id": jenis_id, "berat": "400.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "400.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "400.000"},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data["errors"]["items"], ["Total berat satu setoran maksimal 1.000 kg"]
+        )
+        self.assertEqual(self._saldo(), "0.00")
+
+    def test_item_jenis_sama_digabung_di_atas_500_kg_diterima(self) -> None:
+        # Penggabungan boleh melewati 500 kg per jenis: tiap baris input
+        # sudah lolos validator per item, gabungan baris valid tetap valid.
+        jenis_id = str(self.jenis.id)
+        response = self._setor(
+            [
+                {"jenis_sampah_id": jenis_id, "berat": "300.000"},
+                {"jenis_sampah_id": jenis_id, "berat": "300.000"},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual([item["berat"] for item in response.data["items"]], ["600.000"])
 
     def test_item_dengan_subtotal_di_bawah_satu_rupiah_ditolak(self) -> None:
         # Harga master dipertahankan presisinya, tetapi item yang nilainya

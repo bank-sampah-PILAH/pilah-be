@@ -1,5 +1,6 @@
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from django.db.models import Model
 from rest_framework import serializers
@@ -73,7 +74,20 @@ class TransactionCreateSerializer(serializers.Serializer[Any]):
             raise serializers.ValidationError(
                 f"Total berat satu setoran maksimal {format_ribuan(BERAT_MAKS_PER_SETORAN)} kg"
             )
-        return value
+        # Item dengan jenis sampah sama digabung jadi satu baris (CPBI-08):
+        # berat dijumlah, harga tetap dari master sehingga aman digabung.
+        merged: dict[UUID, dict[str, Any]] = {}
+        for item in value:
+            jid = item["jenis_sampah_id"]
+            if jid in merged:
+                merged[jid]["berat"] += item["berat"]
+            else:
+                merged[jid] = dict(item)
+        items = list(merged.values())
+        # Batas 500 kg tetap per baris input (sudah dijaga TransactionItemInputSerializer);
+        # total gabungan per jenis tidak di-cap tambahan — dua baris 300 kg yang sama-sama
+        # valid tidak boleh ditolak hanya karena kebetulan satu jenis (rev PR 70).
+        return items
 
     def validate(self, attrs: Any) -> Any:
         # Harga hanya boleh berasal dari master jenis sampah. Menerima harga
