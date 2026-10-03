@@ -38,6 +38,9 @@ class PlatformRouteTests(RegressionTestCase):
             signed = TimestampSigner(salt="bank-sampah-kegiatan").sign(path)
             response = self.client.get(f"/media/activity/{signed}")
             self.assertEqual(response.status_code, 200)
+            # Release the streamed file before the finally block deletes it:
+            # an open handle makes default_storage.delete fail on Windows.
+            response.close()
             wrong_prefix = TimestampSigner(salt="bank-sampah-kegiatan").sign("other/x.jpg")
             self.assertEqual(self.client.get(f"/media/activity/{wrong_prefix}").status_code, 404)
         finally:
