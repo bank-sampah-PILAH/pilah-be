@@ -1,5 +1,7 @@
 """Platform contracts: public routes, signed media, validators, model units."""
 
+from uuid import UUID
+
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
@@ -8,8 +10,7 @@ from django.test import TestCase
 from rest_framework import serializers
 
 from api.models import BankSampah, User
-from apps.nasabah.api import next_nasabah_number
-from apps.waste_catalog.api import next_jenis_number
+from apps.waste_catalog.api import get_active_jenis
 from shared_kernel.validators import get_initials, normalize_indonesian_phone
 from tests.regression.helpers import RegressionTestCase
 
@@ -69,12 +70,11 @@ class PlatformUnitTests(TestCase):
         self.assertEqual(get_initials(""), "NA")
         self.assertEqual(get_initials("  Budi   Santoso  Wijaya "), "BS")
 
-    def test_numbering_service_sequences(self) -> None:
+    def test_get_active_jenis_miss_returns_none(self) -> None:
         bank = BankSampah.objects.create(
-            nama="Bank", alamat="Jl. Panjang Sekali No. 1", kota="Depok", no_hp_pic="+628100000001"
+            nama="Cataloged", alamat="Jl. Panjang No. 1", kota="Depok", no_hp_pic="+628100000003"
         )
-        self.assertEqual(next_nasabah_number(bank), "NAS-0001")
-        self.assertEqual(next_jenis_number(bank), "JS-0001")
+        self.assertIsNone(get_active_jenis(bank, UUID(int=0)))
 
     def test_user_manager_requires_email(self) -> None:
         with self.assertRaises(ValueError):

@@ -94,7 +94,10 @@
 - Semua model tetap memakai `app_label = "api"` dan `db_table` beku sampai ada
   squash migration; `api/models.py` hanyalah agregator registry model. Karena
   itu perpindahan berkas adalah operasi kode murni: jangan membuat migration
-  untuk memindahkan model antar context.
+  untuk memindahkan model antar context. Selama squash migration belum ada,
+  `api.models` adalah jalur akses model lintas context (termasuk `Saldo` yang
+  berada di `apps/ledger/models.py`); port `apps/<bc>/api.py` dipakai untuk
+  operasi beratur (query terkunci, aturan eligibility), bukan re-export model.
 - Batas context dijaga test `tests/test_architecture.py`: satu context hanya
   boleh mengimpor context lain lewat `apps.<bc>.api` (port publik) atau
   `apps.<bc>.serializers` (DTO), dan tidak boleh menyentuh `api.*` selain

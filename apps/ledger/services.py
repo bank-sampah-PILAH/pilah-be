@@ -14,14 +14,14 @@ from rest_framework import serializers
 from api.models import (
     BankSampah,
     DetailTransaksi,
-    JenisSampah,
-    Nasabah,
     Pencairan,
     PencairanRevisi,
     Saldo,
     Transaksi,
     User,
 )
+from apps.nasabah.api import get_locked_nasabah
+from apps.waste_catalog.api import get_active_jenis
 from shared_kernel.kalkulasi import (
     bulatkan_rupiah,
     harga_berlaku,
@@ -41,16 +41,7 @@ class TransactionService:
     ) -> Transaksi:
         bank = user.bank_sampah
         assert bank is not None  # ponytail: views gate on IsActivePengelola
-        nasabah = (
-            Nasabah.objects.select_for_update()
-            .filter(
-                id=payload["nasabah_id"],
-                bank_sampah=bank,
-                is_active=True,
-                status=Nasabah.Status.APPROVED,
-            )
-            .first()
-        )
+        nasabah = get_locked_nasabah(bank, payload["nasabah_id"])
         if not nasabah:
             raise serializers.ValidationError(
                 {"nasabah_id": ["Nasabah tidak ditemukan atau tidak aktif"]}
@@ -68,9 +59,7 @@ class TransactionService:
 
         subtotal_items: list[Decimal] = []
         for index, item_payload in enumerate(payload["items"]):
-            jenis = JenisSampah.objects.filter(
-                id=item_payload["jenis_sampah_id"], bank_sampah=bank, is_active=True
-            ).first()
+            jenis = get_active_jenis(bank, item_payload["jenis_sampah_id"])
             if not jenis:
                 raise serializers.ValidationError(
                     {
@@ -124,16 +113,7 @@ class PencairanService:
     def create_pencairan(user: User, payload: Mapping[str, Any]) -> Pencairan:
         bank = user.bank_sampah
         assert bank is not None  # ponytail: views gate on IsActivePengelola
-        nasabah = (
-            Nasabah.objects.select_for_update()
-            .filter(
-                id=payload["nasabah_id"],
-                bank_sampah=bank,
-                is_active=True,
-                status=Nasabah.Status.APPROVED,
-            )
-            .first()
-        )
+        nasabah = get_locked_nasabah(bank, payload["nasabah_id"])
         if not nasabah:
             raise serializers.ValidationError(
                 {"nasabah_id": ["Nasabah tidak ditemukan atau tidak aktif"]}
