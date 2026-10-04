@@ -1,0 +1,99 @@
+from typing import Any
+
+from django.db.models import Model
+from django.utils import timezone
+from rest_framework import serializers
+
+from api.models import User
+from shared_kernel.validators import normalize_indonesian_phone
+
+
+class AuthUserSerializer(serializers.ModelSerializer[Model]):
+    bank_sampah_id = serializers.UUIDField(source="bank_sampah.id", allow_null=True)
+    bank_sampah_nama = serializers.CharField(source="bank_sampah.nama", allow_null=True)
+    bank_sampah_status = serializers.CharField(source="bank_sampah.status", allow_null=True)
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "nama",
+            "email",
+            "no_hp",
+            "jenis_kelamin",
+            "tanggal_lahir",
+            "alamat",
+            "role",
+            "bank_sampah_id",
+            "bank_sampah_nama",
+            "bank_sampah_status",
+            "is_profile_complete",
+            "is_primary_pengelola",
+        ]
+
+
+class UserProfileSerializer(serializers.ModelSerializer[Model]):
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "nama",
+            "email",
+            "no_hp",
+            "jenis_kelamin",
+            "tanggal_lahir",
+            "alamat",
+            "role",
+            "is_profile_complete",
+            "is_primary_pengelola",
+        ]
+        read_only_fields = ["id", "email", "role", "is_profile_complete", "is_primary_pengelola"]
+        extra_kwargs = {"alamat": {"required": False, "allow_blank": True}}
+
+    def validate_nama(self, value: Any) -> Any:
+        value = value.strip()
+        if not 3 <= len(value) <= 100:
+            raise serializers.ValidationError("Nama minimal 3 karakter")
+        return value
+
+    def validate_no_hp(self, value: Any) -> Any:
+        return normalize_indonesian_phone(value)
+
+    def validate_jenis_kelamin(self, value: Any) -> Any:
+        if value not in [User.Gender.MALE, User.Gender.FEMALE]:
+            raise serializers.ValidationError("Jenis kelamin wajib dipilih")
+        return value
+
+    def validate_tanggal_lahir(self, value: Any) -> Any:
+        if value > timezone.localdate():
+            raise serializers.ValidationError("Tanggal lahir tidak boleh di masa depan")
+        return value
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        # alamat is only meaningful (and required) for nasabah accounts —
+        # pengelola/pengelola induk give their organization's address on a
+        # separate step and have no use for a personal one here.
+        instance = self.instance
+        if isinstance(instance, User) and instance.role == User.Role.NASABAH:
+            alamat = attrs.get("alamat", instance.alamat).strip()
+            if not alamat:
+                raise serializers.ValidationError({"alamat": "Alamat wajib diisi"})
+            attrs["alamat"] = alamat
+        return attrs
+
+
+class GoogleAuthSerializer(serializers.Serializer[Any]):
+    id_token = serializers.CharField(required=True)
+
+
+class RefreshTokenSerializer(serializers.Serializer[Any]):
+    refresh_token = serializers.CharField(required=True)
+
+
+class LogoutSerializer(serializers.Serializer[Any]):
+    refresh_token = serializers.CharField(required=False, allow_blank=True)
+
+
+class GoogleRegistrationSerializer(serializers.Serializer[Any]):
+    registration_token = serializers.CharField(required=True)
+    role = serializers.ChoiceField(choices=User.GOOGLE_REGISTRATION_ROLES)
