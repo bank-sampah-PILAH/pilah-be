@@ -401,6 +401,56 @@ class OnboardingService:
         return user
 
     @staticmethod
+    def _reactivate_rejected_membership(user: User, own_record: Nasabah, pesan: str) -> Nasabah:
+        # A rejection is correctable, not a permanent lockout: resubmit
+        # the same row as a fresh application rather than raising.
+        #
+        # Conditional UPDATE, not own_record.save(): guards against two
+        # concurrent reapply requests both passing the status check at the
+        # call site. A losing request affects 0 rows and falls through to
+        # the error below instead of silently double-applying.
+        #
+        # The account's phone is copied too, with the same collision guard
+        # as a first application: it may now belong to another row here.
+        if (
+            Nasabah.objects.filter(bank_sampah_id=own_record.bank_sampah_id, no_hp=user.no_hp)
+            .exclude(pk=own_record.pk)
+            .exists()
+        ):
+            raise ValueError(NO_HP_TERPAKAI_DI_BANK)
+        # The check above does not close the race: the same phone can be
+        # committed elsewhere before this UPDATE, and the constraint then
+        # refuses it. Savepoint so the refusal does not poison the outer
+        # transaction before the ValueError leaves it.
+        try:
+            with transaction.atomic():
+                updated = Nasabah.objects.filter(
+                    pk=own_record.pk, status=Nasabah.Status.REJECTED
+                ).update(
+                    nama=user.nama,
+                    jenis_kelamin=user.jenis_kelamin,
+                    tanggal_lahir=user.tanggal_lahir,
+                    alamat=user.alamat,
+                    no_hp=user.no_hp,
+                    status=Nasabah.Status.PENDING,
+                    is_active=True,
+                    updated_at=timezone.now(),
+                )
+        except IntegrityError as exc:
+            raise ValueError(NO_HP_TERPAKAI_DI_BANK) from exc
+        if updated == 0:
+            raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
+        own_record.refresh_from_db()
+        Saldo.objects.get_or_create(nasabah=own_record)
+        NasabahApprovalLog.objects.create(
+            nasabah=own_record,
+            pengurus=None,
+            status=NasabahApprovalLog.Status.APPEALED,
+            catatan=pesan,
+        )
+        return own_record
+
+    @staticmethod
     @transaction.atomic
     def register_nasabah(user: User, payload: Mapping[str, Any]) -> Nasabah:
         if user.role != User.Role.NASABAH:
@@ -421,53 +471,9 @@ class OnboardingService:
         if own_record is not None:
             if own_record.status != Nasabah.Status.REJECTED:
                 raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
-            # A rejection is correctable, not a permanent lockout: resubmit
-            # the same row as a fresh application rather than raising.
-            #
-            # Conditional UPDATE, not own_record.save(): guards against two
-            # concurrent reapply requests both passing the check above.
-            # A losing request affects 0 rows and falls through to the
-            # error below instead of silently double-applying.
-            #
-            # The account's phone is copied too, with the same collision guard
-            # as a first application: it may now belong to another row here.
-            if (
-                Nasabah.objects.filter(bank_sampah=bank, no_hp=user.no_hp)
-                .exclude(pk=own_record.pk)
-                .exists()
-            ):
-                raise ValueError(NO_HP_TERPAKAI_DI_BANK)
-            # The check above does not close the race: the same phone can be
-            # committed elsewhere before this UPDATE, and the constraint then
-            # refuses it. Savepoint so the refusal does not poison the outer
-            # transaction before the ValueError leaves it.
-            try:
-                with transaction.atomic():
-                    updated = Nasabah.objects.filter(
-                        pk=own_record.pk, status=Nasabah.Status.REJECTED
-                    ).update(
-                        nama=user.nama,
-                        jenis_kelamin=user.jenis_kelamin,
-                        tanggal_lahir=user.tanggal_lahir,
-                        alamat=user.alamat,
-                        no_hp=user.no_hp,
-                        status=Nasabah.Status.PENDING,
-                        is_active=True,
-                        updated_at=timezone.now(),
-                    )
-            except IntegrityError as exc:
-                raise ValueError(NO_HP_TERPAKAI_DI_BANK) from exc
-            if updated == 0:
-                raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
-            own_record.refresh_from_db()
-            Saldo.objects.get_or_create(nasabah=own_record)
-            NasabahApprovalLog.objects.create(
-                nasabah=own_record,
-                pengurus=None,
-                status=NasabahApprovalLog.Status.APPEALED,
-                catatan=payload.get("pesan", ""),
+            return OnboardingService._reactivate_rejected_membership(
+                user, own_record, payload.get("pesan", "")
             )
-            return own_record
 
         # A pengurus-entered record for this same person converges onto
         # `own_record` above at first Google login (AuthService matches on
