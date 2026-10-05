@@ -31,6 +31,9 @@ from shared_kernel.permissions import (
 )
 from shared_kernel.scoping import current_user
 
+# Local page a finished OAuth popup redirects to when no `next` URL survives.
+_OAUTH_FALLBACK_PATH = "/api-test/"
+
 
 class GoogleAuthView(APIView):
     permission_classes = [AllowAny]
@@ -57,9 +60,9 @@ class GoogleOAuthStartView(APIView):
         redirect_uri = settings.GOOGLE_REDIRECT_URI or request.build_absolute_uri(
             "/api/v1/auth/google/callback"
         )
-        next_url = request.GET.get("next") or "/api-test/"
+        next_url = request.GET.get("next") or _OAUTH_FALLBACK_PATH
         if not next_url.startswith("/"):
-            next_url = "/api-test/"
+            next_url = _OAUTH_FALLBACK_PATH
         state = TimestampSigner().sign(next_url)
         params = urlencode(
             {
@@ -87,9 +90,9 @@ class GoogleOAuthCallbackView(APIView):
         try:
             next_url = TimestampSigner().unsign(raw_state, max_age=600)
         except (BadSignature, SignatureExpired):
-            next_url = "/api-test/"
+            next_url = _OAUTH_FALLBACK_PATH
         if not next_url.startswith("/"):
-            next_url = "/api-test/"
+            next_url = _OAUTH_FALLBACK_PATH
 
         redirect_uri = settings.GOOGLE_REDIRECT_URI or request.build_absolute_uri(
             "/api/v1/auth/google/callback"
@@ -119,7 +122,9 @@ class GoogleOAuthCallbackView(APIView):
             return self._popup_response(False, {"error": str(exc)}, next_url)
 
     @staticmethod
-    def _popup_response(ok: bool, payload: Any, next_url: str = "/api-test/") -> HttpResponse:
+    def _popup_response(
+        ok: bool, payload: Any, next_url: str = _OAUTH_FALLBACK_PATH
+    ) -> HttpResponse:
         message = json.dumps({"type": "pilah-google-oauth", "ok": ok, "payload": payload})
         fallback = json.dumps(payload, indent=2)
         html = f"""<!doctype html>

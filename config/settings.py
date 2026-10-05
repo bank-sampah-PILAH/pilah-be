@@ -11,8 +11,15 @@ load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-local-pilah-dev-key")
 DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() == "true"
+# The fallback exists only so local test runs without a `.env` (no DB either)
+# start at all. Never used by staging/production, which set DJANGO_SECRET_KEY.
+# See README: generating a production key and where to store it.
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-local-pilah-dev-key")
+if SECRET_KEY.startswith("django-insecure") and not DEBUG:
+    raise ImproperlyConfigured(
+        "DJANGO_SECRET_KEY must be set to a strong unique value outside local development."
+    )
 ALLOWED_HOSTS = [
     host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()
 ]

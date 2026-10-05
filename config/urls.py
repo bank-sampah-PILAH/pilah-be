@@ -19,6 +19,7 @@ from django.conf import settings
 from django.contrib import admin
 from django.http import HttpRequest, JsonResponse
 from django.urls import include, path, re_path
+from django.views.decorators.http import require_GET
 from django.views.generic import TemplateView
 from django.views.static import serve
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
@@ -42,6 +43,7 @@ class ApiTestView(TemplateView):
         return context
 
 
+@require_GET  # S3752: static JSON for Android app links; only GET is valid.
 def assetlinks(request: HttpRequest) -> JsonResponse:
     return JsonResponse(
         [
