@@ -33,7 +33,9 @@ class BankSampah(TimestampedModel):
         blank=True,
         null=True,
     )
-    wa_gateway_token = models.TextField(blank=True, null=True)
+    # S6553: blank empty string, not NULL — service code already treats the
+    # field via truthiness (`wa_gateway_token or default`).
+    wa_gateway_token = models.TextField(blank=True, default="")
     wa_template = models.TextField(blank=True)
     foto_logo = models.FileField(upload_to="bank_sampah/logo/", blank=True)
     foto_kegiatan = models.FileField(upload_to="bank_sampah/kegiatan/", blank=True)

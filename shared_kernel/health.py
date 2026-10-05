@@ -1,7 +1,9 @@
 from django.db import connection
 from django.http import HttpRequest, JsonResponse
+from django.views.decorators.http import require_GET
 
 
+@require_GET  # S3752: liveness probe; orchestrators poll with GET.
 def healthz(request: HttpRequest) -> JsonResponse:
     """Liveness/readiness probe for container orchestrators.
 

@@ -37,7 +37,7 @@ class TransactionService:
         user: User,
         payload: Mapping[str, Any],
         idempotency_key: UUID | None = None,
-        idempotency_request_hash: str | None = None,
+        idempotency_request_hash: str = "",
     ) -> Transaksi:
         bank = user.bank_sampah
         assert bank is not None  # ponytail: views gate on IsActivePengelola
@@ -52,7 +52,9 @@ class TransactionService:
             nasabah=nasabah,
             bank_sampah=bank,
             dicatat_oleh=user,
-            catatan=payload.get("catatan") or None,
+            # "" — not None: the column is NOT NULL (S6553), and blank means
+            # "no note" everywhere the serializer accepts catatan.
+            catatan=payload.get("catatan") or "",
             idempotency_key=idempotency_key,
             idempotency_request_hash=idempotency_request_hash,
         )

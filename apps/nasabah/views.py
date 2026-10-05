@@ -25,6 +25,8 @@ from apps.nasabah.services import NasabahApprovalService
 from shared_kernel.permissions import IsActivePengelola, IsNasabah, IsNasabahRole
 from shared_kernel.scoping import current_bank, current_user
 
+_NO_HP_TERPAKAI = "Nomor HP nasabah sudah digunakan"
+
 
 def _user(request: Request) -> User:
     assert isinstance(request.user, User)  # ponytail: DRF authentication rejects AnonymousUser
@@ -69,7 +71,7 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         if Nasabah.objects.filter(bank_sampah=bank, nomor=nomor).exists():
             return Response({"errors": {"kode": ["ID Nasabah sudah digunakan"]}}, status=422)
         if Nasabah.objects.filter(bank_sampah=bank, no_hp=no_hp).exists():
-            return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
+            return Response({"errors": {"no_hp": [_NO_HP_TERPAKAI]}}, status=422)
         email = serializer.validated_data.get("email")
         existing_by_email = (
             Nasabah.objects.filter(bank_sampah=bank, email=email).first() if email else None
@@ -114,7 +116,7 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             .exclude(id=instance.id)
             .exists()
         ):
-            return Response({"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422)
+            return Response({"errors": {"no_hp": [_NO_HP_TERPAKAI]}}, status=422)
         email = serializer.validated_data.get("email")
         existing_by_email = (
             Nasabah.objects.filter(bank_sampah=bank, email=email).exclude(id=instance.id).first()
@@ -140,9 +142,7 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         if akun is None:
             return Response({"error": "Nasabah belum memiliki akun"}, status=400)
         no_hp = akun["no_hp"]
-        no_hp_terpakai = Response(
-            {"errors": {"no_hp": ["Nomor HP nasabah sudah digunakan"]}}, status=422
-        )
+        no_hp_terpakai = Response({"errors": {"no_hp": [_NO_HP_TERPAKAI]}}, status=422)
         if (
             no_hp
             and Nasabah.objects.filter(bank_sampah=nasabah.bank_sampah, no_hp=no_hp)
