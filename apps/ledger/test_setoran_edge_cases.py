@@ -1,5 +1,6 @@
 import uuid
 from decimal import Decimal
+from typing import Any
 from unittest.mock import patch
 
 from django.db import IntegrityError
@@ -38,7 +39,7 @@ class SetoranEdgeCaseTests(APITestCase):
             "items": [{"jenis_sampah_id": str(self.jenis.id), "berat": "2.000"}],
         }
 
-    def _post(self, **headers: str) -> object:
+    def _post(self, **headers: Any) -> object:
         return self.client.post("/api/v1/transaksi", self.payload, format="json", **headers)
 
     def test_waste_type_without_a_price_cannot_be_deposited(self) -> None:

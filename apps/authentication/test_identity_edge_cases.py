@@ -1,3 +1,4 @@
+from typing import Any
 from unittest.mock import Mock, patch
 
 from django.core import signing
@@ -9,7 +10,7 @@ from api.models import BankSampah, Nasabah, User
 from apps.authentication.api import register_nasabah
 from apps.authentication.services import REGISTRATION_TOKEN_SALT, AuthService
 
-GOOGLE_PROFILE = {
+GOOGLE_PROFILE: dict[str, Any] = {
     "sub": "google-race",
     "email": "race@example.com",
     "email_verified": True,

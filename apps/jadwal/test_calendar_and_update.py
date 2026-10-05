@@ -95,5 +95,5 @@ class JadwalRecipientBoundaryTests(TestCase):
                 }
             )
 
-        self.assertIn("penerima_ids", caught.exception.detail)  # type: ignore[arg-type]
+        self.assertIn("penerima_ids", caught.exception.detail)
         self.assertNotEqual(outsider.bank_sampah_id, bank.id)
