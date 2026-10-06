@@ -66,6 +66,13 @@ jobs:
           # PR diff coverage compares against the actual stacked base branch.
           fetch-depth: 0
 
+      # Java 21 for the Sonar scanner engine (see the SonarCloud step below).
+      - uses: actions/setup-java@v4
+        id: java21
+        with:
+          distribution: temurin
+          java-version: "21"
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -164,11 +171,10 @@ jobs:
         uses: SonarSource/sonarqube-scan-action@v4
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_SCANNER_OPTS: >
+            -Dsonar.scanner.skipJreProvisioning=true
+            -Dsonar.scanner.javaExePath=${{ steps.java21.outputs.path }}/bin/java
         with:
-          # Pin pre-6.x scanner: 6.2.1's JRE/engine bootstrap gets 403 from
-          # SonarCloud's CDN/WAF on many IPs (GitHub runners included);
-          # 5.0.1 talks straight to sonarcloud.io and submits fine.
-          scannerVersion: 5.0.1.3006
           args: >
             -Dsonar.organization=bank-sampah-pilah
             -Dsonar.projectKey=bank-sampah-PILAH_pilah-be
@@ -178,6 +184,12 @@ jobs:
             -Dsonar.python.coverage.reportPaths=coverage.xml
             -Dsonar.exclusions=**/migrations/**,**/*.pyc,**/__pycache__/**,**/staticfiles/**,reference/**
             -Dsonar.python.version=3.12
+      # Java 21 engine + no JRE download: the JRE bootstrap endpoint
+      # (api.sonarcloud.io/analysis/jres) 403s from some IPs after bursts
+      # (also observed locally). The scanner engine requires Java 21 and the
+      # runner default is 17, so pin it with setup-java and skip the
+      # provisioning download entirely — every other SonarCloud endpoint
+      # answers normally.
 
   deploy_staging:
     name: Deploy staging to Fly.io
