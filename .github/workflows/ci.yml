@@ -165,6 +165,15 @@ jobs:
       # provisioning) and JDK-native HTTP client. The CLI 6.x okhttp client
       # gets 403 from SonarCloud's CDN on api.sonarcloud.io bootstrap calls
       # (TLS-fingerprint WAF rule) — 8.x resolves that by construction.
+      # Java 21 for the scanner engine: with skipJreProvisioning the CLI never
+      # calls api.sonarcloud.io/analysis/jres (GitHub runner IPs get a
+      # deterministic 403 from SonarCloud's CDN), it just runs on this JDK.
+      - name: Set up Java 21 (scanner engine)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
       - name: SonarCloud analysis
         uses: SonarSource/sonarqube-scan-action@v8.3.0
         env:
@@ -179,6 +188,7 @@ jobs:
             -Dsonar.python.coverage.reportPaths=coverage.xml
             -Dsonar.exclusions=**/migrations/**,**/*.pyc,**/__pycache__/**,**/staticfiles/**,reference/**
             -Dsonar.python.version=3.12
+            -Dsonar.scanner.skipJreProvisioning=true
 
   deploy_staging:
     name: Deploy staging to Fly.io
