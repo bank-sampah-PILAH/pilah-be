@@ -175,6 +175,25 @@ jobs:
             -Dsonar.exclusions=**/migrations/**,**/*.pyc,**/__pycache__/**,**/staticfiles/**,reference/**
             -Dsonar.python.version=3.12
 
+      # SonarCloud 403s some GitHub-hosted runner IPs at the JRE bootstrap
+      # (api.sonarcloud.io WAF) — intermittent, config is proven correct.
+      # One same-runner retry usually gets through; if not, re-run the job.
+      - name: SonarCloud analysis (retry on 403)
+        if: failure()
+        uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=bank-sampah-pilah
+            -Dsonar.projectKey=bank-sampah-PILAH_pilah-be
+            -Dsonar.sources=api,apps,config,shared_kernel,tests
+            -Dsonar.tests=api,apps,tests
+            -Dsonar.test.inclusions=**/tests.py,**/test_*.py
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.exclusions=**/migrations/**,**/*.pyc,**/__pycache__/**,**/staticfiles/**,reference/**
+            -Dsonar.python.version=3.12
+
   deploy_staging:
     name: Deploy staging to Fly.io
     if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
