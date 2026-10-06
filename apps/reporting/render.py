@@ -25,6 +25,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
+    Image,
     SimpleDocTemplate,
     Spacer,
     Table,
@@ -154,7 +155,7 @@ class NumberedCanvas(Canvas):  # type: ignore[misc]  # reportlab has no stubs; C
 
 
 def render_statement(data: StatementData, theme_key: str) -> bytes:
-    theme = THEMES.get(theme_key, THEMES["ledger"])
+    theme = THEMES.get(theme_key, THEMES["pilah"])
 
     stream = BytesIO()
     doc = SimpleDocTemplate(
@@ -180,20 +181,11 @@ def _flowables(data: StatementData, theme: Theme) -> list[object]:
 
     story: list[object] = []
 
-    # --- Header band: PILAH wordmark + bank name + statement title.
+    # --- Header band: logo + bank name + statement title.
     header = Table(
         [
             [
-                Paragraph(
-                    "PILAH",
-                    ParagraphStyle(
-                        "wm",
-                        fontName="Inter-Bold",
-                        fontSize=18,
-                        leading=22,
-                        textColor=theme.primary_text,
-                    ),
-                ),
+                _logo(),
                 Paragraph(
                     f"{data.bank_nama}<br/>Laporan Riwayat Aktivitas",
                     ParagraphStyle(
@@ -366,3 +358,10 @@ def _mutation_table(
 
 def item_berat(berat: Decimal) -> str:
     return f"{berat.normalize()} kg"
+
+
+def _logo() -> Image:
+    """The PILAH leaf logo (mobile assets), scaled for the header band."""
+    resource = resources.files("apps.reporting") / "fonts" / "logo.png"
+    with resources.as_file(resource) as path:
+        return Image(str(path), width=14 * mm, height=14 * mm)

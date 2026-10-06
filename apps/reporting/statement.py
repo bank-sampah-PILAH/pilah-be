@@ -99,7 +99,7 @@ def export_statement_pdf(member: Nasabah, request: HttpRequest) -> tuple[bytes, 
     # import time is avoided by resolving render only at call time).
     from apps.reporting.render import render_statement
 
-    return render_statement(data, request.GET.get("tema", "ledger")), _filename(member)
+    return render_statement(data, request.GET.get("tema", "pilah")), _filename(member)
 
 
 def build_statement(member: Nasabah, request: HttpRequest) -> StatementData:
