@@ -9,6 +9,9 @@
 - Keep the canonical checkout on `staging`; use `staging` as the worktree
   baseline and pull request target unless the request explicitly names another
   branch. Never infer `main` as the baseline.
+- This repository is a workspace submodule. Never switch its canonical checkout
+  from the detached commit pinned by the parent workspace; make changes in a
+  sibling worktree instead.
 
 ## Development
 
@@ -118,9 +121,15 @@
 
 ## Delivery
 
-- For Linear-linked work, use `feature/<issue-id>` with the lowercase issue
-  identifier, for example `feature/eng-123`.
+- When a change involves both backend and mobile, use the workspace
+  `multi-ship` skill with the workspace `ship` skill. Keep backend
+  implementation and ownership of its API contract in this repository; agree
+  the shared contract before parallel work.
+- For Linear-linked work, use the same lowercase issue-derived branch
+  (`feature/<issue-id>`) in each selected repository, with separate PRs to
+  `staging`; do not create a Linear issue unless explicitly requested.
 - Use the local `.agents/skills/ship` skill with the global `ship` workflow for
   feature or fix branches in sibling `pilah-be-worktrees` directories.
+- Keep backend validation tied to the documented Django test command above.
 - Use the local `.agents/skills/lgtm` skill with the global `lgtm` workflow for
   merge and cleanup.
