@@ -6,12 +6,10 @@
   workspace.
 - Keep backend implementation changes here, not in the workspace root or the
   mobile repository.
-- Keep the canonical checkout on `staging`; use `staging` as the worktree
-  baseline and pull request target unless the request explicitly names another
-  branch. Never infer `main` as the baseline.
-- This repository is a workspace submodule. Never switch its canonical checkout
-  from the detached commit pinned by the parent workspace; make changes in a
-  sibling worktree instead.
+- Use `staging` as the worktree baseline and PR target unless the request names
+  another branch; never infer `main`. A standalone canonical checkout should
+  remain on `staging`. When nested in the workspace, it may be detached at the
+  parent-pinned commit; leave it untouched and work in a sibling worktree.
 
 ## Development
 
@@ -113,9 +111,12 @@
 
 ## Validation
 
-- Run `uv run --with-requirements requirements.txt python manage.py test` when
-  `uv` is available; otherwise run `python manage.py test`.
-- The Docker equivalent is `docker compose exec web python manage.py test`.
+- For backend code or behavior changes, run
+  `uv run --with-requirements requirements.txt python manage.py test` when `uv`
+  is available; otherwise run `python manage.py test`. The Docker equivalent is
+  `docker compose exec web python manage.py test`.
+- For documentation-only changes, run `git diff --check` and configured
+  documentation checks; skip Django tests.
 - Do not commit `.env`, credentials, local databases, media, or generated
   runtime files.
 
