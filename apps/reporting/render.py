@@ -224,8 +224,26 @@ def _flowables(data: StatementData, theme: Theme) -> list[object]:
             [
                 Paragraph("Nama", styles["label"]),
                 Paragraph(": " + data.nasabah_nama, styles["value"]),
+                Paragraph("Bank Sampah", styles["label"]),
+                Paragraph(": " + data.bank_nama, styles["value"]),
+            ],
+            [
                 Paragraph("No. Anggota", styles["label"]),
                 Paragraph(": " + data.nomor_anggota, styles["value"]),
+                Paragraph("Alamat Bank", styles["label"]),
+                Paragraph(": " + _bank_alamat(data), styles["value"]),
+            ],
+            [
+                Paragraph("Email", styles["label"]),
+                Paragraph(": " + data.nasabah_email, styles["value"]),
+                Paragraph("No. HP Bank", styles["label"]),
+                Paragraph(": " + data.bank_no_hp, styles["value"]),
+            ],
+            [
+                Paragraph("No. HP", styles["label"]),
+                Paragraph(": " + data.nasabah_no_hp, styles["value"]),
+                Paragraph("Alamat", styles["label"]),
+                Paragraph(": " + data.nasabah_alamat, styles["value"]),
             ],
             [
                 Paragraph("Periode", styles["label"]),
@@ -369,3 +387,7 @@ def _logo() -> Image:
     resource = resources.files("apps.reporting") / "fonts" / "logo.png"
     with resources.as_file(resource) as path:
         return Image(str(path), width=14 * mm, height=14 * mm)
+
+
+def _bank_alamat(data: StatementData) -> str:
+    return " ".join(part for part in (data.bank_alamat, data.bank_kota) if part) or "-"

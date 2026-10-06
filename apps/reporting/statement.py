@@ -72,7 +72,13 @@ class MutationRow:
 @dataclass(frozen=True)
 class StatementData:
     bank_nama: str
+    bank_alamat: str
+    bank_kota: str
+    bank_no_hp: str
     nasabah_nama: str
+    nasabah_email: str
+    nasabah_no_hp: str
+    nasabah_alamat: str
     nomor_anggota: str
     periode_label: str
     tipe_label: str
@@ -136,7 +142,13 @@ def build_statement(member: Nasabah, request: HttpRequest) -> StatementData:
 
     return StatementData(
         bank_nama=member.bank_sampah.nama,
+        bank_alamat=member.bank_sampah.alamat,
+        bank_kota=member.bank_sampah.kota,
+        bank_no_hp=member.bank_sampah.no_hp_pic,
         nasabah_nama=member.nama,
+        nasabah_email=member.email,
+        nasabah_no_hp=member.no_hp,
+        nasabah_alamat=member.alamat,
         nomor_anggota=member.nomor,
         periode_label=exporter.period_label(request),
         tipe_label=_TIPE_LABELS[tipe],
