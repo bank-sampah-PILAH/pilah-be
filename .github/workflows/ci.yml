@@ -66,13 +66,6 @@ jobs:
           # PR diff coverage compares against the actual stacked base branch.
           fetch-depth: 0
 
-      # Java 21 for the Sonar scanner engine (see the SonarCloud step below).
-      - uses: actions/setup-java@v4
-        id: java21
-        with:
-          distribution: temurin
-          java-version: "21"
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -167,14 +160,15 @@ jobs:
       # rejects user-supplied ones. No SONAR_HOST_URL: the action defaults to
       # sonarcloud.io unless pointing at self-hosted. Auth is the
       # SONAR_TOKEN repo secret (Execute Analysis scope).
+      #
+      # v8 bundles Scanner CLI 8.x: embedded Java 21 JRE (no JRE
+      # provisioning) and JDK-native HTTP client. The CLI 6.x okhttp client
+      # gets 403 from SonarCloud's CDN on api.sonarcloud.io bootstrap calls
+      # (TLS-fingerprint WAF rule) — 8.x resolves that by construction.
       - name: SonarCloud analysis
-        uses: SonarSource/sonarqube-scan-action@v4
+        uses: SonarSource/sonarqube-scan-action@v8.3.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_SCANNER_OPTS: >
-            -Dsonar.scanner.skipJreProvisioning=true
-            -Dsonar.scanner.javaExePath=${{ steps.java21.outputs.path }}/bin/java
-            -Djdk.tls.client.protocols=TLSv1.2
         with:
           args: >
             -Dsonar.organization=bank-sampah-pilah
@@ -185,12 +179,6 @@ jobs:
             -Dsonar.python.coverage.reportPaths=coverage.xml
             -Dsonar.exclusions=**/migrations/**,**/*.pyc,**/__pycache__/**,**/staticfiles/**,reference/**
             -Dsonar.python.version=3.12
-      # Java 21 engine + no JRE download: the JRE bootstrap endpoint
-      # (api.sonarcloud.io/analysis/jres) 403s from some IPs after bursts
-      # (also observed locally). The scanner engine requires Java 21 and the
-      # runner default is 17, so pin it with setup-java and skip the
-      # provisioning download entirely — every other SonarCloud endpoint
-      # answers normally.
 
   deploy_staging:
     name: Deploy staging to Fly.io
