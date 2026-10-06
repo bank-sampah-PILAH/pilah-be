@@ -25,7 +25,6 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
-    Image,
     SimpleDocTemplate,
     Spacer,
     Table,
@@ -124,11 +123,20 @@ _STYLES = {
 
 
 class NumberedCanvas(Canvas):  # type: ignore[misc]  # reportlab has no stubs; Canvas resolves Any
-    """Standard two-phase pattern: collect page states, draw footers on save."""
+    """Two-phase canvas: footers (with page total) and the repeated page
+    header are drawn on save(), once every page's state is collected."""
 
-    def __init__(self, *args: object, **kwargs: object) -> None:
+    def __init__(
+        self,
+        *args: object,
+        header_data: tuple[str, str, str, str, str, str] | None = None,
+        theme: Theme | None = None,
+        **kwargs: object,
+    ) -> None:
         super().__init__(*args, **kwargs)
         self._saved_page_states: list[dict[str, object]] = []
+        self._header_data = header_data
+        self._theme = theme or THEMES["pilah"]
 
     def showPage(self) -> None:  # noqa: N802  (reportlab API name)
         self._saved_page_states.append(dict(self.__dict__))
@@ -138,12 +146,65 @@ class NumberedCanvas(Canvas):  # type: ignore[misc]  # reportlab has no stubs; C
         total = len(self._saved_page_states)
         for state in self._saved_page_states:
             self.__dict__.update(state)
+            self._draw_repeated_header()
             self._draw_footer(total)
             super().showPage()
         super().save()
 
+    def _draw_repeated_header(self) -> None:
+        """Compact band on every page: logo, bank, title, nasabah info.
+
+        Like a bank's mutation letter, the statement stays identifiable on
+        page 2+: who, which bank, which periode — drawn on the canvas so it
+        repeats even as the mutation table splits across pages.
+        """
+        if not self._header_data:
+            return
+        bank_nama, nasabah_nama, nomor, periode, tipe, diunduh = self._header_data
+        band_top = _PAGE_H - _MARGIN
+        band_h = 27 * mm
+        self.setFillColor(self._theme.primary)
+        self.roundRect(_MARGIN, band_top - band_h, _TABLE_W, band_h, _RADIUS, stroke=0, fill=1)
+
+        # Logo on a white chip so its transparency reads on any theme.
+        self.setFillColor(colors.white)
+        self.roundRect(
+            _MARGIN + 4 * mm,
+            band_top - band_h + 4 * mm,
+            13 * mm,
+            16 * mm,
+            _RADIUS,
+            stroke=0,
+            fill=1,
+        ) if False else None
+        self.drawImage(
+            _logo_path(),
+            _MARGIN + 5 * mm,
+            band_top - band_h + 4.6 * mm,
+            width=11 * mm,
+            height=11.5 * mm,
+            mask="auto",
+        )
+
+        self.setFillColor(self._theme.primary_text)
+        self.setFont("Inter-Bold", 11)
+        self.drawRightString(_PAGE_W - _MARGIN - 5 * mm, band_top - 8 * mm, bank_nama)
+        self.setFont("Inter-Bold", 9)
+        self.drawRightString(
+            _PAGE_W - _MARGIN - 5 * mm, band_top - 14 * mm, "Laporan Riwayat Aktivitas"
+        )
+
+        self.setFillColor(self._theme.primary_text)
+        info_x = _MARGIN + 22 * mm
+        self.setFont("Inter", 7.5)
+        self.drawString(info_x, band_top - 8 * mm, f"Nama: {nasabah_nama}")
+        self.drawString(info_x, band_top - 13 * mm, f"No. Anggota: {nomor}")
+        self.drawString(info_x, band_top - 18 * mm, f"Diunduh: {diunduh}")
+        self.drawString(info_x + 52 * mm, band_top - 8 * mm, f"Periode: {periode}")
+        self.drawString(info_x + 52 * mm, band_top - 13 * mm, f"Tipe: {tipe}")
+
     def _draw_footer(self, total: int) -> None:
-        theme = THEMES["ledger"]  # footer stays neutral across themes
+        theme = self._theme
         self.setFont("Inter", 7)
         self.setFillColor(colors.HexColor("#6B7280"))
         self.drawRightString(
@@ -159,19 +220,35 @@ def render_statement(data: StatementData, theme_key: str) -> bytes:
     theme = THEMES.get(theme_key, THEMES["pilah"])
 
     stream = BytesIO()
+    # The header band + info grid live on the canvas (repeated on every page,
+    # bank-letter style), so text content starts below them: topMargin reserves
+    # their space.
+    top_margin = _MARGIN + 26 * mm
     doc = SimpleDocTemplate(
         stream,
         pagesize=A4,
         leftMargin=_MARGIN,
         rightMargin=_MARGIN,
-        topMargin=_MARGIN,
+        topMargin=top_margin,
         bottomMargin=_MARGIN,
         title="Laporan Riwayat Aktivitas",
         author=data.bank_nama,
     )
     doc.build(
         _flowables(data, theme),
-        canvasmaker=NumberedCanvas,
+        canvasmaker=lambda *args, **kwargs: NumberedCanvas(
+            *args,
+            header_data=(
+                data.bank_nama,
+                data.nasabah_nama,
+                data.nomor_anggota,
+                data.periode_label,
+                data.tipe_label,
+                data.diunduh,
+            ),
+            theme=theme,
+            **kwargs,
+        ),
     )
     return stream.getvalue()
 
@@ -181,72 +258,6 @@ def _flowables(data: StatementData, theme: Theme) -> list[object]:
     styles["subrow"].textColor = theme.subrow_text
 
     story: list[object] = []
-
-    # --- Header band: logo + bank name + statement title.
-    header = Table(
-        [
-            [
-                _logo(),
-                Paragraph(
-                    f"{data.bank_nama}<br/>Laporan Riwayat Aktivitas",
-                    ParagraphStyle(
-                        "ht",
-                        fontName="Inter-Bold",
-                        fontSize=11,
-                        leading=14,
-                        textColor=theme.primary_text,
-                        alignment=2,
-                    ),
-                ),
-            ]
-        ],
-        colWidths=[_TABLE_W * 0.4, _TABLE_W * 0.6],
-    )
-    header.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, -1), theme.primary),
-                ("ROUNDEDCORNERS", [_RADIUS, _RADIUS, _RADIUS, _RADIUS]),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), 10),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-                ("LEFTPADDING", (0, 0), (-1, -1), 12),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 12),
-            ]
-        )
-    )
-    story.append(header)
-    story.append(Spacer(1, 8))
-
-    # --- Info grid.
-    info = Table(
-        [
-            [
-                Paragraph("Nama", styles["label"]),
-                Paragraph(": " + data.nasabah_nama, styles["value"]),
-                Paragraph("No. Anggota", styles["label"]),
-                Paragraph(": " + data.nomor_anggota, styles["value"]),
-            ],
-            [
-                Paragraph("Periode", styles["label"]),
-                Paragraph(": " + data.periode_label, styles["value"]),
-                Paragraph("Tipe", styles["label"]),
-                Paragraph(": " + data.tipe_label, styles["value"]),
-            ],
-            [
-                Paragraph("Diunduh", styles["label"]),
-                Paragraph(": " + data.diunduh, styles["value"]),
-                Paragraph("", styles["label"]),
-                Paragraph("", styles["value"]),
-            ],
-        ],
-        colWidths=[_TABLE_W * 0.15, _TABLE_W * 0.35, _TABLE_W * 0.15, _TABLE_W * 0.35],
-    )
-    info.setStyle(
-        TableStyle([("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2)])
-    )
-    story.append(info)
-    story.append(Spacer(1, 8))
 
     # --- Summary strip: 4 cells.
     summary = Table(
@@ -364,8 +375,8 @@ def item_berat(berat: Decimal) -> str:
     return f"{berat.normalize()} kg"
 
 
-def _logo() -> Image:
-    """The PILAH leaf logo (mobile assets), scaled for the header band."""
+def _logo_path() -> str:
+    """Filesystem path of the vendored PILAH leaf logo (mobile assets)."""
     resource = resources.files("apps.reporting") / "fonts" / "logo.png"
     with resources.as_file(resource) as path:
-        return Image(str(path), width=14 * mm, height=14 * mm)
+        return str(path)
