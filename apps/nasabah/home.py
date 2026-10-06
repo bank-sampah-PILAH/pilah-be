@@ -3,6 +3,7 @@ from typing import Any, cast
 from uuid import UUID
 
 from django.db.models import QuerySet
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
@@ -11,7 +12,9 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from api.models import BankSampah, Nasabah, Transaksi, User
+from apps.ledger.api import apply_period
 from apps.ledger.serializers import TransactionDetailSerializer
+from apps.reporting.api import export_statement_pdf
 from shared_kernel.pagination import StandardPagination
 from shared_kernel.permissions import IsActiveNasabah
 
@@ -186,8 +189,52 @@ class NasabahHistoryView(ListAPIView[Transaksi]):
     serializer_class = ActivitySerializer
     pagination_class = StandardPagination
 
-    def get_queryset(self) -> QuerySet[Transaksi]:
-        return activities(MembershipService.get_active_membership(self.request))
+    # periode filter (PIL-315): omitted param = all-time history (default=None).
+    # Overriding list (not get_queryset) because a custom range with reversed
+    # dates raises ValueError, which must surface as the ledger-style 400 —
+    # get_queryset can only raise, not return a Response. The queryset runs
+    # through apply_period exactly once (here).
+    def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        try:
+            queryset = apply_period(
+                activities(MembershipService.get_active_membership(request)),
+                request,
+                default=None,
+            )
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
+        page = self.paginate_queryset(queryset)
+        serializer = self.get_serializer(page or queryset, many=True)
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
+
+
+class NasabahHistoryExportPdfView(GenericAPIView[Nasabah]):
+    """Riwayat aktivitas statement PDF (PIL-315).
+
+    Same isolation contract as every nasabah-me endpoint: the statement is
+    scoped to the active membership resolved by MembershipService, so a
+    nasabah only ever exports their own rows for their own bank sampah.
+    """
+
+    permission_classes = [IsActiveNasabah]
+
+    def get(self, request: Request) -> HttpResponse:
+        member = MembershipService.get_active_membership(request)
+        try:
+            result = export_statement_pdf(member, request)
+        # apply_period raises ValueError for a reversed custom range; map it to
+        # the same 400 shape the ledger views return (the DRF 400 path would
+        # reshape it to 422, diverging from the ledger convention).
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
+        if result is None:
+            return Response({"error": "Tidak ada data pada periode ini"}, status=400)
+        content, filename = result
+        response = HttpResponse(content, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
 
 
 class NasabahTransactionDetailView(GenericAPIView[Transaksi]):

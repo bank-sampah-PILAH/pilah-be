@@ -30,6 +30,7 @@ from apps.ledger.views import PencairanViewSet, TransaksiViewSet
 from apps.nasabah.home import (
     NasabahBalanceView,
     NasabahBankView,
+    NasabahHistoryExportPdfView,
     NasabahHistoryView,
     NasabahHomeView,
     NasabahTransactionDetailView,
@@ -55,6 +56,11 @@ urlpatterns = [
     path("nasabah/me/saldo", NasabahBalanceView.as_view(), name="nasabah-own-balance"),
     path("nasabah/me/bank-sampah", NasabahBankView.as_view(), name="nasabah-own-bank"),
     path("nasabah/me/riwayat", NasabahHistoryView.as_view(), name="nasabah-own-history"),
+    path(
+        "nasabah/me/riwayat/export-pdf",
+        NasabahHistoryExportPdfView.as_view(),
+        name="nasabah-own-history-export-pdf",
+    ),
     path(
         "nasabah/me/riwayat/<uuid:pk>",
         NasabahTransactionDetailView.as_view(),
