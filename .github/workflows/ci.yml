@@ -1,6 +1,8 @@
 # CI — the merge gate for pilah-be. One verification job runs lint, postgres
 # tests with coverage, migration checks, Django checks, and mypy. Successful
-# staging pushes then deploy the verified commit to Fly.io.
+# staging pushes then deploy the verified commit to Fly.io. Feature branches
+# are also analyzed (push trigger) so SonarCloud shows all branches, not just
+# main/staging.
 #
 # Not here on purpose:
 #   - gitleaks / pip-audit / migration-linter -> scheduled-checks.yml
@@ -14,6 +16,7 @@ on:
     branches:
       - staging
       - main
+      - feature/**
   pull_request:
 
 concurrency:
@@ -136,7 +139,7 @@ jobs:
       - name: mypy strict
         run: mypy api apps config shared_kernel tests
 
-      # --- SonarQube analysis (was its own sonar.yml workflow) ---
+      # --- SonarCloud analysis (was its own sonar.yml workflow) ---
       #
       # Why folded in here instead of a separate workflow:
       #   1. Coverage: Sonar needs coverage.xml, and that file only exists
@@ -147,31 +150,24 @@ jobs:
       #      report is just there.
       #   2. One gate, one place: CI is already the merge gate, so a failed
       #      Sonar push surfaces in the same run a reviewer already watches.
-      #   3. The sonar.yml version needed the same checkout (fetch-depth 0)
-      #      and pip-less scanner anyway; nothing about being a separate file
-      #      added value.
       #
-      # Community Edition has no branch support, so the destination project
-      # is switched per branch (main -> pilah-be, staging/others ->
-      # pilah-be-staging; PRs report to the staging project, non-gating).
-      # SONAR_HOST_URL and the two SONAR_TOKEN_* secrets are repo settings.
-      - name: Pick SonarQube project key by branch
-        id: pick
-        run: |
-          if [[ "${{ github.ref_name }}" == "main" ]]; then
-            echo "key=pilah-be" >> "$GITHUB_OUTPUT"
-          else
-            echo "key=pilah-be-staging" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: SonarQube analysis
+      # Reports to SonarCloud (org bank-sampah-pilah, project
+      # bank-sampah-PILAH_pilah-be). Unlike the old self-hosted Community
+      # Edition, SonarCloud owns branch handling: the scanner auto-detects
+      # sonar.branch.* / sonar.pullrequest.* from the Actions environment, so
+      # every branch and PR gets its own analysis without per-branch project
+      # keys. Branch params must NOT be set manually here — SonarCloud
+      # rejects user-supplied ones. No SONAR_HOST_URL: the action defaults to
+      # sonarcloud.io unless pointing at self-hosted. Auth is the
+      # SONAR_TOKEN repo secret (Execute Analysis scope).
+      - name: SonarCloud analysis
         uses: SonarSource/sonarqube-scan-action@v4
         env:
-          SONAR_TOKEN: ${{ steps.pick.outputs.key == 'pilah-be' && secrets.SONAR_TOKEN || secrets.SONAR_TOKEN_STAGING }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
-            -Dsonar.projectKey=${{ steps.pick.outputs.key }}
+            -Dsonar.organization=bank-sampah-pilah
+            -Dsonar.projectKey=bank-sampah-PILAH_pilah-be
             -Dsonar.sources=api,apps,config,shared_kernel,tests
             -Dsonar.tests=api,apps,tests
             -Dsonar.test.inclusions=**/tests.py,**/test_*.py
