@@ -28,10 +28,25 @@ staging.
 
 Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, and any
 WhatsApp/Twilio secrets the staging environment needs with the same command.
-Also set `PILAH_SUPERADMIN_EMAILS` to the comma-separated Google accounts that
-are allowed to become or remain Superadmin. Include the seeded Superadmin test
-account; this whitelist is authoritative at every real Google login.
-Register this Google OAuth callback URL:
+For web sign-in, `GOOGLE_CLIENT_ID` must match the Web OAuth client ID used by
+the mobile web build (`GOOGLE_SERVER_CLIENT_ID`); the API checks that token
+audience. Also set `PILAH_SUPERADMIN_EMAILS` to the comma-separated Google
+accounts that are allowed to become or remain Superadmin. Include the seeded
+Superadmin test account; this whitelist is authoritative at every real Google
+login.
+
+`fly.toml` keeps `CORS_ALLOW_ALL_ORIGINS=false`. Once the staging dashboard
+origin is known, set its exact origin (scheme, host, optional port; no path) on
+Fly and add the same origin to the OAuth client's Authorized JavaScript origins:
+
+```bash
+flyctl secrets set --app pilah-be-staging \
+  CORS_ALLOWED_ORIGINS='https://<replace-with-dashboard-origin>'
+```
+
+`CORS_ALLOWED_ORIGINS` accepts comma-separated origins. The staging dashboard
+origin is not defined in this repository yet, so replace the placeholder before
+configuring Fly or Google Cloud. Register this Google OAuth callback URL:
 
 ```text
 https://pilah-be-staging.fly.dev/api/v1/auth/google/callback

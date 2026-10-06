@@ -134,6 +134,7 @@ DJANGO_SECRET_KEY=change-me
 DJANGO_DEBUG=false
 DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
 CORS_ALLOW_ALL_ORIGINS=false
+CORS_ALLOWED_ORIGINS=http://localhost:7357
 ```
 
 Database variables:
@@ -156,6 +157,11 @@ PILAH_SUPERADMIN_EMAILS=admin@example.com
 PILAH_PUBLIC_APP_URL=https://pilah.example.com
 PILAH_SUPERADMIN_EMAILS=admin@example.com,another-admin@example.com
 ```
+
+`CORS_ALLOWED_ORIGINS` is a comma-separated list of browser origins (scheme,
+host, and optional port; no path). For web Google login, set backend
+`GOOGLE_CLIENT_ID` to the same Web OAuth client ID used by mobile's
+`GOOGLE_SERVER_CLIENT_ID`; the API validates the token audience against it.
 
 Set `PILAH_SUPERADMIN_EMAILS` on Fly and as a GitHub repository variable for
 Cloud Run. It is the authoritative comma-separated list of Superadmin Google
