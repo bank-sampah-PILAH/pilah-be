@@ -174,7 +174,32 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      # The SonarCloud API intermittently answers 403 to runner traffic: same
+      # args/token get accepted from one runner and rejected from another
+      # minutes apart (CDN-side; happens at bootstrap, before the scan
+      # itself). First attempt gets continue-on-error, second attempt runs
+      # only on failure — a fresh connection usually gets through. Keep both
+      # arg blocks identical.
       - name: SonarCloud analysis
+        id: sonar_scan
+        continue-on-error: true
+        uses: SonarSource/sonarqube-scan-action@v8.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=bank-sampah-pilah
+            -Dsonar.projectKey=bank-sampah-PILAH_pilah-be
+            -Dsonar.sources=api,apps,config,shared_kernel,tests
+            -Dsonar.tests=api,apps,tests
+            -Dsonar.test.inclusions=**/tests.py,**/test_*.py
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.exclusions=**/migrations/**,**/*.pyc,**/__pycache__/**,**/staticfiles/**,reference/**
+            -Dsonar.python.version=3.12
+            -Dsonar.scanner.skipJreProvisioning=true
+
+      - name: SonarCloud analysis (retry)
+        if: steps.sonar_scan.outcome == 'failure'
         uses: SonarSource/sonarqube-scan-action@v8.3.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
