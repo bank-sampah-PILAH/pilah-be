@@ -104,6 +104,7 @@ THEMES: dict[str, Theme] = {
 _PAGE_W, _PAGE_H = A4
 _MARGIN = 15 * mm
 _TABLE_W = _PAGE_W - 2 * _MARGIN
+_RADIUS = 6  # subtle rounded corners shared by every boxed element
 
 _STYLES = {
     "label": ParagraphStyle("label", fontName="Inter", fontSize=8, leading=10),
@@ -205,6 +206,7 @@ def _flowables(data: StatementData, theme: Theme) -> list[object]:
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, -1), theme.primary),
+                ("ROUNDEDCORNERS", [_RADIUS, _RADIUS, _RADIUS, _RADIUS]),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("TOPPADDING", (0, 0), (-1, -1), 10),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
@@ -268,6 +270,7 @@ def _flowables(data: StatementData, theme: Theme) -> list[object]:
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, 0), theme.zebra),
+                ("ROUNDEDCORNERS", [_RADIUS, _RADIUS, _RADIUS, _RADIUS]),
                 ("BOX", (0, 0), (0, -1), 0.5, theme.accent),
                 ("BOX", (1, 0), (1, -1), 0.5, theme.accent),
                 ("BOX", (2, 0), (2, -1), 0.5, theme.accent),
@@ -306,6 +309,7 @@ def _mutation_table(
     style_cmds: list[tuple[object, ...]] = [
         ("BACKGROUND", (0, 0), (-1, 0), theme.primary),
         ("GRID", (0, 0), (-1, -1), 0.4, theme.grid),
+        ("ROUNDEDCORNERS", [_RADIUS, _RADIUS, _RADIUS, _RADIUS]),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
