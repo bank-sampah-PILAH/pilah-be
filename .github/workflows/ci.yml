@@ -165,25 +165,10 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
-          args: >
-            -Dsonar.organization=bank-sampah-pilah
-            -Dsonar.projectKey=bank-sampah-PILAH_pilah-be
-            -Dsonar.sources=api,apps,config,shared_kernel,tests
-            -Dsonar.tests=api,apps,tests
-            -Dsonar.test.inclusions=**/tests.py,**/test_*.py
-            -Dsonar.python.coverage.reportPaths=coverage.xml
-            -Dsonar.exclusions=**/migrations/**,**/*.pyc,**/__pycache__/**,**/staticfiles/**,reference/**
-            -Dsonar.python.version=3.12
-
-      # SonarCloud 403s some GitHub-hosted runner IPs at the JRE bootstrap
-      # (api.sonarcloud.io WAF) — intermittent, config is proven correct.
-      # One same-runner retry usually gets through; if not, re-run the job.
-      - name: SonarCloud analysis (retry on 403)
-        if: failure()
-        uses: SonarSource/sonarqube-scan-action@v4
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
+          # Pin pre-6.x scanner: 6.2.1's JRE/engine bootstrap gets 403 from
+          # SonarCloud's CDN/WAF on many IPs (GitHub runners included);
+          # 5.0.1 talks straight to sonarcloud.io and submits fine.
+          scannerVersion: 5.0.1.3006
           args: >
             -Dsonar.organization=bank-sampah-pilah
             -Dsonar.projectKey=bank-sampah-PILAH_pilah-be
