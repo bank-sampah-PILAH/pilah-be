@@ -257,3 +257,46 @@ class DraftPencairanTests(APITestCase):
         duplikat = self._buat([{"nasabah_id": str(budi.id)}, {"nasabah_id": str(budi.id)}])
         self.assertEqual(duplikat.status_code, 422, duplikat.data)
         self.assertEqual(DraftPencairan.objects.count(), 1)
+
+    def _draft_bank_lain(self) -> DraftPencairan:
+        bank_lain = BankSampah.objects.create(
+            nama="Bank Lain",
+            alamat="Bogor",
+            kota="Bogor",
+            no_hp_pic="+628111111111",
+            status=BankSampah.Status.ACTIVE,
+        )
+        pengurus = User.objects.create_user(
+            email="lain@example.com",
+            nama="Pak Lain",
+            bank_sampah=bank_lain,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        return DraftPencairan.objects.create(
+            bank_sampah=bank_lain, dibuat_oleh=pengurus, diubah_oleh=pengurus
+        )
+
+    def test_daftar_dan_detail_hanya_draft_bank_sendiri(self) -> None:
+        sendiri = self._buat([{"nasabah_id": str(self.nasabah.id)}]).data["id"]
+        asing = self._draft_bank_lain()
+
+        daftar = self.client.get(URL)
+        detail = self.client.get(f"{URL}/{sendiri}")
+        detail_asing = self.client.get(f"{URL}/{asing.id}")
+
+        self.assertEqual(daftar.status_code, 200, daftar.data)
+        self.assertEqual([draft["id"] for draft in daftar.data["results"]], [sendiri])
+        self.assertEqual(detail.status_code, 200, detail.data)
+        self.assertEqual(detail.data["items"][0]["nasabah_nama"], "Ahmad Ridwan")
+        self.assertEqual(detail.data["total_dibayar"], "465600.00")
+        self.assertEqual(detail_asing.status_code, 404)
+
+    def test_daftar_draft_memuat_ringkasan_tanpa_rincian_item(self) -> None:
+        self._buat([{"nasabah_id": str(self.nasabah.id)}])
+
+        draft = self.client.get(URL).data["results"][0]
+
+        self.assertEqual(draft["jumlah_item"], 1)
+        self.assertEqual(draft["total_dibayar"], "465600.00")
+        self.assertNotIn("items", draft)
