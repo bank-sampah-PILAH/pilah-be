@@ -418,3 +418,45 @@ class DraftPencairanTests(APITestCase):
         response = self._patch(str(asing.id), nama="Curang")
 
         self.assertEqual(response.status_code, 404)
+
+    def test_batalkan_draft_menandai_dibatalkan_tanpa_mengubah_saldo(self) -> None:
+        draft = self._buat([{"nasabah_id": str(self.nasabah.id)}]).data
+
+        response = self.client.post(f"{URL}/{draft['id']}/batalkan")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["status"], "dibatalkan")
+        self.assertEqual(self.client.get(f"{URL}/{draft['id']}").data["status"], "dibatalkan")
+        self.assertEqual(Saldo.objects.get(nasabah=self.nasabah).total_saldo, Decimal(465600))
+
+    def test_draft_dibatalkan_atau_dikonfirmasi_tidak_bisa_diubah_atau_dibatalkan(self) -> None:
+        for status in ("dibatalkan", "dikonfirmasi"):
+            with self.subTest(status):
+                draft = self._buat([{"nasabah_id": str(self.nasabah.id)}]).data
+                DraftPencairan.objects.filter(id=draft["id"]).update(status=status)
+
+                ubah = self._patch(draft["id"], nama="Baru")
+                batal = self.client.post(f"{URL}/{draft['id']}/batalkan")
+
+                self.assertEqual(ubah.status_code, 409, ubah.data)
+                self.assertEqual(batal.status_code, 409, batal.data)
+                self.assertEqual(DraftPencairan.objects.get(id=draft["id"]).status, status)
+
+    def test_batalkan_draft_bank_lain_ditolak(self) -> None:
+        asing = self._draft_bank_lain()
+
+        response = self.client.post(f"{URL}/{asing.id}/batalkan")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_nasabah_tidak_boleh_memakai_draft_pencairan(self) -> None:
+        akun_nasabah = User.objects.create_user(
+            email="siti@example.test", nama="Siti", role=User.Role.NASABAH
+        )
+        self._login(akun_nasabah)
+
+        daftar = self.client.get(URL)
+        buat = self._buat([{"nasabah_id": str(self.nasabah.id)}])
+
+        self.assertEqual(daftar.status_code, 403)
+        self.assertEqual(buat.status_code, 403)
