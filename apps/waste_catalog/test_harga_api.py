@@ -117,3 +117,32 @@ class UbahHargaTests(HargaApiTestCase):
                 self.assertEqual(response.status_code, 422, response.data)
                 self.assertIn("berlaku_mulai", response.data["errors"])
         self.assertEqual(HargaSampah.objects.filter(jenis_sampah_id=jenis["id"]).count(), 1)
+
+    def test_only_the_owning_banks_pengurus_can_change_a_price(self) -> None:
+        jenis = self.buat_jenis(harga=3500)
+        bank_lain = BankSampah.objects.create(
+            nama="Bank Sampah Kenanga",
+            alamat="Bogor",
+            kota="Bogor",
+            no_hp_pic="+628123456782",
+            status=BankSampah.Status.ACTIVE,
+        )
+        pengurus_lain = User.objects.create_user(
+            email="lain@example.com",
+            nama="Pengurus Lain",
+            bank_sampah=bank_lain,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        nasabah = User.objects.create_user(
+            email="nasabah@example.com",
+            nama="Ayu",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+
+        self.auth_as(pengurus_lain)
+        self.assertEqual(self.ubah_harga(jenis["id"], {"harga_per_kg": "1"}).status_code, 404)
+        self.auth_as(nasabah)
+        self.assertEqual(self.ubah_harga(jenis["id"], {"harga_per_kg": "1"}).status_code, 403)
+        self.assertEqual(HargaSampah.objects.filter(jenis_sampah_id=jenis["id"]).count(), 1)
