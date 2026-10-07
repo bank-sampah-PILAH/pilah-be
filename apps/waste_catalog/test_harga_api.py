@@ -2,12 +2,16 @@
 
 from datetime import timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.models import BankSampah, HargaSampah, User
+
+WIB = ZoneInfo("Asia/Jakarta")
 
 
 class HargaApiTestCase(APITestCase):
@@ -76,3 +80,21 @@ class UbahHargaTests(HargaApiTestCase):
         self.assertEqual(detail.data["harga_per_kg"], "4000.00")
         terbaru = HargaSampah.objects.filter(jenis_sampah_id=jenis["id"]).latest("id")
         self.assertEqual(terbaru.dibuat_oleh, self.user)
+
+    def test_future_price_is_scheduled_and_the_current_price_stays(self) -> None:
+        jenis = self.buat_jenis(harga=3500)
+        awal = HargaSampah.objects.get(jenis_sampah_id=jenis["id"]).berlaku_mulai
+        # Tengah malam waktu setempat (WIB) yang dikirim aplikasi, lengkap dengan offset.
+        tiga_hari_lagi = (timezone.now() + timedelta(days=3)).astimezone(WIB)
+        tengah_malam = tiga_hari_lagi.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        response = self.ubah_harga(
+            jenis["id"], {"harga_per_kg": "5000", "berlaku_mulai": tengah_malam.isoformat()}
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["harga_per_kg"], "3500.00")
+        self.assertEqual(parse_datetime(response.data["harga_berlaku_mulai"]), awal)
+        terjadwal = response.data["harga_terjadwal"]
+        self.assertEqual(terjadwal["harga_per_kg"], "5000.00")
+        self.assertEqual(parse_datetime(terjadwal["berlaku_mulai"]), tengah_malam)
