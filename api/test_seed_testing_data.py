@@ -239,6 +239,13 @@ class SeedTestingDataCommandTests(TestCase):
             call_command("seed_testing_data")
 
     @override_settings(DEBUG=True)
+    def test_seed_rejects_an_identity_email_without_an_at_sign(self) -> None:
+        with self.assertRaisesRegex(CommandError, "Invalid seed email: not-an-email"):
+            call_command("seed_testing_data", customer_email="not-an-email")
+
+        self.assertFalse(User.objects.exists())
+
+    @override_settings(DEBUG=True)
     def test_seed_rejects_non_fixture_email_collision(self) -> None:
         user = User.objects.create_user(
             email="pengurus.demo@example.com",
