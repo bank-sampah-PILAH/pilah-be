@@ -281,6 +281,30 @@ class PencairanRevisiSerializer(serializers.ModelSerializer[Model]):
         ]
 
 
+def _validate_potongan(attrs: dict[str, Any]) -> dict[str, Any]:
+    """A potongan is a jenis plus a non-negative nilai; percent tops out at 100."""
+    jenis = attrs.get("potongan_jenis")
+    nilai = attrs.get("potongan_nilai")
+    if (jenis is None) != (nilai is None):
+        raise serializers.ValidationError(
+            {"potongan_nilai": ["Jenis dan nilai potongan harus diisi bersamaan"]}
+        )
+    if nilai is None:
+        return attrs
+    if nilai < 0:
+        raise serializers.ValidationError({"potongan_nilai": ["Potongan tidak boleh negatif"]})
+    if jenis == DraftPencairan.PotonganJenis.PERSEN:
+        if nilai > 100:
+            raise serializers.ValidationError(
+                {"potongan_nilai": ["Potongan persen tidak boleh lebih dari 100"]}
+            )
+    elif nilai != nilai.to_integral_value():
+        raise serializers.ValidationError(
+            {"potongan_nilai": ["Potongan rupiah harus berupa rupiah bulat"]}
+        )
+    return attrs
+
+
 class DraftItemInputSerializer(serializers.Serializer[Any]):
     nasabah_id = serializers.UUIDField()
     nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
@@ -292,6 +316,9 @@ class DraftItemInputSerializer(serializers.Serializer[Any]):
 
     def validate_nominal(self, value: Decimal) -> Decimal:
         return _validate_nominal_pencairan(value)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        return _validate_potongan(attrs)
 
 
 class DraftPencairanCreateSerializer(serializers.Serializer[Any]):
