@@ -8,7 +8,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from api.models import BankSampah, HargaSampah, JenisSampah
-from apps.waste_catalog.api import harga_berlaku
+from apps.waste_catalog.api import harga_berlaku, ringkas_harga
 
 
 class HargaBerlakuTests(TestCase):
@@ -55,3 +55,19 @@ class HargaBerlakuTests(TestCase):
         for harga in ("0", "-1"):
             with self.subTest(harga), self.assertRaises(IntegrityError), transaction.atomic():
                 self._versi(harga, 0)
+
+    def test_in_memory_summary_picks_the_same_versions_as_the_database_lookup(self) -> None:
+        # Daftar jenis memakai ringkas_harga atas riwayat yang di-prefetch,
+        # setoran memakai harga_berlaku; keduanya harus sepakat, termasuk seri.
+        self._versi("3000", -2)
+        self._versi("3100", -2)
+        self._versi("5000", 3)
+        self._versi("5500", 3)
+        self._versi("7000", 9)
+
+        berlaku, terjadwal = ringkas_harga(self.jenis.riwayat_harga.all(), self.sekarang)
+
+        assert berlaku is not None and terjadwal is not None
+        self.assertEqual(berlaku.harga_per_kg, harga_berlaku(self.jenis, self.sekarang))
+        self.assertEqual(berlaku.harga_per_kg, 3100)
+        self.assertEqual(terjadwal.harga_per_kg, 5500)
