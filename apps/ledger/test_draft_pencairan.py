@@ -204,3 +204,18 @@ class DraftPencairanTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 422, response.data)
+
+    def test_galat_item_memakai_urutan_permintaan_bukan_urutan_nama(self) -> None:
+        kecil = self._nasabah("NAS-0002", "Zed Kecil", "5000")
+
+        response = self._buat(
+            [
+                {"nasabah_id": str(kecil.id)},
+                {"nasabah_id": str(self.nasabah.id), "nominal": "100000"},
+            ],
+            potongan_jenis="rupiah",
+            potongan_nilai="6000",
+        )
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertEqual(list(response.data["errors"]), ["items[0].potongan_nilai"])
