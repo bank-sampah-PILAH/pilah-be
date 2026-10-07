@@ -29,6 +29,7 @@ from apps.ledger.serializers import (
 )
 from apps.ledger.services import (
     DraftPencairanService,
+    DraftTidakBisaDiubah,
     PencairanService,
     TransactionFilterService,
     TransactionService,
@@ -289,5 +290,17 @@ class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg] 
         draft = self.get_object()
         serializer = DraftPencairanUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        DraftPencairanService.ubah_draft(_user(request), draft, serializer.validated_data)
+        try:
+            DraftPencairanService.ubah_draft(_user(request), draft, serializer.validated_data)
+        except DraftTidakBisaDiubah as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data)
+
+    @action(detail=True, methods=["post"], url_path="batalkan")
+    def batalkan(self, request: Request, pk: str | None = None) -> Response:
+        draft = self.get_object()
+        try:
+            DraftPencairanService.batalkan_draft(_user(request), draft)
+        except DraftTidakBisaDiubah as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
         return Response(DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data)

@@ -402,6 +402,10 @@ _BULAN_SINGKAT = (
 )
 
 
+class DraftTidakBisaDiubah(Exception):
+    """The draft left `draft` status: a confirmed or cancelled one is final."""
+
+
 class DraftPencairanService:
     @staticmethod
     def nama_default() -> str:
@@ -432,7 +436,7 @@ class DraftPencairanService:
 
         `draft` comes from the caller's bank-scoped queryset; it is re-read under lock.
         """
-        draft = DraftPencairan.objects.select_for_update().get(pk=draft.pk)
+        draft = DraftPencairanService._kunci_draft(draft)
         if "nama" in payload:
             draft.nama = DraftPencairanService._nama(payload["nama"])
         if "potongan_jenis" in payload:
@@ -445,6 +449,23 @@ class DraftPencairanService:
         else:
             items = list(draft.items.select_related("draft"))
         DraftPencairanService._periksa_potongan(items)
+        return draft
+
+    @staticmethod
+    @transaction.atomic
+    def batalkan_draft(user: User, draft: DraftPencairan) -> DraftPencairan:
+        draft = DraftPencairanService._kunci_draft(draft)
+        draft.status = DraftPencairan.Status.DIBATALKAN
+        draft.diubah_oleh = user
+        draft.save(update_fields=["status", "diubah_oleh", "updated_at"])
+        return draft
+
+    @staticmethod
+    def _kunci_draft(draft: DraftPencairan) -> DraftPencairan:
+        """Re-read under lock and refuse anything no longer in `draft` status."""
+        draft = DraftPencairan.objects.select_for_update().get(pk=draft.pk)
+        if draft.status != DraftPencairan.Status.DRAFT:
+            raise DraftTidakBisaDiubah(f"Draft sudah {draft.get_status_display().lower()}")
         return draft
 
     @staticmethod
