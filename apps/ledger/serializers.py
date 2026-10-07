@@ -7,7 +7,14 @@ from django.db.models import Model
 from django.utils import timezone
 from rest_framework import serializers
 
-from api.models import DetailTransaksi, Pencairan, PencairanRevisi, Transaksi
+from api.models import (
+    DetailTransaksi,
+    DraftPencairan,
+    DraftPencairanItem,
+    Pencairan,
+    PencairanRevisi,
+    Transaksi,
+)
 from apps.ledger.services import BalanceService, PencairanService
 from shared_kernel.kalkulasi import bulatkan_rupiah, format_ribuan
 from shared_kernel.validators import get_initials
@@ -272,3 +279,30 @@ class PencairanRevisiSerializer(serializers.ModelSerializer[Model]):
             "diubah_oleh_nama",
             "diubah_pada",
         ]
+
+
+class DraftItemInputSerializer(serializers.Serializer[Any]):
+    nasabah_id = serializers.UUIDField()
+    nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
+    metode = serializers.ChoiceField(choices=Pencairan.Metode.choices, required=False)
+
+
+class DraftPencairanCreateSerializer(serializers.Serializer[Any]):
+    items = DraftItemInputSerializer(many=True, allow_empty=False)
+
+
+class DraftPencairanItemSerializer(serializers.ModelSerializer[Model]):
+    nasabah_id = serializers.UUIDField(source=_NASABAH_ID)
+    nasabah_nama = serializers.CharField(source=_NASABAH_NAMA)
+
+    class Meta:
+        model = DraftPencairanItem
+        fields = ["id", "nasabah_id", "nasabah_nama", "nominal", "metode"]
+
+
+class DraftPencairanSerializer(serializers.ModelSerializer[Model]):
+    items = DraftPencairanItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = DraftPencairan
+        fields = ["id", "status", "items"]

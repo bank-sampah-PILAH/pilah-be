@@ -15,6 +15,8 @@ from rest_framework.response import Response
 
 from api.models import BankSampah, Pencairan, Transaksi, User
 from apps.ledger.serializers import (
+    DraftPencairanCreateSerializer,
+    DraftPencairanSerializer,
     PencairanCreateSerializer,
     PencairanDetailSerializer,
     PencairanEditSerializer,
@@ -24,6 +26,7 @@ from apps.ledger.serializers import (
     TransactionListSerializer,
 )
 from apps.ledger.services import (
+    DraftPencairanService,
     PencairanService,
     TransactionFilterService,
     TransactionService,
@@ -254,3 +257,14 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
                 "revisi": PencairanRevisiSerializer(revisi, many=True).data,
             }
         )
+
+
+class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
+    permission_classes = [IsActivePengelola]
+    serializer_class = DraftPencairanSerializer
+
+    def create(self, request: Request) -> Response:
+        serializer = DraftPencairanCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        draft = DraftPencairanService.buat_draft(_user(request), serializer.validated_data)
+        return Response(DraftPencairanSerializer(draft).data, status=status.HTTP_201_CREATED)

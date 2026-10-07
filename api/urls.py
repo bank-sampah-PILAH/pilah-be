@@ -23,7 +23,7 @@ from apps.bank_sampah.views import (
     TeamView,
 )
 from apps.jadwal.views import JadwalKegiatanViewSet
-from apps.ledger.views import PencairanViewSet, TransaksiViewSet
+from apps.ledger.views import DraftPencairanViewSet, PencairanViewSet, TransaksiViewSet
 
 # ponytail: views are imported from their canonical bounded-context homes;
 # routes and names are frozen so this compose is behavior-neutral.
@@ -46,6 +46,7 @@ router.register("jenis-sampah", JenisSampahViewSet, basename="jenis-sampah")
 router.register("jadwal", JadwalKegiatanViewSet, basename="jadwal")
 router.register("transaksi", TransaksiViewSet, basename="transaksi")
 router.register("pencairan", PencairanViewSet, basename="pencairan")
+router.register("draft-pencairan", DraftPencairanViewSet, basename="draft-pencairan")
 router.register(
     "superadmin/bank-sampah", SuperAdminBankSampahViewSet, basename="superadmin-bank-sampah"
 )

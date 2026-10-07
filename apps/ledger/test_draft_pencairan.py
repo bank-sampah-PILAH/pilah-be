@@ -57,5 +57,5 @@ class DraftPencairanTests(APITestCase):
         self.assertEqual(len(response.data["items"]), 1)
         self.assertEqual(response.data["items"][0]["nominal"], "465600.00")
         self.assertEqual(response.data["items"][0]["metode"], "tunai")
-        self.assertEqual(Saldo.objects.get(nasabah=self.nasabah).total_saldo, Decimal("465600"))
+        self.assertEqual(Saldo.objects.get(nasabah=self.nasabah).total_saldo, Decimal(465600))
         self.assertFalse(Pencairan.objects.exists())

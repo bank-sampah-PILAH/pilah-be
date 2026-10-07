@@ -14,6 +14,9 @@ from rest_framework import serializers
 from api.models import (
     BankSampah,
     DetailTransaksi,
+    DraftPencairan,
+    DraftPencairanItem,
+    Nasabah,
     Pencairan,
     PencairanRevisi,
     Saldo,
@@ -381,3 +384,23 @@ class BalanceService:
             total=Coalesce(Sum(F("saldo_sebelum") - F("saldo_sesudah")), Decimal("0.00"))
         )["total"]
         return cast(Decimal, masuk - keluar)
+
+
+class DraftPencairanService:
+    @staticmethod
+    @transaction.atomic
+    def buat_draft(user: User, payload: Mapping[str, Any]) -> DraftPencairan:
+        bank = user.bank_sampah
+        assert bank is not None  # ponytail: views gate on IsActivePengelola
+        draft = DraftPencairan.objects.create(bank_sampah=bank, dibuat_oleh=user, diubah_oleh=user)
+        for item in payload["items"]:
+            nasabah = Nasabah.objects.get(bank_sampah=bank, id=item["nasabah_id"])
+            saldo = Saldo.objects.filter(nasabah=nasabah).first()
+            DraftPencairanItem.objects.create(
+                draft=draft,
+                nasabah=nasabah,
+                nominal=item.get("nominal")
+                or bulatkan_rupiah(saldo.total_saldo if saldo else Decimal(0)),
+                metode=item.get("metode", Pencairan.Metode.TUNAI),
+            )
+        return draft
