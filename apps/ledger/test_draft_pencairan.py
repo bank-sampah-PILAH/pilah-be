@@ -1,6 +1,7 @@
 from decimal import Decimal
 from typing import Any
 
+from django.utils import timezone
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -300,3 +301,27 @@ class DraftPencairanTests(APITestCase):
         self.assertEqual(draft["jumlah_item"], 1)
         self.assertEqual(draft["total_dibayar"], "465600.00")
         self.assertNotIn("items", draft)
+
+    def test_nama_default_otomatis_dan_bisa_diberi_nama(self) -> None:
+        bulan = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
+        hari = timezone.localdate()
+        item = [{"nasabah_id": str(self.nasabah.id)}]
+
+        otomatis = self._buat(item)
+        bernama = self._buat(item, nama="Cair Lebaran")
+
+        self.assertEqual(
+            otomatis.data["nama"], f"Pencairan {hari.day} {bulan[hari.month - 1]} {hari.year}"
+        )
+        self.assertEqual(bernama.data["nama"], "Cair Lebaran")
+
+    def test_draft_memuat_pembuat_dan_waktu(self) -> None:
+        response = self._buat([{"nasabah_id": str(self.nasabah.id)}])
+
+        self.assertEqual(response.data["dibuat_oleh_nama"], "Ibu Sari")
+        self.assertEqual(response.data["diubah_oleh_nama"], "Ibu Sari")
+        self.assertIn("created_at", response.data)
+        self.assertIn("updated_at", response.data)
+        daftar = self.client.get(URL).data["results"][0]
+        self.assertEqual(daftar["nama"], response.data["nama"])
+        self.assertEqual(daftar["diubah_oleh_nama"], "Ibu Sari")
