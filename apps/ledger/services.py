@@ -409,8 +409,11 @@ class DraftTidakBisaDiubah(Exception):
 class DraftPencairanService:
     @staticmethod
     def nama_default() -> str:
-        hari = timezone.localdate()
-        return f"Pencairan {hari.day} {_BULAN_SINGKAT[hari.month - 1]} {hari.year}"
+        sekarang = timezone.localtime()
+        return (
+            f"Pencairan {sekarang.day} {_BULAN_SINGKAT[sekarang.month - 1]} {sekarang.year}, "
+            f"{sekarang:%H:%M}"
+        )
 
     @staticmethod
     @transaction.atomic
