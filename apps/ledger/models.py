@@ -1,8 +1,10 @@
 import uuid
+from decimal import Decimal
 
 from django.db import models
 from django.utils import timezone
 
+from shared_kernel.kalkulasi import hitung_potongan
 from shared_kernel.models import TimestampedModel
 
 # Cross-context FK targets through the frozen api app registry (see AGENTS.md:
@@ -187,6 +189,18 @@ class DraftPencairan(TimestampedModel):
         db_table = "draft_pencairan"
         ordering = ["-created_at"]
 
+    @property
+    def total_nominal(self) -> Decimal:
+        return sum((item.nominal for item in self.items.all()), Decimal(0))
+
+    @property
+    def total_potongan(self) -> Decimal:
+        return sum((item.potongan for item in self.items.all()), Decimal(0))
+
+    @property
+    def total_dibayar(self) -> Decimal:
+        return self.total_nominal - self.total_potongan
+
 
 class DraftPencairanItem(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -214,3 +228,12 @@ class DraftPencairanItem(TimestampedModel):
                 condition=models.Q(nominal__gt=0), name="draft_item_nominal_positive"
             ),
         ]
+
+    @property
+    def potongan(self) -> Decimal:
+        """Effective potongan: rounded down to whole rupiah, per item."""
+        return hitung_potongan(self.nominal, self.potongan_jenis, self.potongan_nilai or Decimal(0))
+
+    @property
+    def dibayar(self) -> Decimal:
+        return self.nominal - self.potongan
