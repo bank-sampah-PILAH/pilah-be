@@ -325,3 +325,96 @@ class DraftPencairanTests(APITestCase):
         daftar = self.client.get(URL).data["results"][0]
         self.assertEqual(daftar["nama"], response.data["nama"])
         self.assertEqual(daftar["diubah_oleh_nama"], "Ibu Sari")
+
+    def _patch(self, draft_id: str, **body: Any) -> Any:
+        return self.client.patch(f"{URL}/{draft_id}", body, format="json")
+
+    def test_ubah_nama_item_dan_potongan_default(self) -> None:
+        budi = self._nasabah("NAS-0002", "Budi Santoso", "50000")
+        citra = self._nasabah("NAS-0003", "Citra Dewi", "80000")
+        draft = self._buat(
+            [
+                {"nasabah_id": str(self.nasabah.id), "nominal": "100000"},
+                {"nasabah_id": str(budi.id)},
+            ]
+        ).data
+        pengurus_lain = User.objects.create_user(
+            email="budi@example.com",
+            nama="Pak Budi",
+            bank_sampah=self.bank,
+            is_profile_complete=True,
+        )
+        self._login(pengurus_lain)
+
+        response = self._patch(
+            draft["id"],
+            nama="Revisi Oktober",
+            potongan_jenis="persen",
+            potongan_nilai="10",
+            items=[
+                {"nasabah_id": str(self.nasabah.id), "nominal": "200000", "metode": "transfer"},
+                {"nasabah_id": str(citra.id)},
+            ],
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["nama"], "Revisi Oktober")
+        self.assertEqual(response.data["dibuat_oleh_nama"], "Ibu Sari")
+        self.assertEqual(response.data["diubah_oleh_nama"], "Pak Budi")
+        self.assertGreater(response.data["updated_at"], draft["updated_at"])
+        items = {item["nasabah_nama"]: item for item in response.data["items"]}
+        self.assertEqual(sorted(items), ["Ahmad Ridwan", "Citra Dewi"])
+        self.assertEqual(items["Ahmad Ridwan"]["nominal"], "200000.00")
+        self.assertEqual(items["Ahmad Ridwan"]["metode"], "transfer")
+        self.assertEqual(items["Citra Dewi"]["nominal"], "80000.00")
+        self.assertEqual(response.data["total_potongan"], "28000.00")
+        self.assertEqual(Saldo.objects.get(nasabah=self.nasabah).total_saldo, Decimal(465600))
+
+    def test_item_yang_tidak_disebut_fieldnya_tetap_dan_null_menghapus_override(self) -> None:
+        draft = self._buat(
+            [
+                {
+                    "nasabah_id": str(self.nasabah.id),
+                    "nominal": "100000",
+                    "potongan_jenis": "persen",
+                    "potongan_nilai": "5",
+                }
+            ],
+            potongan_jenis="rupiah",
+            potongan_nilai="1000",
+        ).data
+
+        tetap = self._patch(draft["id"], items=[{"nasabah_id": str(self.nasabah.id)}])
+        reset = self._patch(
+            draft["id"],
+            items=[
+                {"nasabah_id": str(self.nasabah.id), "potongan_jenis": None, "potongan_nilai": None}
+            ],
+        )
+
+        self.assertEqual(tetap.data["items"][0]["nominal"], "100000.00")
+        self.assertEqual(tetap.data["items"][0]["potongan"], "5000.00")
+        self.assertEqual(reset.data["items"][0]["potongan_jenis"], "")
+        self.assertEqual(reset.data["items"][0]["potongan"], "1000.00")
+
+    def test_ubah_tidak_valid_membatalkan_seluruh_perubahan(self) -> None:
+        draft = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "100000"}]).data
+
+        response = self._patch(
+            draft["id"],
+            nama="Tidak Boleh Tersimpan",
+            items=[{"nasabah_id": str(self.nasabah.id), "nominal": "999999999"}],
+        )
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("items[0].nominal", response.data["errors"])
+        tersimpan = DraftPencairan.objects.get(id=draft["id"])
+        self.assertEqual(tersimpan.nama, draft["nama"])
+        self.assertEqual(tersimpan.items.get().nominal, Decimal(100000))
+
+    def test_ubah_draft_bank_lain_ditolak(self) -> None:
+        asing = self._draft_bank_lain()
+
+        response = self._patch(str(asing.id), nama="Curang")
+
+        self.assertEqual(response.status_code, 404)
