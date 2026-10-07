@@ -11,8 +11,8 @@ from rest_framework.generics import GenericAPIView, ListAPIView
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from api.models import BankSampah, Nasabah, Transaksi, User
-from apps.ledger.api import apply_period
+from api.models import BankSampah, Nasabah, Pencairan, Transaksi, User
+from apps.ledger.api import activity_query, apply_period
 from apps.ledger.serializers import TransactionDetailSerializer
 from apps.reporting.api import export_statement_pdf
 from shared_kernel.pagination import StandardPagination
@@ -195,6 +195,45 @@ class NasabahHistoryView(ListAPIView[Transaksi]):
     # get_queryset can only raise, not return a Response. The queryset runs
     # through apply_period exactly once (here).
     def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        if "tipe" in request.query_params:
+            member = MembershipService.get_active_membership(request)
+            try:
+                rows = activity_query(member.bank_sampah, request, member)
+            except ValueError as exc:
+                return Response({"error": str(exc)}, status=400)
+            page = self.paginate_queryset(rows)
+            assert page is not None  # StandardPagination is always enabled.
+            # Preserve the nasabah list DTO and never expose staff-only fields.
+            payloads = []
+            deposits = {
+                obj.id: obj
+                for obj in Transaksi.objects.filter(
+                    nasabah=member,
+                    id__in=[row["id"] for row in page if row["tipe_aktivitas"] == "setoran"],
+                )
+            }
+            payouts = {
+                obj.id: obj
+                for obj in Pencairan.objects.filter(
+                    nasabah=member,
+                    id__in=[row["id"] for row in page if row["tipe_aktivitas"] == "pencairan"],
+                )
+            }
+            for row in page:
+                value = (
+                    deposits[row["id"]].total_nilai
+                    if row["tipe_aktivitas"] == "setoran"
+                    else payouts[row["id"]].nominal
+                )
+                payloads.append(
+                    {
+                        "id": str(row["id"]),
+                        "tanggal": serializers.DateTimeField().to_representation(row["tanggal"]),
+                        "tipe": row["tipe_aktivitas"],
+                        "total_nilai": str(value),
+                    }
+                )
+            return self.get_paginated_response(payloads)
         try:
             queryset = apply_period(
                 activities(MembershipService.get_active_membership(request)),

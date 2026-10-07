@@ -15,9 +15,10 @@ from django.db.models import Model, QuerySet
 from django.http import HttpRequest
 
 from api.models import BankSampah
+from apps.ledger.activity import activity_query
 from apps.ledger.services import BalanceService, TransactionFilterService
 
-__all__ = ["apply_period", "saldo_at"]
+__all__ = ["activity_query", "apply_period", "saldo_at"]
 
 _Dated = TypeVar("_Dated", bound=Model)
 
