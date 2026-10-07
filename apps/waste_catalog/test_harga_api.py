@@ -59,3 +59,20 @@ class BuatJenisSampahTests(HargaApiTestCase):
         self.assertEqual(versi.dibuat_oleh, self.user)
         self.assertGreaterEqual(versi.berlaku_mulai, sebelum - timedelta(seconds=1))
         self.assertLessEqual(versi.berlaku_mulai, timezone.now())
+
+
+class UbahHargaTests(HargaApiTestCase):
+    def ubah_harga(self, jenis_id: str, payload: dict[str, Any]) -> Any:
+        return self.client.post(f"/api/v1/jenis-sampah/{jenis_id}/harga", payload, format="json")
+
+    def test_price_without_berlaku_mulai_takes_effect_now(self) -> None:
+        jenis = self.buat_jenis(harga=3500)
+
+        response = self.ubah_harga(jenis["id"], {"harga_per_kg": "4000"})
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["harga_per_kg"], "4000.00")
+        detail = self.client.get(f"/api/v1/jenis-sampah/{jenis['id']}")
+        self.assertEqual(detail.data["harga_per_kg"], "4000.00")
+        terbaru = HargaSampah.objects.filter(jenis_sampah_id=jenis["id"]).latest("id")
+        self.assertEqual(terbaru.dibuat_oleh, self.user)
