@@ -471,3 +471,7 @@ class DraftBatchSerializer(_DraftPencairanWriteSerializer):
                 {"nasabah_ids": ["Pilih semua nasabah, atau kirim daftar nasabah, bukan keduanya"]}
             )
         return attrs
+
+
+class DraftExportQuerySerializer(serializers.Serializer[Any]):
+    berkas = serializers.ChoiceField(choices=["pdf", "xlsx"])
