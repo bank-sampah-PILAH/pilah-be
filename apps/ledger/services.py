@@ -399,24 +399,29 @@ class DraftPencairanService:
             potongan_jenis=payload.get("potongan_jenis", DraftPencairan.PotonganJenis.PERSEN),
             potongan_nilai=payload.get("potongan_nilai", Decimal(0)),
         )
+        dibuat: list[DraftPencairanItem] = []
         for index, item in enumerate(payload["items"]):
             nasabah = Nasabah.objects.get(bank_sampah=bank, id=item["nasabah_id"])
-            nominal = DraftPencairanService._nominal(nasabah, item.get("nominal"), index)
-            DraftPencairanItem.objects.create(
-                draft=draft,
-                nasabah=nasabah,
-                nominal=nominal,
-                metode=item.get("metode", Pencairan.Metode.TUNAI),
-                potongan_jenis=item.get("potongan_jenis", ""),
-                potongan_nilai=item.get("potongan_nilai"),
+            dibuat.append(
+                DraftPencairanItem.objects.create(
+                    draft=draft,
+                    nasabah=nasabah,
+                    nominal=DraftPencairanService._nominal(nasabah, item.get("nominal"), index),
+                    metode=item.get("metode", Pencairan.Metode.TUNAI),
+                    potongan_jenis=item.get("potongan_jenis", ""),
+                    potongan_nilai=item.get("potongan_nilai"),
+                )
             )
-        DraftPencairanService._periksa_potongan(draft)
+        DraftPencairanService._periksa_potongan(dibuat)
         return draft
 
     @staticmethod
-    def _periksa_potongan(draft: DraftPencairan) -> None:
-        """Reject a draft whose effective potongan on any item exceeds its nominal."""
-        for index, item in enumerate(draft.items.select_related("draft")):
+    def _periksa_potongan(items: list[DraftPencairanItem]) -> None:
+        """Reject a draft whose effective potongan on any item exceeds its nominal.
+
+        `items` keeps the request order so a reported index matches the client's list.
+        """
+        for index, item in enumerate(items):
             if item.potongan > item.nominal:
                 raise serializers.ValidationError(
                     {f"items[{index}].potongan_nilai": ["Potongan melebihi nominal pencairan"]}
