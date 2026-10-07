@@ -205,6 +205,11 @@ class PencairanService:
         tanggal = payload.get("tanggal", pencairan.tanggal)
         metode = payload.get("metode", pencairan.metode)
         keterangan = payload.get("keterangan", pencairan.keterangan) or ""
+        if pencairan.potongan > 0:
+            # A client that echoes the stored tanggal can lose sub-second digits
+            # (web DateTime keeps milliseconds), so a hair's difference is no edit.
+            if abs(tanggal - pencairan.tanggal) < timedelta(seconds=1):
+                tanggal = pencairan.tanggal
         if pencairan.potongan > 0 and (nominal, tanggal) != (pencairan.nominal, pencairan.tanggal):
             raise serializers.ValidationError(
                 {"nominal": ["Pencairan berpotongan hanya boleh diubah metode dan keterangannya"]}
