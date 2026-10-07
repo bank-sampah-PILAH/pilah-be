@@ -228,6 +228,7 @@ class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
     dicatat_oleh_nama = serializers.CharField(source="dicatat_oleh.nama")
     diperbarui = serializers.SerializerMethodField()
     tanggal_edit_minimum = serializers.SerializerMethodField()
+    dibayar = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
 
     class Meta:
         model = Pencairan
@@ -241,9 +242,12 @@ class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
             "dicatat_oleh_nama",
             "tanggal",
             "nominal",
+            "potongan",
+            "dibayar",
             "metode",
             "keterangan",
             "status",
+            "draft_id",
             "saldo_sebelum",
             "saldo_sesudah",
             "diperbarui",

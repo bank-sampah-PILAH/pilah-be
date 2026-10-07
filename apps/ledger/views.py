@@ -329,3 +329,12 @@ class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg] 
         )
         data = DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data
         return Response({**data, "dilewati": dilewati}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="konfirmasi")
+    def konfirmasi(self, request: Request, pk: str | None = None) -> Response:
+        draft = self.get_object()
+        try:
+            DraftPencairanService.konfirmasi_draft(_user(request), draft)
+        except DraftTidakBisaDiubah as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data)

@@ -114,6 +114,16 @@ class Pencairan(TimestampedModel):
     # Receipt snapshots at record time; PIL-230 decides how edits affect them.
     saldo_sebelum = models.DecimalField(max_digits=14, decimal_places=2)
     saldo_sesudah = models.DecimalField(max_digits=14, decimal_places=2)
+    # `nominal` leaves the saldo (bruto); the pengurus pays `nominal - potongan`.
+    potongan = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    # Set when the pencairan came from confirming a draft (PIL-300).
+    draft = models.ForeignKey(
+        "api.DraftPencairan",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="pencairan",
+    )
 
     class Meta:
         app_label = "api"
@@ -124,7 +134,15 @@ class Pencairan(TimestampedModel):
             models.CheckConstraint(
                 condition=models.Q(nominal__gt=0), name="pencairan_nominal_positive"
             ),
+            models.CheckConstraint(
+                condition=models.Q(potongan__gte=0, potongan__lte=models.F("nominal")),
+                name="pencairan_potongan_within_nominal",
+            ),
         ]
+
+    @property
+    def dibayar(self) -> Decimal:
+        return self.nominal - self.potongan
 
 
 class PencairanRevisi(models.Model):

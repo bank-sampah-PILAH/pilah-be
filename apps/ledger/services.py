@@ -165,6 +165,8 @@ class PencairanService:
         metode: str,
         tanggal: datetime,
         keterangan: str,
+        potongan: Decimal = Decimal(0),
+        draft: DraftPencairan | None = None,
     ) -> Pencairan:
         """Debit `nominal` from the locked `saldo` and record the pencairan.
 
@@ -182,6 +184,8 @@ class PencairanService:
             nominal=nominal,
             metode=metode,
             keterangan=keterangan,
+            potongan=potongan,
+            draft=draft,
             saldo_sebelum=saldo_sebelum,
             saldo_sesudah=saldo_sesudah,
         )
@@ -201,6 +205,10 @@ class PencairanService:
         tanggal = payload.get("tanggal", pencairan.tanggal)
         metode = payload.get("metode", pencairan.metode)
         keterangan = payload.get("keterangan", pencairan.keterangan) or ""
+        if pencairan.potongan > 0 and (nominal, tanggal) != (pencairan.nominal, pencairan.tanggal):
+            raise serializers.ValidationError(
+                {"nominal": ["Pencairan berpotongan hanya boleh diubah metode dan keterangannya"]}
+            )
         if (nominal, tanggal, metode, keterangan) == (
             pencairan.nominal,
             pencairan.tanggal,
@@ -537,6 +545,55 @@ class DraftPencairanService:
         else:
             items = list(draft.items.select_related("draft"))
         DraftPencairanService._periksa_potongan(items)
+        return draft
+
+    @staticmethod
+    @transaction.atomic
+    def konfirmasi_draft(user: User, draft: DraftPencairan) -> DraftPencairan:
+        """Record the payment: debit every item and write its pencairan, all or nothing.
+
+        Items are re-validated against the saldo as it is now, since it may have moved
+        since the draft was made. Every failing item is reported before anything is written.
+        """
+        draft = DraftPencairanService._kunci_draft(draft)
+        items = list(draft.items.select_related("nasabah", "draft"))
+        ids = sorted(item.nasabah_id for item in items)
+        # Lock in id order so two confirmations sharing nasabah cannot deadlock.
+        nasabah_terkunci = {
+            n.id: n for n in Nasabah.objects.select_for_update().filter(id__in=ids).order_by("id")
+        }
+        saldo_terkunci = {
+            s.nasabah_id: s
+            for s in Saldo.objects.select_for_update()
+            .filter(nasabah_id__in=ids)
+            .order_by("nasabah_id")
+        }
+        galat: dict[str, list[str]] = {}
+        for index, item in enumerate(items):
+            nasabah = nasabah_terkunci[item.nasabah_id]
+            saldo = saldo_terkunci.get(item.nasabah_id)
+            if not (nasabah.is_active and nasabah.status == Nasabah.Status.APPROVED):
+                galat[f"items[{index}].nasabah_id"] = ["Nasabah tidak ditemukan atau tidak aktif"]
+            elif saldo is None or item.nominal > saldo.total_saldo:
+                galat[f"items[{index}].nominal"] = ["Saldo nasabah tidak mencukupi"]
+        if galat:
+            raise serializers.ValidationError(galat)
+        tanggal = timezone.now()
+        for item in items:
+            PencairanService.realisasi(
+                user=user,
+                nasabah=nasabah_terkunci[item.nasabah_id],
+                saldo=saldo_terkunci[item.nasabah_id],
+                nominal=item.nominal,
+                metode=item.metode,
+                tanggal=tanggal,
+                keterangan=f"Draft: {draft.nama}"[:255],
+                potongan=item.potongan,
+                draft=draft,
+            )
+        draft.status = DraftPencairan.Status.DIKONFIRMASI
+        draft.diubah_oleh = user
+        draft.save(update_fields=["status", "diubah_oleh", "updated_at"])
         return draft
 
     @staticmethod
