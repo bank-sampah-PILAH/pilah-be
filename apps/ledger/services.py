@@ -24,11 +24,12 @@ from api.models import (
     Transaksi,
     User,
 )
-from apps.nasabah.api import get_eligible_nasabah, get_locked_nasabah
+from apps.nasabah.api import get_eligible_nasabah, get_locked_nasabah, kandidat_pencairan
 from apps.waste_catalog.api import get_active_jenis
 from shared_kernel.kalkulasi import (
     bulatkan_rupiah,
     harga_berlaku,
+    hitung_potongan,
     hitung_subtotal,
     total_setoran,
 )
@@ -435,6 +436,52 @@ class DraftPencairanService:
         items = DraftPencairanService._sinkronkan_item(draft, payload["items"])
         DraftPencairanService._periksa_potongan(items)
         return draft
+
+    @staticmethod
+    @transaction.atomic
+    def buat_batch(
+        user: User, payload: Mapping[str, Any]
+    ) -> tuple[DraftPencairan, list[dict[str, str]]]:
+        """Draft for many nasabah at once; those that cannot be paid are skipped, with a reason.
+
+        Each nasabah gets the whole saldo and the draft-level potongan. A nasabah that
+        fails (not eligible, no saldo, potongan above the nominal) never blocks the rest.
+        """
+        bank = user.bank_sampah
+        assert bank is not None  # ponytail: views gate on IsActivePengelola
+        if payload["semua"]:
+            ids = [nasabah.id for nasabah in kandidat_pencairan(bank)]
+        else:
+            ids = list(dict.fromkeys(payload["nasabah_ids"]))
+        jenis = payload.get("potongan_jenis", DraftPencairan.PotonganJenis.PERSEN)
+        nilai = payload.get("potongan_nilai", Decimal(0))
+        items: list[dict[str, Any]] = []
+        dilewati: list[dict[str, str]] = []
+        for nasabah_id in ids:
+            alasan = DraftPencairanService._alasan_dilewati(bank, nasabah_id, jenis, nilai)
+            if alasan:
+                dilewati.append({"nasabah_id": str(nasabah_id), "alasan": alasan})
+            else:
+                items.append({"nasabah_id": nasabah_id, "metode": payload["metode"]})
+        if not items:
+            raise serializers.ValidationError(
+                {"nasabah_ids": ["Tidak ada nasabah yang dapat dicairkan"], "dilewati": dilewati}
+            )
+        draft = DraftPencairanService.buat_draft(user, {**payload, "items": items})
+        return draft, dilewati
+
+    @staticmethod
+    def _alasan_dilewati(bank: BankSampah, nasabah_id: UUID, jenis: str, nilai: Decimal) -> str:
+        nasabah = get_eligible_nasabah(bank, nasabah_id)
+        if nasabah is None:
+            return "Nasabah tidak ditemukan atau tidak aktif"
+        saldo = Saldo.objects.filter(nasabah=nasabah).first()
+        nominal = bulatkan_rupiah(saldo.total_saldo) if saldo else Decimal(0)
+        if nominal <= 0:
+            return "Saldo nasabah kosong"
+        if hitung_potongan(nominal, jenis, nilai) > nominal:
+            return "Potongan melebihi nominal pencairan"
+        return ""
 
     @staticmethod
     @transaction.atomic

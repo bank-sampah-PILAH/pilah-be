@@ -15,6 +15,7 @@ from rest_framework.response import Response
 
 from api.models import BankSampah, DraftPencairan, DraftPencairanItem, Pencairan, Transaksi, User
 from apps.ledger.serializers import (
+    DraftBatchSerializer,
     DraftKandidatQuerySerializer,
     DraftKandidatSerializer,
     DraftPencairanCreateSerializer,
@@ -315,3 +316,13 @@ class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg] 
         query.is_valid(raise_exception=True)
         nasabah = kandidat_pencairan(current_bank(request), **query.validated_data)
         return Response(DraftKandidatSerializer(nasabah, many=True).data)
+
+    @action(detail=False, methods=["post"], url_path="batch")
+    def batch(self, request: Request) -> Response:
+        serializer = DraftBatchSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        draft, dilewati = DraftPencairanService.buat_batch(
+            _user(request), serializer.validated_data
+        )
+        data = DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data
+        return Response({**data, "dilewati": dilewati}, status=status.HTTP_201_CREATED)

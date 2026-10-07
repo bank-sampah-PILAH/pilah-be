@@ -444,3 +444,23 @@ class DraftKandidatSerializer(serializers.Serializer[Any]):
     kode = serializers.CharField(source="nomor")
     nama = serializers.CharField()
     saldo = serializers.DecimalField(max_digits=14, decimal_places=2, source="saldo.total_saldo")
+
+
+class DraftBatchSerializer(_DraftPencairanWriteSerializer):
+    """Either every eligible nasabah (`semua`) or a chosen list, never both."""
+
+    semua = serializers.BooleanField(required=False, default=False)
+    nasabah_ids = serializers.ListField(
+        child=serializers.UUIDField(), required=False, allow_empty=False
+    )
+    metode = serializers.ChoiceField(
+        choices=Pencairan.Metode.choices, required=False, default=Pencairan.Metode.TUNAI
+    )
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        attrs = super().validate(attrs)
+        if attrs["semua"] == ("nasabah_ids" in attrs):
+            raise serializers.ValidationError(
+                {"nasabah_ids": ["Pilih semua nasabah, atau kirim daftar nasabah, bukan keduanya"]}
+            )
+        return attrs
