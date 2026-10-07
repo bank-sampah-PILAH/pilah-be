@@ -98,3 +98,22 @@ class UbahHargaTests(HargaApiTestCase):
         terjadwal = response.data["harga_terjadwal"]
         self.assertEqual(terjadwal["harga_per_kg"], "5000.00")
         self.assertEqual(parse_datetime(terjadwal["berlaku_mulai"]), tengah_malam)
+
+    def test_rejects_backdated_far_future_or_offsetless_berlaku_mulai(self) -> None:
+        # BR-03: perubahan harga tidak berlaku surut. Waktu tanpa offset tidak
+        # dapat dipastikan zona waktunya, jadi ditolak alih-alih ditebak.
+        jenis = self.buat_jenis(harga=3500)
+        sekarang = timezone.now().astimezone(WIB)
+        cases = {
+            "kemarin": (sekarang - timedelta(days=1)).isoformat(),
+            "lebih dari setahun lagi": (sekarang + timedelta(days=367)).isoformat(),
+            "tanpa offset": (sekarang + timedelta(days=2)).replace(tzinfo=None).isoformat(),
+        }
+        for nama, berlaku_mulai in cases.items():
+            with self.subTest(nama):
+                response = self.ubah_harga(
+                    jenis["id"], {"harga_per_kg": "5000", "berlaku_mulai": berlaku_mulai}
+                )
+                self.assertEqual(response.status_code, 422, response.data)
+                self.assertIn("berlaku_mulai", response.data["errors"])
+        self.assertEqual(HargaSampah.objects.filter(jenis_sampah_id=jenis["id"]).count(), 1)
