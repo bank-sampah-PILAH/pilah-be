@@ -7,9 +7,11 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.serializers import BaseSerializer
 
 from api.models import JenisSampah
 from apps.nasabah.serializers import StatusSerializer
+from apps.waste_catalog.api import harga_berlaku
 from apps.waste_catalog.serializers import HargaBaruSerializer, JenisSampahSerializer
 from apps.waste_catalog.services import catat_harga
 from shared_kernel.permissions import IsActivePengelola
@@ -62,6 +64,21 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
         ):
             return Response({"errors": {"kode": ["Kode sampah sudah digunakan"]}}, status=422)
         return super().update(request, *args, **kwargs)
+
+    @transaction.atomic
+    def perform_update(self, serializer: BaseSerializer[JenisSampah]) -> None:
+        # Aplikasi lama mengirim harga lewat PUT; harga yang berubah tetap
+        # menjadi versi baru yang tercatat, bukan menimpa harga lama.
+        sekarang = timezone.now()
+        jenis = serializer.instance
+        assert jenis is not None  # ponytail: update always has an instance
+        harga_lama = harga_berlaku(jenis, sekarang)
+        if harga_lama is None:
+            harga_lama = jenis.harga_per_kg
+        jenis = serializer.save()
+        harga_baru = serializer.validated_data.get("harga_per_kg")
+        if harga_baru is not None and harga_baru != harga_lama:
+            catat_harga(jenis, harga_baru, sekarang, current_user(self.request))
 
     @action(detail=True, methods=["patch"], url_path="status")
     def set_status(self, request: Request, pk: str | None = None) -> Response:
