@@ -4,7 +4,7 @@ from typing import Any
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import BankSampah, Nasabah, Pencairan, Saldo, User
+from api.models import BankSampah, DraftPencairan, Nasabah, Pencairan, Saldo, User
 
 URL = "/api/v1/draft-pencairan"
 
@@ -59,3 +59,31 @@ class DraftPencairanTests(APITestCase):
         self.assertEqual(response.data["items"][0]["metode"], "tunai")
         self.assertEqual(Saldo.objects.get(nasabah=self.nasabah).total_saldo, Decimal(465600))
         self.assertFalse(Pencairan.objects.exists())
+
+    def test_nominal_sebagian_dipakai_apa_adanya(self) -> None:
+        response = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "100000"}])
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["items"][0]["nominal"], "100000.00")
+
+    def test_nominal_melebihi_saldo_ditolak_dan_tidak_membuat_draft(self) -> None:
+        response = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "465601"}])
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("items[0].nominal", response.data["errors"])
+        self.assertFalse(DraftPencairan.objects.exists())
+
+    def test_nominal_nol_atau_tidak_bulat_ditolak(self) -> None:
+        for nominal in ("0", "-5", "1000.50"):
+            with self.subTest(nominal=nominal):
+                response = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": nominal}])
+
+                self.assertEqual(response.status_code, 422, response.data)
+
+    def test_saldo_kosong_tanpa_nominal_ditolak(self) -> None:
+        kosong = self._nasabah("NAS-0002", "Budi Kosong", "0")
+
+        response = self._buat([{"nasabah_id": str(kosong.id)}])
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("items[0].nominal", response.data["errors"])
