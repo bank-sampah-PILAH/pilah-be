@@ -18,7 +18,9 @@ def _teks_pdf(content: bytes) -> str:
     for aliran in re.findall(rb"stream\r?\n(.*?)endstream", content, re.DOTALL):
         try:
             teks.append(
-                zlib.decompress(base64.a85decode(aliran.strip(), adobe=False)).decode("latin-1")
+                zlib.decompress(base64.a85decode(aliran.strip().removesuffix(b"~>"))).decode(
+                    "latin-1"
+                )
             )
         except (ValueError, zlib.error):
             continue
