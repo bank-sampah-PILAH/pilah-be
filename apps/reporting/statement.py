@@ -229,8 +229,6 @@ def _merge_with_running_saldo(
         )
     return rows
 
-    return rows
-
 
 def _with_detail_subrows(rows: list[MutationRow]) -> list[MutationRow]:
     """Attach DetailTransaksi snapshots to setoran rows (super detail)."""
