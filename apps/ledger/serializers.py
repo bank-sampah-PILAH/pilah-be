@@ -286,6 +286,9 @@ class DraftItemInputSerializer(serializers.Serializer[Any]):
     nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
     metode = serializers.ChoiceField(choices=Pencairan.Metode.choices, required=False)
 
+    def validate_nominal(self, value: Decimal) -> Decimal:
+        return _validate_nominal_pencairan(value)
+
 
 class DraftPencairanCreateSerializer(serializers.Serializer[Any]):
     items = DraftItemInputSerializer(many=True, allow_empty=False)
