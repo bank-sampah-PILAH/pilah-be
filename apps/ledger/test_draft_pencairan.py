@@ -219,3 +219,41 @@ class DraftPencairanTests(APITestCase):
 
         self.assertEqual(response.status_code, 422, response.data)
         self.assertEqual(list(response.data["errors"]), ["items[0].potongan_nilai"])
+
+    def test_nasabah_tidak_memenuhi_syarat_ditolak(self) -> None:
+        nonaktif = self._nasabah("NAS-0002", "Budi Nonaktif", "50000", is_active=False)
+        menunggu = self._nasabah(
+            "NAS-0003", "Citra Menunggu", "50000", status=Nasabah.Status.PENDING
+        )
+        bank_lain = BankSampah.objects.create(
+            nama="Bank Lain",
+            alamat="Bogor",
+            kota="Bogor",
+            no_hp_pic="+628111111111",
+            status=BankSampah.Status.ACTIVE,
+        )
+        asing = self._nasabah("NAS-0004", "Dewi Asing", "50000", bank=bank_lain)
+
+        for nasabah_id in (
+            nonaktif.id,
+            menunggu.id,
+            asing.id,
+            "5b2c8a54-0000-4000-8000-000000000000",
+        ):
+            with self.subTest(nasabah_id=str(nasabah_id)):
+                response = self._buat([{"nasabah_id": str(nasabah_id)}])
+
+                self.assertEqual(response.status_code, 422, response.data)
+                self.assertIn("items[0].nasabah_id", response.data["errors"])
+        self.assertFalse(DraftPencairan.objects.exists())
+
+    def test_draft_berisi_banyak_nasabah_dan_nasabah_ganda_ditolak(self) -> None:
+        budi = self._nasabah("NAS-0002", "Budi Santoso", "50000")
+
+        response = self._buat([{"nasabah_id": str(self.nasabah.id)}, {"nasabah_id": str(budi.id)}])
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["total_nominal"], "515600.00")
+        duplikat = self._buat([{"nasabah_id": str(budi.id)}, {"nasabah_id": str(budi.id)}])
+        self.assertEqual(duplikat.status_code, 422, duplikat.data)
+        self.assertEqual(DraftPencairan.objects.count(), 1)
