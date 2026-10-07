@@ -6,9 +6,10 @@
   workspace.
 - Keep backend implementation changes here, not in the workspace root or the
   mobile repository.
-- Keep the canonical checkout on `staging`; use `staging` as the worktree
-  baseline and pull request target unless the request explicitly names another
-  branch. Never infer `main` as the baseline.
+- Use `staging` as the worktree baseline and PR target unless the request names
+  another branch; never infer `main`. A standalone canonical checkout should
+  remain on `staging`. When nested in the workspace, it may be detached at the
+  parent-pinned commit; leave it untouched and work in a sibling worktree.
 
 ## Development
 
@@ -110,17 +111,26 @@
 
 ## Validation
 
-- Run `uv run --with-requirements requirements.txt python manage.py test` when
-  `uv` is available; otherwise run `python manage.py test`.
-- The Docker equivalent is `docker compose exec web python manage.py test`.
+- For backend code or behavior changes, run
+  `uv run --with-requirements requirements.txt python manage.py test` when `uv`
+  is available; otherwise run `python manage.py test`. The Docker equivalent is
+  `docker compose exec web python manage.py test`.
+- For documentation-only changes, run `git diff --check` and configured
+  documentation checks; skip Django tests.
 - Do not commit `.env`, credentials, local databases, media, or generated
   runtime files.
 
 ## Delivery
 
-- For Linear-linked work, use `feature/<issue-id>` with the lowercase issue
-  identifier, for example `feature/eng-123`.
+- When a change involves both backend and mobile, use the workspace
+  `multi-ship` skill with the workspace `ship` skill. Keep backend
+  implementation and ownership of its API contract in this repository; agree
+  the shared contract before parallel work.
+- For Linear-linked work, use the same lowercase issue-derived branch
+  (`feature/<issue-id>`) in each selected repository, with separate PRs to
+  `staging`; do not create a Linear issue unless explicitly requested.
 - Use the local `.agents/skills/ship` skill with the global `ship` workflow for
   feature or fix branches in sibling `pilah-be-worktrees` directories.
+- Keep backend validation tied to the documented Django test command above.
 - Use the local `.agents/skills/lgtm` skill with the global `lgtm` workflow for
   merge and cleanup.

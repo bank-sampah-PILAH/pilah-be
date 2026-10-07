@@ -86,6 +86,19 @@ fi
 
 ## 3. Understand and implement
 
+- For work that involves both backend and mobile, use the workspace
+  `multi-ship` skill with the workspace `ship` skill. Keep backend changes and
+  ownership of the backend API contract here; establish shared endpoint,
+  payload, validation, authentication, and error behavior before parallel work.
+- When a Linear issue is linked across repositories, use the same lowercase
+  issue-derived branch (`feature/<issue-id>`) and open a separate PR to
+  `staging` in each repository.
+- This repository is a submodule: do not switch its canonical checkout away
+  from a detached commit pinned by the parent workspace. Make changes in the
+  sibling worktree.
+- For backend code or behavior changes, run the documented Django check in
+  `AGENTS.md`; for documentation-only changes, use its documented docs checks.
+  Do not substitute checks from another repository.
 - Read the repository's README, contribution guide, local agent instructions, and the files relevant to the requested behavior.
 - Follow existing language, framework, package-manager, formatting, and testing conventions. Do not add unrelated refactors or dependencies.
 - Implement the prompt completely, including focused tests for new or changed behavior when the repository has a test convention.
