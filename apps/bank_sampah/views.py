@@ -5,6 +5,7 @@ from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.http import FileResponse, Http404, HttpRequest
+from django.views.decorators.http import require_GET
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -35,6 +36,7 @@ from shared_kernel.permissions import (
 from shared_kernel.scoping import current_bank, current_user
 
 
+@require_GET  # S3752: media is read-only; other methods are caller error.
 def bank_sampah_activity_media(request: HttpRequest, token: str) -> FileResponse:
     try:
         name = TimestampSigner(salt="bank-sampah-kegiatan").unsign(

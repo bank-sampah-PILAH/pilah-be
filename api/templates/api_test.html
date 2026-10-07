@@ -546,7 +546,11 @@
     }
 
     function normalizeBaseUrl() {
-      return els.baseUrl.value.replace(/\/+$/, "");
+      let url = els.baseUrl.value;
+      while (url.endsWith("/")) {
+        url = url.slice(0, -1);
+      }
+      return url;
     }
 
     function money(value) {
@@ -1146,8 +1150,18 @@
       els.createdCount.textContent = String(Object.keys(report.created || state.ids || {}).length);
       els.duration.textContent = report.duration_ms ? `${report.duration_ms} ms` : "No run yet";
       els.steps.innerHTML = report.steps.map((step, index) => {
-        const statusClass = step.error ? "failed" : step.passed ? "passed" : "running";
-        const statusText = step.error ? "FAIL" : step.passed ? "PASS" : "RUN";
+        let statusClass;
+        let statusText;
+        if (step.error) {
+          statusClass = "failed";
+          statusText = "FAIL";
+        } else if (step.passed) {
+          statusClass = "passed";
+          statusText = "PASS";
+        } else {
+          statusClass = "running";
+          statusText = "RUN";
+        }
         const result = step.error || "OK";
         return `
           <tr>

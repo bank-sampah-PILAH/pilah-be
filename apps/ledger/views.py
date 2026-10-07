@@ -147,7 +147,9 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         except ParseError as exc:
             return Response({"error": exc.detail}, status=status.HTTP_400_BAD_REQUEST)
         payload = serializer.validated_data
-        payload_hash = _transaction_payload_hash(payload) if idempotency_key else None
+        # "" — not None: the column is NOT NULL (S6553 fix); only rows with a
+        # real key carry a digest, and replay compares digests only then.
+        payload_hash = _transaction_payload_hash(payload) if idempotency_key else ""
         bank = _bank_sampah(request)
 
         def replay(existing: Transaksi) -> Response:

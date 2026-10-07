@@ -134,6 +134,74 @@ class AuthService:
             user.save(update_fields=updates)
 
     @staticmethod
+    def _registration_response(
+        profile: Mapping[str, Any], email: str, google_id: str, name: str
+    ) -> dict[str, Any]:
+        registration_token = signing.dumps(
+            {
+                "sub": google_id,
+                "email": email,
+                "name": name,
+                "picture": profile.get("picture") or "",
+            },
+            salt=REGISTRATION_TOKEN_SALT,
+            compress=True,
+        )
+        return {
+            "registration_required": True,
+            "registration_token": registration_token,
+            "expires_in": REGISTRATION_TOKEN_MAX_AGE,
+            "google_profile": {
+                "email": email,
+                "name": name,
+                "picture": profile.get("picture") or None,
+            },
+        }
+
+    @staticmethod
+    def _role_for_new_account(is_allowlisted: bool, dev_role: Any, nasabah: Nasabah | None) -> str:
+        if is_allowlisted:
+            return User.Role.SUPERADMIN
+        if dev_role:
+            return str(dev_role)
+        # A Google-verified email matching an active Nasabah record
+        # identifies a new account as Nasabah. Existing accounts keep
+        # their assigned role, and _sync_nasabah_prefill links only
+        # Nasabah users.
+        if nasabah is not None:
+            return User.Role.NASABAH
+        return User.Role.PENGELOLA
+
+    @staticmethod
+    def _create_new_account(
+        email: str, google_id: str, name: str, role: str, is_allowlisted: bool
+    ) -> tuple[User, bool]:
+        if role == User.Role.SUPERADMIN and not is_allowlisted:
+            raise AuthService._superadmin_not_allowlisted()
+        try:
+            with transaction.atomic():
+                return (
+                    User.objects.create_user(
+                        email=email,
+                        google_id=google_id,
+                        nama=name,
+                        role=role,
+                        is_profile_complete=role == User.Role.SUPERADMIN,
+                        is_staff=role == User.Role.SUPERADMIN,
+                        is_superuser=role == User.Role.SUPERADMIN,
+                    ),
+                    True,
+                )
+        except IntegrityError:
+            # A concurrent Google request may have created this account
+            # after the initial lookup. Authenticate that account instead
+            # of turning a valid token into an uncaught server error.
+            user = AuthService._user_for_email(email)
+            if user is None:
+                raise
+            return user, False
+
+    @staticmethod
     def login_with_google(raw_id_token: str) -> dict[str, Any]:
         profile = AuthService._verify_google_token(raw_id_token)
         email = str(profile["email"]).strip().lower()
@@ -145,65 +213,19 @@ class AuthService:
         is_allowlisted = AuthService.is_superadmin_allowlisted(email)
 
         if user is None and nasabah is None and not is_allowlisted and dev_role is None:
-            registration_token = signing.dumps(
-                {
-                    "sub": google_id,
-                    "email": email,
-                    "name": name,
-                    "picture": profile.get("picture") or "",
-                },
-                salt=REGISTRATION_TOKEN_SALT,
-                compress=True,
-            )
-            return {
-                "registration_required": True,
-                "registration_token": registration_token,
-                "expires_in": REGISTRATION_TOKEN_MAX_AGE,
-                "google_profile": {
-                    "email": email,
-                    "name": name,
-                    "picture": profile.get("picture") or None,
-                },
-            }
+            return AuthService._registration_response(profile, email, google_id, name)
 
         is_new_user = user is None
         if user is None:
-            if dev_role == User.Role.SUPERADMIN and not is_allowlisted:
-                raise AuthService._superadmin_not_allowlisted()
-            # A Google-verified email matching an active Nasabah record
-            # identifies a new account as Nasabah. Existing accounts keep
-            # their assigned role, and _sync_nasabah_prefill links only
-            # Nasabah users.
-            role = (
-                User.Role.SUPERADMIN
-                if is_allowlisted
-                else dev_role or (User.Role.NASABAH if nasabah is not None else User.Role.PENGELOLA)
+            role = AuthService._role_for_new_account(is_allowlisted, dev_role, nasabah)
+            user, is_new_user = AuthService._create_new_account(
+                email, google_id, name, role, is_allowlisted
             )
-            try:
-                with transaction.atomic():
-                    user = User.objects.create_user(
-                        email=email,
-                        google_id=google_id,
-                        nama=name,
-                        role=role,
-                        is_profile_complete=role == User.Role.SUPERADMIN,
-                        is_staff=role == User.Role.SUPERADMIN,
-                        is_superuser=role == User.Role.SUPERADMIN,
-                    )
-            except IntegrityError:
-                # A concurrent Google request may have created this account
-                # after the initial lookup. Authenticate that account instead
-                # of turning a valid token into an uncaught server error.
-                user = AuthService._user_for_email(email)
-                if user is None:
-                    raise
-                is_new_user = False
-                AuthService._enforce_superadmin_allowlist(user, email)
-                AuthService._update_google_identity(user, google_id, str(name))
-        else:
-            AuthService._enforce_superadmin_allowlist(user, email)
-            AuthService._update_google_identity(user, google_id, str(name))
 
+        # Called for existing accounts and re-matched races; both are no-ops
+        # for a just-created user (identity fields and flags already set).
+        AuthService._enforce_superadmin_allowlist(user, email)
+        AuthService._update_google_identity(user, google_id, str(name))
         AuthService._sync_nasabah_prefill(user)
 
         return AuthService._session_response(user, is_new_user=is_new_user)
@@ -379,6 +401,56 @@ class OnboardingService:
         return user
 
     @staticmethod
+    def _reactivate_rejected_membership(user: User, own_record: Nasabah, pesan: str) -> Nasabah:
+        # A rejection is correctable, not a permanent lockout: resubmit
+        # the same row as a fresh application rather than raising.
+        #
+        # Conditional UPDATE, not own_record.save(): guards against two
+        # concurrent reapply requests both passing the status check at the
+        # call site. A losing request affects 0 rows and falls through to
+        # the error below instead of silently double-applying.
+        #
+        # The account's phone is copied too, with the same collision guard
+        # as a first application: it may now belong to another row here.
+        if (
+            Nasabah.objects.filter(bank_sampah_id=own_record.bank_sampah_id, no_hp=user.no_hp)
+            .exclude(pk=own_record.pk)
+            .exists()
+        ):
+            raise ValueError(NO_HP_TERPAKAI_DI_BANK)
+        # The check above does not close the race: the same phone can be
+        # committed elsewhere before this UPDATE, and the constraint then
+        # refuses it. Savepoint so the refusal does not poison the outer
+        # transaction before the ValueError leaves it.
+        try:
+            with transaction.atomic():
+                updated = Nasabah.objects.filter(
+                    pk=own_record.pk, status=Nasabah.Status.REJECTED
+                ).update(
+                    nama=user.nama,
+                    jenis_kelamin=user.jenis_kelamin,
+                    tanggal_lahir=user.tanggal_lahir,
+                    alamat=user.alamat,
+                    no_hp=user.no_hp,
+                    status=Nasabah.Status.PENDING,
+                    is_active=True,
+                    updated_at=timezone.now(),
+                )
+        except IntegrityError as exc:
+            raise ValueError(NO_HP_TERPAKAI_DI_BANK) from exc
+        if updated == 0:
+            raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
+        own_record.refresh_from_db()
+        Saldo.objects.get_or_create(nasabah=own_record)
+        NasabahApprovalLog.objects.create(
+            nasabah=own_record,
+            pengurus=None,
+            status=NasabahApprovalLog.Status.APPEALED,
+            catatan=pesan,
+        )
+        return own_record
+
+    @staticmethod
     @transaction.atomic
     def register_nasabah(user: User, payload: Mapping[str, Any]) -> Nasabah:
         if user.role != User.Role.NASABAH:
@@ -399,53 +471,9 @@ class OnboardingService:
         if own_record is not None:
             if own_record.status != Nasabah.Status.REJECTED:
                 raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
-            # A rejection is correctable, not a permanent lockout: resubmit
-            # the same row as a fresh application rather than raising.
-            #
-            # Conditional UPDATE, not own_record.save(): guards against two
-            # concurrent reapply requests both passing the check above.
-            # A losing request affects 0 rows and falls through to the
-            # error below instead of silently double-applying.
-            #
-            # The account's phone is copied too, with the same collision guard
-            # as a first application: it may now belong to another row here.
-            if (
-                Nasabah.objects.filter(bank_sampah=bank, no_hp=user.no_hp)
-                .exclude(pk=own_record.pk)
-                .exists()
-            ):
-                raise ValueError(NO_HP_TERPAKAI_DI_BANK)
-            # The check above does not close the race: the same phone can be
-            # committed elsewhere before this UPDATE, and the constraint then
-            # refuses it. Savepoint so the refusal does not poison the outer
-            # transaction before the ValueError leaves it.
-            try:
-                with transaction.atomic():
-                    updated = Nasabah.objects.filter(
-                        pk=own_record.pk, status=Nasabah.Status.REJECTED
-                    ).update(
-                        nama=user.nama,
-                        jenis_kelamin=user.jenis_kelamin,
-                        tanggal_lahir=user.tanggal_lahir,
-                        alamat=user.alamat,
-                        no_hp=user.no_hp,
-                        status=Nasabah.Status.PENDING,
-                        is_active=True,
-                        updated_at=timezone.now(),
-                    )
-            except IntegrityError as exc:
-                raise ValueError(NO_HP_TERPAKAI_DI_BANK) from exc
-            if updated == 0:
-                raise ValueError("Anda sudah terdaftar sebagai nasabah di bank sampah ini")
-            own_record.refresh_from_db()
-            Saldo.objects.get_or_create(nasabah=own_record)
-            NasabahApprovalLog.objects.create(
-                nasabah=own_record,
-                pengurus=None,
-                status=NasabahApprovalLog.Status.APPEALED,
-                catatan=payload.get("pesan", ""),
+            return OnboardingService._reactivate_rejected_membership(
+                user, own_record, payload.get("pesan", "")
             )
-            return own_record
 
         # A pengurus-entered record for this same person converges onto
         # `own_record` above at first Google login (AuthService matches on

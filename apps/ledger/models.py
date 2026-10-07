@@ -5,10 +5,15 @@ from django.utils import timezone
 
 from shared_kernel.models import TimestampedModel
 
+# Cross-context FK targets through the frozen api app registry (see AGENTS.md:
+# app_label = "api" until the squash migration). Constants keep them in sync.
+_NASABAH_API = "api.Nasabah"
+_USER_API = "api.User"
+
 
 class Saldo(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    nasabah = models.OneToOneField("api.Nasabah", on_delete=models.CASCADE, related_name="saldo")
+    nasabah = models.OneToOneField(_NASABAH_API, on_delete=models.CASCADE, related_name="saldo")
     total_saldo = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -27,24 +32,29 @@ class Transaksi(TimestampedModel):
         GAGAL = "gagal", "Gagal"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    nasabah = models.ForeignKey("api.Nasabah", on_delete=models.PROTECT, related_name="transaksi")
+    nasabah = models.ForeignKey(_NASABAH_API, on_delete=models.PROTECT, related_name="transaksi")
     bank_sampah = models.ForeignKey(
         "api.BankSampah", on_delete=models.PROTECT, related_name="transaksi"
     )
     dicatat_oleh = models.ForeignKey(
-        "api.User", on_delete=models.PROTECT, related_name="transaksi_dicatat"
+        _USER_API, on_delete=models.PROTECT, related_name="transaksi_dicatat"
     )
     tanggal = models.DateTimeField(default=timezone.now)
     total_nilai = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     tipe = models.CharField(max_length=20, choices=Tipe.choices, default=Tipe.SETORAN)
-    catatan = models.TextField(blank=True, null=True)
+    # catatan holds "" for "no note": serializer allows blank, service maps an
+    # absent value to None only via the same field. Non-null keeps the column
+    # honest and satisfies S6553 (nullable text fields).
+    catatan = models.TextField(blank=True, default="")
     status_wa = models.CharField(
         max_length=20, choices=StatusWA.choices, default=StatusWA.BELUM_DIKIRIM
     )
     # PBI-12: kunci idempotensi POST setoran. Null boleh — setoran lama dan
     # klien tanpa header tidak memilikinya.
     idempotency_key = models.UUIDField(blank=True, null=True)
-    idempotency_request_hash = models.CharField(max_length=64, blank=True, null=True)
+    # S6553: "" instead of NULL for rows without the header. Comparisons stay
+    # correct because a setoran with a header always writes a real digest.
+    idempotency_request_hash = models.CharField(max_length=64, blank=True, default="")
 
     class Meta:
         # ponytail: single Django app label until the squash migration; db_table
@@ -86,12 +96,12 @@ class Pencairan(TimestampedModel):
         TERCATAT = "tercatat", "Tercatat"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    nasabah = models.ForeignKey("api.Nasabah", on_delete=models.PROTECT, related_name="pencairan")
+    nasabah = models.ForeignKey(_NASABAH_API, on_delete=models.PROTECT, related_name="pencairan")
     bank_sampah = models.ForeignKey(
         "api.BankSampah", on_delete=models.PROTECT, related_name="pencairan"
     )
     dicatat_oleh = models.ForeignKey(
-        "api.User", on_delete=models.PROTECT, related_name="pencairan_dicatat"
+        _USER_API, on_delete=models.PROTECT, related_name="pencairan_dicatat"
     )
     tanggal = models.DateTimeField(default=timezone.now)
     nominal = models.DecimalField(max_digits=14, decimal_places=2)
@@ -129,7 +139,7 @@ class PencairanRevisi(models.Model):
     # Why this version was replaced, by whom and when.
     alasan = models.CharField(max_length=255)
     diubah_oleh = models.ForeignKey(
-        "api.User", on_delete=models.PROTECT, related_name="pencairan_revisi_dibuat"
+        _USER_API, on_delete=models.PROTECT, related_name="pencairan_revisi_dibuat"
     )
     diubah_pada = models.DateTimeField(auto_now_add=True)
 
