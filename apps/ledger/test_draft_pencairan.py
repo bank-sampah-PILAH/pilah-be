@@ -88,3 +88,24 @@ class DraftPencairanTests(APITestCase):
 
         self.assertEqual(response.status_code, 422, response.data)
         self.assertIn("items[0].nominal", response.data["errors"])
+
+    def test_potongan_persen_dibulatkan_ke_bawah_per_item_dan_total_adalah_jumlah_item(
+        self,
+    ) -> None:
+        budi = self._nasabah("NAS-0002", "Budi Santoso", "10001")
+        persen = {"potongan_jenis": "persen", "potongan_nilai": "5"}
+
+        response = self._buat(
+            [
+                {"nasabah_id": str(self.nasabah.id), "nominal": "10001", **persen},
+                {"nasabah_id": str(budi.id), **persen},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        for item in response.data["items"]:
+            self.assertEqual(item["potongan"], "500.00")
+            self.assertEqual(item["dibayar"], "9501.00")
+        self.assertEqual(response.data["total_nominal"], "20002.00")
+        self.assertEqual(response.data["total_potongan"], "1000.00")
+        self.assertEqual(response.data["total_dibayar"], "19002.00")
