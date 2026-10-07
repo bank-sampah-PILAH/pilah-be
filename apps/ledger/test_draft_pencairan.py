@@ -1,9 +1,8 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from unittest import mock
 
-from django.utils import timezone
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -306,13 +305,14 @@ class DraftPencairanTests(APITestCase):
 
     def test_nama_default_otomatis_memuat_tanggal_dan_jam_dan_bisa_diberi_nama(self) -> None:
         item = [{"nasabah_id": str(self.nasabah.id)}]
-        sekarang = timezone.make_aware(datetime(2026, 10, 7, 14, 35, 12))
+        # 22:35 UTC on the 7th is already 05:35 on the 8th for a pengurus in WIB.
+        sekarang = datetime(2026, 10, 7, 22, 35, 12, tzinfo=UTC)
 
         with mock.patch("django.utils.timezone.now", return_value=sekarang):
             otomatis = self._buat(item)
         bernama = self._buat(item, nama="Cair Lebaran")
 
-        self.assertEqual(otomatis.data["nama"], "Pencairan 7 Okt 2026, 14:35")
+        self.assertEqual(otomatis.data["nama"], "Pencairan 8 Okt 2026, 05:35")
         self.assertEqual(bernama.data["nama"], "Cair Lebaran")
 
     def test_draft_memuat_pembuat_dan_waktu(self) -> None:
