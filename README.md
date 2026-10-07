@@ -440,7 +440,7 @@ POST /api/v1/draft-pencairan
 
 | Field | Rule |
 | --- | --- |
-| `nama` | Optional, max 150 characters. Blank becomes `Pencairan 7 Okt 2026`. |
+| `nama` | Optional, max 150 characters. Blank becomes `Pencairan 7 Okt 2026, 14:35` (the current date and time). |
 | `potongan_jenis`, `potongan_nilai` | The draft's default potongan: `persen` (0-100) or `rupiah`. Sent together. |
 | `items[].nasabah_id` | Required. Active, approved nasabah of the pengurus' bank; once per draft. |
 | `items[].nominal` | Optional, defaults to the whole saldo. Whole rupiah, above zero, not above the saldo. |
