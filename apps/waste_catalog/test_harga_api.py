@@ -66,6 +66,17 @@ class BuatJenisSampahTests(HargaApiTestCase):
         self.assertGreaterEqual(versi.berlaku_mulai, sebelum - timedelta(seconds=1))
         self.assertLessEqual(versi.berlaku_mulai, timezone.now())
 
+    def test_a_new_jenis_needs_a_price(self) -> None:
+        response = self.client.post(
+            "/api/v1/jenis-sampah",
+            {"kode": "PLS-001", "nama_sampah": "Plastik PET", "kategori": "plastik"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("harga_per_kg", response.data["errors"])
+        self.assertFalse(HargaSampah.objects.exists())
+
 
 class DaftarJenisSampahTests(HargaApiTestCase):
     def test_list_query_count_does_not_grow_with_the_number_of_jenis(self) -> None:
