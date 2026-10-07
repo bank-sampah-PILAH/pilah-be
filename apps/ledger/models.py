@@ -190,6 +190,10 @@ class DraftPencairan(TimestampedModel):
         ordering = ["-created_at"]
 
     @property
+    def jumlah_item(self) -> int:
+        return len(self.items.all())
+
+    @property
     def total_nominal(self) -> Decimal:
         return sum((item.nominal for item in self.items.all()), Decimal(0))
 
