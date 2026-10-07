@@ -54,6 +54,14 @@ class HargaSampah(models.Model):
     )
     harga_per_kg = models.DecimalField(max_digits=11, decimal_places=2)
     berlaku_mulai = models.DateTimeField()
+    # Jejak audit perubahan harga (BR-11): siapa dan kapan.
+    dibuat_oleh = models.ForeignKey(
+        "api.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="harga_sampah_dibuat",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

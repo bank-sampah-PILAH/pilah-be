@@ -1,6 +1,8 @@
 from typing import Any
 
+from django.db import transaction
 from django.db.models import QuerySet
+from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.request import Request
@@ -9,8 +11,9 @@ from rest_framework.response import Response
 from api.models import JenisSampah
 from apps.nasabah.serializers import StatusSerializer
 from apps.waste_catalog.serializers import JenisSampahSerializer
+from apps.waste_catalog.services import catat_harga
 from shared_kernel.permissions import IsActivePengelola
-from shared_kernel.scoping import current_bank
+from shared_kernel.scoping import current_bank, current_user
 
 
 class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
@@ -41,9 +44,11 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
         bank = current_bank(request)
         if JenisSampah.objects.filter(bank_sampah=bank, nomor=nomor).exists():
             return Response({"errors": {"kode": ["Kode sampah sudah digunakan"]}}, status=422)
-        jenis = serializer.save(
-            bank_sampah=bank,
-        )
+        with transaction.atomic():
+            jenis = serializer.save(
+                bank_sampah=bank,
+            )
+            catat_harga(jenis, jenis.harga_per_kg, timezone.now(), current_user(request))
         return Response(self.get_serializer(jenis).data, status=status.HTTP_201_CREATED)
 
     def update(self, request: Request, *args: Any, **kwargs: Any) -> Response:
