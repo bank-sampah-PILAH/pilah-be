@@ -114,10 +114,11 @@ class WaktuBerzonaField(serializers.DateTimeField):
 
 
 class HargaBaruSerializer(serializers.Serializer[Any]):
-    harga_per_kg = serializers.DecimalField(
-        max_digits=11, decimal_places=2, validators=[validasi_harga]
-    )
+    harga_per_kg = serializers.DecimalField(max_digits=11, decimal_places=2)
     berlaku_mulai = WaktuBerzonaField(required=False)
+
+    def validate_harga_per_kg(self, value: Decimal) -> Decimal:
+        return validasi_harga(value)
 
     def validate_berlaku_mulai(self, value: datetime) -> datetime:
         sekarang = timezone.now()
