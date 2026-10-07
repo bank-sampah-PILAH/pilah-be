@@ -63,14 +63,30 @@
 - Gunakan `shared_kernel/kalkulasi.py` untuk semua perhitungan dan pembulatan
   nilai setoran. Jangan memanggil `quantize()` tanpa mode pembulatan: default
   Python adalah half-even, bukan pembulatan ke bawah.
-- Harga transaksi selalu berasal dari master `JenisSampah` lewat
-  `harga_berlaku()`. Request yang mengirim harga per item ditolak, bukan
-  diabaikan.
+- Harga transaksi selalu berasal dari versi harga yang berlaku pada waktu
+  transaksi, lewat `apps.waste_catalog.api.harga_berlaku()`. Request yang
+  mengirim harga per item ditolak, bukan diabaikan.
 - Pembulatan dilakukan per item, lalu subtotal dijumlahkan menjadi total,
   supaya total selalu sama dengan angka yang tampil di riwayat dan notifikasi.
 - Data lama dari PILAH 1.0 dapat berisi sen. Bulatkan ke bawah saat nilainya
   diperbarui, jangan lakukan migrasi massal atas saldo nasabah.
 - Berat (kg) bukan nilai uang: `format_kg` tetap memakai `ROUND_HALF_UP`.
+
+## Aturan harga jenis sampah
+
+- Harga disimpan sebagai versi di `HargaSampah` (tabel `harga_sampah`, SDS
+  7.1.2), bukan sebagai kolom `JenisSampah`. Satu versi berisi harga per kg,
+  `berlaku_mulai` (UTC), dan `dibuat_oleh`.
+- Versi tidak pernah diubah atau dihapus. Mengganti harga, termasuk
+  membetulkan harga terjadwal, berarti menambah versi baru; jika dua versi
+  berlaku pada waktu yang sama, yang dibuat terakhir yang dipakai.
+- Tambahkan versi hanya lewat `apps/waste_catalog/services.catat_harga` atau,
+  untuk jenis baru, `apps/waste_catalog/api.buat_jenis_sampah`.
+- Harga tidak boleh berlaku surut (BR-03): `berlaku_mulai` harus setelah
+  sekarang, paling lambat 365 hari lagi, dan wajib membawa offset zona waktu.
+  Tanpa `berlaku_mulai`, harga berlaku sekarang.
+- Nilai setoran lama tidak berubah karena harga yang dipakai tersalin ke
+  `DetailTransaksi.harga_snapshot`.
 
 ## Aturan input setoran
 

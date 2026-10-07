@@ -328,6 +328,10 @@ Jenis sampah:
 - `POST /api/v1/jenis-sampah`
 - `PUT /api/v1/jenis-sampah/:id`
 - `PATCH /api/v1/jenis-sampah/:id/status`
+- `POST /api/v1/jenis-sampah/:id/harga` — `{harga_per_kg, berlaku_mulai?}`;
+  tanpa `berlaku_mulai` harga berlaku sekarang. Respons jenis sampah memuat
+  `harga_per_kg` yang berlaku, `harga_berlaku_mulai`, dan `harga_terjadwal`
+  (`{harga_per_kg, berlaku_mulai}` atau `null`).
 
 Transaksi:
 
