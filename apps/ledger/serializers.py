@@ -323,6 +323,13 @@ class DraftItemInputSerializer(serializers.Serializer[Any]):
 
 class DraftPencairanCreateSerializer(serializers.Serializer[Any]):
     items = DraftItemInputSerializer(many=True, allow_empty=False)
+    potongan_jenis = serializers.ChoiceField(
+        choices=DraftPencairan.PotonganJenis.choices, required=False
+    )
+    potongan_nilai = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        return _validate_potongan(attrs)
 
 
 class DraftPencairanItemSerializer(serializers.ModelSerializer[Model]):
@@ -354,4 +361,13 @@ class DraftPencairanSerializer(serializers.ModelSerializer[Model]):
 
     class Meta:
         model = DraftPencairan
-        fields = ["id", "status", "items", "total_nominal", "total_potongan", "total_dibayar"]
+        fields = [
+            "id",
+            "status",
+            "potongan_jenis",
+            "potongan_nilai",
+            "items",
+            "total_nominal",
+            "total_potongan",
+            "total_dibayar",
+        ]
