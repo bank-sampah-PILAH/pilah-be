@@ -386,7 +386,28 @@ class BalanceService:
         return cast(Decimal, masuk - keluar)
 
 
+_BULAN_SINGKAT = (
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "Mei",
+    "Jun",
+    "Jul",
+    "Agu",
+    "Sep",
+    "Okt",
+    "Nov",
+    "Des",
+)
+
+
 class DraftPencairanService:
+    @staticmethod
+    def nama_default() -> str:
+        hari = timezone.localdate()
+        return f"Pencairan {hari.day} {_BULAN_SINGKAT[hari.month - 1]} {hari.year}"
+
     @staticmethod
     @transaction.atomic
     def buat_draft(user: User, payload: Mapping[str, Any]) -> DraftPencairan:
@@ -394,6 +415,7 @@ class DraftPencairanService:
         assert bank is not None  # ponytail: views gate on IsActivePengelola
         draft = DraftPencairan.objects.create(
             bank_sampah=bank,
+            nama=(payload.get("nama") or "").strip() or DraftPencairanService.nama_default(),
             dibuat_oleh=user,
             diubah_oleh=user,
             potongan_jenis=payload.get("potongan_jenis", DraftPencairan.PotonganJenis.PERSEN),

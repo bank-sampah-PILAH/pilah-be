@@ -322,6 +322,7 @@ class DraftItemInputSerializer(serializers.Serializer[Any]):
 
 
 class DraftPencairanCreateSerializer(serializers.Serializer[Any]):
+    nama = serializers.CharField(max_length=150, required=False, allow_blank=True)
     items = DraftItemInputSerializer(many=True, allow_empty=False)
     potongan_jenis = serializers.ChoiceField(
         choices=DraftPencairan.PotonganJenis.choices, required=False
@@ -360,6 +361,9 @@ class DraftPencairanItemSerializer(serializers.ModelSerializer[Model]):
 
 
 class DraftPencairanSerializer(serializers.ModelSerializer[Model]):
+    dibuat_oleh_nama = serializers.CharField(source="dibuat_oleh.nama", read_only=True)
+    diubah_oleh_nama = serializers.CharField(source="diubah_oleh.nama", read_only=True)
+
     items = DraftPencairanItemSerializer(many=True, read_only=True)
     total_nominal = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     total_potongan = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
@@ -369,9 +373,14 @@ class DraftPencairanSerializer(serializers.ModelSerializer[Model]):
         model = DraftPencairan
         fields = [
             "id",
+            "nama",
             "status",
             "potongan_jenis",
             "potongan_nilai",
+            "dibuat_oleh_nama",
+            "diubah_oleh_nama",
+            "created_at",
+            "updated_at",
             "items",
             "total_nominal",
             "total_potongan",
@@ -380,6 +389,9 @@ class DraftPencairanSerializer(serializers.ModelSerializer[Model]):
 
 
 class DraftPencairanListSerializer(serializers.ModelSerializer[Model]):
+    dibuat_oleh_nama = serializers.CharField(source="dibuat_oleh.nama", read_only=True)
+    diubah_oleh_nama = serializers.CharField(source="diubah_oleh.nama", read_only=True)
+
     jumlah_item = serializers.IntegerField(read_only=True)
     total_nominal = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     total_potongan = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
@@ -389,7 +401,12 @@ class DraftPencairanListSerializer(serializers.ModelSerializer[Model]):
         model = DraftPencairan
         fields = [
             "id",
+            "nama",
             "status",
+            "dibuat_oleh_nama",
+            "diubah_oleh_nama",
+            "created_at",
+            "updated_at",
             "jumlah_item",
             "total_nominal",
             "total_potongan",
