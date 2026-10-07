@@ -65,6 +65,36 @@ class BuatJenisSampahTests(HargaApiTestCase):
         self.assertLessEqual(versi.berlaku_mulai, timezone.now())
 
 
+class EditJenisSampahTests(HargaApiTestCase):
+    def edit(self, jenis_id: str, harga: str) -> Any:
+        return self.client.put(
+            f"/api/v1/jenis-sampah/{jenis_id}",
+            {
+                "kode": "PLS-001",
+                "nama_sampah": "Plastik PET Bening",
+                "kategori": "plastik",
+                "harga_per_kg": harga,
+            },
+            format="json",
+        )
+
+    def test_edit_from_older_app_builds_records_a_changed_price_as_a_version(self) -> None:
+        # Aplikasi lama masih mengirim harga lewat PUT. Harga yang berubah
+        # dicatat sebagai versi baru yang berlaku sekarang, harga yang sama
+        # tidak menambah versi.
+        jenis = self.buat_jenis(harga=3500)
+
+        sama = self.edit(jenis["id"], "3500")
+        berubah = self.edit(jenis["id"], "4000")
+
+        self.assertEqual(sama.status_code, 200, sama.data)
+        self.assertEqual(berubah.status_code, 200, berubah.data)
+        self.assertEqual(berubah.data["harga_per_kg"], "4000.00")
+        versi = HargaSampah.objects.filter(jenis_sampah_id=jenis["id"]).order_by("id")
+        self.assertEqual([v.harga_per_kg for v in versi], [3500, 4000])
+        self.assertEqual(versi.last().dibuat_oleh, self.user)  # type: ignore[union-attr]
+
+
 class UbahHargaTests(HargaApiTestCase):
     def ubah_harga(self, jenis_id: str, payload: dict[str, Any]) -> Any:
         return self.client.post(f"/api/v1/jenis-sampah/{jenis_id}/harga", payload, format="json")
