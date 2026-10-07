@@ -15,6 +15,7 @@ from api.models import (
     BankSampah,
     BankSampahApprovalLog,
     DetailTransaksi,
+    HargaSampah,
     JenisSampah,
     Nasabah,
     Pencairan,
@@ -23,6 +24,7 @@ from api.models import (
     User,
 )
 from apps.notification.api import DEFAULT_WA_TEMPLATE
+from apps.waste_catalog.api import harga_berlaku
 
 CONFIRMATION = "SEED-PILAH-STAGING-DATA"
 
@@ -56,6 +58,8 @@ HISTORY_DETAIL_ID_BASE = UUID("00000000-0000-4000-8000-000000000300")
 HISTORY_PAYOUT_ID_BASE = UUID("00000000-0000-4000-8000-000000000500")
 DUMMY_CUSTOMER_ID_BASE = UUID("00000000-0000-4000-8000-000000000700")
 HISTORY_ROWS_PER_CUSTOMER = 110
+# Riwayat setoran seed mundur sampai 365 hari; harga awal harus lebih tua.
+SEED_HARGA_SEJAK_HARI = 400
 DUMMY_CUSTOMER_COUNT = 60
 
 
@@ -429,7 +433,7 @@ class Command(BaseCommand):
                     - timedelta(days=365)
                     + timedelta(days=358 * row_index // (HISTORY_ROWS_PER_CUSTOMER - 1))
                 )
-                total = jenis.harga_per_kg * weight
+                total = _harga_seed(jenis) * weight
                 self._upsert_transaction(
                     transaction_id=UUID(
                         int=HISTORY_TRANSACTION_ID_BASE.int + customer_offset + row_index
@@ -617,10 +621,18 @@ class Command(BaseCommand):
                 "nama_sampah": name,
                 "kategori": category,
                 "deskripsi": description,
-                "harga_per_kg": price,
                 "is_active": True,
             },
         )
+        if not HargaSampah.objects.filter(jenis_sampah=jenis).exists():
+            # Berlaku sebelum riwayat setoran seed yang paling tua, agar harga
+            # setiap setoran seed sama dengan harga yang berlaku saat itu.
+            HargaSampah.objects.create(
+                jenis_sampah=jenis,
+                bank_sampah=bank,
+                harga_per_kg=price,
+                berlaku_mulai=timezone.now() - timedelta(days=SEED_HARGA_SEJAK_HARI),
+            )
         return jenis
 
     @staticmethod
@@ -636,7 +648,7 @@ class Command(BaseCommand):
         items: tuple[tuple[JenisSampah, Decimal], ...],
     ) -> None:
         total = sum(
-            (jenis.harga_per_kg * weight for jenis, weight in items),
+            (_harga_seed(jenis) * weight for jenis, weight in items),
             Decimal("0.00"),
         ).quantize(Decimal("0.01"))
         transaksi, created = Transaksi.objects.get_or_create(
@@ -673,7 +685,7 @@ class Command(BaseCommand):
                 ]
             )
         for detail_id, (jenis, weight) in zip(detail_ids, items, strict=True):
-            subtotal = (jenis.harga_per_kg * weight).quantize(Decimal("0.01"))
+            subtotal = (_harga_seed(jenis) * weight).quantize(Decimal("0.01"))
             DetailTransaksi.objects.update_or_create(
                 pk=detail_id,
                 defaults={
@@ -681,8 +693,14 @@ class Command(BaseCommand):
                     "jenis_sampah": jenis,
                     "nama_sampah_snapshot": jenis.nama_sampah,
                     "kategori_snapshot": jenis.kategori,
-                    "harga_snapshot": jenis.harga_per_kg,
+                    "harga_snapshot": _harga_seed(jenis),
                     "berat": weight,
                     "subtotal": subtotal,
                 },
             )
+
+
+def _harga_seed(jenis: JenisSampah) -> Decimal:
+    harga = harga_berlaku(jenis, timezone.now())
+    assert harga is not None  # ponytail: _upsert_waste_type always leaves a version
+    return harga

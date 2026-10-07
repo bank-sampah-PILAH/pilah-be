@@ -11,7 +11,7 @@ from rest_framework.serializers import BaseSerializer
 
 from api.models import JenisSampah
 from apps.nasabah.serializers import StatusSerializer
-from apps.waste_catalog.api import harga_berlaku
+from apps.waste_catalog.api import buat_jenis_sampah, harga_berlaku
 from apps.waste_catalog.serializers import HargaBaruSerializer, JenisSampahSerializer
 from apps.waste_catalog.services import catat_harga
 from shared_kernel.permissions import IsActivePengelola
@@ -46,11 +46,9 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
         bank = current_bank(request)
         if JenisSampah.objects.filter(bank_sampah=bank, nomor=nomor).exists():
             return Response({"errors": {"kode": ["Kode sampah sudah digunakan"]}}, status=422)
-        with transaction.atomic():
-            jenis = serializer.save(
-                bank_sampah=bank,
-            )
-            catat_harga(jenis, jenis.harga_per_kg, timezone.now(), current_user(request))
+        data = dict(serializer.validated_data)
+        harga = data.pop("harga_per_kg")
+        jenis = buat_jenis_sampah(bank, harga_per_kg=harga, oleh=current_user(request), **data)
         return Response(self.get_serializer(jenis).data, status=status.HTTP_201_CREATED)
 
     def update(self, request: Request, *args: Any, **kwargs: Any) -> Response:
@@ -73,10 +71,8 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
         jenis = serializer.instance
         assert jenis is not None  # ponytail: update always has an instance
         harga_lama = harga_berlaku(jenis, sekarang)
-        if harga_lama is None:
-            harga_lama = jenis.harga_per_kg
+        harga_baru = serializer.validated_data.pop("harga_per_kg", None)
         jenis = serializer.save()
-        harga_baru = serializer.validated_data.get("harga_per_kg")
         if harga_baru is not None and harga_baru != harga_lama:
             catat_harga(jenis, harga_baru, sekarang, current_user(self.request))
 

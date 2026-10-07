@@ -2,13 +2,38 @@
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
-from api.models import BankSampah, HargaSampah, JenisSampah
+from django.db import transaction
+from django.utils import timezone
+
+from api.models import BankSampah, HargaSampah, JenisSampah, User
 
 
 def get_active_jenis(bank: BankSampah, jenis_sampah_id: UUID) -> JenisSampah | None:
     return JenisSampah.objects.filter(id=jenis_sampah_id, bank_sampah=bank, is_active=True).first()
+
+
+@transaction.atomic
+def buat_jenis_sampah(
+    bank_sampah: BankSampah,
+    *,
+    harga_per_kg: Decimal | str | int,
+    oleh: User | None = None,
+    berlaku_mulai: datetime | None = None,
+    **fields: Any,
+) -> JenisSampah:
+    """Buat jenis sampah beserta versi harga pertamanya dalam satu transaksi."""
+    jenis = JenisSampah.objects.create(bank_sampah=bank_sampah, **fields)
+    HargaSampah.objects.create(
+        jenis_sampah=jenis,
+        bank_sampah=bank_sampah,
+        harga_per_kg=Decimal(str(harga_per_kg)),
+        berlaku_mulai=berlaku_mulai or timezone.now(),
+        dibuat_oleh=oleh,
+    )
+    return jenis
 
 
 def harga_berlaku(jenis: JenisSampah, pada: datetime) -> Decimal | None:

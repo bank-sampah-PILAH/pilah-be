@@ -21,7 +21,6 @@ class HargaBerlakuTests(TestCase):
             nomor="PLS-001",
             nama_sampah="Plastik PET",
             kategori="plastik",
-            harga_per_kg=Decimal(3000),
         )
         self.sekarang = timezone.now()
 

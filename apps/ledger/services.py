@@ -73,10 +73,6 @@ class TransactionService:
             # itu sendiri (SDS SD-01 pesan 10), bukan dari nilai yang dikirim client.
             harga = harga_berlaku(jenis, transaksi.created_at)
             if harga is None:
-                # ponytail: jenis tanpa versi harga masih memakai kolom lama sampai
-                # migrasi backfill menghapusnya.
-                harga = jenis.harga_per_kg
-            if harga <= 0:
                 raise serializers.ValidationError(
                     {f"items[{index}].jenis_sampah_id": ["Harga jenis sampah belum diatur"]}
                 )

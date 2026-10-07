@@ -8,7 +8,8 @@ from unittest.mock import Mock, patch
 import requests
 from django.utils import timezone
 
-from api.models import BankSampah, JenisSampah, Nasabah, Saldo, Transaksi, User
+from api.models import BankSampah, Nasabah, Saldo, Transaksi, User
+from apps.waste_catalog.api import buat_jenis_sampah
 from tests.regression.helpers import RegressionTestCase, gateway_env, twilio_env
 
 
@@ -154,7 +155,7 @@ class TransaksiRegressionTests(RegressionTestCase):
             alamat="Jl. Lain No. 11",
         )
         Saldo.objects.create(nasabah=other_nasabah)
-        other_jenis = JenisSampah.objects.create(
+        other_jenis = buat_jenis_sampah(
             bank_sampah=other_bank,
             nomor="X-1",
             nama_sampah="Kaca",

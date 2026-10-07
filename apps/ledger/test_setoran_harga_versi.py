@@ -39,7 +39,6 @@ class SetoranHargaVersiTests(APITestCase):
             nomor="PLS-001",
             nama_sampah="Plastik PET",
             kategori="plastik",
-            harga_per_kg=Decimal(3000),
         )
         refresh = RefreshToken.for_user(self.user)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")

@@ -2,7 +2,8 @@
 
 from typing import Any
 
-from api.models import BankSampah, JenisSampah
+from api.models import BankSampah
+from apps.waste_catalog.api import buat_jenis_sampah
 from tests.regression.helpers import RegressionTestCase
 
 
@@ -50,7 +51,7 @@ class JenisRegressionTests(RegressionTestCase):
         other_bank = BankSampah.objects.create(
             nama="Lain", alamat="Jl. Lain No. 10", kota="Depok", no_hp_pic="+628999999999"
         )
-        other_jenis = JenisSampah.objects.create(
+        other_jenis = buat_jenis_sampah(
             bank_sampah=other_bank,
             nomor="X-1",
             nama_sampah="Kaca",

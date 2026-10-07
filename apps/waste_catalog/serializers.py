@@ -13,6 +13,11 @@ from apps.waste_catalog.api import versi_berlaku, versi_terjadwal
 class JenisSampahSerializer(serializers.ModelSerializer[Model]):
     satuan = serializers.SerializerMethodField()
     kode = serializers.CharField(source="nomor", required=True, max_length=20)
+    # Bukan kolom model: harga masuk sebagai versi pertama (create) atau versi
+    # baru (PUT dari aplikasi lama), dan keluar sebagai harga yang berlaku.
+    harga_per_kg = serializers.DecimalField(
+        max_digits=11, decimal_places=2, write_only=True, required=False
+    )
 
     class Meta:
         model = JenisSampah
@@ -49,6 +54,11 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
     def validate_harga_per_kg(self, value: Any) -> Any:
         return validasi_harga(value)
 
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if self.instance is None and "harga_per_kg" not in attrs:
+            raise serializers.ValidationError({"harga_per_kg": ["Harga wajib diisi"]})
+        return attrs
+
     def get_satuan(self, obj: Any) -> Any:
         return "kg"
 
@@ -56,8 +66,7 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
         data = super().to_representation(instance)
         sekarang = timezone.now()
         berlaku = versi_berlaku(instance, sekarang)
-        if berlaku is not None:
-            data["harga_per_kg"] = _HARGA.to_representation(berlaku.harga_per_kg)
+        data["harga_per_kg"] = _HARGA.to_representation(berlaku.harga_per_kg) if berlaku else None
         data["harga_berlaku_mulai"] = (
             _WAKTU.to_representation(berlaku.berlaku_mulai) if berlaku else None
         )

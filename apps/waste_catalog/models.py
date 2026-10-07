@@ -21,7 +21,8 @@ class JenisSampah(models.Model):
     nama_sampah = models.CharField(max_length=50)
     kategori = models.CharField(max_length=20, choices=Kategori.choices, default=Kategori.PLASTIK)
     deskripsi = models.TextField(blank=True)
-    harga_per_kg = models.DecimalField(max_digits=11, decimal_places=2)
+    # Harga tidak disimpan di sini: satu-satunya sumber harga adalah
+    # HargaSampah, dibaca lewat apps.waste_catalog.api.harga_berlaku.
     is_active = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
