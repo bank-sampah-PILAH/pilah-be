@@ -7,7 +7,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from api.models import JenisSampah
-from apps.waste_catalog.api import versi_berlaku, versi_terjadwal
+from apps.waste_catalog.api import ringkas_harga
 
 
 class JenisSampahSerializer(serializers.ModelSerializer[Model]):
@@ -64,13 +64,11 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
 
     def to_representation(self, instance: Any) -> Any:
         data = super().to_representation(instance)
-        sekarang = timezone.now()
-        berlaku = versi_berlaku(instance, sekarang)
+        berlaku, terjadwal = ringkas_harga(instance.riwayat_harga.all(), timezone.now())
         data["harga_per_kg"] = _HARGA.to_representation(berlaku.harga_per_kg) if berlaku else None
         data["harga_berlaku_mulai"] = (
             _WAKTU.to_representation(berlaku.berlaku_mulai) if berlaku else None
         )
-        terjadwal = versi_terjadwal(instance, sekarang)
         data["harga_terjadwal"] = (
             {
                 "harga_per_kg": _HARGA.to_representation(terjadwal.harga_per_kg),

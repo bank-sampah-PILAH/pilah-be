@@ -24,7 +24,9 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_queryset(self) -> QuerySet[JenisSampah]:
-        qs = JenisSampah.objects.filter(bank_sampah=current_bank(self.request))
+        qs = JenisSampah.objects.filter(bank_sampah=current_bank(self.request)).prefetch_related(
+            "riwayat_harga"
+        )
         search = self.request.query_params.get("search", "")
         status_filter = self.request.query_params.get("status", "aktif")
         kategori = self.request.query_params.get("kategori")
@@ -103,4 +105,6 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
             serializer.validated_data.get("berlaku_mulai") or timezone.now(),
             current_user(request),
         )
+        # Muat ulang: riwayat harga hasil prefetch get_object() belum memuat versi baru.
+        jenis = self.get_object()
         return Response(self.get_serializer(jenis).data, status=status.HTTP_201_CREATED)

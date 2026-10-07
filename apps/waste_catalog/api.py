@@ -1,5 +1,6 @@
 """Public port of the catalog context."""
 
+from collections.abc import Iterable
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -63,10 +64,27 @@ def versi_berlaku(jenis: JenisSampah, pada: datetime) -> HargaSampah | None:
     )
 
 
-def versi_terjadwal(jenis: JenisSampah, pada: datetime) -> HargaSampah | None:
-    """Versi harga ``jenis`` berikutnya yang baru berlaku setelah ``pada``."""
-    return (
-        HargaSampah.objects.filter(jenis_sampah=jenis, berlaku_mulai__gt=pada)
-        .order_by("berlaku_mulai", "-id")
-        .first()
-    )
+def ringkas_harga(
+    riwayat: Iterable[HargaSampah], pada: datetime
+) -> tuple[HargaSampah | None, HargaSampah | None]:
+    """Versi yang berlaku pada ``pada`` dan versi berikutnya yang terjadwal.
+
+    Bekerja atas riwayat yang sudah dimuat (mis. lewat ``prefetch_related``),
+    sehingga daftar jenis sampah tidak membutuhkan query per jenis. Aturan
+    pemilihannya sama dengan ``harga_berlaku``.
+    """
+    berlaku: HargaSampah | None = None
+    terjadwal: HargaSampah | None = None
+    for versi in riwayat:
+        if versi.berlaku_mulai <= pada:
+            if berlaku is None or (versi.berlaku_mulai, versi.id) > (
+                berlaku.berlaku_mulai,
+                berlaku.id,
+            ):
+                berlaku = versi
+        elif terjadwal is None or (versi.berlaku_mulai, -versi.id) < (
+            terjadwal.berlaku_mulai,
+            -terjadwal.id,
+        ):
+            terjadwal = versi
+    return berlaku, terjadwal
