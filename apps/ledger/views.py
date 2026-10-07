@@ -18,6 +18,7 @@ from apps.ledger.serializers import (
     DraftPencairanCreateSerializer,
     DraftPencairanListSerializer,
     DraftPencairanSerializer,
+    DraftPencairanUpdateSerializer,
     PencairanCreateSerializer,
     PencairanDetailSerializer,
     PencairanEditSerializer,
@@ -283,3 +284,10 @@ class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg] 
         serializer.is_valid(raise_exception=True)
         draft = DraftPencairanService.buat_draft(_user(request), serializer.validated_data)
         return Response(DraftPencairanSerializer(draft).data, status=status.HTTP_201_CREATED)
+
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
+        draft = self.get_object()
+        serializer = DraftPencairanUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        DraftPencairanService.ubah_draft(_user(request), draft, serializer.validated_data)
+        return Response(DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data)

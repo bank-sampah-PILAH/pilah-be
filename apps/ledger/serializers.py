@@ -309,10 +309,13 @@ class DraftItemInputSerializer(serializers.Serializer[Any]):
     nasabah_id = serializers.UUIDField()
     nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
     metode = serializers.ChoiceField(choices=Pencairan.Metode.choices, required=False)
+    # null clears the item's own potongan so it follows the draft default again.
     potongan_jenis = serializers.ChoiceField(
-        choices=DraftPencairan.PotonganJenis.choices, required=False
+        choices=DraftPencairan.PotonganJenis.choices, required=False, allow_null=True
     )
-    potongan_nilai = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
+    potongan_nilai = serializers.DecimalField(
+        max_digits=14, decimal_places=2, required=False, allow_null=True
+    )
 
     def validate_nominal(self, value: Decimal) -> Decimal:
         return _validate_nominal_pencairan(value)
@@ -321,9 +324,8 @@ class DraftItemInputSerializer(serializers.Serializer[Any]):
         return _validate_potongan(attrs)
 
 
-class DraftPencairanCreateSerializer(serializers.Serializer[Any]):
+class _DraftPencairanWriteSerializer(serializers.Serializer[Any]):
     nama = serializers.CharField(max_length=150, required=False, allow_blank=True)
-    items = DraftItemInputSerializer(many=True, allow_empty=False)
     potongan_jenis = serializers.ChoiceField(
         choices=DraftPencairan.PotonganJenis.choices, required=False
     )
@@ -337,6 +339,14 @@ class DraftPencairanCreateSerializer(serializers.Serializer[Any]):
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         return _validate_potongan(attrs)
+
+
+class DraftPencairanUpdateSerializer(_DraftPencairanWriteSerializer):
+    items = DraftItemInputSerializer(many=True, allow_empty=False, required=False)
+
+
+class DraftPencairanCreateSerializer(_DraftPencairanWriteSerializer):
+    items = DraftItemInputSerializer(many=True, allow_empty=False)
 
 
 class DraftPencairanItemSerializer(serializers.ModelSerializer[Model]):
