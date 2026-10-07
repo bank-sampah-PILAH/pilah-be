@@ -415,31 +415,73 @@ class DraftPencairanService:
         assert bank is not None  # ponytail: views gate on IsActivePengelola
         draft = DraftPencairan.objects.create(
             bank_sampah=bank,
-            nama=(payload.get("nama") or "").strip() or DraftPencairanService.nama_default(),
+            nama=DraftPencairanService._nama(payload.get("nama")),
             dibuat_oleh=user,
             diubah_oleh=user,
             potongan_jenis=payload.get("potongan_jenis", DraftPencairan.PotonganJenis.PERSEN),
             potongan_nilai=payload.get("potongan_nilai", Decimal(0)),
         )
-        dibuat: list[DraftPencairanItem] = []
-        for index, item in enumerate(payload["items"]):
-            nasabah = get_eligible_nasabah(bank, item["nasabah_id"])
+        items = DraftPencairanService._sinkronkan_item(draft, payload["items"])
+        DraftPencairanService._periksa_potongan(items)
+        return draft
+
+    @staticmethod
+    @transaction.atomic
+    def ubah_draft(user: User, draft: DraftPencairan, payload: Mapping[str, Any]) -> DraftPencairan:
+        """Apply an edit; `items`, when sent, is the full desired list (omitted ones are removed).
+
+        `draft` comes from the caller's bank-scoped queryset; it is re-read under lock.
+        """
+        draft = DraftPencairan.objects.select_for_update().get(pk=draft.pk)
+        if "nama" in payload:
+            draft.nama = DraftPencairanService._nama(payload["nama"])
+        if "potongan_jenis" in payload:
+            draft.potongan_jenis = payload["potongan_jenis"]
+            draft.potongan_nilai = payload["potongan_nilai"]
+        draft.diubah_oleh = user
+        draft.save()
+        if "items" in payload:
+            items = DraftPencairanService._sinkronkan_item(draft, payload["items"])
+        else:
+            items = list(draft.items.select_related("draft"))
+        DraftPencairanService._periksa_potongan(items)
+        return draft
+
+    @staticmethod
+    def _nama(nama: str | None) -> str:
+        return (nama or "").strip() or DraftPencairanService.nama_default()
+
+    @staticmethod
+    def _sinkronkan_item(
+        draft: DraftPencairan, payload_items: list[Mapping[str, Any]]
+    ) -> list[DraftPencairanItem]:
+        """Upsert items by nasabah in request order and drop the ones not sent.
+
+        A field the request leaves out keeps its stored value; a null potongan pair
+        clears the item's override so it follows the draft default again.
+        """
+        bank = draft.bank_sampah
+        ada = {item.nasabah_id: item for item in draft.items.select_related("draft")}
+        hasil: list[DraftPencairanItem] = []
+        for index, data in enumerate(payload_items):
+            nasabah = get_eligible_nasabah(bank, data["nasabah_id"])
             if nasabah is None:
                 raise serializers.ValidationError(
                     {f"items[{index}].nasabah_id": ["Nasabah tidak ditemukan atau tidak aktif"]}
                 )
-            dibuat.append(
-                DraftPencairanItem.objects.create(
-                    draft=draft,
-                    nasabah=nasabah,
-                    nominal=DraftPencairanService._nominal(nasabah, item.get("nominal"), index),
-                    metode=item.get("metode", Pencairan.Metode.TUNAI),
-                    potongan_jenis=item.get("potongan_jenis", ""),
-                    potongan_nilai=item.get("potongan_nilai"),
-                )
-            )
-        DraftPencairanService._periksa_potongan(dibuat)
-        return draft
+            current = ada.pop(nasabah.id, None)
+            item = current or DraftPencairanItem(draft=draft, nasabah=nasabah)
+            diminta = data.get("nominal", current.nominal if current else None)
+            item.nominal = DraftPencairanService._nominal(nasabah, diminta, index)
+            item.metode = data.get("metode", current.metode if current else Pencairan.Metode.TUNAI)
+            if "potongan_jenis" in data:
+                item.potongan_jenis = data["potongan_jenis"] or ""
+                item.potongan_nilai = data.get("potongan_nilai")
+            item.save()
+            hasil.append(item)
+        for sisa in ada.values():
+            sisa.delete()
+        return hasil
 
     @staticmethod
     def _periksa_potongan(items: list[DraftPencairanItem]) -> None:
