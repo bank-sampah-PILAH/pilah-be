@@ -10,7 +10,7 @@ from rest_framework.response import Response
 
 from api.models import JenisSampah
 from apps.nasabah.serializers import StatusSerializer
-from apps.waste_catalog.serializers import JenisSampahSerializer
+from apps.waste_catalog.serializers import HargaBaruSerializer, JenisSampahSerializer
 from apps.waste_catalog.services import catat_harga
 from shared_kernel.permissions import IsActivePengelola
 from shared_kernel.scoping import current_bank, current_user
@@ -78,3 +78,16 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
                 "message": f"Jenis sampah berhasil {state}",
             }
         )
+
+    @action(detail=True, methods=["post"], url_path="harga")
+    def ubah_harga(self, request: Request, pk: str | None = None) -> Response:
+        jenis = self.get_object()
+        serializer = HargaBaruSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        catat_harga(
+            jenis,
+            serializer.validated_data["harga_per_kg"],
+            timezone.now(),
+            current_user(request),
+        )
+        return Response(self.get_serializer(jenis).data, status=status.HTTP_201_CREATED)

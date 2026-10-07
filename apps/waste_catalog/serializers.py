@@ -2,9 +2,11 @@ from decimal import Decimal
 from typing import Any
 
 from django.db.models import Model
+from django.utils import timezone
 from rest_framework import serializers
 
 from api.models import JenisSampah
+from apps.waste_catalog.api import harga_berlaku
 
 
 class JenisSampahSerializer(serializers.ModelSerializer[Model]):
@@ -44,11 +46,30 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
         return value
 
     def validate_harga_per_kg(self, value: Any) -> Any:
-        if value <= 0:
-            raise serializers.ValidationError("Harga harus berupa angka positif")
-        if value >= Decimal(1000000000):
-            raise serializers.ValidationError("Harga maksimal 9 digit")
-        return value
+        return validasi_harga(value)
 
     def get_satuan(self, obj: Any) -> Any:
         return "kg"
+
+    def to_representation(self, instance: Any) -> Any:
+        data = super().to_representation(instance)
+        harga = harga_berlaku(instance, timezone.now())
+        if harga is not None:
+            data["harga_per_kg"] = serializers.DecimalField(
+                max_digits=11, decimal_places=2
+            ).to_representation(harga)
+        return data
+
+
+def validasi_harga(value: Decimal) -> Decimal:
+    if value <= 0:
+        raise serializers.ValidationError("Harga harus berupa angka positif")
+    if value >= Decimal(1000000000):
+        raise serializers.ValidationError("Harga maksimal 9 digit")
+    return value
+
+
+class HargaBaruSerializer(serializers.Serializer[Any]):
+    harga_per_kg = serializers.DecimalField(
+        max_digits=11, decimal_places=2, validators=[validasi_harga]
+    )
