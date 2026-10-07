@@ -28,7 +28,6 @@ from apps.waste_catalog.api import get_active_jenis
 from shared_kernel.kalkulasi import (
     bulatkan_rupiah,
     harga_berlaku,
-    hitung_potongan,
     hitung_subtotal,
     total_setoran,
 )
@@ -393,11 +392,16 @@ class DraftPencairanService:
     def buat_draft(user: User, payload: Mapping[str, Any]) -> DraftPencairan:
         bank = user.bank_sampah
         assert bank is not None  # ponytail: views gate on IsActivePengelola
-        draft = DraftPencairan.objects.create(bank_sampah=bank, dibuat_oleh=user, diubah_oleh=user)
+        draft = DraftPencairan.objects.create(
+            bank_sampah=bank,
+            dibuat_oleh=user,
+            diubah_oleh=user,
+            potongan_jenis=payload.get("potongan_jenis", DraftPencairan.PotonganJenis.PERSEN),
+            potongan_nilai=payload.get("potongan_nilai", Decimal(0)),
+        )
         for index, item in enumerate(payload["items"]):
             nasabah = Nasabah.objects.get(bank_sampah=bank, id=item["nasabah_id"])
             nominal = DraftPencairanService._nominal(nasabah, item.get("nominal"), index)
-            DraftPencairanService._periksa_potongan(item, nominal, index)
             DraftPencairanItem.objects.create(
                 draft=draft,
                 nasabah=nasabah,
@@ -406,17 +410,17 @@ class DraftPencairanService:
                 potongan_jenis=item.get("potongan_jenis", ""),
                 potongan_nilai=item.get("potongan_nilai"),
             )
+        DraftPencairanService._periksa_potongan(draft)
         return draft
 
     @staticmethod
-    def _periksa_potongan(item: Mapping[str, Any], nominal: Decimal, index: int) -> None:
-        if "potongan_jenis" not in item:
-            return
-        potongan = hitung_potongan(nominal, item["potongan_jenis"], item["potongan_nilai"])
-        if potongan > nominal:
-            raise serializers.ValidationError(
-                {f"items[{index}].potongan_nilai": ["Potongan melebihi nominal pencairan"]}
-            )
+    def _periksa_potongan(draft: DraftPencairan) -> None:
+        """Reject a draft whose effective potongan on any item exceeds its nominal."""
+        for index, item in enumerate(draft.items.select_related("draft")):
+            if item.potongan > item.nominal:
+                raise serializers.ValidationError(
+                    {f"items[{index}].potongan_nilai": ["Potongan melebihi nominal pencairan"]}
+                )
 
     @staticmethod
     def _nominal(nasabah: Nasabah, diminta: Decimal | None, index: int) -> Decimal:

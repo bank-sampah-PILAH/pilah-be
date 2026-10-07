@@ -231,8 +231,12 @@ class DraftPencairanItem(TimestampedModel):
 
     @property
     def potongan(self) -> Decimal:
-        """Effective potongan: rounded down to whole rupiah, per item."""
-        return hitung_potongan(self.nominal, self.potongan_jenis, self.potongan_nilai or Decimal(0))
+        """Effective potongan: the item's own pair, else the draft default; whole rupiah."""
+        if self.potongan_jenis:
+            jenis, nilai = self.potongan_jenis, self.potongan_nilai or Decimal(0)
+        else:
+            jenis, nilai = self.draft.potongan_jenis, self.draft.potongan_nilai
+        return hitung_potongan(self.nominal, jenis, nilai)
 
     @property
     def dibayar(self) -> Decimal:
