@@ -153,3 +153,54 @@ class DraftPencairanTests(APITestCase):
         response = self._buat([{"nasabah_id": str(self.nasabah.id), "potongan_jenis": "persen"}])
 
         self.assertEqual(response.status_code, 422, response.data)
+
+    def test_potongan_item_menimpa_default_draft(self) -> None:
+        budi = self._nasabah("NAS-0002", "Budi Santoso", "200000")
+        citra = self._nasabah("NAS-0003", "Citra Dewi", "200000")
+
+        response = self._buat(
+            [
+                {"nasabah_id": str(self.nasabah.id), "nominal": "100000"},
+                {
+                    "nasabah_id": str(budi.id),
+                    "potongan_jenis": "rupiah",
+                    "potongan_nilai": "1000",
+                },
+                {"nasabah_id": str(citra.id), "potongan_jenis": "persen", "potongan_nilai": "0"},
+            ],
+            potongan_jenis="persen",
+            potongan_nilai="10",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["potongan_jenis"], "persen")
+        self.assertEqual(response.data["potongan_nilai"], "10.00")
+        potongan = {item["nasabah_nama"]: item["potongan"] for item in response.data["items"]}
+        self.assertEqual(
+            potongan,
+            {"Ahmad Ridwan": "10000.00", "Budi Santoso": "1000.00", "Citra Dewi": "0.00"},
+        )
+        self.assertEqual(response.data["total_potongan"], "11000.00")
+
+    def test_default_potongan_rupiah_melebihi_nominal_salah_satu_item_ditolak(self) -> None:
+        kecil = self._nasabah("NAS-0002", "Budi Kecil", "5000")
+
+        response = self._buat(
+            [
+                {"nasabah_id": str(self.nasabah.id), "nominal": "100000"},
+                {"nasabah_id": str(kecil.id)},
+            ],
+            potongan_jenis="rupiah",
+            potongan_nilai="6000",
+        )
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("items[1].potongan_nilai", response.data["errors"])
+        self.assertFalse(DraftPencairan.objects.exists())
+
+    def test_default_potongan_tidak_valid_ditolak(self) -> None:
+        response = self._buat(
+            [{"nasabah_id": str(self.nasabah.id)}], potongan_jenis="persen", potongan_nilai="101"
+        )
+
+        self.assertEqual(response.status_code, 422, response.data)
