@@ -109,3 +109,47 @@ class DraftPencairanTests(APITestCase):
         self.assertEqual(response.data["total_nominal"], "20002.00")
         self.assertEqual(response.data["total_potongan"], "1000.00")
         self.assertEqual(response.data["total_dibayar"], "19002.00")
+
+    def test_potongan_rupiah_dipotong_dari_nominal(self) -> None:
+        response = self._buat(
+            [
+                {
+                    "nasabah_id": str(self.nasabah.id),
+                    "nominal": "100000",
+                    "potongan_jenis": "rupiah",
+                    "potongan_nilai": "2500",
+                }
+            ]
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["items"][0]["potongan"], "2500.00")
+        self.assertEqual(response.data["items"][0]["dibayar"], "97500.00")
+
+    def test_potongan_tidak_valid_ditolak(self) -> None:
+        kasus = {
+            "rupiah melebihi nominal": ("rupiah", "100001"),
+            "persen lebih dari 100": ("persen", "100.5"),
+            "nilai negatif": ("rupiah", "-1"),
+            "rupiah pecahan": ("rupiah", "10.5"),
+        }
+        for nama, (jenis, nilai) in kasus.items():
+            with self.subTest(nama):
+                response = self._buat(
+                    [
+                        {
+                            "nasabah_id": str(self.nasabah.id),
+                            "nominal": "100000",
+                            "potongan_jenis": jenis,
+                            "potongan_nilai": nilai,
+                        }
+                    ]
+                )
+
+                self.assertEqual(response.status_code, 422, response.data)
+                self.assertFalse(DraftPencairan.objects.exists())
+
+    def test_jenis_potongan_tanpa_nilai_ditolak(self) -> None:
+        response = self._buat([{"nasabah_id": str(self.nasabah.id), "potongan_jenis": "persen"}])
+
+        self.assertEqual(response.status_code, 422, response.data)
