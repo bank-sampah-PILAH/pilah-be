@@ -68,6 +68,11 @@ class HargaSampah(models.Model):
         app_label = "api"
         db_table = "harga_sampah"
         indexes = [models.Index(fields=["jenis_sampah", "berlaku_mulai"])]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(harga_per_kg__gt=0), name="harga_sampah_harga_positif"
+            )
+        ]
 
     def __str__(self) -> str:
         return f"{self.jenis_sampah_id} {self.harga_per_kg} @ {self.berlaku_mulai}"
