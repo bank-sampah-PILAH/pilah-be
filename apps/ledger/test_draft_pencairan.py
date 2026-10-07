@@ -39,6 +39,7 @@ class DraftPencairanTests(APITestCase):
             bank_sampah=bank or self.bank,
             nomor=nomor,
             nama=nama,
+            email=f"{nomor.lower()}@example.com",
             no_hp=f"+6281{nomor[-4:]}00000",
             alamat="Jl. Mawar No. 12",
             **extra,

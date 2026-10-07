@@ -393,14 +393,26 @@ class DraftPencairanService:
         bank = user.bank_sampah
         assert bank is not None  # ponytail: views gate on IsActivePengelola
         draft = DraftPencairan.objects.create(bank_sampah=bank, dibuat_oleh=user, diubah_oleh=user)
-        for item in payload["items"]:
+        for index, item in enumerate(payload["items"]):
             nasabah = Nasabah.objects.get(bank_sampah=bank, id=item["nasabah_id"])
-            saldo = Saldo.objects.filter(nasabah=nasabah).first()
             DraftPencairanItem.objects.create(
                 draft=draft,
                 nasabah=nasabah,
-                nominal=item.get("nominal")
-                or bulatkan_rupiah(saldo.total_saldo if saldo else Decimal(0)),
+                nominal=DraftPencairanService._nominal(nasabah, item.get("nominal"), index),
                 metode=item.get("metode", Pencairan.Metode.TUNAI),
             )
         return draft
+
+    @staticmethod
+    def _nominal(nasabah: Nasabah, diminta: Decimal | None, index: int) -> Decimal:
+        """Requested nominal, or the whole saldo; never above the saldo, never zero."""
+        saldo = Saldo.objects.filter(nasabah=nasabah).first()
+        tersedia = bulatkan_rupiah(saldo.total_saldo) if saldo else Decimal(0)
+        nominal = tersedia if diminta is None else diminta
+        if nominal <= 0:
+            raise serializers.ValidationError({f"items[{index}].nominal": ["Saldo nasabah kosong"]})
+        if nominal > tersedia:
+            raise serializers.ValidationError(
+                {f"items[{index}].nominal": ["Saldo nasabah tidak mencukupi"]}
+            )
+        return nominal
