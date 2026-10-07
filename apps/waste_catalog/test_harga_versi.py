@@ -40,3 +40,11 @@ class HargaBerlakuTests(TestCase):
         self.assertEqual(harga_berlaku(self.jenis, self.sekarang - timedelta(days=5)), 3000)
         self.assertEqual(harga_berlaku(self.jenis, self.sekarang), 4000)
         self.assertEqual(harga_berlaku(self.jenis, self.sekarang + timedelta(days=4)), 5000)
+
+    def test_later_version_wins_when_two_start_at_the_same_time(self) -> None:
+        # Rows are never edited, so a pengurus corrects a scheduled price by
+        # adding another one for the same time; the correction must win.
+        self._versi("4000", 2)
+        self._versi("4500", 2)
+
+        self.assertEqual(harga_berlaku(self.jenis, self.sekarang + timedelta(days=3)), 4500)
