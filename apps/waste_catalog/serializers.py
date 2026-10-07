@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -84,8 +85,39 @@ def validasi_harga(value: Decimal) -> Decimal:
     return value
 
 
+# Jadwal harga lebih jauh dari ini hampir pasti salah ketik tahun.
+BATAS_JADWAL_HARGA_HARI = 365
+
+
+class WaktuBerzonaField(serializers.DateTimeField):
+    """Waktu yang wajib membawa offset zona waktu.
+
+    Bank sampah bisa berada di WIB, WITA, atau WIT. Waktu tanpa offset akan
+    ditafsirkan sebagai UTC dan bergeser beberapa jam, jadi ditolak.
+    """
+
+    default_error_messages = {"tanpa_zona": "Sertakan zona waktu, misalnya +07:00."}
+
+    def enforce_timezone(self, value: datetime) -> datetime:
+        if timezone.is_naive(value):
+            self.fail("tanpa_zona")
+        return super().enforce_timezone(value)
+
+
 class HargaBaruSerializer(serializers.Serializer[Any]):
     harga_per_kg = serializers.DecimalField(
         max_digits=11, decimal_places=2, validators=[validasi_harga]
     )
-    berlaku_mulai = serializers.DateTimeField(required=False)
+    berlaku_mulai = WaktuBerzonaField(required=False)
+
+    def validate_berlaku_mulai(self, value: datetime) -> datetime:
+        sekarang = timezone.now()
+        if value <= sekarang:
+            raise serializers.ValidationError(
+                "Harga tidak boleh berlaku surut. Kosongkan untuk berlaku sekarang."
+            )
+        if value > sekarang + timedelta(days=BATAS_JADWAL_HARGA_HARI):
+            raise serializers.ValidationError(
+                f"Harga paling lambat dijadwalkan {BATAS_JADWAL_HARGA_HARI} hari dari sekarang."
+            )
+        return value
