@@ -72,3 +72,19 @@ class SetoranHargaVersiTests(APITestCase):
 
         self.assertEqual(item.harga_snapshot, 4000)
         self.assertEqual(item.subtotal, 8000)
+
+    def test_a_price_change_leaves_recorded_setoran_untouched(self) -> None:
+        # SDS 7.1.2: harga disalin ke transaksi, jadi laporan lama tetap sama.
+        self._versi("4000", -timedelta(days=1))
+        lama = self._setor("2.000")
+
+        diubah = self.client.post(
+            f"/api/v1/jenis-sampah/{self.jenis.id}/harga", {"harga_per_kg": "6000"}, format="json"
+        )
+        self.assertEqual(diubah.status_code, 201, diubah.data)
+        baru = self._setor("2.000")
+
+        lama.refresh_from_db()
+        self.assertEqual((lama.harga_snapshot, lama.subtotal), (4000, 8000))
+        self.assertEqual(lama.transaksi.total_nilai, 8000)
+        self.assertEqual((baru.harga_snapshot, baru.subtotal), (6000, 12000))
