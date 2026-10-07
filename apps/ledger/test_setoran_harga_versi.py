@@ -87,3 +87,22 @@ class SetoranHargaVersiTests(APITestCase):
         self.assertEqual((lama.harga_snapshot, lama.subtotal), (4000, 8000))
         self.assertEqual(lama.transaksi.total_nilai, 8000)
         self.assertEqual((baru.harga_snapshot, baru.subtotal), (6000, 12000))
+
+    def test_setoran_is_rejected_while_a_jenis_has_no_price_in_effect(self) -> None:
+        # UC-11 A2: jenis tanpa harga aktif tidak boleh disimpan.
+        self._versi("4000", timedelta(days=1))
+
+        response = self.client.post(
+            "/api/v1/transaksi",
+            {
+                "nasabah_id": str(self.nasabah.id),
+                "items": [{"jenis_sampah_id": str(self.jenis.id), "berat": "1.000"}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertEqual(
+            response.data["errors"]["items[0].jenis_sampah_id"], ["Harga jenis sampah belum diatur"]
+        )
+        self.assertFalse(DetailTransaksi.objects.exists())
