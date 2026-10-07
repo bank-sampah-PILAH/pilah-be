@@ -71,3 +71,10 @@ class HargaBerlakuTests(TestCase):
         self.assertEqual(berlaku.harga_per_kg, harga_berlaku(self.jenis, self.sekarang))
         self.assertEqual(berlaku.harga_per_kg, 3100)
         self.assertEqual(terjadwal.harga_per_kg, 5500)
+
+    def test_text_labels_name_the_jenis_and_the_price_version(self) -> None:
+        # Teks ini yang tampil di Django admin dan shell.
+        versi = self._versi("3500.50", 0)
+
+        self.assertEqual(str(self.jenis), "Plastik PET")
+        self.assertEqual(str(versi), f"{self.jenis.id} 3500.50 @ {versi.berlaku_mulai}")
