@@ -299,8 +299,7 @@ def _flowables(data: StatementData, theme: Theme) -> list[object]:
             ]
         )
     )
-    story.append(summary)
-    story.append(Spacer(1, 12))
+    story.extend([summary, Spacer(1, 12)])
 
     # --- Mutation table with detail sub-rows.
     story.append(_mutation_table(data.rows, theme, styles))
