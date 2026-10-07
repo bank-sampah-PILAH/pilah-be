@@ -6,9 +6,10 @@ row lock must already be inside @transaction.atomic.
 """
 
 from collections.abc import Iterable
+from decimal import Decimal
 from uuid import UUID
 
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 
 from api.models import BankSampah, Nasabah
 
@@ -32,3 +33,31 @@ def get_eligible_nasabah_map(bank: BankSampah, nasabah_ids: Iterable[UUID]) -> d
     """
     rows = _eligible_in(bank).filter(id__in=list(nasabah_ids)).select_related("saldo")
     return {nasabah.id: nasabah for nasabah in rows}
+
+
+_KANDIDAT_URUTAN = {
+    "nama": "nama",
+    "-nama": "-nama",
+    "saldo": "saldo__total_saldo",
+    "-saldo": "-saldo__total_saldo",
+}
+
+
+def kandidat_pencairan(
+    bank: BankSampah, *, search: str = "", saldo_min: Decimal = Decimal(0), ordering: str = "nama"
+) -> QuerySet[Nasabah]:
+    """Nasabah a pengurus can still pay out: active, approved, with at least Rp 1.
+
+    One place for the "memenuhi syarat" rule so the picker and the batch builder agree.
+    """
+    qs = Nasabah.objects.filter(
+        bank_sampah=bank,
+        is_active=True,
+        status=Nasabah.Status.APPROVED,
+        saldo__total_saldo__gte=max(saldo_min, Decimal(1)),
+    ).select_related("saldo")
+    if len(search) >= 2:
+        qs = qs.filter(
+            Q(nama__icontains=search) | Q(nomor__icontains=search) | Q(no_hp__icontains=search)
+        )
+    return qs.order_by(_KANDIDAT_URUTAN[ordering], "nomor")
