@@ -67,7 +67,8 @@ class HargaBerlakuTests(TestCase):
 
         berlaku, terjadwal = ringkas_harga(self.jenis.riwayat_harga.all(), self.sekarang)
 
-        assert berlaku is not None and terjadwal is not None
+        assert berlaku is not None
+        assert terjadwal is not None
         self.assertEqual(berlaku.harga_per_kg, harga_berlaku(self.jenis, self.sekarang))
         self.assertEqual(berlaku.harga_per_kg, 3100)
         self.assertEqual(terjadwal.harga_per_kg, 5500)
