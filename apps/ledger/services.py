@@ -23,7 +23,7 @@ from api.models import (
     Transaksi,
     User,
 )
-from apps.nasabah.api import get_locked_nasabah
+from apps.nasabah.api import get_eligible_nasabah, get_locked_nasabah
 from apps.waste_catalog.api import get_active_jenis
 from shared_kernel.kalkulasi import (
     bulatkan_rupiah,
@@ -401,7 +401,11 @@ class DraftPencairanService:
         )
         dibuat: list[DraftPencairanItem] = []
         for index, item in enumerate(payload["items"]):
-            nasabah = Nasabah.objects.get(bank_sampah=bank, id=item["nasabah_id"])
+            nasabah = get_eligible_nasabah(bank, item["nasabah_id"])
+            if nasabah is None:
+                raise serializers.ValidationError(
+                    {f"items[{index}].nasabah_id": ["Nasabah tidak ditemukan atau tidak aktif"]}
+                )
             dibuat.append(
                 DraftPencairanItem.objects.create(
                     draft=draft,

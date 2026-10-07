@@ -328,6 +328,12 @@ class DraftPencairanCreateSerializer(serializers.Serializer[Any]):
     )
     potongan_nilai = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
 
+    def validate_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        ids = [item["nasabah_id"] for item in items]
+        if len(set(ids)) != len(ids):
+            raise serializers.ValidationError("Satu nasabah hanya boleh sekali dalam satu draft")
+        return items
+
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         return _validate_potongan(attrs)
 
