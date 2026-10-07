@@ -4,6 +4,8 @@ from datetime import timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework.test import APITestCase
@@ -63,6 +65,32 @@ class BuatJenisSampahTests(HargaApiTestCase):
         self.assertEqual(versi.dibuat_oleh, self.user)
         self.assertGreaterEqual(versi.berlaku_mulai, sebelum - timedelta(seconds=1))
         self.assertLessEqual(versi.berlaku_mulai, timezone.now())
+
+
+class DaftarJenisSampahTests(HargaApiTestCase):
+    def test_list_query_count_does_not_grow_with_the_number_of_jenis(self) -> None:
+        # Aplikasi memuat daftar harga dengan page_size=100; harga berlaku dan
+        # terjadwal tidak boleh membuat satu query per jenis.
+        def hitung_query() -> int:
+            with CaptureQueriesContext(connection) as queries:
+                response = self.client.get("/api/v1/jenis-sampah", {"page_size": 100})
+            self.assertEqual(response.status_code, 200)
+            return len(queries)
+
+        self.buat_jenis(kode="PLS-001")
+        satu_jenis = hitung_query()
+        for nomor in range(2, 6):
+            jenis = self.buat_jenis(kode=f"PLS-00{nomor}")
+            self.client.post(
+                f"/api/v1/jenis-sampah/{jenis['id']}/harga",
+                {
+                    "harga_per_kg": "5000",
+                    "berlaku_mulai": (timezone.now() + timedelta(days=2)).isoformat(),
+                },
+                format="json",
+            )
+
+        self.assertEqual(hitung_query(), satu_jenis)
 
 
 class EditJenisSampahTests(HargaApiTestCase):
