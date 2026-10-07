@@ -1,60 +1,16 @@
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
 from unittest import mock
 
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
-from rest_framework.test import APITestCase
-from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.models import BankSampah, DraftPencairan, Nasabah, Pencairan, Saldo, User
+from apps.ledger.draft_testing import URL, DraftTestBase
 
-URL = "/api/v1/draft-pencairan"
 
-
-class DraftPencairanTests(APITestCase):
-    def setUp(self) -> None:
-        self.bank = BankSampah.objects.create(
-            nama="Bank Sampah BTH",
-            alamat="Depok",
-            kota="Depok",
-            no_hp_pic="+628123456789",
-            status=BankSampah.Status.ACTIVE,
-        )
-        self.user = User.objects.create_user(
-            email="sari@example.com",
-            nama="Ibu Sari",
-            bank_sampah=self.bank,
-            is_profile_complete=True,
-            is_primary_pengelola=True,
-        )
-        self.nasabah = self._nasabah("NAS-0001", "Ahmad Ridwan", "465600")
-        self._login(self.user)
-
-    def _login(self, user: User) -> None:
-        refresh = RefreshToken.for_user(user)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
-
-    def _nasabah(
-        self, nomor: str, nama: str, saldo: str, bank: BankSampah | None = None, **extra: Any
-    ) -> Nasabah:
-        nasabah = Nasabah.objects.create(
-            bank_sampah=bank or self.bank,
-            nomor=nomor,
-            nama=nama,
-            email=f"{nomor.lower()}@example.com",
-            no_hp=f"+6281{nomor[-4:]}00000",
-            alamat="Jl. Mawar No. 12",
-            **extra,
-        )
-        Saldo.objects.create(nasabah=nasabah, total_saldo=Decimal(saldo))
-        return nasabah
-
-    def _buat(self, items: list[dict[str, Any]], **extra: Any) -> Any:
-        return self.client.post(URL, {"items": items, **extra}, format="json")
-
+class DraftPencairanTests(DraftTestBase):
     def test_buat_draft_satu_nasabah_nominal_default_seluruh_saldo(self) -> None:
         response = self._buat([{"nasabah_id": str(self.nasabah.id)}])
 
@@ -263,25 +219,6 @@ class DraftPencairanTests(APITestCase):
         self.assertEqual(duplikat.status_code, 422, duplikat.data)
         self.assertEqual(DraftPencairan.objects.count(), 1)
 
-    def _draft_bank_lain(self) -> DraftPencairan:
-        bank_lain = BankSampah.objects.create(
-            nama="Bank Lain",
-            alamat="Bogor",
-            kota="Bogor",
-            no_hp_pic="+628111111111",
-            status=BankSampah.Status.ACTIVE,
-        )
-        pengurus = User.objects.create_user(
-            email="lain@example.com",
-            nama="Pak Lain",
-            bank_sampah=bank_lain,
-            is_profile_complete=True,
-            is_primary_pengelola=True,
-        )
-        return DraftPencairan.objects.create(
-            bank_sampah=bank_lain, dibuat_oleh=pengurus, diubah_oleh=pengurus
-        )
-
     def test_daftar_dan_detail_hanya_draft_bank_sendiri(self) -> None:
         sendiri = self._buat([{"nasabah_id": str(self.nasabah.id)}]).data["id"]
         asing = self._draft_bank_lain()
@@ -328,9 +265,6 @@ class DraftPencairanTests(APITestCase):
         daftar = self.client.get(URL).data["results"][0]
         self.assertEqual(daftar["nama"], response.data["nama"])
         self.assertEqual(daftar["diubah_oleh_nama"], "Ibu Sari")
-
-    def _patch(self, draft_id: str, **body: Any) -> Any:
-        return self.client.patch(f"{URL}/{draft_id}", body, format="json")
 
     def test_ubah_nama_item_dan_potongan_default(self) -> None:
         budi = self._nasabah("NAS-0002", "Budi Santoso", "50000")
