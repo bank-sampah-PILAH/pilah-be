@@ -143,21 +143,45 @@ class PencairanService:
 
         saldo, _ = Saldo.objects.select_for_update().get_or_create(nasabah=nasabah)
         nominal = payload["nominal"]
-        saldo_sebelum = saldo.total_saldo
-        if nominal > saldo_sebelum:
+        if nominal > saldo.total_saldo:
             raise serializers.ValidationError({"nominal": ["Saldo nasabah tidak mencukupi"]})
+        return PencairanService.realisasi(
+            user=user,
+            nasabah=nasabah,
+            saldo=saldo,
+            nominal=nominal,
+            metode=payload["metode"],
+            tanggal=tanggal,
+            keterangan=payload.get("keterangan") or "",
+        )
 
-        # Whole rupiah, rounded down: drops sen left in PILAH 1.0 saldo, matching
-        # the setoran rule. Swap for kalkulasi.bulatkan_rupiah once PR #22 lands.
-        saldo_sesudah = (saldo_sebelum - nominal).quantize(Decimal(1), rounding=ROUND_DOWN)
+    @staticmethod
+    def realisasi(
+        *,
+        user: User,
+        nasabah: Nasabah,
+        saldo: Saldo,
+        nominal: Decimal,
+        metode: str,
+        tanggal: datetime,
+        keterangan: str,
+    ) -> Pencairan:
+        """Debit `nominal` from the locked `saldo` and record the pencairan.
+
+        The one place a pencairan moves money, shared by the single recording flow and
+        draft confirmation. The caller holds the row locks and checked the balance.
+        """
+        saldo_sebelum = saldo.total_saldo
+        # Whole rupiah, rounded down: drops sen left in PILAH 1.0 saldo, matching the setoran rule.
+        saldo_sesudah = bulatkan_rupiah(saldo_sebelum - nominal)
         pencairan = Pencairan.objects.create(
             nasabah=nasabah,
-            bank_sampah=bank,
+            bank_sampah=nasabah.bank_sampah,
             dicatat_oleh=user,
             tanggal=tanggal,
             nominal=nominal,
-            metode=payload["metode"],
-            keterangan=payload.get("keterangan") or "",
+            metode=metode,
+            keterangan=keterangan,
             saldo_sebelum=saldo_sebelum,
             saldo_sesudah=saldo_sesudah,
         )
