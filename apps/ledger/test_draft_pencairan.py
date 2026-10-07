@@ -1,5 +1,7 @@
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
+from unittest import mock
 
 from django.utils import timezone
 from rest_framework.test import APITestCase
@@ -302,17 +304,15 @@ class DraftPencairanTests(APITestCase):
         self.assertEqual(draft["total_dibayar"], "465600.00")
         self.assertNotIn("items", draft)
 
-    def test_nama_default_otomatis_dan_bisa_diberi_nama(self) -> None:
-        bulan = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
-        hari = timezone.localdate()
+    def test_nama_default_otomatis_memuat_tanggal_dan_jam_dan_bisa_diberi_nama(self) -> None:
         item = [{"nasabah_id": str(self.nasabah.id)}]
+        sekarang = timezone.make_aware(datetime(2026, 10, 7, 14, 35, 12))
 
-        otomatis = self._buat(item)
+        with mock.patch("django.utils.timezone.now", return_value=sekarang):
+            otomatis = self._buat(item)
         bernama = self._buat(item, nama="Cair Lebaran")
 
-        self.assertEqual(
-            otomatis.data["nama"], f"Pencairan {hari.day} {bulan[hari.month - 1]} {hari.year}"
-        )
+        self.assertEqual(otomatis.data["nama"], "Pencairan 7 Okt 2026, 14:35")
         self.assertEqual(bernama.data["nama"], "Cair Lebaran")
 
     def test_draft_memuat_pembuat_dan_waktu(self) -> None:
