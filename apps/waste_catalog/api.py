@@ -18,6 +18,12 @@ def harga_berlaku(jenis: JenisSampah, pada: datetime) -> Decimal | None:
     dengan ``berlaku_mulai`` sama diputus oleh yang dibuat terakhir, karena
     koreksi harga terjadwal adalah baris baru. ``None`` berarti belum ada
     harga yang berlaku.
+
+    Harga dikembalikan apa adanya, termasuk sennya. Harga per kg adalah tarif,
+    bukan nilai uang yang disimpan, jadi pembulatan ke rupiah penuh dilakukan
+    pada subtotal (``shared_kernel.kalkulasi``). Membulatkan tarifnya lebih dulu
+    membuang presisi dan membuat transaksi menyimpan harga yang tidak
+    benar-benar dipakai (BR-03).
     """
     versi = (
         HargaSampah.objects.filter(jenis_sampah=jenis, berlaku_mulai__lte=pada)
