@@ -71,7 +71,7 @@ class TransactionService:
                 )
             # Harga diambil di dalam transaksi database, pada waktu transaksi
             # itu sendiri (SDS SD-01 pesan 10), bukan dari nilai yang dikirim client.
-            harga = harga_berlaku(jenis, transaksi.created_at)
+            harga = harga_berlaku(jenis, transaksi.tanggal)
             if harga is None:
                 raise serializers.ValidationError(
                     {f"items[{index}].jenis_sampah_id": ["Harga jenis sampah belum diatur"]}
