@@ -87,7 +87,7 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
         catat_harga(
             jenis,
             serializer.validated_data["harga_per_kg"],
-            timezone.now(),
+            serializer.validated_data.get("berlaku_mulai") or timezone.now(),
             current_user(request),
         )
         return Response(self.get_serializer(jenis).data, status=status.HTTP_201_CREATED)

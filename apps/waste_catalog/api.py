@@ -25,9 +25,23 @@ def harga_berlaku(jenis: JenisSampah, pada: datetime) -> Decimal | None:
     membuang presisi dan membuat transaksi menyimpan harga yang tidak
     benar-benar dipakai (BR-03).
     """
-    versi = (
+    versi = versi_berlaku(jenis, pada)
+    return versi.harga_per_kg if versi else None
+
+
+def versi_berlaku(jenis: JenisSampah, pada: datetime) -> HargaSampah | None:
+    """Versi harga ``jenis`` yang berlaku pada waktu ``pada``."""
+    return (
         HargaSampah.objects.filter(jenis_sampah=jenis, berlaku_mulai__lte=pada)
         .order_by("-berlaku_mulai", "-id")
         .first()
     )
-    return versi.harga_per_kg if versi else None
+
+
+def versi_terjadwal(jenis: JenisSampah, pada: datetime) -> HargaSampah | None:
+    """Versi harga ``jenis`` berikutnya yang baru berlaku setelah ``pada``."""
+    return (
+        HargaSampah.objects.filter(jenis_sampah=jenis, berlaku_mulai__gt=pada)
+        .order_by("berlaku_mulai", "-id")
+        .first()
+    )
