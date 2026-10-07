@@ -3,6 +3,7 @@ from datetime import date, datetime, time, timedelta
 from decimal import ROUND_DOWN, Decimal
 from typing import Any, TypeVar, cast
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from django.db import transaction
 from django.db.models import Exists, F, Max, Model, OuterRef, Q, QuerySet, Subquery, Sum
@@ -386,6 +387,9 @@ class BalanceService:
         return cast(Decimal, masuk - keluar)
 
 
+# The server runs on UTC, but a pengurus reads the name on a clock in WIB.
+ZONA_PENGURUS = ZoneInfo("Asia/Jakarta")
+
 _BULAN_SINGKAT = (
     "Jan",
     "Feb",
@@ -409,7 +413,7 @@ class DraftTidakBisaDiubah(Exception):
 class DraftPencairanService:
     @staticmethod
     def nama_default() -> str:
-        sekarang = timezone.localtime()
+        sekarang = timezone.localtime(timezone=ZONA_PENGURUS)
         return (
             f"Pencairan {sekarang.day} {_BULAN_SINGKAT[sekarang.month - 1]} {sekarang.year}, "
             f"{sekarang:%H:%M}"
