@@ -15,6 +15,8 @@ from rest_framework.response import Response
 
 from api.models import BankSampah, DraftPencairan, DraftPencairanItem, Pencairan, Transaksi, User
 from apps.ledger.serializers import (
+    DraftKandidatQuerySerializer,
+    DraftKandidatSerializer,
     DraftPencairanCreateSerializer,
     DraftPencairanListSerializer,
     DraftPencairanSerializer,
@@ -34,6 +36,7 @@ from apps.ledger.services import (
     TransactionFilterService,
     TransactionService,
 )
+from apps.nasabah.api import kandidat_pencairan
 from apps.notification.api import send_setoran_receipt
 from apps.reporting.api import export_excel
 from shared_kernel.permissions import (
@@ -304,3 +307,11 @@ class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg] 
         except DraftTidakBisaDiubah as exc:
             return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
         return Response(DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data)
+
+    @action(detail=False, methods=["get"], url_path="kandidat")
+    def kandidat(self, request: Request) -> Response:
+        """Everyone a draft could pay out, unpaginated, so the picker can select across pages."""
+        query = DraftKandidatQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        nasabah = kandidat_pencairan(current_bank(request), **query.validated_data)
+        return Response(DraftKandidatSerializer(nasabah, many=True).data)

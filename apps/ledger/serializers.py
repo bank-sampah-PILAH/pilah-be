@@ -427,3 +427,20 @@ class DraftPencairanListSerializer(serializers.ModelSerializer[Model]):
             "total_potongan",
             "total_dibayar",
         ]
+
+
+class DraftKandidatQuerySerializer(serializers.Serializer[Any]):
+    search = serializers.CharField(required=False, allow_blank=True, default="")
+    saldo_min = serializers.DecimalField(
+        max_digits=14, decimal_places=2, required=False, min_value=Decimal(0), default=Decimal(0)
+    )
+    ordering = serializers.ChoiceField(
+        choices=["nama", "-nama", "saldo", "-saldo"], required=False, default="nama"
+    )
+
+
+class DraftKandidatSerializer(serializers.Serializer[Any]):
+    id = serializers.UUIDField()
+    kode = serializers.CharField(source="nomor")
+    nama = serializers.CharField()
+    saldo = serializers.DecimalField(max_digits=14, decimal_places=2, source="saldo.total_saldo")
