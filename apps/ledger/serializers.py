@@ -377,3 +377,21 @@ class DraftPencairanSerializer(serializers.ModelSerializer[Model]):
             "total_potongan",
             "total_dibayar",
         ]
+
+
+class DraftPencairanListSerializer(serializers.ModelSerializer[Model]):
+    jumlah_item = serializers.IntegerField(read_only=True)
+    total_nominal = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_potongan = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_dibayar = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = DraftPencairan
+        fields = [
+            "id",
+            "status",
+            "jumlah_item",
+            "total_nominal",
+            "total_potongan",
+            "total_dibayar",
+        ]
