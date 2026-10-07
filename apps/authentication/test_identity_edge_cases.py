@@ -3,7 +3,7 @@ from unittest.mock import Mock, patch
 
 from django.core import signing
 from django.db import IntegrityError
-from django.test import override_settings
+from django.test import SimpleTestCase, override_settings
 from rest_framework.test import APITestCase
 
 from api.models import BankSampah, Nasabah, User
@@ -206,3 +206,34 @@ class NasabahSelfRegistrationServiceTests(APITestCase):
             register_nasabah(user, {"bank_sampah_id": self.bank.id})
 
         self.assertFalse(Nasabah.objects.filter(user=user).exists())
+
+
+class NewAccountRoleTests(SimpleTestCase):
+    """Role precedence for a new Google account.
+
+    `login_with_google` answers with a registration response before it reaches
+    `_role_for_new_account` unless the email is allowlisted, carries a dev role
+    or matches an active Nasabah, so the final Pengelola fallback cannot be
+    reached through a request. It is the safe default if that guard ever moves,
+    so it is pinned here directly.
+    """
+
+    def test_allowlisted_email_outranks_every_other_signal(self) -> None:
+        role = AuthService._role_for_new_account(True, "pengelola", Mock(spec=Nasabah))
+
+        self.assertEqual(role, User.Role.SUPERADMIN)
+
+    def test_dev_role_outranks_a_matching_nasabah(self) -> None:
+        role = AuthService._role_for_new_account(False, "pengelola", Mock(spec=Nasabah))
+
+        self.assertEqual(role, "pengelola")
+
+    def test_matching_nasabah_record_makes_a_nasabah_account(self) -> None:
+        role = AuthService._role_for_new_account(False, None, Mock(spec=Nasabah))
+
+        self.assertEqual(role, User.Role.NASABAH)
+
+    def test_no_signal_defaults_to_pengelola(self) -> None:
+        role = AuthService._role_for_new_account(False, None, None)
+
+        self.assertEqual(role, User.Role.PENGELOLA)
