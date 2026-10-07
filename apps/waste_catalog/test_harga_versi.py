@@ -3,6 +3,7 @@
 from datetime import timedelta
 from decimal import Decimal
 
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
@@ -48,3 +49,10 @@ class HargaBerlakuTests(TestCase):
         self._versi("4500", 2)
 
         self.assertEqual(harga_berlaku(self.jenis, self.sekarang + timedelta(days=3)), 4500)
+
+    def test_database_rejects_a_price_that_is_not_positive(self) -> None:
+        # Dijaga di database, bukan hanya serializer, agar jalur selain API
+        # (admin, shell, data migration) tidak bisa menyimpan harga 0.
+        for harga in ("0", "-1"):
+            with self.subTest(harga), self.assertRaises(IntegrityError), transaction.atomic():
+                self._versi(harga, 0)
