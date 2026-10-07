@@ -285,6 +285,10 @@ class DraftItemInputSerializer(serializers.Serializer[Any]):
     nasabah_id = serializers.UUIDField()
     nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
     metode = serializers.ChoiceField(choices=Pencairan.Metode.choices, required=False)
+    potongan_jenis = serializers.ChoiceField(
+        choices=DraftPencairan.PotonganJenis.choices, required=False
+    )
+    potongan_nilai = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
 
     def validate_nominal(self, value: Decimal) -> Decimal:
         return _validate_nominal_pencairan(value)
@@ -297,15 +301,30 @@ class DraftPencairanCreateSerializer(serializers.Serializer[Any]):
 class DraftPencairanItemSerializer(serializers.ModelSerializer[Model]):
     nasabah_id = serializers.UUIDField(source=_NASABAH_ID)
     nasabah_nama = serializers.CharField(source=_NASABAH_NAMA)
+    potongan = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    dibayar = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
 
     class Meta:
         model = DraftPencairanItem
-        fields = ["id", "nasabah_id", "nasabah_nama", "nominal", "metode"]
+        fields = [
+            "id",
+            "nasabah_id",
+            "nasabah_nama",
+            "nominal",
+            "metode",
+            "potongan_jenis",
+            "potongan_nilai",
+            "potongan",
+            "dibayar",
+        ]
 
 
 class DraftPencairanSerializer(serializers.ModelSerializer[Model]):
     items = DraftPencairanItemSerializer(many=True, read_only=True)
+    total_nominal = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_potongan = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_dibayar = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
 
     class Meta:
         model = DraftPencairan
-        fields = ["id", "status", "items"]
+        fields = ["id", "status", "items", "total_nominal", "total_potongan", "total_dibayar"]

@@ -400,6 +400,8 @@ class DraftPencairanService:
                 nasabah=nasabah,
                 nominal=DraftPencairanService._nominal(nasabah, item.get("nominal"), index),
                 metode=item.get("metode", Pencairan.Metode.TUNAI),
+                potongan_jenis=item.get("potongan_jenis", ""),
+                potongan_nilai=item.get("potongan_nilai"),
             )
         return draft
 
