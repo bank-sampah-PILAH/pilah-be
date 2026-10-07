@@ -145,3 +145,31 @@ class KonfirmasiDraftTests(DraftTestBase):
         self.assertIn("nominal", nominal.data["errors"])
         self.assertEqual(metode.status_code, 200, metode.data)
         self.assertEqual(metode.data["metode"], "tunai")
+
+    def test_edit_metode_dengan_semua_field_dan_tanggal_dibulatkan_milidetik_diterima(
+        self,
+    ) -> None:
+        # The app sends every field back; on the web a DateTime keeps only
+        # milliseconds, so the tanggal it returns is a hair off the stored one.
+        self._konfirmasi(self._draft(potongan_jenis="persen", potongan_nilai="10")["id"])
+        pencairan = Pencairan.objects.get(nasabah=self.nasabah)
+        tanggal = pencairan.tanggal.replace(
+            microsecond=pencairan.tanggal.microsecond // 1000 * 1000
+        )
+
+        response = self.client.patch(
+            f"/api/v1/pencairan/{pencairan.id}",
+            {
+                "nominal": str(int(pencairan.nominal)),
+                "tanggal": tanggal.isoformat(),
+                "metode": "tunai",
+                "keterangan": pencairan.keterangan,
+                "alasan": "dibayar tunai",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["metode"], "tunai")
+        pencairan.refresh_from_db()
+        self.assertEqual(pencairan.nominal, Decimal(100000))
