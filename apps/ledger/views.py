@@ -274,7 +274,10 @@ class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg] 
         return DraftPencairan.objects.filter(
             bank_sampah=current_bank(self.request)
         ).prefetch_related(
-            Prefetch("items", queryset=DraftPencairanItem.objects.select_related("nasabah"))
+            Prefetch(
+                "items",
+                queryset=DraftPencairanItem.objects.select_related("nasabah", "nasabah__saldo"),
+            )
         )
 
     def list(self, request: Request) -> Response:

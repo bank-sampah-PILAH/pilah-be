@@ -1,6 +1,7 @@
 import uuid
 from decimal import Decimal
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.utils import timezone
 
@@ -246,6 +247,14 @@ class DraftPencairanItem(TimestampedModel):
         else:
             jenis, nilai = self.draft.potongan_jenis, self.draft.potongan_nilai
         return hitung_potongan(self.nominal, jenis, nilai)
+
+    @property
+    def saldo_saat_ini(self) -> Decimal:
+        """The nasabah's saldo right now; the nominal was fixed when the draft was made."""
+        try:
+            return self.nasabah.saldo.total_saldo
+        except ObjectDoesNotExist:
+            return Decimal(0)
 
     @property
     def dibayar(self) -> Decimal:
