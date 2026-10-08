@@ -25,9 +25,17 @@ def validate_configuration() -> None:
         port = int(origin.rsplit(":", 1)[1])
         if not 1 <= port <= 65535:
             raise ValueError("PILAH_WEB_ORIGIN port is invalid")
-    emails = os.environ.get("PILAH_SUPERADMIN_EMAILS", "").split(",")
+    emails = [email.strip() for email in os.environ.get("PILAH_SUPERADMIN_EMAILS", "").split(",")]
+    # Conservative ASCII dot-atoms/DNS labels accepted by Django validate_email,
+    # bounded by User.email's storage length; this preflight has no Django dependency.
     if not all(
-        re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", email.strip())
+        len(email) <= 254
+        and re.fullmatch(
+            r"[A-Za-z0-9_%+-]+(?:\.[A-Za-z0-9_%+-]+)*@"
+            r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+            r"[A-Za-z]{2,63}",
+            email,
+        )
         for email in emails
     ):
         raise ValueError("PILAH_SUPERADMIN_EMAILS must contain valid email addresses")
