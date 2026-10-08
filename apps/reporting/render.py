@@ -13,6 +13,7 @@ auto-reload safe.
 
 from dataclasses import dataclass
 from decimal import Decimal
+from html import escape
 from importlib import resources
 from io import BytesIO
 from pathlib import Path
@@ -25,9 +26,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
-    Image,
     SimpleDocTemplate,
-    Spacer,
     Table,
     TableStyle,
 )
@@ -123,6 +122,16 @@ _STYLES = {
 }
 
 
+def _p(text: str, style: ParagraphStyle) -> Paragraph:
+    """Dynamic text as a Paragraph: escaped.
+
+    Paragraph bodies parse as XML — a bank or nasabah named "A & B Sampah"
+    or one containing "<" aborts the whole export otherwise. Labels the code
+    writes itself stay literal (they carry ``<br/>`` in the header band).
+    """
+    return Paragraph(escape(text), style)
+
+
 class NumberedCanvas(Canvas):  # type: ignore[misc]  # reportlab has no stubs; Canvas resolves Any
     """Standard two-phase pattern: collect page states, draw footers on save."""
 
@@ -159,151 +168,156 @@ def render_statement(data: StatementData, theme_key: str) -> bytes:
     theme = THEMES.get(theme_key, THEMES["pilah"])
 
     stream = BytesIO()
+    # Chrome height: header band + info grid + summary + spacers, so the
+    # mutation frame starts below the repeated chrome on every page.
+    chrome_h = 14 * mm + 4 * mm + 30 * mm + 4 * mm + 12 * mm + 3 * mm + 6 * mm
     doc = SimpleDocTemplate(
         stream,
         pagesize=A4,
         leftMargin=_MARGIN,
         rightMargin=_MARGIN,
-        topMargin=_MARGIN,
+        topMargin=_MARGIN + chrome_h,
         bottomMargin=_MARGIN,
         title="Laporan Riwayat Aktivitas",
         author=data.bank_nama,
     )
+
+    def draw_chrome(canvas: Canvas, _doc: SimpleDocTemplate) -> None:
+        _page_chrome(canvas, data, theme)
+
     doc.build(
         _flowables(data, theme),
+        onFirstPage=draw_chrome,
+        onLaterPages=draw_chrome,
         canvasmaker=NumberedCanvas,
     )
     return stream.getvalue()
 
 
 def _flowables(data: StatementData, theme: Theme) -> list[object]:
+    # Sub-row tone comes from the theme, so pass a fresh style copy.
     styles = dict(_STYLES)
     styles["subrow"].textColor = theme.subrow_text
+    return [_mutation_table(data.rows, theme, styles)]
 
-    story: list[object] = []
 
-    # --- Header band: logo + bank name + statement title.
-    header = Table(
-        [
-            [
-                _logo(),
-                Paragraph(
-                    f"{data.bank_nama}<br/>Laporan Riwayat Aktivitas",
-                    ParagraphStyle(
-                        "ht",
-                        fontName="Inter-Bold",
-                        fontSize=11,
-                        leading=14,
-                        textColor=theme.primary_text,
-                        alignment=2,
-                    ),
-                ),
-            ]
-        ],
-        colWidths=[_TABLE_W * 0.4, _TABLE_W * 0.6],
-    )
-    header.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, -1), theme.primary),
-                ("ROUNDEDCORNERS", [_RADIUS, _RADIUS, _RADIUS, _RADIUS]),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), 10),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-                ("LEFTPADDING", (0, 0), (-1, -1), 12),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 12),
-            ]
+def _page_chrome(canvas: Canvas, data: StatementData, theme: Theme) -> None:
+    """Header band + info grid + summary strip, drawn on every page.
+
+    Platypus repeats headers via an onPage callback, not story flowables —
+    the flowable path renders once, on page 1 only (the bug this replaced).
+    Everything draws at absolute canvas coordinates, mirrored around the
+    top margin; the mutation table lives in the frame below it.
+    """
+    header_h = 14 * mm
+    top = _PAGE_H - 15 * mm  # top margin line
+    x_start = _MARGIN
+
+    # --- Header band.
+    canvas.saveState()
+    canvas.setFillColor(theme.primary)
+    canvas.roundRect(x_start, top - header_h, _TABLE_W, header_h, _RADIUS, stroke=0, fill=1)
+    logo = _logo_file()
+    if logo:
+        canvas.drawImage(
+            logo,
+            x_start + 6 * mm,
+            top - header_h + (header_h - 10 * mm) / 2,
+            width=10 * mm,
+            height=10 * mm,
+            mask="auto",
         )
+    canvas.setFillColor(theme.primary_text)
+    canvas.setFont("Inter-Bold", 11)
+    canvas.drawRightString(
+        x_start + _TABLE_W - 6 * mm, top - header_h / 2 - 4, "Laporan Riwayat Aktivitas"
     )
-    story.append(header)
-    story.append(Spacer(1, 8))
+    canvas.drawRightString(x_start + _TABLE_W - 6 * mm, top - header_h / 2 + 6, data.bank_nama)
+    canvas.restoreState()
 
-    # --- Info grid.
-    info = Table(
-        [
-            [
-                Paragraph("Nama", styles["label"]),
-                Paragraph(": " + data.nasabah_nama, styles["value"]),
-                Paragraph("Bank Sampah", styles["label"]),
-                Paragraph(": " + data.bank_nama, styles["value"]),
-            ],
-            [
-                Paragraph("No. Anggota", styles["label"]),
-                Paragraph(": " + data.nomor_anggota, styles["value"]),
-                Paragraph("Alamat Bank", styles["label"]),
-                Paragraph(": " + _bank_alamat(data), styles["value"]),
-            ],
-            [
-                Paragraph("Email", styles["label"]),
-                Paragraph(": " + data.nasabah_email, styles["value"]),
-                Paragraph("No. HP Bank", styles["label"]),
-                Paragraph(": " + data.bank_no_hp, styles["value"]),
-            ],
-            [
-                Paragraph("No. HP", styles["label"]),
-                Paragraph(": " + data.nasabah_no_hp, styles["value"]),
-                Paragraph("Alamat", styles["label"]),
-                Paragraph(": " + data.nasabah_alamat, styles["value"]),
-            ],
-            [
-                Paragraph("Periode", styles["label"]),
-                Paragraph(": " + data.periode_label, styles["value"]),
-                Paragraph("Tipe", styles["label"]),
-                Paragraph(": " + data.tipe_label, styles["value"]),
-            ],
-            [
-                Paragraph("Diunduh", styles["label"]),
-                Paragraph(": " + data.diunduh, styles["value"]),
-                Paragraph("", styles["label"]),
-                Paragraph("", styles["value"]),
-            ],
-        ],
-        colWidths=[_TABLE_W * 0.15, _TABLE_W * 0.35, _TABLE_W * 0.15, _TABLE_W * 0.35],
-    )
-    info.setStyle(
-        TableStyle([("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2)])
-    )
-    story.append(info)
-    story.append(Spacer(1, 8))
+    # --- Info grid, label:value pairs in two columns.
+    grid_h = 30 * mm
+    grid_top = top - header_h - 4 * mm
+    labels_left = ["Nama", "No. Anggota", "Email", "No. HP", "Periode", "Diunduh"]
+    values_left = [
+        data.nasabah_nama,
+        data.nomor_anggota,
+        data.nasabah_email,
+        data.nasabah_no_hp,
+        data.periode_label,
+        data.diunduh,
+    ]
+    labels_right = ["Bank Sampah", "Alamat Bank", "No. HP Bank", "Alamat", "Tipe", ""]
+    values_right = [
+        data.bank_nama,
+        _bank_alamat(data),
+        data.bank_no_hp,
+        data.nasabah_alamat,
+        data.tipe_label,
+        "",
+    ]
+    row_h = grid_h / 6
+    canvas.saveState()
+    for i in range(6):
+        y = grid_top - (i + 1) * row_h
+        canvas.setFillColor(colors.HexColor("#6B7280"))
+        canvas.setFont("Inter", 8)
+        canvas.drawString(x_start, y, labels_left[i])
+        canvas.drawString(x_start + _TABLE_W * 0.5, y, labels_right[i])
+        canvas.setFillColor(colors.HexColor("#111827"))
+        canvas.setFont("Inter-Bold", 8)
+        canvas.drawString(x_start + 18 * mm, y, _clip(values_left[i], 40))
+        canvas.drawString(x_start + _TABLE_W * 0.5 + 22 * mm, y, _clip(values_right[i], 40))
+    canvas.restoreState()
 
-    # --- Summary strip: 4 cells.
-    summary = Table(
-        [
-            [
-                Paragraph("Saldo Awal", styles["label"]),
-                Paragraph("Total Setoran", styles["label"]),
-                Paragraph("Total Pencairan", styles["label"]),
-                Paragraph("Saldo Akhir", styles["label"]),
-            ],
-            [
-                Paragraph("Rp " + format_ribuan(data.saldo_awal), styles["value"]),
-                Paragraph("Rp " + format_ribuan(data.total_setoran), styles["value"]),
-                Paragraph("Rp " + format_ribuan(data.total_pencairan), styles["value"]),
-                Paragraph("Rp " + format_ribuan(data.saldo_akhir), styles["value"]),
-            ],
-        ],
-        colWidths=[_TABLE_W / 4] * 4,
-    )
-    summary.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), theme.zebra),
-                ("ROUNDEDCORNERS", [_RADIUS, _RADIUS, _RADIUS, _RADIUS]),
-                ("BOX", (0, 0), (0, -1), 0.5, theme.accent),
-                ("BOX", (1, 0), (1, -1), 0.5, theme.accent),
-                ("BOX", (2, 0), (2, -1), 0.5, theme.accent),
-                ("BOX", (3, 0), (3, -1), 0.5, theme.accent),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                ("LEFTPADDING", (0, 0), (-1, -1), 8),
-            ]
-        )
-    )
-    story.extend([summary, Spacer(1, 12)])
+    # --- Summary strip: saldo awal / setoran / pencairan / saldo akhir.
+    strip_top = grid_top - grid_h - 4 * mm
+    strip_h = 12 * mm
+    cell_w = _TABLE_W / 4
+    captions = ["Saldo Awal", "Total Setoran", "Total Pencairan", "Saldo Akhir"]
+    amounts = [data.saldo_awal, data.total_setoran, data.total_pencairan, data.saldo_akhir]
+    canvas.saveState()
+    for i, (caption, amount) in enumerate(zip(captions, amounts, strict=True)):
+        x = x_start + i * cell_w
+        canvas.setFillColor(theme.zebra)
+        canvas.roundRect(x, strip_top - strip_h, cell_w - 2, strip_h, _RADIUS, stroke=0, fill=1)
+        canvas.setStrokeColor(theme.accent)
+        canvas.setLineWidth(0.5)
+        canvas.roundRect(x, strip_top - strip_h, cell_w - 2, strip_h, _RADIUS, stroke=1, fill=0)
+        canvas.setFillColor(colors.HexColor("#6B7280"))
+        canvas.setFont("Inter", 8)
+        canvas.drawString(x + 8, strip_top - strip_h + 6, caption)
+        canvas.setFillColor(colors.HexColor("#111827"))
+        canvas.setFont("Inter-Bold", 9)
+        canvas.drawString(x + 8, strip_top - 6, "Rp " + format_ribuan(amount))
+    canvas.restoreState()
 
-    # --- Mutation table with detail sub-rows.
-    story.append(_mutation_table(data.rows, theme, styles))
-    return story
+    canvas.saveState()
+    canvas.setStrokeColor(theme.grid)
+    canvas.setLineWidth(0.4)
+    canvas.line(
+        _MARGIN, strip_top - strip_h - 3 * mm, _PAGE_W - _MARGIN, strip_top - strip_h - 3 * mm
+    )
+    canvas.restoreState()
+
+
+def _bank_alamat(data: StatementData) -> str:
+    return " ".join(part for part in (data.bank_alamat, data.bank_kota) if part) or "-"
+
+
+def _clip(text: str, limit: int) -> str:
+    """Truncate long names to keep absolute-drawn chrome inside its band."""
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _logo_file() -> str | None:
+    """Path of the leaf logo asset, None when the resource can't resolve
+    (e.g. zip imports) — the band draws without it."""
+    try:
+        with resources.as_file(resources.files("apps.reporting") / "fonts" / "logo.png") as path:
+            return str(path)
+    except Exception:  # noqa: BLE001 — a missing logo must not abort an export
+        return None
 
 
 def _mutation_table(
@@ -341,7 +355,7 @@ def _mutation_table(
         table_data.append(
             [
                 Paragraph(tanggal, styles["cell"]),
-                Paragraph(row.keterangan, styles["cell"]),
+                Paragraph(escape(row.keterangan), styles["cell"]),
                 Paragraph(format_ribuan(row.debit) if row.debit else "", num_style),
                 Paragraph(format_ribuan(row.kredit) if row.kredit else "", num_style),
                 Paragraph(format_ribuan(row.saldo), num_style),
@@ -355,7 +369,7 @@ def _mutation_table(
         # Item sub-rows (super detail): muted, indented, no zebra.
         for item in row.items:
             text = (
-                f"• {item.kategori} – {item.nama} "
+                f"• {escape(item.kategori)} – {escape(item.nama)} "
                 f"({item_berat(item.berat)} × Rp {format_ribuan(item.harga)})"
             )
             table_data.append(
@@ -379,14 +393,3 @@ def _mutation_table(
 
 def item_berat(berat: Decimal) -> str:
     return f"{berat.normalize()} kg"
-
-
-def _logo() -> Image:
-    """The PILAH leaf logo (mobile assets), scaled for the header band."""
-    resource = resources.files("apps.reporting") / "fonts" / "logo.png"
-    with resources.as_file(resource) as path:
-        return Image(str(path), width=14 * mm, height=14 * mm)
-
-
-def _bank_alamat(data: StatementData) -> str:
-    return " ".join(part for part in (data.bank_alamat, data.bank_kota) if part) or "-"

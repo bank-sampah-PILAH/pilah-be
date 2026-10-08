@@ -73,6 +73,16 @@ class NasabahHistoryPdfExportTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.content.startswith(b"%PDF-"))
 
+    def test_export_rejects_pil_246_month_windows_until_shared(self) -> None:
+        # 1/3/6/12-month values exist on the PIL-246 branch only. apply_period
+        # silently ignores them (exporting ALL history), so until the shared
+        # filter learns them the export must reject instead of mislabeling.
+        for periode in ("1_bulan", "3_bulan", "6_bulan", "12_bulan"):
+            with self.subTest(periode=periode):
+                response = self.client.get(self.url, {"periode": periode})
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("belum tersedia", response.json()["error"])
+
     def test_export_unknown_tipe_falls_back_to_semua(self) -> None:
         response = self.client.get(self.url, {"tipe": "deposito"})
         self.assertEqual(response.status_code, 200)

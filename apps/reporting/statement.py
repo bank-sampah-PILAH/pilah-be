@@ -29,6 +29,20 @@ from shared_kernel.kalkulasi import bulatkan_rupiah
 
 _TIPE_LABELS = {"setoran": "Setoran", "pencairan": "Pencairan", "semua": "Semua"}
 
+# PIL-246's month-window values: not yet known to apply_period, which would
+# silently export all history under a label that promises a range. Reject
+# until PIL-246 teaches the shared filter (and period_label) these values.
+_NOT_YET_KNOWN_PERIODS = {"1_bulan", "3_bulan", "6_bulan", "12_bulan"}
+
+
+def _periode_label(request: HttpRequest) -> str:
+    """Label for this export's window. ``period_label`` defaults to "Hari Ini",
+    which is only true for the XLSX exports whose filter defaults there; this
+    export defaults to no filter, so an omitted param must say all time."""
+    if not request.GET.get("periode"):
+        return "Semua Periode"
+    return exporter.period_label(request)
+
 
 @dataclass(frozen=True)
 class _StatementEvent:
@@ -97,7 +111,12 @@ def export_statement_pdf(member: Nasabah, request: HttpRequest) -> tuple[bytes, 
     ``tipe`` (semua/setoran/pencairan) and ``tema`` from the request params.
     Returns ``(bytes, filename)``, or ``None`` when the chosen window holds no
     activity (the view maps that to 400, matching the XLSX export convention).
+    Raises ``ValueError`` for a PIL-246 month-window ``periode`` the shared
+    filter cannot apply yet.
     """
+    periode = request.GET.get("periode")
+    if periode in _NOT_YET_KNOWN_PERIODS:
+        raise ValueError(f"Periode '{periode}' belum tersedia untuk laporan ini.")
     data = build_statement(member, request)
     if not data.rows:
         return None
@@ -150,7 +169,7 @@ def build_statement(member: Nasabah, request: HttpRequest) -> StatementData:
         nasabah_no_hp=member.no_hp,
         nasabah_alamat=member.alamat,
         nomor_anggota=member.nomor,
-        periode_label=exporter.period_label(request),
+        periode_label=_periode_label(request),
         tipe_label=_TIPE_LABELS[tipe],
         diunduh=timezone.localtime().strftime("%d/%m/%Y %H:%M"),
         saldo_awal=bulatkan_rupiah(saldo_awal),
@@ -216,6 +235,13 @@ def _merge_with_running_saldo(
     rows: list[MutationRow] = []
     for item in events:
         saldo += item.delta
+        after = item.snapshot if item.snapshot is not None else saldo
+        if item.snapshot is not None:
+            # Snapshot wins: it is what the receipt recorded. Rebase the walk
+            # onto it so a legacy payout with no prior setoran (where the
+            # unanchored walk would stay below the stored saldo) keeps every
+            # later row and the final saldo consistent with the ledger.
+            saldo = after
         rows.append(
             MutationRow(
                 id=item.event_id,
@@ -224,7 +250,7 @@ def _merge_with_running_saldo(
                 keterangan=item.keterangan,
                 debit=item.debit,
                 kredit=item.kredit,
-                saldo=bulatkan_rupiah(item.snapshot if item.snapshot is not None else saldo),
+                saldo=bulatkan_rupiah(after),
             )
         )
     return rows
