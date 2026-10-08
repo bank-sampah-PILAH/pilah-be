@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.core.validators import validate_email
-from django.db import transaction
+from django.db import IntegrityError, transaction
 
 from api.models import User
 from shared_kernel.permissions import superadmin_allowlist
@@ -27,10 +27,20 @@ class Command(BaseCommand):
                     if any(user.role != User.Role.SUPERADMIN for user in existing):
                         raise CommandError("Allowlisted email belongs to a non-Superadmin account")
                     continue
-                User.objects.create_user(
-                    email=email,
-                    nama="SuperAdmin PILAH",
-                    role=User.Role.SUPERADMIN,
-                    is_profile_complete=True,
-                )
+                try:
+                    with transaction.atomic():
+                        User.objects.create_user(
+                            email=email,
+                            nama="SuperAdmin PILAH",
+                            role=User.Role.SUPERADMIN,
+                            is_profile_complete=True,
+                        )
+                except IntegrityError:
+                    raced = list(User.objects.select_for_update().filter(email__iexact=email))
+                    if not raced:
+                        raise
+                    if any(user.role != User.Role.SUPERADMIN for user in raced):
+                        raise CommandError(
+                            "Allowlisted email belongs to a non-Superadmin account"
+                        ) from None
         self.stdout.write(self.style.SUCCESS("Superadmin bootstrap complete"))

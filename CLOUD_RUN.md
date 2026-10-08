@@ -28,16 +28,18 @@ guess a URL hash or configure a custom domain.
 3. Deploy the backend with its existing GCP/DB/storage/OAuth secrets and vars.
    CORS and CSRF explicitly allow `PILAH_WEB_ORIGIN`, never all origins.
 4. Read the actual backend Cloud Run URL and rebuild/redeploy the frontend with
-   `<backend-url>/api/v1/` as its API base and the matching Google Web client ID.
+   the backend origin (no path) as its `BASE_URL_PROD` and the matching Google
+   Web client ID. Mobile request paths already include `/api/v1`.
 5. Add the exact dashboard origin to the Web OAuth client's **Authorized
    JavaScript origins** in Google Console. Frontend `GOOGLE_SERVER_CLIENT_ID`
    must equal backend `GOOGLE_CLIENT_ID`. If using the backend callback flow,
    register `<backend-url>/api/v1/auth/google/callback` as the redirect URI.
 
 `PILAH_PUBLIC_APP_URL` remains the invite-link base and is distinct from
-`PILAH_WEB_ORIGIN` (browser origin) and the frontend API base (backend +
-`/api/v1/`). Configure it for the existing invite route; this delivery does not
-change invite routing. Keep fake tokens and Django debug **false**.
+`PILAH_WEB_ORIGIN` (browser origin) and the frontend `BASE_URL_PROD` (backend
+origin only; mobile request paths include `/api/v1`). Configure it for the
+existing invite route; this delivery does not change invite routing. Keep fake
+tokens and Django debug **false**.
 
 ## Automatic production Superadmin bootstrap
 

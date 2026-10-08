@@ -268,8 +268,10 @@ confirmation and an allowlisted fixture Superadmin; production always rejects
 fixtures. See [Fly.io staging](FLY_STAGING.md) for required variables.
 
 The staging dashboard is `https://pilah-web-staging.fly.dev`, separate from the
-API base `https://pilah-be-staging.fly.dev/api/v1/`. Production uses the actual
-provider-generated `pilah-web` Cloud Run URL. Set backend repository variable
+backend origin `https://pilah-be-staging.fly.dev`. Mobile `BASE_URL_DEV` and
+`BASE_URL_PROD` use backend origins without paths because request paths already
+include `/api/v1`. Production uses the actual provider-generated `pilah-web`
+Cloud Run URL. Set backend repository variable
 `PILAH_WEB_ORIGIN` to that exact HTTPS origin (no path/trailing slash) before
 production deployment; both CORS and CSRF explicitly allow it. Add each dashboard
 origin to the Google Web OAuth client's Authorized JavaScript origins. Backend

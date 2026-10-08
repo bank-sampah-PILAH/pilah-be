@@ -65,7 +65,9 @@ class BootstrapSuperadminsTests(TestCase):
         with (
             override_settings(PILAH_SUPERADMIN_EMAILS=("root@example.com",)),
             patch.object(User.objects, "select_for_update", return_value=query),
-            patch.object(User.objects, "create_user", side_effect=IntegrityError("duplicate email")),
+            patch.object(
+                User.objects, "create_user", side_effect=IntegrityError("duplicate email")
+            ),
         ):
             call_command("bootstrap_superadmins", stdout=StringIO())
 
@@ -80,7 +82,9 @@ class BootstrapSuperadminsTests(TestCase):
         with (
             override_settings(PILAH_SUPERADMIN_EMAILS=("root@example.com",)),
             patch.object(User.objects, "select_for_update", return_value=query),
-            patch.object(User.objects, "create_user", side_effect=IntegrityError("duplicate email")),
+            patch.object(
+                User.objects, "create_user", side_effect=IntegrityError("duplicate email")
+            ),
         ):
             with self.assertRaises(CommandError):
                 call_command("bootstrap_superadmins", stdout=StringIO())
