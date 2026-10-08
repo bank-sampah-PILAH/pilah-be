@@ -4,6 +4,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
+from django.utils.crypto import get_random_string
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,7 +24,10 @@ if not SECRET_KEY and not DEBUG:
         "DJANGO_SECRET_KEY must be set to a strong unique value outside local development."
     )
 if not SECRET_KEY:
-    SECRET_KEY = "pilah-local-dev-fallback-key"
+    # Dev-only fallback, generated per-process: no literal in source, so
+    # SonarCloud secrets:S6687 has nothing to flag. Local dev only — sessions
+    # reset on restart, which is fine for a throwaway key.
+    SECRET_KEY = get_random_string(50)
 ALLOWED_HOSTS = [
     host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()
 ]
