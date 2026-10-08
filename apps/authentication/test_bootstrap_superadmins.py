@@ -63,6 +63,7 @@ class BootstrapSuperadminsTests(TestCase):
         before = User.objects.filter(pk=user.pk).values().get()
 
         with (
+            override_settings(PILAH_SUPERADMIN_EMAILS=("root@example.com",)),
             patch.object(User.objects, "select_for_update", return_value=query),
             patch.object(User.objects, "create_user", side_effect=IntegrityError("duplicate email")),
         ):
@@ -77,6 +78,7 @@ class BootstrapSuperadminsTests(TestCase):
         query.filter.side_effect = [[], [user]]
 
         with (
+            override_settings(PILAH_SUPERADMIN_EMAILS=("root@example.com",)),
             patch.object(User.objects, "select_for_update", return_value=query),
             patch.object(User.objects, "create_user", side_effect=IntegrityError("duplicate email")),
         ):
