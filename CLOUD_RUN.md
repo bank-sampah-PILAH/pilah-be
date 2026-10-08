@@ -1,6 +1,8 @@
-# Manual Google Cloud Run Deployment
+# Google Cloud Run Production
 
-This guide deploys the backend manually using your own Google account with `gcloud auth login`.
+Production backend deployment runs on pushes to `main` (or the existing manual
+workflow dispatch). Backend PRs still target `staging`; promotion to `main` is a
+separate operational step. The manual provisioning script below is also supported.
 
 Target services:
 
@@ -8,6 +10,60 @@ Target services:
 - Cloud SQL for PostgreSQL
 - Google Cloud Storage for uploaded media
 - Artifact Registry for the Docker image
+
+## Dashboard origin and first-deploy ordering
+
+The production dashboard is the separate `pilah-web` Cloud Run service owned by
+`pilah-mobile`. Both services use provider-generated `*.run.app` URLs; do not
+guess a URL hash or configure a custom domain.
+
+1. Deploy the backend-independent dashboard service to obtain its actual URL
+   (an initial build may use a placeholder API base and is not ready for login).
+   Read it with `gcloud run services describe pilah-web --region <region>
+   --project <project> --format='value(status.url)'`.
+2. Set the backend repository variable `PILAH_WEB_ORIGIN` to that exact HTTPS
+   origin, without a path or trailing slash. Also configure the production
+   repository variable `PILAH_SUPERADMIN_EMAILS` with real authorized accounts.
+   Missing/invalid origin or allowlist stops deployment before cloud mutations.
+3. Deploy the backend with its existing GCP/DB/storage/OAuth secrets and vars.
+   CORS and CSRF explicitly allow `PILAH_WEB_ORIGIN`, never all origins.
+4. Read the actual backend Cloud Run URL and rebuild/redeploy the frontend with
+   `<backend-url>/api/v1/` as its API base and the matching Google Web client ID.
+5. Add the exact dashboard origin to the Web OAuth client's **Authorized
+   JavaScript origins** in Google Console. Frontend `GOOGLE_SERVER_CLIENT_ID`
+   must equal backend `GOOGLE_CLIENT_ID`. If using the backend callback flow,
+   register `<backend-url>/api/v1/auth/google/callback` as the redirect URI.
+
+`PILAH_PUBLIC_APP_URL` remains the invite-link base and is distinct from
+`PILAH_WEB_ORIGIN` (browser origin) and the frontend API base (backend +
+`/api/v1/`). Configure it for the existing invite route; this delivery does not
+change invite routing. Keep fake tokens and Django debug **false**.
+
+## Automatic production Superadmin bootstrap
+
+After service deployment succeeds, the workflow creates/replaces and executes
+`<backend-service>-bootstrap-superadmins` as a real Cloud Run Job and waits for
+success. The manual script uses the same helper. The Job copies the deployed
+service image, runtime service account, environment (including Secret Manager
+references), Cloud SQL/VPC configuration and mounted volumes. The temporary
+manifest is owner-only and removed after use; credential values are not logged.
+The deploying identity therefore needs permissions to describe the service,
+create/update/execute Jobs (for example `roles/run.admin`) and act as the
+runtime service account (`roles/iam.serviceAccountUser`). Runtime DB/Cloud SQL
+permissions are the same as the backend service. Python 3 is required for the
+helper; it adds no runtime dependency.
+
+The Job runs `python manage.py bootstrap_superadmins`. Only missing accounts
+in the runtime `PILAH_SUPERADMIN_EMAILS` allowlist are created, with role
+Superadmin and an unusable password for genuine Google login. It creates no
+banks, customers, balances, waste types or transactions. Existing account
+profiles, passwords, active flags, Google identities and Django admin flags
+are never changed. A non-Superadmin role conflict fails atomically; resolve
+account ownership manually rather than silently promoting it. Job failure
+fails the deploy workflow, although the service revision has already deployed.
+Re-running the bootstrap is safe. Runtime `PILAH_ENVIRONMENT=production`
+forbids `seed_testing_data`, even with its staging confirmation or debug enabled.
+Staging fixture variables are not used in production.
 
 ## Prerequisites
 
@@ -44,6 +100,8 @@ export DB_PASSWORD='change-this-db-password'
 export GCS_BUCKET='pilah-media-prod'
 export DJANGO_SECRET_KEY='change-this-django-secret'
 export PILAH_PUBLIC_APP_URL=''
+export PILAH_WEB_ORIGIN='https://<actual-dashboard-provider-url>'
+export PILAH_SUPERADMIN_EMAILS='admin@example.com'
 export GOOGLE_CLIENT_ID=''
 export WHATSAPP_GATEWAY_URL=''
 export WHATSAPP_GATEWAY_TOKEN=''
@@ -67,6 +125,9 @@ The script will:
 8. Build and push the Docker image with Cloud Build.
 9. Deploy to Cloud Run.
 10. Print the Cloud Run service URL.
+11. Execute and wait for the production-only Superadmin bootstrap Job.
+
+The origin and allowlist are required and validated before provisioning starts.
 
 ## After Deploy
 
@@ -81,23 +142,15 @@ when `DJANGO_DEBUG=true`, so on Cloud Run (`DJANGO_DEBUG=false`) they answer 404
 Use a local run, or `python manage.py spectacular --file openapi.yaml`, to read
 the API docs.
 
-Create a SuperAdmin account:
+Superadmins are bootstrapped automatically as described above; do not run the
+staging fixture or `createsuperadmin` in the deployment pipeline. The latter
+is an explicit local/operator tool that overwrites role, profile and password,
+not an idempotent production bootstrap.
 
-```bash
-gcloud run jobs create pilah-create-superadmin \
-  --image asia-southeast2-docker.pkg.dev/pilah-app/pilah/pilah-be:latest \
-  --region asia-southeast2 \
-  --set-cloudsql-instances pilah-app:asia-southeast2:pilah-postgres \
-  --set-env-vars DJANGO_DEBUG=false,DB_ENGINE=django.db.backends.postgresql,DB_NAME=pilah,DB_USER=pilah,DB_PASSWORD='change-this-db-password',DB_HOST=/cloudsql/pilah-app:asia-southeast2:pilah-postgres,DB_PORT=5432,GS_BUCKET_NAME=pilah-media-prod \
-  --command python \
-  --args manage.py,createsuperadmin,--email,admin@example.com,--password,password123,--nama,"Admin PILAH"
-
-gcloud run jobs execute pilah-create-superadmin \
-  --region asia-southeast2 \
-  --wait
-```
-
-You can also create the SuperAdmin inside a locally configured environment with direct database access, but the Cloud Run job keeps it inside Google Cloud.
+After configuring OAuth and rebuilding the frontend, verify real Google
+sign-in as an allowlisted Superadmin. Confirm the production database contains
+no demo fixture records. No live cloud/Google Console changes are made merely
+by merging this code; required variables and promotion must be completed.
 
 ## Important Production Notes
 
@@ -106,7 +159,9 @@ Set these before production use:
 - `DJANGO_SECRET_KEY` to a long random value.
 - `GOOGLE_CLIENT_ID` to the production OAuth client ID.
 - `DJANGO_ALLOWED_HOSTS` to the Cloud Run domain or custom domain.
-- `CORS_ALLOW_ALL_ORIGINS=false` once the frontend domain is known.
+- `PILAH_WEB_ORIGIN` to the actual dashboard HTTPS origin (required).
+- `PILAH_SUPERADMIN_EMAILS` to the authoritative production Google accounts.
+- `CORS_ALLOW_ALL_ORIGINS=false`; both deploy paths enforce explicit origins.
 - `PILAH_PUBLIC_APP_URL` to the public app or API URL used for invite links.
 - `WHATSAPP_GATEWAY_URL` and `WHATSAPP_GATEWAY_TOKEN` if WhatsApp sending is enabled.
 

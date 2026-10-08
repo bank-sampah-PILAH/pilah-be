@@ -157,7 +157,6 @@ Auth and app variables:
 ```env
 GOOGLE_CLIENT_ID=
 PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false
-PILAH_SUPERADMIN_EMAILS=admin@example.com
 PILAH_PUBLIC_APP_URL=https://pilah.example.com
 PILAH_SUPERADMIN_EMAILS=admin@example.com,another-admin@example.com
 ```
@@ -261,11 +260,30 @@ Cloud Run workflow reads the production allowlist from the GitHub variable with
 the same name.
 Existing Superadmin accounts not present in this list cannot use Google login.
 
-Run the confirmation-gated **Seed Staging Testing Data** GitHub Actions
-workflow and enter `SEED-PILAH-STAGING-DATA` exactly. The workflow connects to
-the documented `pilah-be-staging` Fly.io app and runs the same idempotent
-command with `--environment staging`; it never enables fake authentication.
-See [Fly.io staging](FLY_STAGING.md) for setup details.
+CI automatically seeds `pilah-be-staging` only after a verified staging deploy
+and successful health check. Seeding is part of deploy success, uses the same
+idempotent fixture command and never resets unrelated data or enables fake
+Google tokens. Non-debug seeding requires runtime `PILAH_ENVIRONMENT=staging`,
+confirmation and an allowlisted fixture Superadmin; production always rejects
+fixtures. See [Fly.io staging](FLY_STAGING.md) for required variables.
+
+The staging dashboard is `https://pilah-web-staging.fly.dev`, separate from the
+API base `https://pilah-be-staging.fly.dev/api/v1/`. Production uses the actual
+provider-generated `pilah-web` Cloud Run URL. Set backend repository variable
+`PILAH_WEB_ORIGIN` to that exact HTTPS origin (no path/trailing slash) before
+production deployment; both CORS and CSRF explicitly allow it. Add each dashboard
+origin to the Google Web OAuth client's Authorized JavaScript origins. Backend
+`GOOGLE_CLIENT_ID` must match frontend `GOOGLE_SERVER_CLIENT_ID`.
+`PILAH_PUBLIC_APP_URL` is the separate invite-link base, not the API base or CORS
+setting. See [Cloud Run](CLOUD_RUN.md) for first-deploy URL ordering and IAM.
+
+Production deployment on `main` automatically runs `bootstrap_superadmins` in
+a Cloud Run Job with the service's image, DB environment and runtime identity.
+It creates only missing allowlisted Superadmins (Google login, no usable
+password); existing profiles/passwords remain unchanged. Role conflicts and
+missing/invalid allowlists fail deployment. It never seeds banks or demo data.
+Manual Cloud Run deployment uses the same bootstrap. Neither cloud provisioning
+nor OAuth Console configuration is performed by this code delivery itself.
 
 Bank Sampah organizations can be `mandiri`, `induk`, or `unit`. A unit must
 belong to an induk organization. A Nasabah user can have one membership per
