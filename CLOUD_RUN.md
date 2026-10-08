@@ -73,10 +73,13 @@ The script will:
 Open the printed Cloud Run URL, then check:
 
 ```text
-/api/docs/
-/api/schema/
-/api-test/
+/healthz
 ```
+
+`/api/docs/`, `/api/schema/` and `/api-test/` are developer tools served only
+when `DJANGO_DEBUG=true`, so on Cloud Run (`DJANGO_DEBUG=false`) they answer 404.
+Use a local run, or `python manage.py spectacular --file openapi.yaml`, to read
+the API docs.
 
 Create a SuperAdmin account:
 

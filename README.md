@@ -47,6 +47,10 @@ Open:
 - OpenAPI schema: `http://localhost:8000/api/schema/`
 - Swagger UI: `http://localhost:8000/api/docs/`
 
+The API test runner, OpenAPI schema and Swagger UI are developer tools served
+only when `DJANGO_DEBUG=true` (the Docker setup sets it). With `DJANGO_DEBUG=false`,
+as on staging and production, they answer 404.
+
 Create or update a SuperAdmin account:
 
 ```bash
@@ -523,7 +527,7 @@ Generate schema locally:
 python manage.py spectacular --file openapi.yaml --validate
 ```
 
-Served endpoints:
+Served endpoints (only when `DJANGO_DEBUG=true`; 404 otherwise):
 
 - `GET /api/schema/`
 - `GET /api/docs/`
