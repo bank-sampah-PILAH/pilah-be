@@ -460,6 +460,13 @@ class ApiTestPageTests(APITestCase):
         self.assertContains(response, 'const superEmail = "browser\\u002Dadmin@example.com";')
 
 
+    @override_settings(DEBUG=False)
+    def test_page_is_hidden_outside_debug(self) -> None:
+        response = self.client.get("/api-test/")
+
+        self.assertEqual(response.status_code, 404)
+
+
 @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=True)
 class RoleOnboardingStateTests(APITestCase):
     def test_all_registration_roles_can_complete_shared_profile(self) -> None:
