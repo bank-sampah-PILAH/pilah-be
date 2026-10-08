@@ -226,6 +226,20 @@ class PencairanEditTests(APITestCase):
         self.assertEqual(response.data["saldo_sesudah"], "315600.00")
         self.assertEqual(self._saldo(), "315600.00")
 
+    def test_edit_replay_drops_legacy_sen_like_recording_does(self) -> None:
+        # Saldo warisan PILAH 1.0 bisa bersen. Pencatatan membuang sennya, dan
+        # pemutaran ulang saat edit harus membulatkan dengan aturan yang sama.
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("465600.75"))
+        pencairan = self._catat("200000")
+        self.assertEqual(self._saldo(), "265600.00")
+
+        response = self._edit(pencairan["id"], {"nominal": "150000", "alasan": "Salah ketik"})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["saldo_sebelum"], "465600.75")
+        self.assertEqual(response.data["saldo_sesudah"], "315600.00")
+        self.assertEqual(self._saldo(), "315600.00")
+
     def _setor(self, harga: str = "100000.00", berat: str = "1.000") -> None:
         jenis, _ = JenisSampah.objects.get_or_create(
             bank_sampah=self.bank,
