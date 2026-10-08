@@ -292,7 +292,11 @@ class SeedTestingDataCommandTests(TestCase):
             self.assertEqual(Pencairan.objects.get(pk=pk).tanggal, tanggal)
         self.assertEqual(Nasabah.objects.filter(nomor__startswith="NAS-DEMO-").count(), 60)
 
-    @override_settings(DEBUG=False)
+    @override_settings(
+        DEBUG=False,
+        PILAH_ENVIRONMENT="staging",
+        PILAH_SUPERADMIN_EMAILS=("superadmin.demo@example.com",),
+    )
     def test_staging_requires_explicit_confirmation(self) -> None:
         with self.assertRaisesRegex(CommandError, "SEED-PILAH-STAGING-DATA"):
             call_command("seed_testing_data", environment="staging")
