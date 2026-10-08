@@ -19,6 +19,7 @@ class BootstrapCloudRunTests(SimpleTestCase):
                         "annotations": {
                             "run.googleapis.com/cloudsql-instances": "project:region:db",
                             "run.googleapis.com/vpc-access-connector": "connector",
+                            "run.googleapis.com/secrets": "secret:projects/other/secrets/django-key",
                         }
                     },
                     "spec": {
@@ -76,10 +77,13 @@ class BootstrapCloudRunTests(SimpleTestCase):
                 self.assertEqual(container["image"], "registry/image:verified-sha")
                 self.assertEqual(container["command"], ["python"])
                 self.assertEqual(container["args"], ["manage.py", "bootstrap_superadmins"])
+                # Cloud Run v1 ExecutionTemplate owns SQL/VPC/secret annotations;
+                # TaskTemplate only accepts spec (provider discovery schema).
                 self.assertEqual(
-                    template["metadata"]["annotations"],
+                    job["spec"]["template"]["metadata"]["annotations"],
                     service["spec"]["template"]["metadata"]["annotations"],
                 )
+                self.assertEqual(set(template), {"spec"})
             return subprocess.CompletedProcess(argv, 0, stdout="")
 
         with patch.dict(os.environ, env, clear=True), patch("subprocess.run", side_effect=gcloud):
