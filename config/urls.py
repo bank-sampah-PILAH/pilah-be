@@ -25,6 +25,7 @@ from django.views.static import serve
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from apps.bank_sampah.views import bank_sampah_activity_media
+from shared_kernel.debug_only import debug_only
 from shared_kernel.health import healthz
 
 
@@ -70,8 +71,13 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path(".well-known/assetlinks.json", assetlinks, name="assetlinks"),
     path("api-test/", ApiTestView.as_view(), name="api-test"),
-    path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
-    path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
+    # Developer docs: served only when DEBUG is on, so staging and production answer 404.
+    path("api/schema/", debug_only(SpectacularAPIView.as_view()), name="schema"),
+    path(
+        "api/docs/",
+        debug_only(SpectacularSwaggerView.as_view(url_name="schema")),
+        name="swagger-ui",
+    ),
     path("api/v1/", include("api.urls")),
     path(
         "media/activity/<path:token>", bank_sampah_activity_media, name="bank-sampah-activity-media"
