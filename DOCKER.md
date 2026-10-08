@@ -13,6 +13,9 @@ Open:
 - OpenAPI schema: http://localhost:8000/api/schema/
 - Swagger UI: http://localhost:8000/api/docs/
 
+The API tester, schema and Swagger UI are served only when `DJANGO_DEBUG=true`
+(set in `docker-compose.yml`). With `DJANGO_DEBUG=false` they answer 404.
+
 Create or update a SuperAdmin:
 
 ```bash

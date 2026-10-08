@@ -47,6 +47,10 @@ Open:
 - OpenAPI schema: `http://localhost:8000/api/schema/`
 - Swagger UI: `http://localhost:8000/api/docs/`
 
+The API test runner, OpenAPI schema and Swagger UI are developer tools served
+only when `DJANGO_DEBUG=true` (the Docker setup sets it). With `DJANGO_DEBUG=false`,
+as on staging and production, they answer 404.
+
 Create or update a SuperAdmin account:
 
 ```bash
@@ -134,6 +138,7 @@ DJANGO_SECRET_KEY=change-me
 DJANGO_DEBUG=false
 DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
 CORS_ALLOW_ALL_ORIGINS=false
+CORS_ALLOWED_ORIGINS=http://localhost:7357
 ```
 
 Database variables:
@@ -156,6 +161,11 @@ PILAH_SUPERADMIN_EMAILS=admin@example.com
 PILAH_PUBLIC_APP_URL=https://pilah.example.com
 PILAH_SUPERADMIN_EMAILS=admin@example.com,another-admin@example.com
 ```
+
+`CORS_ALLOWED_ORIGINS` is a comma-separated list of browser origins (scheme,
+host, and optional port; no path). For web Google login, set backend
+`GOOGLE_CLIENT_ID` to the same Web OAuth client ID used by mobile's
+`GOOGLE_SERVER_CLIENT_ID`; the API validates the token audience against it.
 
 Set `PILAH_SUPERADMIN_EMAILS` on Fly and as a GitHub repository variable for
 Cloud Run. It is the authoritative comma-separated list of Superadmin Google
@@ -523,7 +533,7 @@ Generate schema locally:
 python manage.py spectacular --file openapi.yaml --validate
 ```
 
-Served endpoints:
+Served endpoints (only when `DJANGO_DEBUG=true`; 404 otherwise):
 
 - `GET /api/schema/`
 - `GET /api/docs/`
