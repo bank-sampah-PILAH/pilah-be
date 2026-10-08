@@ -1,16 +1,97 @@
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.test import SimpleTestCase
 
 from scripts.bootstrap_cloud_run import bootstrap_cloud_run, validate_configuration
 
 
 class BootstrapCloudRunTests(SimpleTestCase):
+    def test_invalid_allowlist_fails_validate_only_before_cloud_calls(self) -> None:
+        for email in (
+            ".admin@example.com",
+            "admin.@example.com",
+            "admin..name@example.com",
+            "admin@",
+            "admin@.example.com",
+            "admin@example..com",
+            "admin@-example.com",
+            "admin@example-.com",
+            "admin@exam_ple.com",
+            "admin@example.-com",
+            "admin@example.com-",
+            "admin@example.c",
+            "admin@" + "a" * 64 + ".com",
+            "admin@example." + "a" * 64,
+            "a" * 309 + "@example.com",
+        ):
+            with self.subTest(email=email):
+                with self.assertRaises(ValidationError):
+                    validate_email(email)
+                environment = {
+                    **os.environ,
+                    "PILAH_WEB_ORIGIN": "https://web.run.app",
+                    "PILAH_SUPERADMIN_EMAILS": f"valid@example.com,{email}",
+                }
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(Path(__file__).resolve().parents[1] / "scripts/bootstrap_cloud_run.py"),
+                        "--validate-only",
+                    ],
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("PILAH_SUPERADMIN_EMAILS", result.stderr)
+                with patch.dict(os.environ, environment), patch("subprocess.run") as run:
+                    with self.assertRaises(ValueError):
+                        bootstrap_cloud_run()
+                    run.assert_not_called()
+
+    def test_accepted_email_boundaries_are_valid_for_runtime(self) -> None:
+        for email in (
+            "Admin.Name+tag_%@sub-domain.example.com",
+            "admin@" + "a" * 63 + ".com",
+            "admin@example." + "a" * 63,
+            "a" * 64 + "@" + "b" * 63 + "." + "c" * 63 + "." + "d" * 57 + ".com",
+        ):
+            with self.subTest(email=email):
+                validate_email(email)
+                with patch.dict(
+                    os.environ,
+                    {
+                        "PILAH_WEB_ORIGIN": "https://web.run.app",
+                        "PILAH_SUPERADMIN_EMAILS": f" {email} , second@example.com ",
+                    },
+                ):
+                    validate_configuration()
+
+    def test_allowlist_preflight_respects_user_email_storage_length(self) -> None:
+        for length in (255, 320):
+            email = "a" * (length - len("@example.com")) + "@example.com"
+            with self.subTest(length=length):
+                # Django's validator permits 320, but User.email stores at most 254.
+                validate_email(email)
+                with patch.dict(
+                    os.environ,
+                    {
+                        "PILAH_WEB_ORIGIN": "https://web.run.app",
+                        "PILAH_SUPERADMIN_EMAILS": email,
+                    },
+                ):
+                    with self.assertRaises(ValueError):
+                        validate_configuration()
+
     def test_job_uses_deployed_image_runtime_identity_and_environment_and_waits(self) -> None:
         service: dict[str, Any] = {
             "spec": {

@@ -52,6 +52,33 @@ class DeploymentWorkflowTests(SimpleTestCase):
         self.assertNotIn("continue-on-error", bootstrap)
         self.assertNotIn("if", bootstrap)
 
+    def test_manual_deploy_rejects_invalid_allowlist_before_any_cloud_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fake_gcloud = Path(directory) / "gcloud"
+            called = Path(directory) / "called"
+            fake_gcloud.write_text(f"#!/bin/sh\ntouch '{called}'\nexit 99\n")
+            fake_gcloud.chmod(0o700)
+            for email in (".admin@example.com", "admin..name@example.com"):
+                with self.subTest(email=email):
+                    result = subprocess.run(
+                        ["bash", str(ROOT / "scripts/deploy-cloud-run.sh")],
+                        env={
+                            **os.environ,
+                            "PATH": f"{directory}:{os.environ['PATH']}",
+                            "DB_PASSWORD": "placeholder",
+                            "GCS_BUCKET": "placeholder",
+                            "DJANGO_SECRET_KEY": "placeholder",
+                            "PILAH_WEB_ORIGIN": "https://web.run.app",
+                            "PILAH_SUPERADMIN_EMAILS": email,
+                        },
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("PILAH_SUPERADMIN_EMAILS", result.stderr)
+                    self.assertFalse(called.exists())
+
     def test_manual_deploy_rejects_invalid_origin_before_any_cloud_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fake_gcloud = Path(directory) / "gcloud"
