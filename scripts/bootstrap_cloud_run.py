@@ -59,6 +59,7 @@ def bootstrap_cloud_run() -> None:
             "run.googleapis.com/vpc-access-connector",
             "run.googleapis.com/vpc-access-egress",
             "run.googleapis.com/network-interfaces",
+            "run.googleapis.com/secrets",
         )
     }
     container = {
@@ -74,11 +75,12 @@ def bootstrap_cloud_run() -> None:
         "metadata": {"name": job_name},
         "spec": {
             "template": {
+                "metadata": {"annotations": annotations},
                 "spec": {
                     "taskCount": 1,
                     "parallelism": 1,
-                    "template": {"metadata": {"annotations": annotations}, "spec": spec},
-                }
+                    "template": {"spec": spec},
+                },
             }
         },
     }
