@@ -70,7 +70,18 @@ class SecuritySettingsTests(SimpleTestCase):
 
     def test_missing_secret_key_falls_back_only_in_debug(self) -> None:
         with self._reloaded_settings({"DJANGO_SECRET_KEY": "", "DJANGO_DEBUG": "true"}):
-            self.assertEqual(settings_module.SECRET_KEY, "pilah-local-dev-fallback-key")
+            # Random per-process fallback: non-empty, and not the dev-runaway
+            # case where the env value leaks through — no literal to assert.
+            self.assertTrue(settings_module.SECRET_KEY)
+
+    def test_missing_secret_key_fallback_is_random_per_process(self) -> None:
+        first: str
+        second: str
+        with self._reloaded_settings({"DJANGO_SECRET_KEY": "", "DJANGO_DEBUG": "true"}):
+            first = settings_module.SECRET_KEY
+        with self._reloaded_settings({"DJANGO_SECRET_KEY": "", "DJANGO_DEBUG": "true"}):
+            second = settings_module.SECRET_KEY
+        self.assertNotEqual(first, second)
 
     def test_explicit_secret_key_is_kept_unchanged(self) -> None:
         with self._reloaded_settings({"DJANGO_SECRET_KEY": "staging-real-key"}):
