@@ -459,7 +459,6 @@ class ApiTestPageTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'const superEmail = "browser\\u002Dadmin@example.com";')
 
-
     @override_settings(DEBUG=False)
     def test_page_is_hidden_outside_debug(self) -> None:
         response = self.client.get("/api-test/")
