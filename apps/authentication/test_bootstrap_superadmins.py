@@ -1,7 +1,9 @@
 from io import StringIO
+from unittest.mock import Mock, patch
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import IntegrityError
 from django.test import TestCase, override_settings
 
 from api.models import BankSampah, JenisSampah, Nasabah, Transaksi, User
@@ -45,6 +47,45 @@ class BootstrapSuperadminsTests(TestCase):
                 user.refresh_from_db()
                 self.assertEqual(user.role, role)
                 self.assertEqual(User.objects.count(), 1)
+
+    def test_concurrent_google_superadmin_creation_is_treated_as_success(self) -> None:
+        user = User.objects.create_user(
+            email="root@example.com",
+            google_id="google-id",
+            nama="Google Admin",
+            role=User.Role.SUPERADMIN,
+            is_profile_complete=True,
+            is_staff=True,
+            is_superuser=True,
+        )
+        query = Mock()
+        query.filter.side_effect = [[], [user]]
+        before = User.objects.filter(pk=user.pk).values().get()
+
+        with (
+            patch.object(User.objects, "select_for_update", return_value=query),
+            patch.object(User.objects, "create_user", side_effect=IntegrityError("duplicate email")),
+        ):
+            call_command("bootstrap_superadmins", stdout=StringIO())
+
+        self.assertEqual(User.objects.filter(pk=user.pk).values().get(), before)
+        self.assertEqual(User.objects.count(), 1)
+
+    def test_concurrent_non_superadmin_creation_is_not_promoted(self) -> None:
+        user = User.objects.create_user(email="root@example.com", role=User.Role.NASABAH)
+        query = Mock()
+        query.filter.side_effect = [[], [user]]
+
+        with (
+            patch.object(User.objects, "select_for_update", return_value=query),
+            patch.object(User.objects, "create_user", side_effect=IntegrityError("duplicate email")),
+        ):
+            with self.assertRaises(CommandError):
+                call_command("bootstrap_superadmins", stdout=StringIO())
+
+        user.refresh_from_db()
+        self.assertEqual(user.role, User.Role.NASABAH)
+        self.assertEqual(User.objects.count(), 1)
 
     def test_missing_or_invalid_allowlist_fails_without_writes(self) -> None:
         for allowlist in ((), ("root@example.com", "not-an-email")):
