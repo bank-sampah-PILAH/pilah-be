@@ -70,8 +70,8 @@ urlpatterns = [
     path("healthz", healthz, name="healthz"),
     path("admin/", admin.site.urls),
     path(".well-known/assetlinks.json", assetlinks, name="assetlinks"),
-    path("api-test/", ApiTestView.as_view(), name="api-test"),
-    # Developer docs: served only when DEBUG is on, so staging and production answer 404.
+    # Developer tools: served only when DEBUG is on, so staging and production answer 404.
+    path("api-test/", debug_only(ApiTestView.as_view()), name="api-test"),
     path("api/schema/", debug_only(SpectacularAPIView.as_view()), name="schema"),
     path(
         "api/docs/",
