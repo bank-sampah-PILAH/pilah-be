@@ -453,6 +453,16 @@ class DraftPencairanService:
             ids = [nasabah.id for nasabah in kandidat_pencairan(bank)]
         else:
             ids = list(dict.fromkeys(payload["nasabah_ids"]))
+        if len(ids) > DraftPencairan.MAKSIMAL_ITEM:
+            # Checked before the per-nasabah work, so an oversized request stays cheap.
+            raise serializers.ValidationError(
+                {
+                    "nasabah_ids": [
+                        f"Satu draft paling banyak {DraftPencairan.MAKSIMAL_ITEM} nasabah. "
+                        "Pilih lebih sedikit atau bagi menjadi beberapa draft."
+                    ]
+                }
+            )
         jenis = payload.get("potongan_jenis", DraftPencairan.PotonganJenis.PERSEN)
         nilai = payload.get("potongan_nilai", Decimal(0))
         items: list[dict[str, Any]] = []
