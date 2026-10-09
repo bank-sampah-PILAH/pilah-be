@@ -11,7 +11,16 @@ from rest_framework.response import Response
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import BankSampah, JenisSampah, Nasabah, Pencairan, PencairanRevisi, Saldo, User
+from api.models import (
+    BankSampah,
+    JenisSampah,
+    Nasabah,
+    Pencairan,
+    PencairanRevisi,
+    Saldo,
+    Transaksi,
+    User,
+)
 from apps.ledger.services import BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI
 
 
@@ -239,6 +248,33 @@ class PencairanEditTests(APITestCase):
         self.assertEqual(response.data["saldo_sebelum"], "465600.75")
         self.assertEqual(response.data["saldo_sesudah"], "315600.00")
         self.assertEqual(self._saldo(), "315600.00")
+
+    def test_edit_replay_rounds_at_every_pencairan_not_once_at_the_end(self) -> None:
+        # Setoran warisan PILAH 1.0 juga bisa bersen. Sen yang masuk di antara
+        # dua pencairan dibuang di pencairan berikutnya, jadi pembulatan harus
+        # per langkah: dibulatkan sekali di akhir, hasilnya Rp 1 lebih besar.
+        sekarang = timezone.now()
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("465600.75"))
+        pertama = self._catat("200000", tanggal=(sekarang - timedelta(hours=3)).isoformat())
+        Transaksi.objects.create(
+            nasabah=self.nasabah,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.user,
+            tanggal=sekarang - timedelta(hours=2),
+            total_nilai=Decimal("0.90"),
+        )
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("265600.90"))
+        kedua = self._catat("100000", tanggal=(sekarang - timedelta(hours=1)).isoformat())
+        self.assertEqual(self._saldo(), "165600.00")
+
+        response = self._edit(pertama["id"], {"nominal": "150000", "alasan": "Salah ketik"})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["saldo_sesudah"], "315600.00")
+        berikutnya = self._detail(kedua["id"])
+        self.assertEqual(berikutnya["saldo_sebelum"], "315600.90")
+        self.assertEqual(berikutnya["saldo_sesudah"], "215600.00")
+        self.assertEqual(self._saldo(), "215600.00")
 
     def _setor(self, harga: str = "100000.00", berat: str = "1.000") -> None:
         jenis, _ = JenisSampah.objects.get_or_create(
