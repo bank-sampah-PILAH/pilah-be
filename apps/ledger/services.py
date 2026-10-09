@@ -142,8 +142,7 @@ class PencairanService:
         if nominal > saldo_sebelum:
             raise serializers.ValidationError({"nominal": ["Saldo nasabah tidak mencukupi"]})
 
-        # Whole rupiah, rounded down: drops sen left in PILAH 1.0 saldo, matching
-        # the setoran rule.
+        # Drops sen left in PILAH 1.0 saldo, the same rule as setoran.
         saldo_sesudah = bulatkan_rupiah(saldo_sebelum - nominal)
         pencairan = Pencairan.objects.create(
             nasabah=nasabah,
@@ -284,6 +283,8 @@ class PencairanService:
                     raise serializers.ValidationError(
                         {"nominal": ["Saldo nasabah tidak mencukupi untuk perubahan ini"]}
                     )
+                # Per pencairan, not once at the end: legacy setoran can carry sen, and
+                # recording dropped it at each pencairan too.
                 sesudah = bulatkan_rupiah(saldo_berjalan - nilai)
                 snapshot[pencairan_id] = (saldo_berjalan, sesudah)
                 saldo_berjalan = sesudah
