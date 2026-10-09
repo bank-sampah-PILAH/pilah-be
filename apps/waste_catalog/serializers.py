@@ -129,3 +129,14 @@ class HargaBaruSerializer(serializers.Serializer[Any]):
                 f"Harga paling lambat dijadwalkan {BATAS_JADWAL_HARGA_HARI} hari dari sekarang."
             )
         return value
+
+
+class FilterJenisSampahSerializer(serializers.Serializer[Any]):
+    """Parameter filter daftar jenis sampah, dicocokkan dengan nilai yang dikenal.
+
+    Nilai di luar daftar ditolak (422), tidak diteruskan ke query atau
+    diam-diam diartikan lain (OWASP A03: validasi input positif di server).
+    """
+
+    status = serializers.ChoiceField(choices=["aktif", "tidak_aktif", "semua"], default="aktif")
+    kategori = serializers.ChoiceField(choices=JenisSampah.Kategori.choices, required=False)

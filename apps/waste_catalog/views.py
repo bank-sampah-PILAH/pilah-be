@@ -12,7 +12,11 @@ from rest_framework.serializers import BaseSerializer
 from api.models import JenisSampah
 from apps.nasabah.serializers import StatusSerializer
 from apps.waste_catalog.api import buat_jenis_sampah, harga_berlaku
-from apps.waste_catalog.serializers import HargaBaruSerializer, JenisSampahSerializer
+from apps.waste_catalog.serializers import (
+    FilterJenisSampahSerializer,
+    HargaBaruSerializer,
+    JenisSampahSerializer,
+)
 from apps.waste_catalog.services import catat_harga
 from shared_kernel.permissions import IsActivePengelola
 from shared_kernel.scoping import current_bank, current_user
@@ -27,19 +31,25 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
         qs = JenisSampah.objects.filter(bank_sampah=current_bank(self.request)).prefetch_related(
             "riwayat_harga"
         )
-        search = self.request.query_params.get("search", "")
-        status_filter = self.request.query_params.get("status", "aktif")
-        kategori = self.request.query_params.get("kategori")
-        if self.action == "list" and len(search) >= 2:
-            qs = qs.filter(nama_sampah__icontains=search)
         if self.action == "list":
-            if status_filter == "aktif":
-                qs = qs.filter(is_active=True)
-            elif status_filter == "tidak_aktif":
-                qs = qs.filter(is_active=False)
-        if self.action == "list" and kategori:
-            qs = qs.filter(kategori=kategori)
+            qs = self._saring(qs)
         return qs.order_by("nomor")
+
+    def _saring(self, qs: QuerySet[JenisSampah]) -> QuerySet[JenisSampah]:
+        filter_ = FilterJenisSampahSerializer(data=self.request.query_params)
+        filter_.is_valid(raise_exception=True)
+        search = self.request.query_params.get("search", "")
+        if len(search) >= 2:
+            qs = qs.filter(nama_sampah__icontains=search)
+        status_filter = filter_.validated_data["status"]
+        if status_filter == "aktif":
+            qs = qs.filter(is_active=True)
+        elif status_filter == "tidak_aktif":
+            qs = qs.filter(is_active=False)
+        kategori = filter_.validated_data.get("kategori")
+        if kategori:
+            qs = qs.filter(kategori=kategori)
+        return qs
 
     def create(self, request: Request) -> Response:
         serializer = self.get_serializer(data=request.data)
