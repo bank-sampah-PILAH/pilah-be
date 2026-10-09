@@ -456,6 +456,13 @@ and `saldo_saat_ini`.
 whole desired list: a field left out of an item keeps its value, and an item
 left out of the list is removed.
 
+A draft holds at most **1000 nasabah**, on create, `PATCH` and `batch` alike;
+past that the request is rejected with 422 and the pengurus splits the payout
+into several drafts. A draft is read, saved and confirmed whole, in one request
+and one transaction, which is what the limit protects. Items always come back
+ordered by nasabah name, then id, so they can be paginated by cursor if banks
+ever outgrow the limit; the totals are already computed server-side.
+
 `POST /api/v1/draft-pencairan/:id/konfirmasi` re-checks every item against the
 saldo as it is now, reports all failing items before writing anything, then
 debits each nasabah and writes one `pencairan` per item (carrying `potongan` and
