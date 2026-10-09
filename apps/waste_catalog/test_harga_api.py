@@ -79,6 +79,24 @@ class BuatJenisSampahTests(HargaApiTestCase):
 
 
 class DaftarJenisSampahTests(HargaApiTestCase):
+    def test_list_filters_accept_only_known_values(self) -> None:
+        # Parameter filter dicocokkan dengan daftar nilai yang dikenal, bukan
+        # diteruskan apa adanya: nilai asing ditolak, tidak diam-diam diartikan
+        # "semua" atau menghasilkan daftar kosong.
+        self.buat_jenis(kode="PLS-001")
+        for params in ({"status": "semua"}, {"status": "tidak_aktif"}, {"kategori": "kaca"}):
+            with self.subTest(params):
+                self.assertEqual(self.client.get("/api/v1/jenis-sampah", params).status_code, 200)
+
+        for nama, params in {
+            "status": {"status": "hapus"},
+            "kategori": {"kategori": "plastik' OR '1'='1"},
+        }.items():
+            with self.subTest(nama):
+                response = self.client.get("/api/v1/jenis-sampah", params)
+                self.assertEqual(response.status_code, 422, response.data)
+                self.assertIn(nama, response.data["errors"])
+
     def test_list_query_count_does_not_grow_with_the_number_of_jenis(self) -> None:
         # Aplikasi memuat daftar harga dengan page_size=100; harga berlaku dan
         # terjadwal tidak boleh membuat satu query per jenis.
