@@ -1,8 +1,11 @@
+import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from unittest import mock
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -460,3 +463,60 @@ class DraftPencairanTests(APITestCase):
 
         self.assertEqual(daftar.status_code, 403)
         self.assertEqual(buat.status_code, 403)
+
+    def test_draft_lebih_dari_batas_item_ditolak_saat_dibuat(self) -> None:
+        # Past the limit nothing else is looked at: the ids need not even exist.
+        terlalu_banyak = [{"nasabah_id": str(uuid.uuid4())} for _ in range(1001)]
+
+        response = self._buat(terlalu_banyak)
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("1000", str(response.data["errors"]["items"]))
+        self.assertFalse(DraftPencairan.objects.exists())
+
+    def test_batas_item_berlaku_juga_saat_mengubah_draft(self) -> None:
+        draft = self._buat([{"nasabah_id": str(self.nasabah.id)}]).data
+
+        with mock.patch.object(DraftPencairan, "MAKSIMAL_ITEM", 2):
+            response = self.client.patch(
+                f"{URL}/{draft['id']}",
+                {"items": [{"nasabah_id": str(uuid.uuid4())} for _ in range(3)]},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("2", str(response.data["errors"]["items"]))
+
+    def test_draft_tepat_sebesar_batas_masih_diterima(self) -> None:
+        kedua = self._nasabah("NAS-0002", "Budi Santoso", "50000")
+        items = [{"nasabah_id": str(self.nasabah.id)}, {"nasabah_id": str(kedua.id)}]
+
+        with mock.patch.object(DraftPencairan, "MAKSIMAL_ITEM", 2):
+            response = self._buat(items)
+
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_rincian_draft_berurutan_nama_lalu_id_apa_pun_urutan_permintaan(self) -> None:
+        budi = self._nasabah("NAS-0002", "Budi Santoso", "50000")
+        citra = self._nasabah("NAS-0003", "Citra Dewi", "75000")
+
+        response = self._buat([{"nasabah_id": str(n.id)} for n in (citra, self.nasabah, budi)])
+
+        self.assertEqual(
+            [item["nasabah_nama"] for item in response.data["items"]],
+            ["Ahmad Ridwan", "Budi Santoso", "Citra Dewi"],
+        )
+
+    def test_membaca_draft_besar_tidak_menambah_query_per_item(self) -> None:
+        def jumlah_query(jumlah: int) -> int:
+            nasabah = [
+                self._nasabah(f"BNY-{jumlah}{i:03d}", f"Nasabah {jumlah}-{i}", "10000")
+                for i in range(jumlah)
+            ]
+            draft = self._buat([{"nasabah_id": str(n.id)} for n in nasabah]).data
+            with CaptureQueriesContext(connection) as queries:
+                response = self.client.get(f"{URL}/{draft['id']}")
+            self.assertEqual(len(response.data["items"]), jumlah)
+            return len(queries)
+
+        self.assertEqual(jumlah_query(3), jumlah_query(25))
