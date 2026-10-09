@@ -332,6 +332,11 @@ class _DraftPencairanWriteSerializer(serializers.Serializer[Any]):
     potongan_nilai = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
 
     def validate_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if len(items) > DraftPencairan.MAKSIMAL_ITEM:
+            raise serializers.ValidationError(
+                f"Satu draft paling banyak {DraftPencairan.MAKSIMAL_ITEM} nasabah. "
+                "Bagi menjadi beberapa draft."
+            )
         ids = [item["nasabah_id"] for item in items]
         if len(set(ids)) != len(ids):
             raise serializers.ValidationError("Satu nasabah hanya boleh sekali dalam satu draft")

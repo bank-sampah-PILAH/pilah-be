@@ -157,6 +157,11 @@ class PencairanRevisi(models.Model):
 class DraftPencairan(TimestampedModel):
     """A payout plan for one or many nasabah (PIL-327). Never touches saldo."""
 
+    # A draft is read, saved and confirmed whole, in one request and one
+    # transaction. Past this it should be split; if banks outgrow it, items need
+    # their own paginated endpoints (ordered by nasabah name, then id).
+    MAKSIMAL_ITEM = 1000
+
     class Status(models.TextChoices):
         DRAFT = "draft", "Draft"
         DIKONFIRMASI = "dikonfirmasi", "Dikonfirmasi"
