@@ -1,5 +1,6 @@
 from decimal import Decimal
 from typing import Any
+from unittest import mock
 
 from api.models import BankSampah, DraftPencairan, Nasabah, Saldo
 from apps.ledger.draft_testing import URL, DraftTestBase
@@ -134,3 +135,16 @@ class BatchPencairanTests(DraftTestBase):
         for body in ({}, {"semua": True, "nasabah_ids": [str(self.budi.id)]}, {"semua": False}):
             with self.subTest(body=body):
                 self.assertEqual(self._batch(**body).status_code, 422)
+
+    def test_batch_melebihi_batas_item_ditolak_baik_semua_maupun_daftar(self) -> None:
+        # Three nasabah are eligible and the limit is two.
+        with mock.patch.object(DraftPencairan, "MAKSIMAL_ITEM", 2):
+            semua = self._batch(semua=True)
+            daftar = self._batch(
+                nasabah_ids=[str(n.id) for n in (self.nasabah, self.budi, self.citra)]
+            )
+
+        for response in (semua, daftar):
+            self.assertEqual(response.status_code, 422, response.data)
+            self.assertIn("2", str(response.data["errors"]["nasabah_ids"]))
+        self.assertFalse(DraftPencairan.objects.exists())
