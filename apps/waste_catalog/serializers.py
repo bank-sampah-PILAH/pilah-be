@@ -1,15 +1,23 @@
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 from django.db.models import Model
+from django.utils import timezone
 from rest_framework import serializers
 
 from api.models import JenisSampah
+from apps.waste_catalog.api import ringkas_harga
 
 
 class JenisSampahSerializer(serializers.ModelSerializer[Model]):
     satuan = serializers.SerializerMethodField()
     kode = serializers.CharField(source="nomor", required=True, max_length=20)
+    # Bukan kolom model: harga masuk sebagai versi pertama (create) atau versi
+    # baru (PUT dari aplikasi lama), dan keluar sebagai harga yang berlaku.
+    harga_per_kg = serializers.DecimalField(
+        max_digits=11, decimal_places=2, write_only=True, required=False
+    )
 
     class Meta:
         model = JenisSampah
@@ -44,11 +52,91 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
         return value
 
     def validate_harga_per_kg(self, value: Any) -> Any:
-        if value <= 0:
-            raise serializers.ValidationError("Harga harus berupa angka positif")
-        if value >= Decimal(1000000000):
-            raise serializers.ValidationError("Harga maksimal 9 digit")
-        return value
+        return validasi_harga(value)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if self.instance is None and "harga_per_kg" not in attrs:
+            raise serializers.ValidationError({"harga_per_kg": ["Harga wajib diisi"]})
+        return attrs
 
     def get_satuan(self, obj: Any) -> Any:
         return "kg"
+
+    def to_representation(self, instance: Any) -> Any:
+        data = super().to_representation(instance)
+        berlaku, terjadwal = ringkas_harga(instance.riwayat_harga.all(), timezone.now())
+        data["harga_per_kg"] = _HARGA.to_representation(berlaku.harga_per_kg) if berlaku else None
+        data["harga_berlaku_mulai"] = (
+            _WAKTU.to_representation(berlaku.berlaku_mulai) if berlaku else None
+        )
+        data["harga_terjadwal"] = (
+            {
+                "harga_per_kg": _HARGA.to_representation(terjadwal.harga_per_kg),
+                "berlaku_mulai": _WAKTU.to_representation(terjadwal.berlaku_mulai),
+            }
+            if terjadwal
+            else None
+        )
+        return data
+
+
+_HARGA = serializers.DecimalField(max_digits=11, decimal_places=2)
+_WAKTU = serializers.DateTimeField()
+
+
+def validasi_harga(value: Decimal) -> Decimal:
+    if value <= 0:
+        raise serializers.ValidationError("Harga harus berupa angka positif")
+    if value >= Decimal(1000000000):
+        raise serializers.ValidationError("Harga maksimal 9 digit")
+    return value
+
+
+# Jadwal harga lebih jauh dari ini hampir pasti salah ketik tahun.
+BATAS_JADWAL_HARGA_HARI = 365
+
+
+class WaktuBerzonaField(serializers.DateTimeField):
+    """Waktu yang wajib membawa offset zona waktu.
+
+    Bank sampah bisa berada di WIB, WITA, atau WIT. Waktu tanpa offset akan
+    ditafsirkan sebagai UTC dan bergeser beberapa jam, jadi ditolak.
+    """
+
+    default_error_messages = {"tanpa_zona": "Sertakan zona waktu, misalnya +07:00."}
+
+    def enforce_timezone(self, value: datetime) -> datetime:
+        if timezone.is_naive(value):
+            self.fail("tanpa_zona")
+        return super().enforce_timezone(value)
+
+
+class HargaBaruSerializer(serializers.Serializer[Any]):
+    harga_per_kg = serializers.DecimalField(max_digits=11, decimal_places=2)
+    berlaku_mulai = WaktuBerzonaField(required=False)
+
+    def validate_harga_per_kg(self, value: Decimal) -> Decimal:
+        return validasi_harga(value)
+
+    def validate_berlaku_mulai(self, value: datetime) -> datetime:
+        sekarang = timezone.now()
+        if value <= sekarang:
+            raise serializers.ValidationError(
+                "Harga tidak boleh berlaku surut. Kosongkan untuk berlaku sekarang."
+            )
+        if value > sekarang + timedelta(days=BATAS_JADWAL_HARGA_HARI):
+            raise serializers.ValidationError(
+                f"Harga paling lambat dijadwalkan {BATAS_JADWAL_HARGA_HARI} hari dari sekarang."
+            )
+        return value
+
+
+class FilterJenisSampahSerializer(serializers.Serializer[Any]):
+    """Parameter filter daftar jenis sampah, dicocokkan dengan nilai yang dikenal.
+
+    Nilai di luar daftar ditolak (422), tidak diteruskan ke query atau
+    diam-diam diartikan lain (OWASP A03: validasi input positif di server).
+    """
+
+    status = serializers.ChoiceField(choices=["aktif", "tidak_aktif", "semua"], default="aktif")
+    kategori = serializers.ChoiceField(choices=JenisSampah.Kategori.choices, required=False)

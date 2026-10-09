@@ -44,6 +44,8 @@ from api.models import (
 from apps.bank_sampah.serializers import BankSampahApprovalListSerializer
 from apps.nasabah.keanggotaan import sinkronkan_dari_akun
 from apps.nasabah.services import NasabahApprovalService
+from apps.waste_catalog.api import buat_jenis_sampah
+from apps.waste_catalog.services import catat_harga
 
 
 class APISpecTests(APITestCase):
@@ -2012,7 +2014,7 @@ class APISpecTests(APITestCase):
             alamat="Jl. Melati No. 9",
         )
         Saldo.objects.create(nasabah=nasabah)
-        jenis = JenisSampah.objects.create(
+        jenis = buat_jenis_sampah(
             bank_sampah=self.bank,
             nomor="JS-0002",
             nama_sampah="Kardus",
@@ -2107,14 +2109,14 @@ class APISpecTests(APITestCase):
             alamat="Jl. Melati No. 5",
         )
         Saldo.objects.create(nasabah=nasabah)
-        kertas = JenisSampah.objects.create(
+        kertas = buat_jenis_sampah(
             bank_sampah=self.bank,
             nomor="JS-0003",
             nama_sampah="kertas hvs",
             kategori="kertas",
             harga_per_kg=Decimal(1500),
         )
-        botol = JenisSampah.objects.create(
+        botol = buat_jenis_sampah(
             bank_sampah=self.bank,
             nomor="JS-0004",
             nama_sampah="botol kaca",
@@ -4416,14 +4418,14 @@ class SetoranTestBase(APITestCase):
             alamat="Jl. Mawar No. 12",
         )
         Saldo.objects.create(nasabah=self.nasabah)
-        self.jenis = JenisSampah.objects.create(
+        self.jenis = buat_jenis_sampah(
             bank_sampah=self.bank,
             nomor="PLS-001",
             nama_sampah="Plastik PET",
             kategori=JenisSampah.Kategori.PLASTIK,
             harga_per_kg=Decimal("3333.00"),
         )
-        self.jenis_lain = JenisSampah.objects.create(
+        self.jenis_lain = buat_jenis_sampah(
             bank_sampah=self.bank,
             nomor="KRS-001",
             nama_sampah="Kardus",
@@ -4502,7 +4504,7 @@ class IdempotensiSetoranTests(SetoranTestBase):
             no_hp="+628123456781",
             alamat="Bogor",
         )
-        jenis_lain = JenisSampah.objects.create(
+        jenis_lain = buat_jenis_sampah(
             bank_sampah=bank_lain,
             nomor="PLS-001",
             nama_sampah="Plastik PET",
@@ -4622,8 +4624,7 @@ class KalkulasiSetoranTests(SetoranTestBase):
         # Kolom harga master menerima dua desimal. Rp 3.333,99/kg x 0,300 kg =
         # Rp 1.000,197, jadi hasilnya Rp 1.000 — bukan Rp 999 seperti yang
         # terjadi bila harganya dipotong lebih dulu.
-        self.jenis.harga_per_kg = Decimal("3333.99")
-        self.jenis.save(update_fields=["harga_per_kg"])
+        catat_harga(self.jenis, Decimal("3333.99"), timezone.now(), self.user)
 
         response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "0.300"}])
 
@@ -4779,8 +4780,7 @@ class ValidasiInputSetoranTests(SetoranTestBase):
     def test_item_dengan_subtotal_di_bawah_satu_rupiah_ditolak(self) -> None:
         # Harga master dipertahankan presisinya, tetapi item yang nilainya
         # membulat ke Rp 0 tidak boleh membuat transaksi tanpa nilai.
-        self.jenis.harga_per_kg = Decimal("0.50")
-        self.jenis.save(update_fields=["harga_per_kg"])
+        catat_harga(self.jenis, Decimal("0.50"), timezone.now(), self.user)
 
         response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "0.001"}])
 
@@ -4794,8 +4794,7 @@ class ValidasiInputSetoranTests(SetoranTestBase):
 
     def test_harga_master_bersen_diterima_jika_subtotal_minimal_satu_rupiah(self) -> None:
         # Preservasi pecahan harga berarti Rp 0,50/kg x 2 kg = Rp 1 dan valid.
-        self.jenis.harga_per_kg = Decimal("0.50")
-        self.jenis.save(update_fields=["harga_per_kg"])
+        catat_harga(self.jenis, Decimal("0.50"), timezone.now(), self.user)
 
         response = self._setor([{"jenis_sampah_id": str(self.jenis.id), "berat": "2.000"}])
 
@@ -4998,7 +4997,7 @@ class PencairanAPITests(APITestCase):
 
     def test_saldo_setelah_transaksi_accounts_for_pencairan(self) -> None:
         Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))
-        jenis = JenisSampah.objects.create(
+        jenis = buat_jenis_sampah(
             bank_sampah=self.bank,
             nomor="PLS-001",
             nama_sampah="Plastik PET",
@@ -5069,7 +5068,7 @@ class PencairanAPITests(APITestCase):
 
     def test_export_saldo_column_accounts_for_pencairan(self) -> None:
         Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))
-        jenis = JenisSampah.objects.create(
+        jenis = buat_jenis_sampah(
             bank_sampah=self.bank,
             nomor="PLS-001",
             nama_sampah="Plastik PET",
@@ -5124,7 +5123,7 @@ class PencairanAPITests(APITestCase):
 
     def test_same_instant_pencairan_is_ordered_after_setoran(self) -> None:
         Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))
-        jenis = JenisSampah.objects.create(
+        jenis = buat_jenis_sampah(
             bank_sampah=self.bank,
             nomor="PLS-001",
             nama_sampah="Plastik PET",
@@ -5237,7 +5236,7 @@ class PencairanAPITests(APITestCase):
 
     def test_pencairan_cannot_predate_latest_nasabah_activity(self) -> None:
         Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))
-        jenis = JenisSampah.objects.create(
+        jenis = buat_jenis_sampah(
             bank_sampah=self.bank,
             nomor="PLS-001",
             nama_sampah="Plastik PET",
@@ -5296,7 +5295,7 @@ class PencairanAPITests(APITestCase):
 
     def test_history_saldo_matches_saldo_after_pencairan_drops_sen(self) -> None:
         Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))
-        jenis = JenisSampah.objects.create(
+        jenis = buat_jenis_sampah(
             bank_sampah=self.bank,
             nomor="PLS-001",
             nama_sampah="Plastik PET",
