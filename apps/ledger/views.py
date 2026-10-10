@@ -3,7 +3,7 @@ import json
 from typing import Any
 from uuid import UUID
 
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import Prefetch, QuerySet
 from django.http import HttpResponse
 from rest_framework import status, viewsets
@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from api.models import BankSampah, DraftPencairan, DraftPencairanItem, Pencairan, Transaksi, User
 from apps.ledger.serializers import (
     DraftBatchSerializer,
+    DraftExportQuerySerializer,
     DraftKandidatQuerySerializer,
     DraftKandidatSerializer,
     DraftPencairanCreateSerializer,
@@ -39,7 +40,7 @@ from apps.ledger.services import (
 )
 from apps.nasabah.api import kandidat_pencairan
 from apps.notification.api import send_setoran_receipt
-from apps.reporting.api import export_excel
+from apps.reporting.api import export_draft_pencairan, export_excel
 from shared_kernel.permissions import (
     IsActivePengelola,
     IsActivePengelolaOrNasabah,
@@ -338,3 +339,37 @@ class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg] 
         except DraftTidakBisaDiubah as exc:
             return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
         return Response(DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data)
+
+    @action(detail=False, methods=["post"], url_path="export")
+    def export_langsung(self, request: Request) -> HttpResponse:
+        """PDF or Excel of the draft as sent, saved or not. Nothing is written.
+
+        The body is a draft as it would be created, checked the same way and built the same
+        way; the rows are rolled back once the file exists, so a half-edited screen can be
+        exported without being saved.
+        """
+        query = DraftExportQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        serializer = DraftPencairanCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            draft = DraftPencairanService.buat_draft(_user(request), serializer.validated_data)
+            content, filename, content_type = export_draft_pencairan(
+                self.get_queryset().get(pk=draft.pk), query.validated_data["berkas"]
+            )
+            transaction.set_rollback(True)
+        response = HttpResponse(content, content_type=content_type)
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    @action(detail=True, methods=["get"], url_path="export")
+    def export(self, request: Request, pk: str | None = None) -> HttpResponse:
+        """PDF or Excel of the draft. Read-only: it never changes the status or the saldo."""
+        query = DraftExportQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        content, filename, content_type = export_draft_pencairan(
+            self.get_object(), query.validated_data["berkas"]
+        )
+        response = HttpResponse(content, content_type=content_type)
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response

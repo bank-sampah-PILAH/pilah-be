@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 from unittest import mock
 
 from django.db import connection
@@ -484,3 +485,72 @@ class DraftPencairanTests(DraftTestBase):
         item = self.client.get(f"{URL}/{draft['id']}").data["items"][0]
 
         self.assertEqual(item["saldo_saat_ini"], "0.00")
+
+
+class JumlahUmumDraftTests(DraftTestBase):
+    """The jumlah the pengurus applied to everyone, kept so the form reopens as it was left."""
+
+    def _item(self) -> list[dict[str, Any]]:
+        return [{"nasabah_id": str(self.nasabah.id), "nominal": "232800"}]
+
+    def test_tanpa_jumlah_umum_keduanya_kosong(self) -> None:
+        response = self._buat(self._item())
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertIsNone(response.data["jumlah_jenis"])
+        self.assertIsNone(response.data["jumlah_nilai"])
+
+    def test_jumlah_umum_tersimpan_dan_terbaca_lagi(self) -> None:
+        response = self._buat(self._item(), jumlah_jenis="persen", jumlah_nilai="50")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        detail = self.client.get(f"{URL}/{response.data['id']}")
+        self.assertEqual(detail.data["jumlah_jenis"], "persen")
+        self.assertEqual(detail.data["jumlah_nilai"], "50.00")
+
+    def test_jumlah_rupiah_tersimpan(self) -> None:
+        response = self._buat(self._item(), jumlah_jenis="rupiah", jumlah_nilai="100000")
+
+        self.assertEqual(response.data["jumlah_jenis"], "rupiah")
+        self.assertEqual(response.data["jumlah_nilai"], "100000.00")
+
+    def test_jumlah_umum_bisa_diubah_dan_dikosongkan(self) -> None:
+        draft = self._buat(self._item(), jumlah_jenis="persen", jumlah_nilai="50").data
+
+        ubah = self.client.patch(
+            f"{URL}/{draft['id']}",
+            {"jumlah_jenis": "rupiah", "jumlah_nilai": "75000"},
+            format="json",
+        )
+        self.assertEqual(
+            (ubah.data["jumlah_jenis"], ubah.data["jumlah_nilai"]), ("rupiah", "75000.00")
+        )
+
+        kosong = self.client.patch(
+            f"{URL}/{draft['id']}", {"jumlah_jenis": None, "jumlah_nilai": None}, format="json"
+        )
+        self.assertEqual(kosong.status_code, 200, kosong.data)
+        self.assertIsNone(kosong.data["jumlah_jenis"])
+        self.assertIsNone(kosong.data["jumlah_nilai"])
+
+    def test_ubah_hal_lain_tidak_menyentuh_jumlah_umum(self) -> None:
+        draft = self._buat(self._item(), jumlah_jenis="persen", jumlah_nilai="50").data
+
+        ubah = self.client.patch(f"{URL}/{draft['id']}", {"nama": "Baru"}, format="json")
+
+        self.assertEqual(ubah.data["jumlah_jenis"], "persen")
+        self.assertEqual(ubah.data["jumlah_nilai"], "50.00")
+
+    def test_jumlah_umum_tidak_valid_ditolak(self) -> None:
+        kasus = [
+            {"jumlah_jenis": "persen"},
+            {"jumlah_nilai": "50"},
+            {"jumlah_jenis": "persen", "jumlah_nilai": "100.01"},
+            {"jumlah_jenis": "persen", "jumlah_nilai": "-1"},
+            {"jumlah_jenis": "rupiah", "jumlah_nilai": "1000.5"},
+            {"jumlah_jenis": "ons", "jumlah_nilai": "5"},
+        ]
+        for body in kasus:
+            with self.subTest(body=body):
+                response = self._buat(self._item(), **body)
+                self.assertEqual(response.status_code, 422, response.data)

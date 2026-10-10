@@ -469,6 +469,8 @@ class DraftPencairanService:
             diubah_oleh=user,
             potongan_jenis=payload.get("potongan_jenis", DraftPencairan.PotonganJenis.PERSEN),
             potongan_nilai=payload.get("potongan_nilai", Decimal(0)),
+            jumlah_jenis=payload.get("jumlah_jenis"),
+            jumlah_nilai=payload.get("jumlah_nilai"),
         )
         items = DraftPencairanService._sinkronkan_item(draft, payload["items"])
         DraftPencairanService._periksa_potongan(items)
@@ -543,6 +545,9 @@ class DraftPencairanService:
         if "potongan_jenis" in payload:
             draft.potongan_jenis = payload["potongan_jenis"]
             draft.potongan_nilai = payload["potongan_nilai"]
+        if "jumlah_jenis" in payload:
+            draft.jumlah_jenis = payload["jumlah_jenis"]
+            draft.jumlah_nilai = payload.get("jumlah_nilai")
         draft.diubah_oleh = user
         draft.save()
         if "items" in payload:

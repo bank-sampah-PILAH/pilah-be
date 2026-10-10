@@ -309,6 +309,30 @@ def _validate_potongan(attrs: dict[str, Any]) -> dict[str, Any]:
     return attrs
 
 
+def _validate_jumlah(attrs: dict[str, Any]) -> dict[str, Any]:
+    """The jumlah applied to everyone: a jenis plus a nilai, both or neither."""
+    jenis = attrs.get("jumlah_jenis")
+    nilai = attrs.get("jumlah_nilai")
+    if (jenis is None) != (nilai is None):
+        raise serializers.ValidationError(
+            {"jumlah_nilai": ["Jenis dan nilai jumlah harus diisi bersamaan"]}
+        )
+    if nilai is None:
+        return attrs
+    if nilai < 0:
+        raise serializers.ValidationError({"jumlah_nilai": ["Jumlah tidak boleh negatif"]})
+    if jenis == DraftPencairan.PotonganJenis.PERSEN:
+        if nilai > 100:
+            raise serializers.ValidationError(
+                {"jumlah_nilai": ["Jumlah persen tidak boleh lebih dari 100"]}
+            )
+    elif nilai != nilai.to_integral_value():
+        raise serializers.ValidationError(
+            {"jumlah_nilai": ["Jumlah rupiah harus berupa rupiah bulat"]}
+        )
+    return attrs
+
+
 class DraftItemInputSerializer(serializers.Serializer[Any]):
     nasabah_id = serializers.UUIDField()
     nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
@@ -334,6 +358,13 @@ class _DraftPencairanWriteSerializer(serializers.Serializer[Any]):
         choices=DraftPencairan.PotonganJenis.choices, required=False
     )
     potongan_nilai = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
+    # null on an edit clears what was kept.
+    jumlah_jenis = serializers.ChoiceField(
+        choices=DraftPencairan.PotonganJenis.choices, required=False, allow_null=True
+    )
+    jumlah_nilai = serializers.DecimalField(
+        max_digits=14, decimal_places=2, required=False, allow_null=True
+    )
 
     def validate_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if len(items) > DraftPencairan.MAKSIMAL_ITEM:
@@ -347,7 +378,7 @@ class _DraftPencairanWriteSerializer(serializers.Serializer[Any]):
         return items
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        return _validate_potongan(attrs)
+        return _validate_jumlah(_validate_potongan(attrs))
 
 
 class DraftPencairanUpdateSerializer(_DraftPencairanWriteSerializer):
@@ -398,6 +429,8 @@ class DraftPencairanSerializer(serializers.ModelSerializer[Model]):
             "status",
             "potongan_jenis",
             "potongan_nilai",
+            "jumlah_jenis",
+            "jumlah_nilai",
             "dibuat_oleh_nama",
             "diubah_oleh_nama",
             "created_at",
@@ -471,3 +504,7 @@ class DraftBatchSerializer(_DraftPencairanWriteSerializer):
                 {"nasabah_ids": ["Pilih semua nasabah, atau kirim daftar nasabah, bukan keduanya"]}
             )
         return attrs
+
+
+class DraftExportQuerySerializer(serializers.Serializer[Any]):
+    berkas = serializers.ChoiceField(choices=["pdf", "xlsx"])

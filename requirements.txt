@@ -26,6 +26,7 @@ jsonschema-specifications==2025.9.1
 msgpack==1.2.2
 openpyxl==3.1.5
 packaging==26.2
+pillow==12.3.0
 psycopg==3.3.4
 psycopg-binary==3.3.4
 pyasn1==0.6.4
@@ -37,6 +38,7 @@ proto-plus==1.28.0
 protobuf==7.35.1
 PyYAML==6.0.3
 referencing==0.37.0
+reportlab==5.0.1
 requests==2.34.2
 rpds-py==2026.5.1
 sqlparse==0.6.0

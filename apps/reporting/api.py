@@ -9,13 +9,17 @@ reporting port).
 from django.db.models import QuerySet
 from django.http import HttpRequest
 
-from api.models import Transaksi
-from apps.reporting import exporter
+from api.models import DraftPencairan, Transaksi
+from apps.reporting import draft_export, exporter
 
-__all__ = ["export_excel"]
+__all__ = ["export_draft_pencairan", "export_excel"]
 
 
 def export_excel(
     queryset: QuerySet[Transaksi], request: HttpRequest | None = None
 ) -> tuple[bytes, str]:
     return exporter.export_excel(queryset, request)
+
+
+def export_draft_pencairan(draft: DraftPencairan, berkas: str) -> tuple[bytes, str, str]:
+    return draft_export.export_draft_pencairan(draft, berkas)
