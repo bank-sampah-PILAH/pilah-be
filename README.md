@@ -442,6 +442,7 @@ POST /api/v1/draft-pencairan
 | --- | --- |
 | `nama` | Optional, max 150 characters. Blank becomes `Pencairan 7 Okt 2026, 14:35` (the current date and time in WIB). |
 | `potongan_jenis`, `potongan_nilai` | The draft's default potongan: `persen` (0-100) or `rupiah`. Sent together. |
+| `jumlah_jenis`, `jumlah_nilai` | The jumlah last applied to everyone (`persen` 0-100, or whole `rupiah`), kept so the form reopens as it was. Sent together; only a record, the item nominals decide what is paid. `null` for both clears it. |
 | `items[].nasabah_id` | Required. Active, approved nasabah of the pengurus' bank; once per draft. |
 | `items[].nominal` | Optional, defaults to the whole saldo. Whole rupiah, above zero, not above the saldo. |
 | `items[].metode` | `tunai` (default) or `transfer`. |
@@ -473,10 +474,17 @@ edited afterwards.
 `GET /api/v1/draft-pencairan/:id/export?berkas=pdf|xlsx` downloads the draft as
 PDF or Excel. It works in any status, repeatedly, and changes nothing.
 
+`POST /api/v1/draft-pencairan/export?berkas=pdf|xlsx` takes the same body as a
+create and returns the file for that draft as it stands, without saving it: the
+draft is built and validated, then rolled back. Use it to export edits that were
+not saved yet.
+
 `GET /api/v1/draft-pencairan/kandidat` lists, unpaginated, the nasabah that can
 still be paid out (active, approved, saldo of at least Rp 1) so a picker can
 select across pages. It accepts `search` (2+ characters), `saldo_min` and
-`ordering` (`nama`, `-nama`, `saldo`, `-saldo`).
+`ordering` (`nama`, `-nama`, `saldo`, `-saldo`). With `termasuk_kosong=true` it
+also lists nasabah whose saldo is Rp 0 or who have no saldo yet, so a picker can
+show them as empty; they still cannot be put in a draft.
 
 `POST /api/v1/draft-pencairan/batch` builds a draft from `{"semua": true}` or
 `{"nasabah_ids": [...]}`, paying each their whole saldo with the optional
