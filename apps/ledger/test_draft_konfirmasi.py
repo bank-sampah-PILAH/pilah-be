@@ -50,6 +50,36 @@ class KonfirmasiDraftTests(DraftTestBase):
         self.assertEqual(riwayat["Budi Santoso"].nominal, Decimal(50000))
         self.assertEqual(riwayat["Budi Santoso"].potongan, Decimal(5000))
 
+    def test_draft_terkonfirmasi_menyimpan_saldo_awal_sebelum_dibayar(self) -> None:
+        draft = self._draft()
+        self._konfirmasi(draft["id"])
+
+        detail = self.client.get(f"{URL}/{draft['id']}")
+
+        saldo_awal = {i["nasabah_nama"]: i["saldo_saat_ini"] for i in detail.data["items"]}
+        self.assertEqual(saldo_awal["Ahmad Ridwan"], "465600.00")
+        self.assertEqual(saldo_awal["Budi Santoso"], "50000.00")
+        self.assertEqual(self._saldo(self.budi), Decimal(0), "the live saldo did go down")
+
+    def test_saldo_awal_tetap_walau_saldo_nasabah_berubah_lagi(self) -> None:
+        draft = self._draft()
+        self._konfirmasi(draft["id"])
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal(1))
+
+        detail = self.client.get(f"{URL}/{draft['id']}")
+
+        saldo_awal = {i["nasabah_nama"]: i["saldo_saat_ini"] for i in detail.data["items"]}
+        self.assertEqual(saldo_awal["Ahmad Ridwan"], "465600.00")
+
+    def test_draft_yang_masih_draft_tetap_menunjukkan_saldo_terkini(self) -> None:
+        draft = self._draft()
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal(777))
+
+        detail = self.client.get(f"{URL}/{draft['id']}")
+
+        saldo = {i["nasabah_nama"]: i["saldo_saat_ini"] for i in detail.data["items"]}
+        self.assertEqual(saldo["Ahmad Ridwan"], "777.00")
+
     def test_riwayat_pengurus_menampilkan_potongan_dan_nominal_dibayar(self) -> None:
         self._konfirmasi(self._draft(potongan_jenis="persen", potongan_nilai="10")["id"])
 
