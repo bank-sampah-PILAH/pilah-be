@@ -101,3 +101,86 @@ class ExportDraftTests(DraftTestBase):
         )
 
         self.assertEqual(self._export("pdf").status_code, 403)
+
+
+class ExportPratinjauTests(DraftTestBase):
+    """Export of what is on the screen, saved or not: nothing is written."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.budi = self._nasabah("NAS-0002", "Budi Santoso", "50000")
+
+    def _body(self, **extra: Any) -> dict[str, Any]:
+        return {
+            "nama": "Belum Disimpan",
+            "potongan_jenis": "persen",
+            "potongan_nilai": "10",
+            "items": [
+                {"nasabah_id": str(self.nasabah.id), "nominal": "100000"},
+                {"nasabah_id": str(self.budi.id)},
+            ],
+            **extra,
+        }
+
+    def _export(self, body: dict[str, Any], berkas: str | None = "pdf") -> Any:
+        params = f"?berkas={berkas}" if berkas else ""
+        return self.client.post(f"{URL}/export{params}", body, format="json")
+
+    def test_pdf_dari_isi_yang_dikirim_tanpa_menyimpan_apa_pun(self) -> None:
+        response = self._export(self._body())
+
+        self.assertEqual(response.status_code, 200, getattr(response, "data", None))
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        teks = _teks_pdf(response.content)
+        for isi in ("Belum Disimpan", "Ahmad Ridwan", "Budi Santoso", "90.000", "45.000"):
+            self.assertIn(isi, teks)
+        self.assertEqual(DraftPencairan.objects.count(), 0)
+
+    def test_excel_dari_isi_yang_dikirim(self) -> None:
+        response = self._export(self._body(), "xlsx")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], XLSX)
+        baris = [
+            [sel for sel in row if sel is not None]
+            for row in load_workbook(BytesIO(response.content)).active.iter_rows(values_only=True)
+        ]
+        self.assertIn([1, "NAS-0001", "Ahmad Ridwan", "Tunai", 100000, 10000, 90000], baris)
+        self.assertEqual(DraftPencairan.objects.count(), 0)
+
+    def test_tidak_menyentuh_draft_yang_sudah_tersimpan(self) -> None:
+        tersimpan = self._buat(
+            [{"nasabah_id": str(self.nasabah.id), "nominal": "100000"}], nama="Versi Tersimpan"
+        ).data
+
+        self._export(self._body())
+
+        draft = DraftPencairan.objects.get()
+        self.assertEqual(str(draft.id), tersimpan["id"])
+        self.assertEqual(draft.nama, "Versi Tersimpan")
+        self.assertEqual(draft.items.count(), 1)
+
+    def test_nama_kosong_dipakai_nama_default(self) -> None:
+        response = self._export(self._body(nama=""))
+
+        self.assertIn("Pencairan", _teks_pdf(response.content))
+
+    def test_isi_tidak_valid_ditolak_seperti_menyimpan(self) -> None:
+        body = self._body(items=[{"nasabah_id": str(self.budi.id), "nominal": "99999999"}])
+
+        response = self._export(body)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(DraftPencairan.objects.count(), 0)
+
+    def test_berkas_wajib_dan_hanya_pdf_atau_xlsx(self) -> None:
+        for berkas in (None, "csv"):
+            with self.subTest(berkas=berkas):
+                self.assertEqual(self._export(self._body(), berkas).status_code, 422)
+
+    def test_nasabah_tidak_boleh_mengekspor(self) -> None:
+        self._login(
+            User.objects.create_user(email="n@example.test", nama="N", role=User.Role.NASABAH)
+        )
+
+        self.assertIn(self._export(self._body()).status_code, (403, 404))
