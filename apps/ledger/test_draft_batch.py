@@ -53,6 +53,60 @@ class KandidatPencairanTests(DraftTestBase):
         self.assertEqual(nama(ordering="-saldo"), ["Ahmad Ridwan", "Citra Dewi", "Budi Santoso"])
         self.assertEqual(nama(saldo_min="250000"), ["Ahmad Ridwan", "Citra Dewi"])
 
+    def test_kandidat_bisa_menyertakan_nasabah_bersaldo_kosong_untuk_ditampilkan(self) -> None:
+        self._nasabah("NAS-0004", "Dedi Nonaktif", "90000", is_active=False)
+        self._nasabah("NAS-0006", "Fani Kosong", "0")
+        self._nasabah("NAS-0007", "Gita Receh", "0.50")
+
+        def nama(**params: str) -> list[str]:
+            return [k["nama"] for k in self._kandidat(**params)]
+
+        self.assertEqual(
+            nama(termasuk_kosong="true"),
+            ["Ahmad Ridwan", "Budi Santoso", "Citra Dewi", "Fani Kosong", "Gita Receh"],
+        )
+        self.assertEqual(
+            nama(termasuk_kosong="true", ordering="saldo")[:2], ["Fani Kosong", "Gita Receh"]
+        )
+        self.assertEqual(nama(termasuk_kosong="true", search="fani"), ["Fani Kosong"])
+        self.assertEqual(
+            nama(termasuk_kosong="true", saldo_min="250000"), ["Ahmad Ridwan", "Citra Dewi"]
+        )
+        saldo = {k["nama"]: k["saldo"] for k in self._kandidat(termasuk_kosong="true")}
+        self.assertEqual(saldo["Fani Kosong"], "0.00")
+
+    def test_nasabah_yang_belum_punya_saldo_sama_sekali_tampil_sebagai_nol(self) -> None:
+        baru = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0009",
+            nama="Hana Baru",
+            email="hana@example.com",
+            no_hp="+628100090000",
+            alamat="Jl. Melati",
+        )
+        self.assertFalse(Saldo.objects.filter(nasabah=baru).exists())
+
+        kandidat = self._kandidat(termasuk_kosong="true", ordering="saldo")
+
+        self.assertEqual(kandidat[0]["nama"], "Hana Baru")
+        self.assertEqual(kandidat[0]["saldo"], "0.00")
+        self.assertNotIn("Hana Baru", [k["nama"] for k in self._kandidat()])
+
+    def test_tanpa_termasuk_kosong_kandidat_tetap_hanya_yang_bisa_dicairkan(self) -> None:
+        self._nasabah("NAS-0006", "Fani Kosong", "0")
+
+        names = [k["nama"] for k in self._kandidat(termasuk_kosong="false")]
+
+        self.assertNotIn("Fani Kosong", names)
+
+    def test_batch_semua_tidak_membawa_nasabah_bersaldo_kosong(self) -> None:
+        self._nasabah("NAS-0006", "Fani Kosong", "0")
+
+        response = self.client.post(f"{URL}/batch", {"semua": True}, format="json")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertNotIn("Fani Kosong", [i["nasabah_nama"] for i in response.data["items"]])
+
 
 class BatchPencairanTests(DraftTestBase):
     def setUp(self) -> None:
