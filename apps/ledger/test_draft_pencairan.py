@@ -476,3 +476,11 @@ class DraftPencairanTests(DraftTestBase):
 
         self.assertEqual(item["nominal"], "100000.00")
         self.assertEqual(item["saldo_saat_ini"], "80000.00")
+
+    def test_item_tanpa_baris_saldo_dilaporkan_nol(self) -> None:
+        draft = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "100000"}]).data
+        Saldo.objects.filter(nasabah=self.nasabah).delete()
+
+        item = self.client.get(f"{URL}/{draft['id']}").data["items"][0]
+
+        self.assertEqual(item["saldo_saat_ini"], "0.00")
