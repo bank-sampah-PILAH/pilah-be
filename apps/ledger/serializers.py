@@ -7,7 +7,14 @@ from django.db.models import Model
 from django.utils import timezone
 from rest_framework import serializers
 
-from api.models import DetailTransaksi, Pencairan, PencairanRevisi, Transaksi
+from api.models import (
+    DetailTransaksi,
+    DraftPencairan,
+    DraftPencairanItem,
+    Pencairan,
+    PencairanRevisi,
+    Transaksi,
+)
 from apps.ledger.services import BalanceService, PencairanService
 from shared_kernel.kalkulasi import bulatkan_rupiah, format_ribuan
 from shared_kernel.validators import get_initials
@@ -271,4 +278,152 @@ class PencairanRevisiSerializer(serializers.ModelSerializer[Model]):
             "diubah_oleh",
             "diubah_oleh_nama",
             "diubah_pada",
+        ]
+
+
+def _validate_potongan(attrs: dict[str, Any]) -> dict[str, Any]:
+    """A potongan is a jenis plus a non-negative nilai; percent tops out at 100."""
+    jenis = attrs.get("potongan_jenis")
+    nilai = attrs.get("potongan_nilai")
+    if (jenis is None) != (nilai is None):
+        raise serializers.ValidationError(
+            {"potongan_nilai": ["Jenis dan nilai potongan harus diisi bersamaan"]}
+        )
+    if nilai is None:
+        return attrs
+    if nilai < 0:
+        raise serializers.ValidationError({"potongan_nilai": ["Potongan tidak boleh negatif"]})
+    if jenis == DraftPencairan.PotonganJenis.PERSEN:
+        if nilai > 100:
+            raise serializers.ValidationError(
+                {"potongan_nilai": ["Potongan persen tidak boleh lebih dari 100"]}
+            )
+    elif nilai != nilai.to_integral_value():
+        raise serializers.ValidationError(
+            {"potongan_nilai": ["Potongan rupiah harus berupa rupiah bulat"]}
+        )
+    return attrs
+
+
+class DraftItemInputSerializer(serializers.Serializer[Any]):
+    nasabah_id = serializers.UUIDField()
+    nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
+    metode = serializers.ChoiceField(choices=Pencairan.Metode.choices, required=False)
+    # null clears the item's own potongan so it follows the draft default again.
+    potongan_jenis = serializers.ChoiceField(
+        choices=DraftPencairan.PotonganJenis.choices, required=False, allow_null=True
+    )
+    potongan_nilai = serializers.DecimalField(
+        max_digits=14, decimal_places=2, required=False, allow_null=True
+    )
+
+    def validate_nominal(self, value: Decimal) -> Decimal:
+        return _validate_nominal_pencairan(value)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        return _validate_potongan(attrs)
+
+
+class _DraftPencairanWriteSerializer(serializers.Serializer[Any]):
+    nama = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    potongan_jenis = serializers.ChoiceField(
+        choices=DraftPencairan.PotonganJenis.choices, required=False
+    )
+    potongan_nilai = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
+
+    def validate_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if len(items) > DraftPencairan.MAKSIMAL_ITEM:
+            raise serializers.ValidationError(
+                f"Satu draft paling banyak {DraftPencairan.MAKSIMAL_ITEM} nasabah. "
+                "Bagi menjadi beberapa draft."
+            )
+        ids = [item["nasabah_id"] for item in items]
+        if len(set(ids)) != len(ids):
+            raise serializers.ValidationError("Satu nasabah hanya boleh sekali dalam satu draft")
+        return items
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        return _validate_potongan(attrs)
+
+
+class DraftPencairanUpdateSerializer(_DraftPencairanWriteSerializer):
+    items = DraftItemInputSerializer(many=True, allow_empty=False, required=False)
+
+
+class DraftPencairanCreateSerializer(_DraftPencairanWriteSerializer):
+    items = DraftItemInputSerializer(many=True, allow_empty=False)
+
+
+class DraftPencairanItemSerializer(serializers.ModelSerializer[Model]):
+    nasabah_id = serializers.UUIDField(source=_NASABAH_ID)
+    nasabah_nama = serializers.CharField(source=_NASABAH_NAMA)
+    potongan = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    dibayar = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = DraftPencairanItem
+        fields = [
+            "id",
+            "nasabah_id",
+            "nasabah_nama",
+            "nominal",
+            "metode",
+            "potongan_jenis",
+            "potongan_nilai",
+            "potongan",
+            "dibayar",
+        ]
+
+
+class DraftPencairanSerializer(serializers.ModelSerializer[Model]):
+    dibuat_oleh_nama = serializers.CharField(source="dibuat_oleh.nama", read_only=True)
+    diubah_oleh_nama = serializers.CharField(source="diubah_oleh.nama", read_only=True)
+
+    items = DraftPencairanItemSerializer(many=True, read_only=True)
+    total_nominal = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_potongan = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_dibayar = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = DraftPencairan
+        fields = [
+            "id",
+            "nama",
+            "status",
+            "potongan_jenis",
+            "potongan_nilai",
+            "dibuat_oleh_nama",
+            "diubah_oleh_nama",
+            "created_at",
+            "updated_at",
+            "items",
+            "total_nominal",
+            "total_potongan",
+            "total_dibayar",
+        ]
+
+
+class DraftPencairanListSerializer(serializers.ModelSerializer[Model]):
+    dibuat_oleh_nama = serializers.CharField(source="dibuat_oleh.nama", read_only=True)
+    diubah_oleh_nama = serializers.CharField(source="diubah_oleh.nama", read_only=True)
+
+    jumlah_item = serializers.IntegerField(read_only=True)
+    total_nominal = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_potongan = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    total_dibayar = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = DraftPencairan
+        fields = [
+            "id",
+            "nama",
+            "status",
+            "dibuat_oleh_nama",
+            "diubah_oleh_nama",
+            "created_at",
+            "updated_at",
+            "jumlah_item",
+            "total_nominal",
+            "total_potongan",
+            "total_dibayar",
         ]

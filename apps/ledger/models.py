@@ -1,8 +1,10 @@
 import uuid
+from decimal import Decimal
 
 from django.db import models
 from django.utils import timezone
 
+from shared_kernel.kalkulasi import hitung_potongan
 from shared_kernel.models import TimestampedModel
 
 # Cross-context FK targets through the frozen api app registry (see AGENTS.md:
@@ -150,3 +152,101 @@ class PencairanRevisi(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["pencairan", "versi"], name="pencairan_revisi_unik"),
         ]
+
+
+class DraftPencairan(TimestampedModel):
+    """A payout plan for one or many nasabah (PIL-327). Never touches saldo."""
+
+    # A draft is read, saved and confirmed whole, in one request and one
+    # transaction. Past this it should be split; if banks outgrow it, items need
+    # their own paginated endpoints (ordered by nasabah name, then id).
+    MAKSIMAL_ITEM = 1000
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        DIKONFIRMASI = "dikonfirmasi", "Dikonfirmasi"
+        DIBATALKAN = "dibatalkan", "Dibatalkan"
+
+    class PotonganJenis(models.TextChoices):
+        PERSEN = "persen", "Persen"
+        RUPIAH = "rupiah", "Rupiah"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    bank_sampah = models.ForeignKey(
+        "api.BankSampah", on_delete=models.PROTECT, related_name="draft_pencairan"
+    )
+    nama = models.CharField(max_length=150, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+    # Default potongan for every item that does not carry its own.
+    potongan_jenis = models.CharField(
+        max_length=10, choices=PotonganJenis.choices, default=PotonganJenis.PERSEN
+    )
+    potongan_nilai = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    dibuat_oleh = models.ForeignKey(
+        _USER_API, on_delete=models.PROTECT, related_name="draft_pencairan_dibuat"
+    )
+    diubah_oleh = models.ForeignKey(
+        _USER_API, on_delete=models.PROTECT, related_name="draft_pencairan_diubah"
+    )
+
+    class Meta:
+        app_label = "api"
+        db_table = "draft_pencairan"
+        ordering = ["-created_at"]
+
+    @property
+    def jumlah_item(self) -> int:
+        return len(self.items.all())
+
+    @property
+    def total_nominal(self) -> Decimal:
+        return sum((item.nominal for item in self.items.all()), Decimal(0))
+
+    @property
+    def total_potongan(self) -> Decimal:
+        return sum((item.potongan for item in self.items.all()), Decimal(0))
+
+    @property
+    def total_dibayar(self) -> Decimal:
+        return self.total_nominal - self.total_potongan
+
+
+class DraftPencairanItem(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    draft = models.ForeignKey(DraftPencairan, on_delete=models.CASCADE, related_name="items")
+    nasabah = models.ForeignKey(
+        _NASABAH_API, on_delete=models.PROTECT, related_name="draft_pencairan_item"
+    )
+    nominal = models.DecimalField(max_digits=14, decimal_places=2)
+    metode = models.CharField(
+        max_length=20, choices=Pencairan.Metode.choices, default=Pencairan.Metode.TUNAI
+    )
+    # Blank jenis means "follow the draft default"; a set pair overrides it.
+    potongan_jenis = models.CharField(
+        max_length=10, choices=DraftPencairan.PotonganJenis.choices, blank=True, default=""
+    )
+    potongan_nilai = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+
+    class Meta:
+        app_label = "api"
+        db_table = "draft_pencairan_item"
+        ordering = ["nasabah__nama", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["draft", "nasabah"], name="draft_item_nasabah_unik"),
+            models.CheckConstraint(
+                condition=models.Q(nominal__gt=0), name="draft_item_nominal_positive"
+            ),
+        ]
+
+    @property
+    def potongan(self) -> Decimal:
+        """Effective potongan: the item's own pair, else the draft default; whole rupiah."""
+        if self.potongan_jenis:
+            jenis, nilai = self.potongan_jenis, self.potongan_nilai or Decimal(0)
+        else:
+            jenis, nilai = self.draft.potongan_jenis, self.draft.potongan_nilai
+        return hitung_potongan(self.nominal, jenis, nilai)
+
+    @property
+    def dibayar(self) -> Decimal:
+        return self.nominal - self.potongan

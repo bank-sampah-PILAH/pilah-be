@@ -4,7 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from django.db import IntegrityError
-from django.db.models import QuerySet
+from django.db.models import Prefetch, QuerySet
 from django.http import HttpResponse
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -13,8 +13,12 @@ from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from api.models import BankSampah, Pencairan, Transaksi, User
+from api.models import BankSampah, DraftPencairan, DraftPencairanItem, Pencairan, Transaksi, User
 from apps.ledger.serializers import (
+    DraftPencairanCreateSerializer,
+    DraftPencairanListSerializer,
+    DraftPencairanSerializer,
+    DraftPencairanUpdateSerializer,
     PencairanCreateSerializer,
     PencairanDetailSerializer,
     PencairanEditSerializer,
@@ -24,6 +28,8 @@ from apps.ledger.serializers import (
     TransactionListSerializer,
 )
 from apps.ledger.services import (
+    DraftPencairanService,
+    DraftTidakBisaDiubah,
     PencairanService,
     TransactionFilterService,
     TransactionService,
@@ -254,3 +260,47 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
                 "revisi": PencairanRevisiSerializer(revisi, many=True).data,
             }
         )
+
+
+class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
+    permission_classes = [IsActivePengelola]
+    serializer_class = DraftPencairanSerializer
+
+    def get_queryset(self) -> QuerySet[DraftPencairan]:
+        return DraftPencairan.objects.filter(
+            bank_sampah=current_bank(self.request)
+        ).prefetch_related(
+            Prefetch("items", queryset=DraftPencairanItem.objects.select_related("nasabah"))
+        )
+
+    def list(self, request: Request) -> Response:
+        page = self.paginate_queryset(self.get_queryset())
+        return self.get_paginated_response(DraftPencairanListSerializer(page, many=True).data)
+
+    def retrieve(self, request: Request, pk: str | None = None) -> Response:
+        return Response(DraftPencairanSerializer(self.get_object()).data)
+
+    def create(self, request: Request) -> Response:
+        serializer = DraftPencairanCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        draft = DraftPencairanService.buat_draft(_user(request), serializer.validated_data)
+        return Response(DraftPencairanSerializer(draft).data, status=status.HTTP_201_CREATED)
+
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
+        draft = self.get_object()
+        serializer = DraftPencairanUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            DraftPencairanService.ubah_draft(_user(request), draft, serializer.validated_data)
+        except DraftTidakBisaDiubah as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data)
+
+    @action(detail=True, methods=["post"], url_path="batalkan")
+    def batalkan(self, request: Request, pk: str | None = None) -> Response:
+        draft = self.get_object()
+        try:
+            DraftPencairanService.batalkan_draft(_user(request), draft)
+        except DraftTidakBisaDiubah as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data)
