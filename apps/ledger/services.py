@@ -585,6 +585,8 @@ class DraftPencairanService:
             raise serializers.ValidationError(galat)
         tanggal = timezone.now()
         for item in items:
+            item.saldo_sebelum = saldo_terkunci[item.nasabah_id].total_saldo
+            item.save(update_fields=["saldo_sebelum", "updated_at"])
             PencairanService.realisasi(
                 user=user,
                 nasabah=nasabah_terkunci[item.nasabah_id],

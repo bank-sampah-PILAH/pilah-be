@@ -71,6 +71,26 @@ class KonfirmasiDraftTests(DraftTestBase):
         saldo_awal = {i["nasabah_nama"]: i["saldo_saat_ini"] for i in detail.data["items"]}
         self.assertEqual(saldo_awal["Ahmad Ridwan"], "465600.00")
 
+    def test_migrasi_mengisi_saldo_awal_draft_yang_sudah_terlanjur_dibayar(self) -> None:
+        from importlib import import_module
+
+        from django.apps import apps
+
+        from api.models import DraftPencairanItem
+
+        draft = self._draft()
+        self._konfirmasi(draft["id"])
+        DraftPencairanItem.objects.update(saldo_sebelum=None)  # paid before the column existed
+
+        import_module("api.migrations.0022_draft_item_saldo_sebelum").isi_saldo_draft_terkonfirmasi(
+            apps, None
+        )
+
+        detail = self.client.get(f"{URL}/{draft['id']}")
+        saldo_awal = {i["nasabah_nama"]: i["saldo_saat_ini"] for i in detail.data["items"]}
+        self.assertEqual(saldo_awal["Ahmad Ridwan"], "465600.00")
+        self.assertEqual(saldo_awal["Budi Santoso"], "50000.00")
+
     def test_draft_yang_masih_draft_tetap_menunjukkan_saldo_terkini(self) -> None:
         draft = self._draft()
         Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal(777))

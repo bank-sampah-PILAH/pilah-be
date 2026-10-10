@@ -245,6 +245,8 @@ class DraftPencairanItem(TimestampedModel):
         max_length=10, choices=DraftPencairan.PotonganJenis.choices, blank=True, default=""
     )
     potongan_nilai = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    # The nasabah's saldo just before this was paid; set once, on confirmation.
+    saldo_sebelum = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
 
     class Meta:
         app_label = "api"
@@ -268,7 +270,10 @@ class DraftPencairanItem(TimestampedModel):
 
     @property
     def saldo_saat_ini(self) -> Decimal:
-        """The nasabah's saldo right now; the nominal was fixed when the draft was made."""
+        """The saldo to start from: the nasabah's saldo right now while the draft is open,
+        and what it was when paid once confirmed, since paying lowers the live one."""
+        if self.saldo_sebelum is not None:
+            return self.saldo_sebelum
         try:
             return self.nasabah.saldo.total_saldo
         except ObjectDoesNotExist:
