@@ -15,6 +15,9 @@ from rest_framework.response import Response
 
 from api.models import BankSampah, DraftPencairan, DraftPencairanItem, Pencairan, Transaksi, User
 from apps.ledger.serializers import (
+    DraftBatchSerializer,
+    DraftKandidatQuerySerializer,
+    DraftKandidatSerializer,
     DraftPencairanCreateSerializer,
     DraftPencairanListSerializer,
     DraftPencairanSerializer,
@@ -34,6 +37,7 @@ from apps.ledger.services import (
     TransactionFilterService,
     TransactionService,
 )
+from apps.nasabah.api import kandidat_pencairan
 from apps.notification.api import send_setoran_receipt
 from apps.reporting.api import export_excel
 from shared_kernel.permissions import (
@@ -270,7 +274,10 @@ class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg] 
         return DraftPencairan.objects.filter(
             bank_sampah=current_bank(self.request)
         ).prefetch_related(
-            Prefetch("items", queryset=DraftPencairanItem.objects.select_related("nasabah"))
+            Prefetch(
+                "items",
+                queryset=DraftPencairanItem.objects.select_related("nasabah", "nasabah__saldo"),
+            )
         )
 
     def list(self, request: Request) -> Response:
@@ -304,3 +311,21 @@ class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg] 
         except DraftTidakBisaDiubah as exc:
             return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
         return Response(DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data)
+
+    @action(detail=False, methods=["get"], url_path="kandidat")
+    def kandidat(self, request: Request) -> Response:
+        """Everyone a draft could pay out, unpaginated, so the picker can select across pages."""
+        query = DraftKandidatQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        nasabah = kandidat_pencairan(current_bank(request), **query.validated_data)
+        return Response(DraftKandidatSerializer(nasabah, many=True).data)
+
+    @action(detail=False, methods=["post"], url_path="batch")
+    def batch(self, request: Request) -> Response:
+        serializer = DraftBatchSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        draft, dilewati = DraftPencairanService.buat_batch(
+            _user(request), serializer.validated_data
+        )
+        data = DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data
+        return Response({**data, "dilewati": dilewati}, status=status.HTTP_201_CREATED)

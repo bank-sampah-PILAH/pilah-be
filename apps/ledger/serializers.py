@@ -359,6 +359,7 @@ class DraftPencairanItemSerializer(serializers.ModelSerializer[Model]):
     nasabah_nama = serializers.CharField(source=_NASABAH_NAMA)
     potongan = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     dibayar = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    saldo_saat_ini = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
 
     class Meta:
         model = DraftPencairanItem
@@ -372,6 +373,7 @@ class DraftPencairanItemSerializer(serializers.ModelSerializer[Model]):
             "potongan_nilai",
             "potongan",
             "dibayar",
+            "saldo_saat_ini",
         ]
 
 
@@ -427,3 +429,41 @@ class DraftPencairanListSerializer(serializers.ModelSerializer[Model]):
             "total_potongan",
             "total_dibayar",
         ]
+
+
+class DraftKandidatQuerySerializer(serializers.Serializer[Any]):
+    search = serializers.CharField(required=False, allow_blank=True, default="")
+    saldo_min = serializers.DecimalField(
+        max_digits=14, decimal_places=2, required=False, min_value=Decimal(0), default=Decimal(0)
+    )
+    ordering = serializers.ChoiceField(
+        choices=["nama", "-nama", "saldo", "-saldo"], required=False, default="nama"
+    )
+    termasuk_kosong = serializers.BooleanField(required=False, default=False)
+
+
+class DraftKandidatSerializer(serializers.Serializer[Any]):
+    id = serializers.UUIDField()
+    kode = serializers.CharField(source="nomor")
+    nama = serializers.CharField()
+    saldo = serializers.DecimalField(max_digits=14, decimal_places=2, source="saldo_nilai")
+
+
+class DraftBatchSerializer(_DraftPencairanWriteSerializer):
+    """Either every eligible nasabah (`semua`) or a chosen list, never both."""
+
+    semua = serializers.BooleanField(required=False, default=False)
+    nasabah_ids = serializers.ListField(
+        child=serializers.UUIDField(), required=False, allow_empty=False
+    )
+    metode = serializers.ChoiceField(
+        choices=Pencairan.Metode.choices, required=False, default=Pencairan.Metode.TUNAI
+    )
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        attrs = super().validate(attrs)
+        if attrs["semua"] == ("nasabah_ids" in attrs):
+            raise serializers.ValidationError(
+                {"nasabah_ids": ["Pilih semua nasabah, atau kirim daftar nasabah, bukan keduanya"]}
+            )
+        return attrs
