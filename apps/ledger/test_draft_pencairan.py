@@ -400,6 +400,19 @@ class DraftPencairanTests(APITestCase):
         self.assertEqual(reset.data["items"][0]["potongan_jenis"], "")
         self.assertEqual(reset.data["items"][0]["potongan"], "1000.00")
 
+    def test_ubah_tanpa_item_menjaga_item_dan_memeriksa_potongan_baru(self) -> None:
+        draft = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "100000"}]).data
+
+        response = self._patch(draft["id"], nama="Hanya nama")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["nama"], "Hanya nama")
+        self.assertEqual([item["nominal"] for item in response.data["items"]], ["100000.00"])
+
+        terlalu_besar = self._patch(draft["id"], potongan_jenis="rupiah", potongan_nilai="150000")
+
+        self.assertEqual(terlalu_besar.status_code, 422, terlalu_besar.data)
+
     def test_ubah_tidak_valid_membatalkan_seluruh_perubahan(self) -> None:
         draft = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "100000"}]).data
 
