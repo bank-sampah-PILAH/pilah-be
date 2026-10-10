@@ -114,6 +114,16 @@ class Pencairan(TimestampedModel):
     # Receipt snapshots at record time; PIL-230 decides how edits affect them.
     saldo_sebelum = models.DecimalField(max_digits=14, decimal_places=2)
     saldo_sesudah = models.DecimalField(max_digits=14, decimal_places=2)
+    # `nominal` leaves the saldo (bruto); the pengurus pays `nominal - potongan`.
+    potongan = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    # Set when the pencairan came from confirming a draft (PIL-300).
+    draft = models.ForeignKey(
+        "api.DraftPencairan",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="pencairan",
+    )
 
     class Meta:
         app_label = "api"
@@ -124,7 +134,15 @@ class Pencairan(TimestampedModel):
             models.CheckConstraint(
                 condition=models.Q(nominal__gt=0), name="pencairan_nominal_positive"
             ),
+            models.CheckConstraint(
+                condition=models.Q(potongan__gte=0, potongan__lte=models.F("nominal")),
+                name="pencairan_potongan_within_nominal",
+            ),
         ]
+
+    @property
+    def dibayar(self) -> Decimal:
+        return self.nominal - self.potongan
 
 
 class PencairanRevisi(models.Model):
@@ -227,6 +245,8 @@ class DraftPencairanItem(TimestampedModel):
         max_length=10, choices=DraftPencairan.PotonganJenis.choices, blank=True, default=""
     )
     potongan_nilai = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    # The nasabah's saldo just before this was paid; set once, on confirmation.
+    saldo_sebelum = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
 
     class Meta:
         app_label = "api"
@@ -250,7 +270,10 @@ class DraftPencairanItem(TimestampedModel):
 
     @property
     def saldo_saat_ini(self) -> Decimal:
-        """The nasabah's saldo right now; the nominal was fixed when the draft was made."""
+        """The saldo to start from: the nasabah's saldo right now while the draft is open,
+        and what it was when paid once confirmed, since paying lowers the live one."""
+        if self.saldo_sebelum is not None:
+            return self.saldo_sebelum
         try:
             return self.nasabah.saldo.total_saldo
         except ObjectDoesNotExist:
