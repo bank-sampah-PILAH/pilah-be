@@ -38,7 +38,12 @@ from apps.nasabah.home import (
 from apps.nasabah.profile import NasabahProfileView
 from apps.nasabah.views import NasabahSelfView, NasabahViewSet, RegisterNasabahView, SaldoView
 from apps.notification.views import WATemplateView
-from apps.reporting.views import DashboardRecentTransactionsView, DashboardStatsView
+from apps.reporting.views import (
+    DashboardOperationalTrendsView,
+    DashboardRecentTransactionsView,
+    DashboardStatsView,
+    DashboardWasteCategoriesView,
+)
 from apps.waste_catalog.views import JenisSampahViewSet
 
 router = DefaultRouter(trailing_slash=False)
@@ -86,6 +91,16 @@ urlpatterns = [
     path("nasabah/me", NasabahSelfView.as_view(), name="nasabah-me"),
     path("nasabah/<uuid:pk>/saldo", SaldoView.as_view(), name="nasabah-saldo"),
     path("dashboard/stats", DashboardStatsView.as_view(), name="dashboard-stats"),
+    path(
+        "dashboard/operational-trends",
+        DashboardOperationalTrendsView.as_view(),
+        name="dashboard-operational-trends",
+    ),
+    path(
+        "dashboard/waste-categories",
+        DashboardWasteCategoriesView.as_view(),
+        name="dashboard-waste-categories",
+    ),
     path(
         "dashboard/recent-transactions",
         DashboardRecentTransactionsView.as_view(),
