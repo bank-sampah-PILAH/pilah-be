@@ -9,7 +9,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from rest_framework import serializers
 from rest_framework.test import APITestCase
 
-from api.models import BankSampah, User
+from api.models import BankSampah, JenisSampah, User
 from apps.bank_sampah.serializers import (
     BankSampahApprovalListSerializer,
     BankSampahDirectorySerializer,
@@ -232,9 +232,12 @@ class BankDirectoryCoordinateTests(APITestCase):
         )
         BankSampah.objects.create(nama="Bank Kosong", alamat="Jl. Kosong No. 2", kota="Depok")
 
-    def _data(self, nama: str) -> Mapping[str, Any]:
-        response = self.client.get(self.url)
-        return {item["nama"]: item for item in response.data}[nama]  # type: ignore[no-any-return]
+    def _results(self, **query: str) -> list[Mapping[str, Any]]:
+        response = self.client.get(self.url, query or None)
+        return response.data["results"]  # type: ignore[no-any-return]
+
+    def _data(self, nama: str, **query: str) -> Mapping[str, Any]:
+        return {item["nama"]: item for item in self._results(**query)}[nama]
 
     def test_directory_exposes_coordinates(self) -> None:
         item = self._data("Bank Garis")
@@ -251,6 +254,125 @@ class BankDirectoryCoordinateTests(APITestCase):
         data = BankSampahDirectorySerializer(self.mandiri).data
         self.assertEqual(data["latitude"], "-6.362829")
         self.assertEqual(data["longitude"], "106.828655")
+
+
+class BankDirectorySearchTests(APITestCase):
+    """Directory keyword/kota filtering and pagination (PIL-308)."""
+
+    url = "/api/v1/bank-sampah"
+
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(email="cari@example.test", nama="Pencari")
+        self.client.force_authenticate(self.user)
+        self.garis = BankSampah.objects.create(
+            nama="Bank Garis Dua",
+            alamat="Jl. Garis No. 1",
+            kota="Depok",
+            latitude=Decimal("-6.362829"),
+            longitude=Decimal("106.828655"),
+        )
+        self.kosong = BankSampah.objects.create(
+            nama="Bank Kosong", alamat="Jl. Kosong No. 2", kota="Depok"
+        )
+
+    def _names(self, query: Mapping[str, str] | None = None) -> list[str]:
+        return sorted(item["nama"] for item in self.client.get(self.url, query).data["results"])
+
+    def test_q_searches_nama_alamat_and_kota(self) -> None:
+        cases = [
+            ("q", "Garis", ["Bank Garis Dua"]),  # nama
+            ("q", "Jl. Kosong", ["Bank Kosong"]),  # alamat
+            ("q", "Depok", ["Bank Garis Dua", "Bank Kosong"]),  # kota
+        ]
+        for param, word, expected in cases:
+            with self.subTest(word=word):
+                self.assertEqual(self._names({param: word}), expected)
+
+    def test_short_or_missing_q_returns_all_bank_sampah(self) -> None:
+        self.assertEqual(
+            self._names({"q": "J"}),
+            ["Bank Garis Dua", "Bank Kosong"],  # 1 char is noise, not a filter
+        )
+        self.assertEqual(self._names({}), ["Bank Garis Dua", "Bank Kosong"])
+
+    def test_kota_filter_is_insensitive_to_case_and_spaces(self) -> None:
+        for kota in ("depok", "  DEPOK  "):
+            with self.subTest(kota=kota):
+                self.assertEqual(self._names({"kota": kota}), ["Bank Garis Dua", "Bank Kosong"])
+        self.assertEqual(self._names({"kota": "Bandung"}), [])
+
+    def test_kota_and_q_combine(self) -> None:
+        self.assertEqual(self._names({"kota": "Depok", "q": "Garis"}), ["Bank Garis Dua"])
+
+    def test_pagination_envelope_and_second_page(self) -> None:
+        response = self.client.get(self.url, {"page_size": 1, "page": 1})
+        self.assertEqual(response.data["count"], 2)
+        self.assertIn("page=2", response.data["next"])
+        self.assertIsNone(response.data["previous"])
+        self.assertEqual([b["nama"] for b in response.data["results"]], ["Bank Garis Dua"])
+        response = self.client.get(self.url, {"page_size": 1, "page": 2})
+        self.assertIsNone(response.data["next"])
+        # DRF omits `page=1` from the previous link.
+        self.assertIn("page_size=1", response.data["previous"])
+        self.assertNotIn("page=2", response.data["previous"])
+
+
+class BankDetailTests(APITestCase):
+    url = "/api/v1/bank-sampah"
+
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(email="cari@example.test", nama="Pencari")
+        self.client.force_authenticate(self.user)
+        self.bank = BankSampah.objects.create(
+            nama="Bank Garis Dua",
+            alamat="Jl. Garis No. 1",
+            kota="Depok",
+            latitude=Decimal("-6.362829"),
+            longitude=Decimal("106.828655"),
+        )
+        for nomor, nama_sampah, kategori, harga, aktif in [
+            ("K-1", "Kardus", "kertas", 1500, True),
+            ("P-2", "Botol", "plastik", 2000, True),
+            ("X-9", "Nonaktif", "dll", 500, False),
+        ]:
+            JenisSampah.objects.create(
+                bank_sampah=self.bank,
+                nomor=nomor,
+                nama_sampah=nama_sampah,
+                kategori=kategori,
+                harga_per_kg=harga,
+                is_active=aktif,
+            )
+
+    def _detail(self, bank: BankSampah | None = None) -> Mapping[str, Any]:
+        url = f"{self.url}/{(bank or self.bank).id}"
+        return self.client.get(url).data  # type: ignore[no-any-return]
+
+    def test_detail_returns_profile_status_coords_and_active_layanan(self) -> None:
+        data = self._detail()
+        self.assertEqual(data["nama"], "Bank Garis Dua")
+        self.assertEqual(data["status"], "active")
+        self.assertEqual(data["latitude"], "-6.362829")
+        # `nomor`-ordered, and exactly the jenis sampah a member would be paid at.
+        self.assertEqual([item["kode"] for item in data["layanan"]], ["K-1", "P-2"])
+        lain = data["layanan"][1]
+        self.assertEqual(lain["nama_sampah"], "Botol")
+        self.assertEqual(lain["harga_per_kg"], "2000.00")
+        self.assertEqual(lain["satuan"], "kg")
+        self.assertNotIn("is_active", lain)
+
+    def test_detail_hides_non_joinable_banks(self) -> None:
+        induk = BankSampah.objects.create(
+            nama="Induk BTH", jenis_organisasi=BankSampah.OrganizationType.INDUK, no_hp_pic="081"
+        )
+        pending = BankSampah.objects.create(
+            nama="Bank Pending", status=BankSampah.Status.PENDING, no_hp_pic="081"
+        )
+        for bank, why in [(induk, "induk"), (pending, "pending")]:
+            with self.subTest(why):
+                response = self.client.get(f"{self.url}/{bank.id}")
+                self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.client.get(f"{self.url}/not-a-uuid").status_code, 404)
 
 
 class BankProfileApiTests(APITestCase):
