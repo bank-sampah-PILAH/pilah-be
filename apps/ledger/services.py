@@ -26,7 +26,6 @@ from api.models import (
     User,
 )
 from apps.nasabah.api import (
-    get_eligible_nasabah,
     get_eligible_nasabah_map,
     get_locked_nasabah,
     kandidat_pencairan,
@@ -454,14 +453,19 @@ class DraftPencairanService:
         bank = user.bank_sampah
         assert bank is not None  # ponytail: views gate on IsActivePengelola
         if payload["semua"]:
-            ids = [nasabah.id for nasabah in kandidat_pencairan(bank)]
+            # The candidates already carry their saldo, and by construction are eligible.
+            layak = {nasabah.id: nasabah for nasabah in kandidat_pencairan(bank)}
+            ids = list(layak)
+            kunci = "semua"
         else:
             ids = list(dict.fromkeys(payload["nasabah_ids"]))
+            layak = get_eligible_nasabah_map(bank, ids)
+            kunci = "nasabah_ids"
         if len(ids) > DraftPencairan.MAKSIMAL_ITEM:
             # Checked before the per-nasabah work, so an oversized request stays cheap.
             raise serializers.ValidationError(
                 {
-                    "nasabah_ids": [
+                    kunci: [
                         f"Satu draft paling banyak {DraftPencairan.MAKSIMAL_ITEM} nasabah. "
                         "Pilih lebih sedikit atau bagi menjadi beberapa draft."
                     ]
@@ -472,7 +476,7 @@ class DraftPencairanService:
         items: list[dict[str, Any]] = []
         dilewati: list[dict[str, str]] = []
         for nasabah_id in ids:
-            alasan = DraftPencairanService._alasan_dilewati(bank, nasabah_id, jenis, nilai)
+            alasan = DraftPencairanService._alasan_dilewati(layak.get(nasabah_id), jenis, nilai)
             if alasan:
                 dilewati.append({"nasabah_id": str(nasabah_id), "alasan": alasan})
             else:
@@ -485,12 +489,10 @@ class DraftPencairanService:
         return draft, dilewati
 
     @staticmethod
-    def _alasan_dilewati(bank: BankSampah, nasabah_id: UUID, jenis: str, nilai: Decimal) -> str:
-        nasabah = get_eligible_nasabah(bank, nasabah_id)
+    def _alasan_dilewati(nasabah: Nasabah | None, jenis: str, nilai: Decimal) -> str:
         if nasabah is None:
             return "Nasabah tidak ditemukan atau tidak aktif"
-        saldo = Saldo.objects.filter(nasabah=nasabah).first()
-        nominal = bulatkan_rupiah(saldo.total_saldo) if saldo else Decimal(0)
+        nominal = DraftPencairanService._saldo_tersedia(nasabah)
         if nominal <= 0:
             return "Saldo nasabah kosong"
         if hitung_potongan(nominal, jenis, nilai) > nominal:
