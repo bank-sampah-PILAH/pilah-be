@@ -594,3 +594,21 @@ class DraftPencairanTests(APITestCase):
         self.assertEqual(len(sedikit), len(banyak))
         # The item order joins nasabah, but none of its columns is read.
         self.assertFalse([sql for sql in banyak if '"nasabah"."' in sql.split(" FROM ")[0]])
+
+    def test_menyimpan_draft_besar_tidak_menambah_select_per_nasabah(self) -> None:
+        def jumlah_select(jumlah: int) -> list[int]:
+            nasabah = [
+                self._nasabah(f"SAV-{jumlah}{i:03d}", f"Nasabah {jumlah}-{i}", "10000")
+                for i in range(jumlah)
+            ]
+            items = [{"nasabah_id": str(n.id), "nominal": "5000"} for n in nasabah]
+            with CaptureQueriesContext(connection) as buat:
+                draft = self._buat(items).data
+            with CaptureQueriesContext(connection) as ubah:
+                self.client.patch(f"{URL}/{draft['id']}", {"items": items}, format="json")
+            return [
+                len([q for q in konteks.captured_queries if q["sql"].startswith("SELECT")])
+                for konteks in (buat, ubah)
+            ]
+
+        self.assertEqual(jumlah_select(3), jumlah_select(25))
