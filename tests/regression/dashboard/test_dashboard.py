@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from django.utils import timezone
 
-from api.models import DetailTransaksi, Transaksi
+from api.models import DetailTransaksi, Pencairan, Transaksi
 from tests.regression.helpers import RegressionTestCase
 
 
@@ -51,6 +51,27 @@ class DashboardRegressionTests(RegressionTestCase):
         self.assertEqual(response.data["buckets"][0]["setoran_count"], 1)
         self.assertEqual(response.data["buckets"][0]["pencairan_count"], 0)
         self.assertEqual(response.data["buckets"][1]["setoran_total_nilai"], "0.00")
+
+    def test_operational_trends_aggregates_pencairan_amounts_and_counts(self) -> None:
+        nasabah = self.make_nasabah()
+        Pencairan.objects.create(
+            nasabah=nasabah,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.user,
+            tanggal=timezone.make_aware(datetime(2024, 1, 3, 12)),
+            nominal=Decimal("1250.00"),
+            metode=Pencairan.Metode.TUNAI,
+            saldo_sebelum=Decimal("5000.00"),
+            saldo_sesudah=Decimal("3750.00"),
+        )
+        response = self.client.get(
+            "/api/v1/dashboard/operational-trends",
+            {"start_date": "2024-01-01", "end_date": "2024-01-07", "granularity": "day"},
+        )
+        self.assertEqual(response.status_code, 200)
+        bucket = response.data["buckets"][2]
+        self.assertEqual(bucket["pencairan_total_nominal"], "1250.00")
+        self.assertEqual(bucket["pencairan_count"], 1)
 
     def test_waste_categories_aggregates_weight_and_distinct_deposits(self) -> None:
         transaction_id = self.make_transaksi()
