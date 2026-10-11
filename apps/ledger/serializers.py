@@ -22,6 +22,8 @@ from shared_kernel.validators import get_initials
 # Nested `source` paths shared by several serializers (one definition each).
 _NASABAH_ID = "nasabah.id"
 _NASABAH_NAMA = "nasabah.nama"
+_DIBUAT_OLEH_NAMA = "dibuat_oleh.nama"
+_DIUBAH_OLEH_NAMA = "diubah_oleh.nama"
 _BANK_SAMPAH_ID = "bank_sampah.id"
 _DICATAT_OLEH_ID = "dicatat_oleh.id"
 
@@ -262,7 +264,7 @@ class PencairanDetailSerializer(serializers.ModelSerializer[Model]):
 
 class PencairanRevisiSerializer(serializers.ModelSerializer[Model]):
     diubah_oleh = serializers.UUIDField(source="diubah_oleh.id")
-    diubah_oleh_nama = serializers.CharField(source="diubah_oleh.nama")
+    diubah_oleh_nama = serializers.CharField(source=_DIUBAH_OLEH_NAMA)
 
     class Meta:
         model = PencairanRevisi
@@ -378,8 +380,8 @@ class DraftPencairanItemSerializer(serializers.ModelSerializer[Model]):
 
 
 class DraftPencairanSerializer(serializers.ModelSerializer[Model]):
-    dibuat_oleh_nama = serializers.CharField(source="dibuat_oleh.nama", read_only=True)
-    diubah_oleh_nama = serializers.CharField(source="diubah_oleh.nama", read_only=True)
+    dibuat_oleh_nama = serializers.CharField(source=_DIBUAT_OLEH_NAMA, read_only=True)
+    diubah_oleh_nama = serializers.CharField(source=_DIUBAH_OLEH_NAMA, read_only=True)
 
     items = DraftPencairanItemSerializer(many=True, read_only=True)
     total_nominal = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
@@ -406,8 +408,8 @@ class DraftPencairanSerializer(serializers.ModelSerializer[Model]):
 
 
 class DraftPencairanListSerializer(serializers.ModelSerializer[Model]):
-    dibuat_oleh_nama = serializers.CharField(source="dibuat_oleh.nama", read_only=True)
-    diubah_oleh_nama = serializers.CharField(source="diubah_oleh.nama", read_only=True)
+    dibuat_oleh_nama = serializers.CharField(source=_DIBUAT_OLEH_NAMA, read_only=True)
+    diubah_oleh_nama = serializers.CharField(source=_DIUBAH_OLEH_NAMA, read_only=True)
 
     jumlah_item = serializers.IntegerField(read_only=True)
     total_nominal = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)

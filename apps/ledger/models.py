@@ -12,6 +12,7 @@ from shared_kernel.models import TimestampedModel
 # app_label = "api" until the squash migration). Constants keep them in sync.
 _NASABAH_API = "api.Nasabah"
 _USER_API = "api.User"
+_BANK_API = "api.BankSampah"
 
 
 class Saldo(models.Model):
@@ -36,9 +37,7 @@ class Transaksi(TimestampedModel):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     nasabah = models.ForeignKey(_NASABAH_API, on_delete=models.PROTECT, related_name="transaksi")
-    bank_sampah = models.ForeignKey(
-        "api.BankSampah", on_delete=models.PROTECT, related_name="transaksi"
-    )
+    bank_sampah = models.ForeignKey(_BANK_API, on_delete=models.PROTECT, related_name="transaksi")
     dicatat_oleh = models.ForeignKey(
         _USER_API, on_delete=models.PROTECT, related_name="transaksi_dicatat"
     )
@@ -100,9 +99,7 @@ class Pencairan(TimestampedModel):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     nasabah = models.ForeignKey(_NASABAH_API, on_delete=models.PROTECT, related_name="pencairan")
-    bank_sampah = models.ForeignKey(
-        "api.BankSampah", on_delete=models.PROTECT, related_name="pencairan"
-    )
+    bank_sampah = models.ForeignKey(_BANK_API, on_delete=models.PROTECT, related_name="pencairan")
     dicatat_oleh = models.ForeignKey(
         _USER_API, on_delete=models.PROTECT, related_name="pencairan_dicatat"
     )
@@ -174,7 +171,7 @@ class DraftPencairan(TimestampedModel):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     bank_sampah = models.ForeignKey(
-        "api.BankSampah", on_delete=models.PROTECT, related_name="draft_pencairan"
+        _BANK_API, on_delete=models.PROTECT, related_name="draft_pencairan"
     )
     nama = models.CharField(max_length=150, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)

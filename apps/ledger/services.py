@@ -34,6 +34,8 @@ from shared_kernel.kalkulasi import (
     total_setoran,
 )
 
+_NASABAH_TIDAK_AKTIF = "Nasabah tidak ditemukan atau tidak aktif"
+
 
 class TransactionService:
     @staticmethod
@@ -48,9 +50,7 @@ class TransactionService:
         assert bank is not None  # ponytail: views gate on IsActivePengelola
         nasabah = get_locked_nasabah(bank, payload["nasabah_id"])
         if not nasabah:
-            raise serializers.ValidationError(
-                {"nasabah_id": ["Nasabah tidak ditemukan atau tidak aktif"]}
-            )
+            raise serializers.ValidationError({"nasabah_id": [_NASABAH_TIDAK_AKTIF]})
 
         saldo, _ = Saldo.objects.select_for_update().get_or_create(nasabah=nasabah)
         transaksi = Transaksi.objects.create(
@@ -122,9 +122,7 @@ class PencairanService:
         assert bank is not None  # ponytail: views gate on IsActivePengelola
         nasabah = get_locked_nasabah(bank, payload["nasabah_id"])
         if not nasabah:
-            raise serializers.ValidationError(
-                {"nasabah_id": ["Nasabah tidak ditemukan atau tidak aktif"]}
-            )
+            raise serializers.ValidationError({"nasabah_id": [_NASABAH_TIDAK_AKTIF]})
 
         tanggal = payload.get("tanggal") or timezone.now()
         # The balance check below reads the current saldo, which is only the saldo
@@ -497,7 +495,7 @@ class DraftPencairanService:
             nasabah = layak.get(data["nasabah_id"])
             if nasabah is None:
                 raise serializers.ValidationError(
-                    {f"items[{index}].nasabah_id": ["Nasabah tidak ditemukan atau tidak aktif"]}
+                    {f"items[{index}].nasabah_id": [_NASABAH_TIDAK_AKTIF]}
                 )
             current = ada.pop(nasabah.id, None)
             item = current or DraftPencairanItem(draft=draft, nasabah=nasabah)
