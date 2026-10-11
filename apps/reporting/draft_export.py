@@ -30,6 +30,8 @@ _Baris = tuple[int, str, str, str, int, int, int]
 
 _HEADER = ["No", "Kode", "Nama", "Metode", "Nominal (Rp)", "Potongan (Rp)", "Dibayar (Rp)"]
 
+_JUDUL = "Draft Pencairan"
+
 
 def export_draft_pencairan(draft: DraftPencairan, berkas: str) -> tuple[bytes, str, str]:
     """Return (content, filename, content_type) for `berkas` in {"pdf", "xlsx"}."""
@@ -70,8 +72,8 @@ def _meta(draft: DraftPencairan) -> list[tuple[str, str]]:
 def _xlsx(draft: DraftPencairan) -> bytes:
     wb = Workbook()
     ws = cast(Worksheet, wb.active)
-    ws.title = "Draft Pencairan"
-    ws.append(["Draft Pencairan"])
+    ws.title = _JUDUL
+    ws.append([_JUDUL])
     ws["A1"].font = Font(bold=True, size=14)
     for label, nilai in _meta(draft):
         ws.append([label, nilai])
@@ -99,7 +101,7 @@ def _xlsx(draft: DraftPencairan) -> bytes:
 def _pdf(draft: DraftPencairan) -> bytes:
     gaya = getSampleStyleSheet()
     isi: list[Paragraph | Spacer | Table] = [
-        Paragraph("Draft Pencairan", gaya["Title"]),
+        Paragraph(_JUDUL, gaya["Title"]),
         *(
             Paragraph(f"<b>{escape(label)}:</b> {escape(nilai)}", gaya["Normal"])
             for label, nilai in _meta(draft)
