@@ -40,6 +40,7 @@ from shared_kernel.kalkulasi import (
 )
 
 _NASABAH_TIDAK_AKTIF = "Nasabah tidak ditemukan atau tidak aktif"
+_SALDO_KURANG = "Saldo nasabah tidak mencukupi"
 
 
 class TransactionService:
@@ -147,7 +148,7 @@ class PencairanService:
         saldo, _ = Saldo.objects.select_for_update().get_or_create(nasabah=nasabah)
         nominal = payload["nominal"]
         if nominal > saldo.total_saldo:
-            raise serializers.ValidationError({"nominal": ["Saldo nasabah tidak mencukupi"]})
+            raise serializers.ValidationError({"nominal": [_SALDO_KURANG]})
         return PencairanService.realisasi(
             user=user,
             nasabah=nasabah,
@@ -592,9 +593,9 @@ class DraftPencairanService:
             nasabah = nasabah_terkunci[item.nasabah_id]
             saldo = saldo_terkunci.get(item.nasabah_id)
             if not (nasabah.is_active and nasabah.status == Nasabah.Status.APPROVED):
-                galat[f"items[{index}].nasabah_id"] = ["Nasabah tidak ditemukan atau tidak aktif"]
+                galat[f"items[{index}].nasabah_id"] = [_NASABAH_TIDAK_AKTIF]
             elif saldo is None or item.nominal > saldo.total_saldo:
-                galat[f"items[{index}].nominal"] = ["Saldo nasabah tidak mencukupi"]
+                galat[f"items[{index}].nominal"] = [_SALDO_KURANG]
         if galat:
             raise serializers.ValidationError(galat)
         tanggal = timezone.now()
@@ -699,7 +700,5 @@ class DraftPencairanService:
         if nominal <= 0:
             raise serializers.ValidationError({f"items[{index}].nominal": ["Saldo nasabah kosong"]})
         if nominal > tersedia:
-            raise serializers.ValidationError(
-                {f"items[{index}].nominal": ["Saldo nasabah tidak mencukupi"]}
-            )
+            raise serializers.ValidationError({f"items[{index}].nominal": [_SALDO_KURANG]})
         return nominal
