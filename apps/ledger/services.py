@@ -318,7 +318,7 @@ class TransactionFilterService:
         Without `periode`, [default] applies; `None` means no date filter.
         """
         periode = request.GET.get("periode", default)
-        if periode is None:
+        if periode is None or periode == "semua":
             return queryset
         today = timezone.localdate()
         if periode == "hari_ini":
@@ -350,7 +350,7 @@ class TransactionFilterService:
                 raise ValueError("Tanggal akhir tidak boleh lebih awal dari tanggal awal")
             start, end = parsed_start, parsed_end
         else:
-            return queryset
+            raise serializers.ValidationError({"periode": "Periode tidak valid"})
 
         tz = timezone.get_current_timezone()
         start_dt = timezone.make_aware(datetime.combine(start, time.min), tz)
