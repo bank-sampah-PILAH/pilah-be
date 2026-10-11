@@ -359,6 +359,7 @@ class DraftPencairanItemSerializer(serializers.ModelSerializer[Model]):
     nasabah_nama = serializers.CharField(source=_NASABAH_NAMA)
     potongan = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     dibayar = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    saldo_saat_ini = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
 
     class Meta:
         model = DraftPencairanItem
@@ -372,6 +373,7 @@ class DraftPencairanItemSerializer(serializers.ModelSerializer[Model]):
             "potongan_nilai",
             "potongan",
             "dibayar",
+            "saldo_saat_ini",
         ]
 
 

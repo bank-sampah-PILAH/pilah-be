@@ -270,11 +270,20 @@ class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg] 
         return DraftPencairan.objects.filter(
             bank_sampah=current_bank(self.request)
         ).prefetch_related(
-            Prefetch("items", queryset=DraftPencairanItem.objects.select_related("nasabah"))
+            Prefetch(
+                "items",
+                queryset=DraftPencairanItem.objects.select_related("nasabah", "nasabah__saldo"),
+            )
         )
 
     def list(self, request: Request) -> Response:
-        page = self.paginate_queryset(self.get_queryset())
+        # The list only shows totals, so it needs the item rows but not their nasabah.
+        ringkasan = (
+            DraftPencairan.objects.filter(bank_sampah=current_bank(request))
+            .select_related("dibuat_oleh", "diubah_oleh")
+            .prefetch_related("items")
+        )
+        page = self.paginate_queryset(ringkasan)
         return self.get_paginated_response(DraftPencairanListSerializer(page, many=True).data)
 
     def retrieve(self, request: Request, pk: str | None = None) -> Response:
@@ -284,7 +293,10 @@ class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg] 
         serializer = DraftPencairanCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         draft = DraftPencairanService.buat_draft(_user(request), serializer.validated_data)
-        return Response(DraftPencairanSerializer(draft).data, status=status.HTTP_201_CREATED)
+        return Response(
+            DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     def partial_update(self, request: Request, pk: str | None = None) -> Response:
         draft = self.get_object()
