@@ -99,7 +99,7 @@ class NasabahHistoryPdfExportTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.content.startswith(b"%PDF-"))
 
-    def test_export_tipe_pencairan_limits_displayed_rows(self) -> None:
+    def test_export_tipe_pencairan_returns_pdf_contract(self) -> None:
         response = self.client.get(self.url, {"tipe": "pencairan"})
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.content.startswith(b"%PDF-"))

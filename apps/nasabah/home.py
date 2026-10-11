@@ -36,10 +36,13 @@ class BankUnitSerializer(serializers.ModelSerializer[BankSampah]):
         ]
 
 
-class ActivitySerializer(serializers.ModelSerializer[Transaksi]):
-    class Meta:
-        model = Transaksi
-        fields = ["id", "tanggal", "tipe", "total_nilai"]
+class ActivitySerializer(serializers.Serializer[Any]):
+    """Public history summary shared by deposits and payout projections."""
+
+    id = serializers.UUIDField()
+    tanggal = serializers.DateTimeField()
+    tipe = serializers.CharField()
+    total_nilai = serializers.DecimalField(max_digits=14, decimal_places=2)
 
 
 class NasabahTransactionDetailSerializer(TransactionDetailSerializer):
@@ -228,13 +231,13 @@ class NasabahHistoryView(ListAPIView[Transaksi]):
                 )
                 payloads.append(
                     {
-                        "id": str(row["id"]),
-                        "tanggal": serializers.DateTimeField().to_representation(row["tanggal"]),
+                        "id": row["id"],
+                        "tanggal": row["tanggal"],
                         "tipe": row["tipe_aktivitas"],
-                        "total_nilai": str(value),
+                        "total_nilai": value,
                     }
                 )
-            return self.get_paginated_response(payloads)
+            return self.get_paginated_response(self.get_serializer(payloads, many=True).data)
         try:
             queryset = apply_period(
                 activities(MembershipService.get_active_membership(request)),
