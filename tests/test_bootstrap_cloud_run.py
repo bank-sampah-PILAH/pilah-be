@@ -136,9 +136,12 @@ class BootstrapCloudRunTests(SimpleTestCase):
             "PILAH_SUPERADMIN_EMAILS": "admin@example.com",
         }
         commands: list[list[str]] = []
+        replace_options: dict[str, object] = {}
 
         def gcloud(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
             commands.append(argv)
+            if "replace" in argv:
+                replace_options.update(kwargs)
             if "describe" in argv:
                 return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(service))
             if "replace" in argv:
@@ -156,7 +159,10 @@ class BootstrapCloudRunTests(SimpleTestCase):
                     container["env"], service["spec"]["template"]["spec"]["containers"][0]["env"]
                 )
                 self.assertEqual(container["image"], "registry/image:verified-sha")
-                self.assertEqual(container["command"], ["python"])
+                self.assertEqual(
+                    container["command"],
+                    ["setpriv", "--reuid=appuser", "--regid=appuser", "--init-groups", "python"],
+                )
                 self.assertEqual(container["args"], ["manage.py", "bootstrap_superadmins"])
                 # Cloud Run v1 ExecutionTemplate owns SQL/VPC/secret annotations;
                 # TaskTemplate only accepts spec (provider discovery schema).
@@ -171,6 +177,7 @@ class BootstrapCloudRunTests(SimpleTestCase):
             bootstrap_cloud_run()
         self.assertEqual([cmd[3] for cmd in commands], ["describe", "replace", "execute"])
         self.assertIn("--wait", commands[-1])
+        self.assertNotIn("capture_output", replace_options)
         self.assertTrue(all("never-print-me" not in " ".join(cmd) for cmd in commands))
 
     def test_missing_or_invalid_origin_and_allowlist_fail_before_cloud_calls(self) -> None:

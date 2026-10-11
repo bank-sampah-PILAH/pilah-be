@@ -55,8 +55,9 @@ runtime service account (`roles/iam.serviceAccountUser`). Runtime DB/Cloud SQL
 permissions are the same as the backend service. Python 3 is required for the
 helper; it adds no runtime dependency.
 
-The Job runs `python manage.py bootstrap_superadmins`. Only missing accounts
-in the runtime `PILAH_SUPERADMIN_EMAILS` allowlist are created, with role
+The Job drops privileges to the image's `appuser` before running
+`python manage.py bootstrap_superadmins`. Only missing accounts in the runtime
+`PILAH_SUPERADMIN_EMAILS` allowlist are created, with role
 Superadmin and an unusable password for genuine Google login. It creates no
 banks, customers, balances, waste types or transactions. Existing account
 profiles, passwords, active flags, Google identities and Django admin flags

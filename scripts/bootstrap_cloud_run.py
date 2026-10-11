@@ -73,7 +73,16 @@ def bootstrap_cloud_run() -> None:
     container = {
         key: source[key] for key in ("image", "env", "resources", "volumeMounts") if key in source
     }
-    container.update(command=["python"], args=["manage.py", "bootstrap_superadmins"])
+    container.update(
+        command=[
+            "setpriv",
+            "--reuid=appuser",
+            "--regid=appuser",
+            "--init-groups",
+            "python",
+        ],
+        args=["manage.py", "bootstrap_superadmins"],
+    )
     spec = {key: runtime[key] for key in ("serviceAccountName", "volumes") if key in runtime}
     spec.update(containers=[container], maxRetries=0, timeoutSeconds="300")
     job_name = f"{service_name}-bootstrap-superadmins"
@@ -98,8 +107,6 @@ def bootstrap_cloud_run() -> None:
         subprocess.run(
             ["gcloud", "run", "jobs", "replace", manifest.name, *flags, "--quiet"],
             check=True,
-            capture_output=True,
-            text=True,
         )
     subprocess.run(
         ["gcloud", "run", "jobs", "execute", job_name, *flags, "--wait", "--quiet"],
