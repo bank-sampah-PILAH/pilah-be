@@ -106,6 +106,22 @@ class BootstrapSuperadminsTests(TestCase):
         self.assertEqual(user.role, User.Role.NASABAH)
         self.assertEqual(User.objects.count(), 1)
 
+    def test_unrelated_integrity_error_without_matching_email_is_reraised(self) -> None:
+        query = Mock()
+        query.filter.side_effect = [[], []]
+
+        with (
+            override_settings(PILAH_SUPERADMIN_EMAILS=("root@example.com",)),
+            patch.object(User.objects, "select_for_update", return_value=query),
+            patch.object(
+                User.objects, "create_user", side_effect=IntegrityError("unrelated constraint")
+            ),
+        ):
+            with self.assertRaisesRegex(IntegrityError, "unrelated constraint"):
+                call_command("bootstrap_superadmins", stdout=StringIO())
+
+        self.assertFalse(User.objects.exists())
+
     def test_missing_or_invalid_allowlist_fails_without_writes(self) -> None:
         for allowlist in ((), ("root@example.com", "not-an-email")):
             with (
