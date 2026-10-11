@@ -23,6 +23,7 @@ from api.models import (
     User,
 )
 from apps.notification.api import DEFAULT_WA_TEMPLATE
+from shared_kernel.permissions import superadmin_allowlist
 
 CONFIRMATION = "SEED-PILAH-STAGING-DATA"
 
@@ -115,8 +116,12 @@ class Command(BaseCommand):
     def handle(self, *args: object, **options: object) -> None:
         environment = str(options["environment"])
         confirmation = str(options.get("confirm") or "")
+        if settings.PILAH_ENVIRONMENT == "production":
+            raise CommandError("Testing data is forbidden in production")
         if environment == "local" and not settings.DEBUG:
             raise CommandError("Local testing data requires DJANGO_DEBUG=true")
+        if not settings.DEBUG and settings.PILAH_ENVIRONMENT != "staging":
+            raise CommandError("Testing data requires PILAH_ENVIRONMENT=staging outside debug")
         if environment == "staging" and confirmation != CONFIRMATION:
             raise CommandError(f"Pass --confirm={CONFIRMATION} to seed staging data")
 
@@ -128,6 +133,9 @@ class Command(BaseCommand):
             pending_pengurus_email=self._normalize_email(options["pending_pengurus_email"]),
             induk_email=self._normalize_email(options["induk_email"]),
         )
+
+        if not settings.DEBUG and identities.superadmin_email.lower() not in superadmin_allowlist():
+            raise CommandError("Seed Superadmin must be in PILAH_SUPERADMIN_EMAILS")
 
         with transaction.atomic():
             self._seed(identities)

@@ -1,16 +1,46 @@
 # Fly.io Staging
 
-Pushes to `staging` deploy `pilah-be-staging` after CI succeeds. The app runs in
-Singapore, connects to Neon over TLS, and stores uploaded media on the single
-`media_data` Fly volume.
+Pushes to `staging` deploy the verified backend commit to `pilah-be-staging`.
+CI then requires `/healthz` to succeed and automatically seeds the idempotent
+E2E fixture. Seed failure fails deployment; no separate dispatch is needed.
+Staging runs are serialized so deploy and seed are not interrupted by a newer
+push. No reset or deletion runs in the deployment pipeline.
 
-Only logo files are served as public local media. Activity-proof files are
-returned to superadmins as short-lived signed URLs.
+The API runs in Singapore, connects to Neon over TLS, and stores uploaded
+media on the single `media_data` Fly volume. Only logo files are public local
+media; activity proofs use short-lived signed URLs for Superadmins.
 
-## Required Secrets
+## Domains and Google OAuth
 
-Set Django and Neon values directly on Fly. Use the individual fields from the
-Neon connection string; do not commit the connection string.
+- Dashboard (separate mobile-repository Fly app): `https://pilah-web-staging.fly.dev`
+- Backend API base: `https://pilah-be-staging.fly.dev/api/v1/`
+- Backend health check: `https://pilah-be-staging.fly.dev/healthz`
+
+`fly.toml` explicitly allows only the staging dashboard browser origin with
+`CORS_ALLOW_ALL_ORIGINS=false` and adds it to `CSRF_TRUSTED_ORIGINS`.
+Remove any older Fly secret overriding `CORS_ALLOWED_ORIGINS` with another
+value, or set it to exactly `https://pilah-web-staging.fly.dev`.
+No custom domain or wildcard browser allowlist is required.
+
+Set backend `GOOGLE_CLIENT_ID` to the same Web OAuth client ID used as
+`GOOGLE_SERVER_CLIENT_ID` by the frontend. Add
+`https://pilah-web-staging.fly.dev` to that client's **Authorized JavaScript
+origins**, and add staging test accounts to the consent screen's test-user
+list. If using the backend callback flow, register this redirect URI:
+
+```text
+https://pilah-be-staging.fly.dev/api/v1/auth/google/callback
+```
+
+`PILAH_PUBLIC_APP_URL` is the invite-link base, not the CORS origin or frontend
+API base; it currently remains the backend URL in `fly.toml`. Changing invite
+routing is outside this delivery. Keep `PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false`
+and `DJANGO_DEBUG=false`; web hosting does not enable demo login.
+
+## Required Secrets and Seed Variables
+
+Set Django and Neon values directly on Fly using the individual connection
+fields; never commit a connection string:
 
 ```bash
 flyctl secrets set --app pilah-be-staging \
@@ -19,41 +49,18 @@ flyctl secrets set --app pilah-be-staging \
   DB_USER='neondb_owner' \
   DB_PASSWORD='change-me' \
   DB_HOST='ep-example.ap-southeast-1.aws.neon.tech' \
+  GOOGLE_CLIENT_ID='your-web-oauth-client-id' \
   PILAH_SUPERADMIN_EMAILS='superadmin@example.com'
 ```
 
-Set `PILAH_SUPERADMIN_EMAILS` to the comma-separated email addresses authorized
-as Superadmins. This setting is required for Superadmin login and API access in
-staging.
+Set Google callback and WhatsApp/Twilio secrets as needed. The Fly runtime
+allowlist is authoritative for Superadmin login/API access and must include
+the configured fixture Superadmin. Non-debug fixture seeding fails unless
+`PILAH_ENVIRONMENT=staging` (set in `fly.toml`), the confirmation is provided,
+and that Superadmin is allowlisted.
 
-Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, and any
-WhatsApp/Twilio secrets the staging environment needs with the same command.
-For web sign-in, `GOOGLE_CLIENT_ID` must match the Web OAuth client ID used by
-the mobile web build (`GOOGLE_SERVER_CLIENT_ID`); the API checks that token
-audience. Also set `PILAH_SUPERADMIN_EMAILS` to the comma-separated Google
-accounts that are allowed to become or remain Superadmin. Include the seeded
-Superadmin test account; this whitelist is authoritative at every real Google
-login.
-
-`fly.toml` keeps `CORS_ALLOW_ALL_ORIGINS=false`. Once the staging dashboard
-origin is known, set its exact origin (scheme, host, optional port; no path) on
-Fly and add the same origin to the OAuth client's Authorized JavaScript origins:
-
-```bash
-flyctl secrets set --app pilah-be-staging \
-  CORS_ALLOWED_ORIGINS='https://<replace-with-dashboard-origin>'
-```
-
-`CORS_ALLOWED_ORIGINS` accepts comma-separated origins. The staging dashboard
-origin is not defined in this repository yet, so replace the placeholder before
-configuring Fly or Google Cloud. Register this Google OAuth callback URL:
-
-```text
-https://pilah-be-staging.fly.dev/api/v1/auth/google/callback
-```
-
-GitHub's `staging` environment must contain an app-scoped `FLY_API_TOKEN`.
-It should also contain the non-secret variables used by the seed workflow:
+GitHub's `staging` environment needs an app-scoped `FLY_API_TOKEN` and these
+non-secret variables before the next staging push:
 
 ```text
 PILAH_SEED_PENGURUS_EMAIL
@@ -64,15 +71,20 @@ PILAH_SEED_PENDING_PENGURUS_EMAIL
 PILAH_SEED_INDUK_EMAIL
 ```
 
-`PILAH_SEED_INDUK_EMAIL` is optional; it defaults to
-`induk.demo@example.com` when unset.
+`PILAH_SEED_INDUK_EMAIL` defaults to `induk.demo@example.com`. The old
+`PILAH_SEED_OPERATOR_EMAIL` and `PILAH_SEED_PENDING_OPERATOR_EMAIL` remain
+fallbacks, with Pengurus values taking precedence. Use real Google test
+accounts and include Induk's chosen address on the consent screen too.
+Missing/invalid required addresses fail the deploy job. Seed arguments are
+validated and passed as data rather than interpolated into a shell script.
 
-The old `PILAH_SEED_OPERATOR_EMAIL` and
-`PILAH_SEED_PENDING_OPERATOR_EMAIL` variables remain temporary fallbacks so
-existing GitHub environment settings keep working. These addresses should be
-Google test accounts already listed on the OAuth consent screen. Staging uses
-real Google ID tokens; `PILAH_ALLOW_FAKE_GOOGLE_TOKEN` must remain `false`, and
-the mobile staging build does not show the local demo login.
+The command updates deterministic active Pengelola/Induk banks and pending
+approval fixtures, customers, balances, waste types and transaction history;
+it never flushes or removes unrelated data. As before, fixture profiles can
+be restored by reseeding, so do not use fixture identities for permanent data.
+For local SQLite or Docker Postgres, run migrations followed by
+`python manage.py seed_testing_data`; local execution requires `DJANGO_DEBUG=true`.
+Production runtime markers always forbid fixture seeding.
 
 ## Operations
 
@@ -82,24 +94,9 @@ flyctl checks list --app pilah-be-staging
 flyctl logs --app pilah-be-staging
 ```
 
-## Seed E2E data
-
-Use the repository's **Seed Staging Testing Data** GitHub Actions workflow.
-Enter `SEED-PILAH-STAGING-DATA` in its confirmation field. The workflow checks
-the target app and all five configured emails, then runs:
-
-```bash
-python manage.py seed_testing_data \
-  --environment staging \
-  --confirm=SEED-PILAH-STAGING-DATA
-```
-
-The command is idempotent, creates the active Pengelola and Induk banks plus the pending approval-flow
-fixtures, and never flushes or removes unrelated staging data. For local
-SQLite or Docker Postgres, run `python manage.py migrate` followed by
-`python manage.py seed_testing_data` instead; local execution requires
-`DJANGO_DEBUG=true`.
-
-Migrations and static collection run from `docker/entrypoint.sh` before Gunicorn
-starts. The volume limits this staging app to one machine; move media to object
-storage before scaling beyond one machine or region.
+Migrations and static collection run from `docker/entrypoint.sh` before
+Gunicorn starts. The volume limits this staging app to one machine; move
+media to object storage before scaling beyond one machine or region.
+After deploying, verify genuine Google sign-in from the dashboard as Pengurus,
+Pengurus Induk and Superadmin. This change does not itself deploy or configure
+cloud resources or Google Console settings.
