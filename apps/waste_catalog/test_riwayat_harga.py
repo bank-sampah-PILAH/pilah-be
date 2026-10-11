@@ -6,7 +6,7 @@ from typing import Any
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from api.models import HargaSampah
+from api.models import BankSampah, HargaSampah, JenisSampah, User
 from apps.waste_catalog.test_harga_api import HargaApiTestCase
 
 
@@ -62,3 +62,58 @@ class RiwayatHargaTests(HargaApiTestCase):
                 ("3500.00", "sebelumnya"),
             ],
         )
+
+    def test_only_the_owning_banks_pengurus_can_read_the_history(self) -> None:
+        # OWASP A01: harga bank lain tidak bocor lewat id jenis sampah yang ditebak.
+        jenis = self.buat_jenis(harga=3500)
+        bank_lain = BankSampah.objects.create(
+            nama="Bank Sampah Kenanga",
+            alamat="Bogor",
+            kota="Bogor",
+            no_hp_pic="+628123456782",
+            status=BankSampah.Status.ACTIVE,
+        )
+        pengurus_lain = User.objects.create_user(
+            email="lain@example.com",
+            nama="Pengurus Lain",
+            bank_sampah=bank_lain,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        nasabah = User.objects.create_user(
+            email="nasabah@example.com",
+            nama="Ayu",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+
+        self.auth_as(pengurus_lain)
+        self.assertEqual(self.riwayat(jenis["id"]).status_code, 404)
+        self.auth_as(nasabah)
+        self.assertEqual(self.riwayat(jenis["id"]).status_code, 403)
+
+    def test_jenis_without_any_version_has_an_empty_history(self) -> None:
+        jenis = JenisSampah.objects.create(
+            bank_sampah=self.bank, nomor="LGM-001", nama_sampah="Besi"
+        )
+
+        response = self.riwayat(str(jenis.id))
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["results"], [])
+
+    def test_version_without_an_author_shows_no_name(self) -> None:
+        # Versi hasil backfill migrasi 0021 tidak punya pembuat.
+        jenis = JenisSampah.objects.create(
+            bank_sampah=self.bank, nomor="LGM-001", nama_sampah="Besi"
+        )
+        HargaSampah.objects.create(
+            jenis_sampah=jenis,
+            bank_sampah=self.bank,
+            harga_per_kg=2000,
+            berlaku_mulai=timezone.now(),
+        )
+
+        baris = self.riwayat(str(jenis.id)).data["results"]
+
+        self.assertEqual([(b["dibuat_oleh"], b["status"]) for b in baris], [(None, "berlaku")])
