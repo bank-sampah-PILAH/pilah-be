@@ -23,7 +23,7 @@ class OperationalTrendsData(ReportingPeriodData):
     granularity: str
 
 
-class ReportingPeriodSerializer(serializers.Serializer):
+class ReportingPeriodSerializer(serializers.Serializer[Any]):
     start_date = serializers.DateField(required=True)
     end_date = serializers.DateField(required=True)
 

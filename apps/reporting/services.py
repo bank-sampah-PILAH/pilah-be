@@ -40,9 +40,7 @@ class DashboardService:
         }
 
     @staticmethod
-    def operational_trends(
-        user: User, start: date, end: date, granularity: str
-    ) -> dict[str, Any]:
+    def operational_trends(user: User, start: date, end: date, granularity: str) -> dict[str, Any]:
         bank = user.bank_sampah
         assert bank is not None  # ponytail: views gate on IsActivePengelola
         truncation = {"day": TruncDay, "week": TruncWeek, "month": TruncMonth}[granularity]
@@ -78,12 +76,12 @@ class DashboardService:
         for row in setoran:
             bucket = buckets.get(row["period"].date())
             if bucket is not None:
-                bucket["setoran_total_nilai"] = f'{row["total"]:.2f}'
+                bucket["setoran_total_nilai"] = f"{row['total']:.2f}"
                 bucket["setoran_count"] = row["count"]
         for row in pencairan:
             bucket = buckets.get(row["period"].date())
             if bucket is not None:
-                bucket["pencairan_total_nominal"] = f'{row["total"]:.2f}'
+                bucket["pencairan_total_nominal"] = f"{row['total']:.2f}"
                 bucket["pencairan_count"] = row["count"]
         return {"granularity": granularity, "buckets": list(buckets.values())}
 
@@ -137,5 +135,5 @@ def _next_period(period: date, granularity: str) -> date:
     if granularity == "week":
         return period + timedelta(days=7)
     if granularity == "month":
-        return (period.replace(day=monthrange(period.year, period.month)[1]) + timedelta(days=1))
+        return period.replace(day=monthrange(period.year, period.month)[1]) + timedelta(days=1)
     return period + timedelta(days=1)
