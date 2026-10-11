@@ -12,12 +12,14 @@ auto-reload safe.
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from html import escape
 from importlib import resources
 from io import BytesIO
 from pathlib import Path
 
+from django.utils import timezone
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
@@ -32,7 +34,7 @@ from reportlab.platypus import (
 )
 from reportlab.platypus.paragraph import Paragraph
 
-from apps.reporting.statement import MutationRow, StatementData
+from apps.reporting.statement import _WIB, MutationRow, StatementData
 from shared_kernel.kalkulasi import format_ribuan
 
 if "Inter" not in pdfmetrics.getRegisteredFontNames():
@@ -228,11 +230,23 @@ def _page_chrome(canvas: Canvas, data: StatementData, theme: Theme) -> None:
             mask="auto",
         )
     canvas.setFillColor(theme.primary_text)
-    canvas.setFont("Inter-Bold", 11)
     canvas.drawRightString(
         x_start + _TABLE_W - 6 * mm, top - header_h / 2 - 4, "Laporan Riwayat Aktivitas"
     )
-    canvas.drawRightString(x_start + _TABLE_W - 6 * mm, top - header_h / 2 + 6, data.bank_nama)
+    # Bank name, right-aligned into the space left of the logo (17mm right
+    # edge of the logo): shrink the font first, then ellipsize, so a long
+    # name cannot run over the logo.
+    name = data.bank_nama
+    name_size: float = 11
+    avail = (_TABLE_W - 6 * mm) - (x_start + 17 * mm)
+    while name_size > 8 and canvas.stringWidth(name, "Inter-Bold", name_size) > avail:
+        name_size -= 0.5
+    while name and canvas.stringWidth(f"{name}…", "Inter-Bold", name_size) > avail:
+        name = name[:-1]
+    if name != data.bank_nama:
+        name += "…"
+    canvas.setFont("Inter-Bold", name_size)
+    canvas.drawRightString(x_start + _TABLE_W - 6 * mm, top - header_h / 2 + 6, name)
     canvas.restoreState()
 
     # --- Info grid, label:value pairs in two columns.
@@ -301,6 +315,16 @@ def _page_chrome(canvas: Canvas, data: StatementData, theme: Theme) -> None:
     canvas.restoreState()
 
 
+def _tanggal_label(tanggal: datetime) -> str:
+    """WIB calendar date for a mutation row.
+
+    Rows carry aware UTC datetimes (TIME_ZONE stays UTC for the API's
+    datetime contract); printing them raw would show the previous WIB date
+    for any event between 17:00 and 24:00 UTC (+07:00 crosses midnight).
+    """
+    return timezone.localtime(tanggal, _WIB).strftime("%d/%m/%Y")
+
+
 def _bank_alamat(data: StatementData) -> str:
     return " ".join(part for part in (data.bank_alamat, data.bank_kota) if part) or "-"
 
@@ -351,7 +375,7 @@ def _mutation_table(
     row_index = 1
     zebra_on = False
     for row in rows:
-        tanggal = row.tanggal.strftime("%d/%m/%Y")
+        tanggal = _tanggal_label(row.tanggal)
         table_data.append(
             [
                 Paragraph(tanggal, styles["cell"]),

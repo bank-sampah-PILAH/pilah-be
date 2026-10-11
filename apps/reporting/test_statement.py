@@ -6,10 +6,11 @@ build_statement, including the BalanceService.saldo_at equivalence that pins
 the tie-break rule. HTTP contract lives in apps/nasabah/test_history_pdf_export.py.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory
@@ -25,7 +26,8 @@ from api.models import (
     User,
 )
 from apps.ledger.api import saldo_at
-from apps.reporting.statement import build_statement
+from apps.reporting.render import _tanggal_label
+from apps.reporting.statement import MAX_DISPLAYED_ROWS, StatementPeriodError, build_statement
 from shared_kernel.kalkulasi import bulatkan_rupiah
 
 
@@ -195,3 +197,54 @@ class NasabahStatementDataTests(TestCase):
 
         data_setoran = build_statement(self.member, self._request(tipe="setoran"))
         self.assertEqual([row.tipe for row in data_setoran.rows], ["Setoran"])
+
+    # --- Request windows the statement refuses ----------------------------
+
+    def test_reversed_custom_range_surfaces_as_statement_period_error(self) -> None:
+        # apply_period's ValueError (reversed custom range) is re-tagged, so
+        # the HTTP view can separate request errors from render errors.
+        with self.assertRaises(StatementPeriodError):
+            build_statement(
+                self.member,
+                self._request(
+                    periode="custom",
+                    dari_tanggal="2026-10-02",
+                    sampai_tanggal="2026-10-01",
+                ),
+            )
+
+    def test_row_cap_rejects_oversized_window_instead_of_truncating(self) -> None:
+        Transaksi.objects.all().delete()
+        Pencairan.objects.all().delete()
+        base = timezone.make_aware(datetime(2026, 1, 1))
+        Transaksi.objects.bulk_create(
+            [
+                Transaksi(
+                    nasabah=self.member,
+                    bank_sampah=self.bank,
+                    dicatat_oleh=self.manager,
+                    total_nilai=Decimal("100.00"),
+                    tanggal=base + timedelta(minutes=i),
+                )
+                for i in range(MAX_DISPLAYED_ROWS + 1)
+            ]
+        )
+        with self.assertRaises(StatementPeriodError) as ctx:
+            build_statement(self.member, self._request())
+        self.assertIn(str(MAX_DISPLAYED_ROWS), str(ctx.exception))
+        self.assertIn("periode", str(ctx.exception))
+
+
+class TanggalLabelTests(SimpleTestCase):
+    """WIB calendar dates for the mutation table's plain-tanggal column."""
+
+    def test_utc_evening_prints_the_next_wib_date(self) -> None:
+        # 2026-10-01 19:00 UTC is 02:00 WIB on 10/02; a raw UTC strftime
+        # (the old behavior) printed 01/10.
+        utc_evening = datetime(2026, 10, 1, 19, 0, tzinfo=ZoneInfo("UTC"))
+        self.assertEqual(_tanggal_label(utc_evening), "02/10/2026")
+
+    def test_utc_morning_stays_the_same_wib_date(self) -> None:
+        utc_morning = datetime(2026, 10, 2, 2, 0, tzinfo=ZoneInfo("UTC"))
+        # 09:00 WIB same day.
+        self.assertEqual(_tanggal_label(utc_morning), "02/10/2026")

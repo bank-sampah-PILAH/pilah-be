@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from django.db.models import QuerySet
 from django.http import HttpRequest
@@ -24,8 +25,19 @@ from apps.ledger.api import apply_period
 from apps.reporting import exporter
 from shared_kernel.kalkulasi import bulatkan_rupiah
 
+# The statement is a report, not an API timezone: labels are always WIB
+# regardless of the global TIME_ZONE (kept UTC for the API's datetime
+# contract).
+_WIB = ZoneInfo("Asia/Jakarta")
+
 # ponytail: full-history walk per statement (one nasabah, hundreds of events);
 # switch to window aggregates if a member ever reaches thousands of events.
+
+# Hard cap on displayed rows: the export renders the window into one PDF, and
+# an uncapped all-time export degrades worse than linearly with history size.
+# Hitting the cap asks the user for a narrower periode instead of silently
+# truncating.
+MAX_DISPLAYED_ROWS = 2000
 
 _TIPE_LABELS = {"setoran": "Setoran", "pencairan": "Pencairan", "semua": "Semua"}
 
@@ -33,6 +45,17 @@ _TIPE_LABELS = {"setoran": "Setoran", "pencairan": "Pencairan", "semua": "Semua"
 # silently export all history under a label that promises a range. Reject
 # until PIL-246 teaches the shared filter (and period_label) these values.
 _NOT_YET_KNOWN_PERIODS = {"1_bulan", "3_bulan", "6_bulan", "12_bulan"}
+
+
+class StatementPeriodError(ValueError):
+    """A periode/tipe request this statement cannot serve (unknown month
+    window, reversed custom range, oversized window).
+
+    Subclassing ValueError keeps `apply_period`'s parse failures in the same
+    family, while letting the export view distinguish them from any
+    ValueError raised during rendering — rendering failures must surface as
+    a 500, not a 400 echoing renderer internals.
+    """
 
 
 def _periode_label(request: HttpRequest) -> str:
@@ -111,12 +134,15 @@ def export_statement_pdf(member: Nasabah, request: HttpRequest) -> tuple[bytes, 
     ``tipe`` (semua/setoran/pencairan) and ``tema`` from the request params.
     Returns ``(bytes, filename)``, or ``None`` when the chosen window holds no
     activity (the view maps that to 400, matching the XLSX export convention).
-    Raises ``ValueError`` for a PIL-246 month-window ``periode`` the shared
-    filter cannot apply yet.
+    Raises ``StatementPeriodError`` (a ValueError) for a request the
+    statement cannot serve: a PIL-246 month-window ``periode`` the shared
+    filter cannot apply yet, a reversed custom range, or a window holding
+    more rows than ``MAX_DISPLAYED_ROWS``. Rendering failures raise other
+    exceptions and must surface as a 500, never a 400.
     """
     periode = request.GET.get("periode")
     if periode in _NOT_YET_KNOWN_PERIODS:
-        raise ValueError(f"Periode '{periode}' belum tersedia untuk laporan ini.")
+        raise StatementPeriodError(f"Periode '{periode}' belum tersedia untuk laporan ini.")
     data = build_statement(member, request)
     if not data.rows:
         return None
@@ -149,15 +175,26 @@ def build_statement(member: Nasabah, request: HttpRequest) -> StatementData:
     )
 
     # Displayed rows: in the periode window and matching the tipe filter.
-    displayed = [
-        row for row in rows if row.id in window and (tipe == "semua" or row.tipe.lower() == tipe)
-    ]
+    # The index of the first displayed row is tracked in the same pass —
+    # `rows.index(first)` would rescan the list once per export.
+    displayed: list[MutationRow] = []
+    first_index = 0
+    for index, row in enumerate(rows):
+        if row.id in window and (tipe == "semua" or row.tipe.lower() == tipe):
+            if not displayed:
+                first_index = index
+            displayed.append(row)
+
+    if len(displayed) > MAX_DISPLAYED_ROWS:
+        raise StatementPeriodError(
+            f"Periode ini memuat lebih dari {MAX_DISPLAYED_ROWS} transaksi — "
+            "gunakan periode yang lebih sempit."
+        )
 
     # Saldo just before the first displayed event: the walk's value prior to
     # it. The walk list is chronological, so it is the previous row's saldo
     # (or 0 before any event).
-    index = rows.index(displayed[0]) if displayed else 0
-    saldo_awal = rows[index - 1].saldo if displayed and index > 0 else Decimal(0)
+    saldo_awal = rows[first_index - 1].saldo if displayed and first_index > 0 else Decimal(0)
 
     return StatementData(
         bank_nama=member.bank_sampah.nama,
@@ -171,7 +208,7 @@ def build_statement(member: Nasabah, request: HttpRequest) -> StatementData:
         nomor_anggota=member.nomor,
         periode_label=_periode_label(request),
         tipe_label=_TIPE_LABELS[tipe],
-        diunduh=timezone.localtime().strftime("%d/%m/%Y %H:%M"),
+        diunduh=timezone.localtime(timezone.now(), _WIB).strftime("%d/%m/%Y %H:%M"),
         saldo_awal=bulatkan_rupiah(saldo_awal),
         total_setoran=bulatkan_rupiah(sum((row.kredit for row in displayed), Decimal(0))),
         total_pencairan=bulatkan_rupiah(sum((row.debit for row in displayed), Decimal(0))),
@@ -291,7 +328,13 @@ def _rebuild(row: MutationRow, items: list[ItemRow]) -> MutationRow:
 def _filter_window(
     queryset: QuerySet[Transaksi] | QuerySet[Pencairan], request: HttpRequest
 ) -> QuerySet[Transaksi] | QuerySet[Pencairan]:
-    return apply_period(queryset, request, default=None)  # type: ignore[return-value]
+    try:
+        return apply_period(queryset, request, default=None)  # type: ignore[return-value]
+    except ValueError as exc:
+        # apply_period signals a bad periode (e.g. a reversed custom range)
+        # via ValueError; re-tag it so the view's period-only catch keeps
+        # separating request errors from rendering errors.
+        raise StatementPeriodError(str(exc)) from exc
 
 
 def _filename(member: Nasabah) -> str:

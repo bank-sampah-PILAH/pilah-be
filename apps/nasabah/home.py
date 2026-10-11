@@ -10,11 +10,12 @@ from rest_framework.exceptions import NotFound, PermissionDenied, ValidationErro
 from rest_framework.generics import GenericAPIView, ListAPIView
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 
 from api.models import BankSampah, Nasabah, Transaksi, User
 from apps.ledger.api import apply_period
 from apps.ledger.serializers import TransactionDetailSerializer
-from apps.reporting.api import export_statement_pdf
+from apps.reporting.api import StatementPeriodError, export_statement_pdf
 from shared_kernel.pagination import StandardPagination
 from shared_kernel.permissions import IsActiveNasabah
 
@@ -219,15 +220,21 @@ class NasabahHistoryExportPdfView(GenericAPIView[Nasabah]):
     """
 
     permission_classes = [IsActiveNasabah]
+    # The statement render is CPU-heavy (minutes of history → one PDF); the
+    # scoped throttle is read from DEFAULT_THROTTLE_RATES["statement_pdf"].
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "statement_pdf"
 
     def get(self, request: Request) -> HttpResponse:
         member = MembershipService.get_active_membership(request)
         try:
             result = export_statement_pdf(member, request)
-        # apply_period raises ValueError for a reversed custom range; map it to
-        # the same 400 shape the ledger views return (the DRF 400 path would
-        # reshape it to 422, diverging from the ledger convention).
-        except ValueError as exc:
+        # StatementPeriodError means the periode/tipe request is unservable
+        # (unknown month window, reversed range, oversized window) and maps
+        # to the same 400 shape the ledger views return. Anything else —
+        # including a ValueError escaping the renderer — must NOT be echoed
+        # back as a 400; it falls through to the framework's 500 path.
+        except StatementPeriodError as exc:
             return Response({"error": str(exc)}, status=400)
         if result is None:
             return Response({"error": "Tidak ada data pada periode ini"}, status=400)
