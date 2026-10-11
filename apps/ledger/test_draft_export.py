@@ -179,3 +179,53 @@ class ExportPratinjauTests(DraftTestBase):
         )
 
         self.assertEqual(self._export(self._body()).status_code, 403)
+
+
+class ExportRumusTests(DraftTestBase):
+    """Names typed by users must open in Excel as text, never as a formula (CSV/XLSX injection)."""
+
+    RUMUS = ('=HYPERLINK("http://evil.test","klik")', "+1+1", "-2+3", "@SUM(1+1)", "\t=1+1")
+
+    def _sel_teks(self, response: Any) -> list[Any]:
+        sheet = load_workbook(BytesIO(response.content)).active
+        return [cell for row in sheet.iter_rows() for cell in row if cell.value is not None]
+
+    def _tidak_ada_rumus(self, response: Any) -> None:
+        self.assertEqual(response.status_code, 200)
+        for cell in self._sel_teks(response):
+            self.assertNotEqual(cell.data_type, "f", f"{cell.coordinate}: {cell.value!r}")
+            if isinstance(cell.value, str):
+                self.assertNotIn(cell.value[:1], "=+-@\t\r", f"{cell.coordinate}: {cell.value!r}")
+
+    def test_nama_draft_nasabah_dan_pembuat_tidak_menjadi_rumus(self) -> None:
+        for rumus in self.RUMUS:
+            with self.subTest(rumus=rumus):
+                DraftPencairan.objects.all().delete()
+                self.user.nama = rumus
+                self.user.save()
+                self.nasabah.nama = rumus
+                self.nasabah.save()
+                draft = self._buat(
+                    [{"nasabah_id": str(self.nasabah.id), "nominal": "1000"}], nama=rumus
+                ).data
+
+                response = self.client.get(f"{URL}/{draft['id']}/export", {"berkas": "xlsx"})
+
+                self._tidak_ada_rumus(response)
+                nilai = [cell.value for cell in self._sel_teks(response)]
+                self.assertTrue(any(isinstance(n, str) and rumus.lstrip() in n for n in nilai))
+
+    def test_pratinjau_juga_aman(self) -> None:
+        self.nasabah.nama = "=1+1"
+        self.nasabah.save()
+
+        response = self.client.post(
+            f"{URL}/export?berkas=xlsx",
+            {
+                "nama": "@cmd",
+                "items": [{"nasabah_id": str(self.nasabah.id), "nominal": "1000"}],
+            },
+            format="json",
+        )
+
+        self._tidak_ada_rumus(response)
