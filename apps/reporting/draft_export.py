@@ -32,6 +32,13 @@ _HEADER = ["No", "Kode", "Nama", "Metode", "Nominal (Rp)", "Potongan (Rp)", "Dib
 
 _JUDUL = "Draft Pencairan"
 
+_PEMICU_RUMUS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _aman(teks: str) -> str:
+    """Spreadsheet apps run text that starts with = + - @ as a formula; a leading ' keeps it text."""
+    return f"'{teks}" if teks.startswith(_PEMICU_RUMUS) else teks
+
 
 def export_draft_pencairan(draft: DraftPencairan, berkas: str) -> tuple[bytes, str, str]:
     """Return (content, filename, content_type) for `berkas` in {"pdf", "xlsx"}."""
@@ -76,15 +83,15 @@ def _xlsx(draft: DraftPencairan) -> bytes:
     ws.append([_JUDUL])
     ws["A1"].font = Font(bold=True, size=14)
     for label, nilai in _meta(draft):
-        ws.append([label, nilai])
+        ws.append([label, _aman(nilai)])
     ws.append([])
     ws.append(_HEADER)
     for cell in ws[ws.max_row]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="006D44")
         cell.alignment = Alignment(horizontal="center")
-    for row in _rows(draft):
-        ws.append(list(row))
+    for no, kode, nama, metode, *angka in _rows(draft):
+        ws.append([no, _aman(kode), _aman(nama), metode, *angka])
     ws.append(["TOTAL", None, None, None, *_totals(draft)])
     for cell in ws[ws.max_row]:
         cell.font = Font(bold=True)
