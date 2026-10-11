@@ -272,3 +272,13 @@ class PencairanRevisiSerializer(serializers.ModelSerializer[Model]):
             "diubah_oleh_nama",
             "diubah_pada",
         ]
+
+
+class SetoranActivityEnvelopeSerializer(serializers.Serializer[Any]):
+    tipe = serializers.ChoiceField(choices=["setoran"])
+    data = TransactionListSerializer()
+
+
+class PencairanActivityEnvelopeSerializer(serializers.Serializer[Any]):
+    tipe = serializers.ChoiceField(choices=["pencairan"])
+    data = PencairanDetailSerializer()

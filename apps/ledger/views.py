@@ -6,6 +6,7 @@ from uuid import UUID
 from django.db import IntegrityError
 from django.db.models import QuerySet
 from django.http import HttpResponse
+from drf_spectacular.utils import PolymorphicProxySerializer, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ParseError
@@ -17,6 +18,8 @@ from rest_framework.response import Response
 from api.models import BankSampah, Pencairan, Transaksi, User
 from apps.ledger.activity import activity_query, serialize_activity_page
 from apps.ledger.serializers import (
+    PencairanActivityEnvelopeSerializer,
+    SetoranActivityEnvelopeSerializer,
     PencairanCreateSerializer,
     PencairanDetailSerializer,
     PencairanEditSerializer,
@@ -89,6 +92,17 @@ class ActivityHistoryView(GenericAPIView[Any]):
     pagination_class = StandardPagination
     serializer_class = TransactionListSerializer
 
+    @extend_schema(
+        responses=PolymorphicProxySerializer(
+            component_name="ActivityEnvelope",
+            serializers={
+                "setoran": SetoranActivityEnvelopeSerializer,
+                "pencairan": PencairanActivityEnvelopeSerializer,
+            },
+            resource_type_field_name="tipe",
+            many=True,
+        )
+    )
     def get(self, request: Request) -> Response:
         bank = current_bank(request)
         try:
