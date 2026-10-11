@@ -192,3 +192,33 @@ class ActivityHistoryTests(APITestCase):
         self.assertEqual(
             {row["tipe"] for row in response.data["results"]}, {"setoran", "pencairan"}
         )
+
+    def test_unknown_period_is_rejected_by_legacy_routes_too(self) -> None:
+        for url in ("/api/v1/transaksi", "/api/v1/transaksi/export", "/api/v1/pencairan"):
+            with self.subTest(url=url):
+                response = self.client.get(url, {"periode": "1 Bulan"})
+                self.assertEqual(response.status_code, 422)
+                self.assertIn("periode", response.data["errors"])
+        self.client.force_authenticate(self.user)
+        for url in ("/api/v1/nasabah/me/riwayat",):
+            with self.subTest(url=url):
+                response = self.client.get(url, {"periode": "1 Bulan"})
+                self.assertEqual(response.status_code, 422)
+                self.assertIn("periode", response.data["errors"])
+
+    def test_opt_in_deposit_matches_legacy_summary_exactly(self) -> None:
+        self.client.force_authenticate(self.user)
+        url = "/api/v1/nasabah/me/riwayat"
+        legacy = self.client.get(url, {"periode": "semua"})
+        unified = self.client.get(url, {"periode": "semua", "tipe": "setoran"})
+        self.assertEqual(unified.status_code, 200)
+        self.assertEqual(unified.data["results"], legacy.data["results"])
+
+    def test_equal_timestamps_put_deposit_before_payout(self) -> None:
+        Pencairan.objects.filter(pk=self.payout.pk).update(
+            tanggal=self.setoran.tanggal, created_at=self.setoran.created_at
+        )
+        self.assertEqual(
+            [row["tipe"] for row in self.get().data["results"]],
+            ["setoran", "pencairan"],
+        )
