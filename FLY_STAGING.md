@@ -1,8 +1,9 @@
 # Fly.io Staging
 
 Pushes to `staging` deploy the verified backend commit to `pilah-be-staging`.
-CI then requires `/healthz` to succeed and automatically seeds the idempotent
-E2E fixture. Seed failure fails deployment; no separate dispatch is needed.
+CI then requires `/healthz` to succeed and initializes the E2E fixture only if
+its known rows are absent. Later deploys preserve tester edits to existing
+fixture rows. Seed failure fails deployment; no separate dispatch is needed.
 Staging runs are serialized so deploy and seed are not interrupted by a newer
 push. No reset or deletion runs in the deployment pipeline.
 
@@ -80,8 +81,11 @@ validated and passed as data rather than interpolated into a shell script.
 
 The command updates deterministic active Pengelola/Induk banks and pending
 approval fixtures, customers, balances, waste types and transaction history;
-it never flushes or removes unrelated data. As before, fixture profiles can
-be restored by reseeding, so do not use fixture identities for permanent data.
+it never flushes or removes unrelated data. The automatic deploy uses
+`--if-missing`, so existing fixture rows (including tester edits) are left
+alone. To intentionally restore fixture defaults, run the confirmed staging
+command without `--if-missing`; do not use fixture identities for permanent
+data.
 For local SQLite or Docker Postgres, run migrations followed by
 `python manage.py seed_testing_data`; local execution requires `DJANGO_DEBUG=true`.
 Production runtime markers always forbid fixture seeding.

@@ -25,6 +25,7 @@ class SeedStagingPipelineTests(SimpleTestCase):
             self.assertEqual(command[:3], ["python", "/app/manage.py", "seed_testing_data"])
             self.assertIn("--environment=staging", command)
             self.assertIn("--confirm=SEED-PILAH-STAGING-DATA", command)
+            self.assertIn("--if-missing", command)
             self.assertIn("--pengurus-email=pengurus@example.com", command)
             self.assertIn("--induk-email=induk.demo@example.com", command)
             self.assertTrue(run.call_args.kwargs["check"])

@@ -15,6 +15,7 @@ def seed_staging() -> None:
         "seed_testing_data",
         "--environment=staging",
         "--confirm=SEED-PILAH-STAGING-DATA",
+        "--if-missing",
     ]
     for flag in ("pengurus", "customer", "customer-two", "superadmin", "pending-pengurus", "induk"):
         key = f"PILAH_SEED_{flag.upper().replace('-', '_')}_EMAIL"

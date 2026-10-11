@@ -76,6 +76,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument("--environment", choices=("local", "staging"), default="local")
         parser.add_argument("--confirm")
+        parser.add_argument("--if-missing", action="store_true")
         parser.add_argument(
             "--pengurus-email",
             "--operator-email",
@@ -137,6 +138,10 @@ class Command(BaseCommand):
         if not settings.DEBUG and identities.superadmin_email.lower() not in superadmin_allowlist():
             raise CommandError("Seed Superadmin must be in PILAH_SUPERADMIN_EMAILS")
 
+        if bool(options.get("if_missing")) and self._has_seeded_data():
+            self.stdout.write(self.style.SUCCESS("Existing fixture rows found; skipping reseed."))
+            return
+
         with transaction.atomic():
             self._seed(identities)
 
@@ -148,6 +153,25 @@ class Command(BaseCommand):
             f"{customer_count} customers, 4 waste types, "
             f"{3 + history_count} setoran, {history_count} pencairan, "
             "and recalculated balances."
+        )
+
+    @staticmethod
+    def _has_seeded_data() -> bool:
+        return (
+            BankSampah.objects.filter(
+                pk__in=(ACTIVE_BANK_ID, PENDING_BANK_ID, INDUK_BANK_ID)
+            ).exists()
+            or User.objects.filter(
+                pk__in=(
+                    PENGURUS_ID,
+                    PENDING_PENGURUS_ID,
+                    SUPERADMIN_ID,
+                    INDUK_PENGELOLA_ID,
+                    CUSTOMER_ONE_USER_ID,
+                    CUSTOMER_TWO_USER_ID,
+                )
+            ).exists()
+            or Nasabah.objects.filter(pk__in=(CUSTOMER_ONE_ID, CUSTOMER_TWO_ID)).exists()
         )
 
     @staticmethod
