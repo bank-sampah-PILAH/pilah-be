@@ -207,7 +207,7 @@ class DraftPencairan(TimestampedModel):
     # What the pengurus last applied to everyone ("50%" or "up to Rp 100.000"), kept so the
     # form reopens as it was left. Only a record: the item nominals are the truth.
     jumlah_jenis = models.CharField(
-        max_length=10, choices=PotonganJenis.choices, null=True, blank=True
+        max_length=10, choices=PotonganJenis.choices, blank=True, default=""
     )
     jumlah_nilai = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     dibuat_oleh = models.ForeignKey(

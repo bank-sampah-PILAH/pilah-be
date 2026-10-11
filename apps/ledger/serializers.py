@@ -414,10 +414,18 @@ class DraftPencairanItemSerializer(serializers.ModelSerializer[Model]):
         ]
 
 
+class _JenisAtauNull(serializers.ChoiceField):
+    """A choice kept as text, where an empty string means "none" and is sent as null."""
+
+    def to_representation(self, value: Any) -> Any:
+        return super().to_representation(value) or None
+
+
 class DraftPencairanSerializer(serializers.ModelSerializer[Model]):
     dibuat_oleh_nama = serializers.CharField(source=_DIBUAT_OLEH_NAMA, read_only=True)
     diubah_oleh_nama = serializers.CharField(source=_DIUBAH_OLEH_NAMA, read_only=True)
 
+    jumlah_jenis = _JenisAtauNull(choices=DraftPencairan.PotonganJenis.choices, read_only=True)
     items = DraftPencairanItemSerializer(many=True, read_only=True)
     total_nominal = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     total_potongan = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)

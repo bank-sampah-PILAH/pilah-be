@@ -15,8 +15,8 @@ class Migration(migrations.Migration):
             field=models.CharField(
                 blank=True,
                 choices=[("persen", "Persen"), ("rupiah", "Rupiah")],
+                default="",
                 max_length=10,
-                null=True,
             ),
         ),
         migrations.AddField(
