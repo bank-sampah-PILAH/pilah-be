@@ -491,7 +491,7 @@ class DraftPencairanService:
     @staticmethod
     def _alasan_dilewati(nasabah: Nasabah | None, jenis: str, nilai: Decimal) -> str:
         if nasabah is None:
-            return "Nasabah tidak ditemukan atau tidak aktif"
+            return _NASABAH_TIDAK_AKTIF
         nominal = DraftPencairanService._saldo_tersedia(nasabah)
         if nominal <= 0:
             return "Saldo nasabah kosong"
