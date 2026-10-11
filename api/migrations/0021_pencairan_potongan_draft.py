@@ -33,4 +33,12 @@ class Migration(migrations.Migration):
                 name="pencairan_potongan_within_nominal",
             ),
         ),
+        migrations.AddConstraint(
+            model_name="pencairan",
+            constraint=models.UniqueConstraint(
+                condition=models.Q(("draft__isnull", False)),
+                fields=("draft", "nasabah"),
+                name="pencairan_draft_nasabah_unik",
+            ),
+        ),
     ]

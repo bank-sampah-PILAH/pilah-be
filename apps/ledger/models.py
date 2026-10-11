@@ -135,6 +135,12 @@ class Pencairan(TimestampedModel):
                 condition=models.Q(potongan__gte=0, potongan__lte=models.F("nominal")),
                 name="pencairan_potongan_within_nominal",
             ),
+            # A draft pays each nasabah once, whatever path realises it.
+            models.UniqueConstraint(
+                fields=["draft", "nasabah"],
+                condition=models.Q(draft__isnull=False),
+                name="pencairan_draft_nasabah_unik",
+            ),
         ]
 
     @property

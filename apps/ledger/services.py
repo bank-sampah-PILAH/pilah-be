@@ -213,10 +213,18 @@ class PencairanService:
             # (web DateTime keeps milliseconds), so a hair's difference is no edit.
             if abs(tanggal - pencairan.tanggal) < timedelta(seconds=1):
                 tanggal = pencairan.tanggal
-        if pencairan.potongan > 0 and (nominal, tanggal) != (pencairan.nominal, pencairan.tanggal):
-            raise serializers.ValidationError(
-                {"nominal": ["Pencairan berpotongan hanya boleh diubah metode dan keterangannya"]}
-            )
+        if pencairan.potongan > 0:
+            diubah = [
+                nama
+                for nama, baru, lama in (
+                    ("nominal", nominal, pencairan.nominal),
+                    ("tanggal", tanggal, pencairan.tanggal),
+                )
+                if baru != lama
+            ]
+            if diubah:
+                pesan = "Pencairan berpotongan hanya boleh diubah metode dan keterangannya"
+                raise serializers.ValidationError({nama: [pesan] for nama in diubah})
         if (nominal, tanggal, metode, keterangan) == (
             pencairan.nominal,
             pencairan.tanggal,
