@@ -178,4 +178,4 @@ class ExportPratinjauTests(DraftTestBase):
             User.objects.create_user(email="n@example.test", nama="N", role=User.Role.NASABAH)
         )
 
-        self.assertIn(self._export(self._body()).status_code, (403, 404))
+        self.assertEqual(self._export(self._body()).status_code, 403)
