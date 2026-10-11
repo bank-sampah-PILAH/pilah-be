@@ -10,6 +10,13 @@ from shared_kernel.permissions import superadmin_allowlist
 class Command(BaseCommand):
     help = "Create missing allowlisted Superadmins without changing existing accounts."
 
+    @staticmethod
+    def _validate_single_superadmin(matches: list[User]) -> None:
+        if len(matches) > 1:
+            raise CommandError("Allowlisted email matches multiple accounts")
+        if matches[0].role != User.Role.SUPERADMIN:
+            raise CommandError("Allowlisted email belongs to a non-Superadmin account")
+
     def handle(self, *args: object, **options: object) -> None:
         emails = sorted(superadmin_allowlist())
         if not emails:
@@ -24,8 +31,7 @@ class Command(BaseCommand):
             for email in emails:
                 existing = list(User.objects.select_for_update().filter(email__iexact=email))
                 if existing:
-                    if any(user.role != User.Role.SUPERADMIN for user in existing):
-                        raise CommandError("Allowlisted email belongs to a non-Superadmin account")
+                    self._validate_single_superadmin(existing)
                     continue
                 try:
                     with transaction.atomic():
@@ -39,8 +45,5 @@ class Command(BaseCommand):
                     raced = list(User.objects.select_for_update().filter(email__iexact=email))
                     if not raced:
                         raise
-                    if any(user.role != User.Role.SUPERADMIN for user in raced):
-                        raise CommandError(
-                            "Allowlisted email belongs to a non-Superadmin account"
-                        ) from None
+                    self._validate_single_superadmin(raced)
         self.stdout.write(self.style.SUCCESS("Superadmin bootstrap complete"))

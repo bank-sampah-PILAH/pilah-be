@@ -37,6 +37,19 @@ class BootstrapSuperadminsTests(TestCase):
         call_command("bootstrap_superadmins", stdout=StringIO())
         self.assertEqual(User.objects.filter(pk=user.pk).values().get(), before)
 
+    def test_duplicate_case_insensitive_superadmins_fail_as_ambiguous(self) -> None:
+        User.objects.create_user(email="root@example.com", role=User.Role.SUPERADMIN)
+        User.objects.create_user(email="ROOT@example.com", role=User.Role.SUPERADMIN)
+
+        with (
+            override_settings(PILAH_SUPERADMIN_EMAILS=("root@example.com",)),
+            self.assertRaisesRegex(CommandError, "matches multiple accounts"),
+        ):
+            call_command("bootstrap_superadmins", stdout=StringIO())
+
+        self.assertEqual(User.objects.count(), 2)
+        self.assertEqual(set(User.objects.values_list("role", flat=True)), {User.Role.SUPERADMIN})
+
     def test_conflicting_roles_fail_atomically_without_privilege_escalation(self) -> None:
         for role in (User.Role.PENGELOLA, User.Role.PENGELOLA_INDUK, User.Role.NASABAH):
             with self.subTest(role=role):
