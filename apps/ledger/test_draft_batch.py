@@ -2,6 +2,9 @@ from decimal import Decimal
 from typing import Any
 from unittest import mock
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+
 from api.models import BankSampah, DraftPencairan, Nasabah, Saldo
 from apps.ledger.draft_testing import URL, DraftTestBase
 
@@ -198,7 +201,29 @@ class BatchPencairanTests(DraftTestBase):
                 nasabah_ids=[str(n.id) for n in (self.nasabah, self.budi, self.citra)]
             )
 
-        for response in (semua, daftar):
+        # The error names the field the client actually sent.
+        for response, kunci in ((semua, "semua"), (daftar, "nasabah_ids")):
             self.assertEqual(response.status_code, 422, response.data)
-            self.assertIn("2", str(response.data["errors"]["nasabah_ids"]))
+            self.assertEqual(list(response.data["errors"]), [kunci])
+            self.assertIn("2", str(response.data["errors"][kunci]))
         self.assertFalse(DraftPencairan.objects.exists())
+
+    def test_batch_besar_tidak_menambah_select_per_nasabah(self) -> None:
+        def jumlah_select(jumlah: int, *, semua: bool) -> int:
+            nasabah = [
+                self._nasabah(f"BAT-{semua * 5000 + jumlah * 100 + i:04d}", f"Nasabah {i}", "10000")
+                for i in range(jumlah)
+            ]
+            body: dict[str, Any] = (
+                {"semua": True} if semua else {"nasabah_ids": [str(n.id) for n in nasabah]}
+            )
+            with CaptureQueriesContext(connection) as queries:
+                response = self._batch(**body)
+            self.assertEqual(response.status_code, 201, response.data)
+            DraftPencairan.objects.all().delete()
+            Nasabah.objects.exclude(id__in=[self.nasabah.id, self.budi.id, self.citra.id]).delete()
+            return len([q for q in queries.captured_queries if q["sql"].startswith("SELECT")])
+
+        for semua in (False, True):
+            with self.subTest(semua=semua):
+                self.assertEqual(jumlah_select(3, semua=semua), jumlah_select(25, semua=semua))
