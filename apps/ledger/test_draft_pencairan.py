@@ -95,6 +95,15 @@ class DraftPencairanTests(APITestCase):
         self.assertEqual(response.status_code, 422, response.data)
         self.assertIn("items[0].nominal", response.data["errors"])
 
+    def test_nasabah_tanpa_baris_saldo_dianggap_kosong(self) -> None:
+        belum_transaksi = self._nasabah("NAS-0009", "Belum Transaksi", "0")
+        Saldo.objects.filter(nasabah=belum_transaksi).delete()
+
+        response = self._buat([{"nasabah_id": str(belum_transaksi.id)}])
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("items[0].nominal", response.data["errors"])
+
     def test_potongan_persen_dibulatkan_ke_bawah_per_item_dan_total_adalah_jumlah_item(
         self,
     ) -> None:
