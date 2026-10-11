@@ -5,6 +5,7 @@ from typing import Any, TypeVar, cast
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from django.db.models import Exists, F, Max, Model, OuterRef, Q, QuerySet, Subquery, Sum
 from django.db.models.functions import Coalesce
@@ -24,7 +25,7 @@ from api.models import (
     Transaksi,
     User,
 )
-from apps.nasabah.api import get_eligible_nasabah, get_locked_nasabah
+from apps.nasabah.api import get_eligible_nasabah_map, get_locked_nasabah
 from apps.waste_catalog.api import get_active_jenis
 from shared_kernel.kalkulasi import (
     bulatkan_rupiah,
@@ -490,9 +491,10 @@ class DraftPencairanService:
         """
         bank = draft.bank_sampah
         ada = {item.nasabah_id: item for item in draft.items.select_related("draft")}
+        layak = get_eligible_nasabah_map(bank, [data["nasabah_id"] for data in payload_items])
         hasil: list[DraftPencairanItem] = []
         for index, data in enumerate(payload_items):
-            nasabah = get_eligible_nasabah(bank, data["nasabah_id"])
+            nasabah = layak.get(data["nasabah_id"])
             if nasabah is None:
                 raise serializers.ValidationError(
                     {f"items[{index}].nasabah_id": ["Nasabah tidak ditemukan atau tidak aktif"]}
@@ -524,10 +526,17 @@ class DraftPencairanService:
                 )
 
     @staticmethod
+    def _saldo_tersedia(nasabah: Nasabah) -> Decimal:
+        """Whole rupiah the nasabah holds; a nasabah who never transacted has no Saldo row."""
+        try:
+            return bulatkan_rupiah(nasabah.saldo.total_saldo)
+        except ObjectDoesNotExist:
+            return Decimal(0)
+
+    @staticmethod
     def _nominal(nasabah: Nasabah, diminta: Decimal | None, index: int) -> Decimal:
         """Requested nominal, or the whole saldo; never above the saldo, never zero."""
-        saldo = Saldo.objects.filter(nasabah=nasabah).first()
-        tersedia = bulatkan_rupiah(saldo.total_saldo) if saldo else Decimal(0)
+        tersedia = DraftPencairanService._saldo_tersedia(nasabah)
         nominal = tersedia if diminta is None else diminta
         if nominal <= 0:
             raise serializers.ValidationError({f"items[{index}].nominal": ["Saldo nasabah kosong"]})
