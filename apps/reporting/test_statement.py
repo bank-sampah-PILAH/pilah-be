@@ -171,6 +171,7 @@ class NasabahStatementDataTests(TestCase):
             nasabah=self.member,
             bank_sampah=self.bank,
             dicatat_oleh=self.manager,
+            tanggal=timezone.now() - timedelta(days=1),
             nominal=Decimal("1000.00"),
             metode="tunai",
             saldo_sebelum=Decimal("8000.00"),
@@ -180,6 +181,7 @@ class NasabahStatementDataTests(TestCase):
             nasabah=self.member,
             bank_sampah=self.bank,
             dicatat_oleh=self.manager,
+            tanggal=legacy.tanggal + timedelta(hours=1),
             total_nilai=Decimal("2500.00"),
         )
         data = build_statement(self.member, self._request())
