@@ -1,6 +1,9 @@
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 from unittest import mock
+
+from django.db import IntegrityError, transaction
 
 from api.models import DraftPencairan, Nasabah, Pencairan, Saldo, User
 from apps.ledger.draft_testing import URL, DraftTestBase
@@ -195,6 +198,54 @@ class KonfirmasiDraftTests(DraftTestBase):
         self.assertIn("nominal", nominal.data["errors"])
         self.assertEqual(metode.status_code, 200, metode.data)
         self.assertEqual(metode.data["metode"], "tunai")
+
+    def test_pencairan_berpotongan_melapor_field_yang_diubah(self) -> None:
+        self._konfirmasi(self._draft(potongan_jenis="persen", potongan_nilai="10")["id"])
+        pencairan = Pencairan.objects.get(nasabah=self.nasabah)
+        url = f"/api/v1/pencairan/{pencairan.id}"
+        tanggal_lain = (pencairan.tanggal - timedelta(days=1)).isoformat()
+
+        hanya_tanggal = self.client.patch(
+            url, {"tanggal": tanggal_lain, "alasan": "salah hari"}, format="json"
+        )
+        keduanya = self.client.patch(
+            url, {"nominal": "90000", "tanggal": tanggal_lain, "alasan": "salah"}, format="json"
+        )
+
+        self.assertEqual(hanya_tanggal.status_code, 422, hanya_tanggal.data)
+        self.assertEqual(list(hanya_tanggal.data["errors"]), ["tanggal"])
+        self.assertEqual(keduanya.status_code, 422, keduanya.data)
+        self.assertEqual(sorted(keduanya.data["errors"]), ["nominal", "tanggal"])
+
+    def test_satu_draft_hanya_boleh_mencairkan_satu_nasabah_satu_kali(self) -> None:
+        self._konfirmasi(self._draft()["id"])
+        pencairan = Pencairan.objects.get(nasabah=self.nasabah)
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Pencairan.objects.create(
+                nasabah=pencairan.nasabah,
+                bank_sampah=pencairan.bank_sampah,
+                dicatat_oleh=pencairan.dicatat_oleh,
+                nominal=pencairan.nominal,
+                metode=pencairan.metode,
+                saldo_sebelum=pencairan.saldo_sebelum,
+                saldo_sesudah=pencairan.saldo_sesudah,
+                draft=pencairan.draft,
+            )
+
+    def test_pencairan_biasa_tanpa_draft_boleh_berulang_untuk_nasabah_yang_sama(self) -> None:
+        for _ in range(2):
+            Pencairan.objects.create(
+                nasabah=self.nasabah,
+                bank_sampah=self.bank,
+                dicatat_oleh=self.user,
+                nominal=Decimal(1000),
+                metode=Pencairan.Metode.TUNAI,
+                saldo_sebelum=Decimal(5000),
+                saldo_sesudah=Decimal(4000),
+            )
+
+        self.assertEqual(Pencairan.objects.filter(nasabah=self.nasabah).count(), 2)
 
     def test_edit_metode_dengan_semua_field_dan_tanggal_dibulatkan_milidetik_diterima(
         self,
