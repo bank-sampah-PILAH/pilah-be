@@ -106,10 +106,39 @@ class OAuthRegressionTests(RegressionTestCase):
             )
         self.assertEqual(response.status_code, 401)
 
+    def test_real_verify_rejects_token_with_wrong_web_audience(self) -> None:
+        self.client.credentials()
+
+        def verify_audience(
+            _token: str, _request: object, audience: str | None
+        ) -> dict[str, object]:
+            if audience != "web-client-id":
+                raise ValueError("Wrong audience")
+            return {"sub": "sub-1", "email": "real@example.com", "email_verified": True}
+
+        with (
+            override_settings(
+                PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False, GOOGLE_CLIENT_ID="other-client-id"
+            ),
+            patch(
+                "apps.authentication.services.google_id_token.verify_oauth2_token",
+                side_effect=verify_audience,
+            ) as verify,
+        ):
+            response = self.client.post(
+                "/api/v1/auth/google", {"id_token": "token-for-web-client"}, format="json"
+            )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(verify.call_args.args[2], "other-client-id")
+
     def test_real_verify_accepts_minimal_profile(self) -> None:
         self.client.credentials()
         with (
-            override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False, GOOGLE_CLIENT_ID="cid"),
+            override_settings(
+                PILAH_ALLOW_FAKE_GOOGLE_TOKEN=False,
+                GOOGLE_CLIENT_ID="web-client-id",
+            ),
             patch(
                 "apps.authentication.services.google_id_token.verify_oauth2_token",
                 return_value={
@@ -117,9 +146,10 @@ class OAuthRegressionTests(RegressionTestCase):
                     "email": "real@example.com",
                     "email_verified": True,
                 },
-            ),
+            ) as verify,
         ):
             response = self.client.post(
                 "/api/v1/auth/google", {"id_token": "real-token"}, format="json"
             )
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(verify.call_args.args[2], "web-client-id")

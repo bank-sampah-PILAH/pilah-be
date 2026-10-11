@@ -7,10 +7,20 @@ test dependency.
 """
 
 from decimal import Decimal
+from unittest.mock import patch
 
-from rest_framework.test import APITestCase
+from django.conf import settings
+from django.test import override_settings
+from rest_framework.test import APIClient, APITestCase
 
 from api.models import BankSampah, Nasabah, Pencairan, Transaksi, User
+
+# The bulk contract below fires far more than 10 requests per minute; the
+# throttle's rate is exercised only by real traffic, not these fixtures.
+_TEST_SETTINGS = {
+    **settings.REST_FRAMEWORK,
+    "DEFAULT_THROTTLE_RATES": {"statement_pdf": None},
+}
 
 
 def make_member(email: str, nomor: str, bank: BankSampah) -> Nasabah:
@@ -25,6 +35,7 @@ def make_member(email: str, nomor: str, bank: BankSampah) -> Nasabah:
     )
 
 
+@override_settings(REST_FRAMEWORK=_TEST_SETTINGS)
 class NasabahHistoryPdfExportTests(APITestCase):
     url = "/api/v1/nasabah/me/riwayat/export-pdf"
 
@@ -73,6 +84,16 @@ class NasabahHistoryPdfExportTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.content.startswith(b"%PDF-"))
 
+    def test_export_rejects_pil_246_month_windows_until_shared(self) -> None:
+        # 1/3/6/12-month values exist on the PIL-246 branch only. apply_period
+        # silently ignores them (exporting ALL history), so until the shared
+        # filter learns them the export must reject instead of mislabeling.
+        for periode in ("1_bulan", "3_bulan", "6_bulan", "12_bulan"):
+            with self.subTest(periode=periode):
+                response = self.client.get(self.url, {"periode": periode})
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("belum tersedia", response.json()["error"])
+
     def test_export_unknown_tipe_falls_back_to_semua(self) -> None:
         response = self.client.get(self.url, {"tipe": "deposito"})
         self.assertEqual(response.status_code, 200)
@@ -107,6 +128,37 @@ class NasabahHistoryPdfExportTests(APITestCase):
         self.assertEqual(
             response.json()["error"], "Tanggal akhir tidak boleh lebih awal dari tanggal awal"
         )
+
+    def test_render_value_error_is_a_500_not_a_400(self) -> None:
+        # The view maps only StatementPeriodError (a period request error) to
+        # 400. A ValueError escaping the renderer must surface as a server
+        # error — never a 400 echoing renderer internals like an absolute
+        # path.
+        # raise_request_exception=False: the framework's error handling turns
+        # the escape into the response a real caller would receive.
+        client = APIClient(raise_request_exception=False)
+        client.force_authenticate(self.user)
+        with patch(
+            "apps.reporting.render.render_statement",
+            side_effect=ValueError("internal /srv/x secret detail"),
+        ):
+            response = client.get(self.url)
+        self.assertEqual(response.status_code, 500)
+        self.assertNotIn("secret detail", response.content.decode())
+
+    def test_export_is_throttled(self) -> None:
+        # The scoped rate keeps a nasabah from farming the CPU-heavy render
+        # endpoint; a second export inside one minute is rejected with 429.
+        # The throttle reads its rates off the class attribute snapshotted at
+        # import (not the live Django setting), so patch that attribute.
+        with patch(
+            "rest_framework.throttling.ScopedRateThrottle.THROTTLE_RATES",
+            {"statement_pdf": "1/min"},
+        ):
+            client = APIClient()
+            client.force_authenticate(self.user)
+            self.assertEqual(client.get(self.url).status_code, 200)
+            self.assertEqual(client.get(self.url).status_code, 429)
 
     # --- Access boundaries -------------------------------------------------
 

@@ -12,7 +12,7 @@ from django.http import HttpRequest
 from api.models import Nasabah, Transaksi
 from apps.reporting import exporter, statement
 
-__all__ = ["export_excel", "export_statement_pdf"]
+__all__ = ["export_excel", "export_statement_pdf", "StatementPeriodError"]
 
 
 def export_excel(
@@ -24,3 +24,9 @@ def export_excel(
 def export_statement_pdf(member: Nasabah, request: HttpRequest) -> tuple[bytes, str] | None:
     """Riwayat aktivitas statement PDF; None when the window holds no activity."""
     return statement.export_statement_pdf(member, request)
+
+
+# Re-exported so callers outside reporting can distinguish a period request
+# error (→ 400) from a render failure (→ 500) by type, without importing the
+# reporting module directly.
+StatementPeriodError = statement.StatementPeriodError

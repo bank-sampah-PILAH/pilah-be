@@ -141,7 +141,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "id"
 
-TIME_ZONE = "Asia/Jakarta"
+TIME_ZONE = "UTC"
 
 USE_I18N = True
 
@@ -190,6 +190,10 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 20,
     "EXCEPTION_HANDLER": "shared_kernel.exceptions.api_exception_handler",
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # Scoped rates: keys are the throttle scope of the views declaring one.
+    # statement_pdf = the riwayat statement render (CPU-heavy; see
+    # apps.nasabah.home.NasabahHistoryExportPdfView).
+    "DEFAULT_THROTTLE_RATES": {"statement_pdf": "10/min"},
 }
 
 SPECTACULAR_SETTINGS = {
@@ -207,6 +211,9 @@ SIMPLE_JWT = {
 }
 
 CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "true").lower() == "true"
+CORS_ALLOWED_ORIGINS = [
+    origin.strip() for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if origin.strip()
+]
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
