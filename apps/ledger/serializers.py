@@ -287,52 +287,39 @@ class PencairanRevisiSerializer(serializers.ModelSerializer[Model]):
         ]
 
 
-def _validate_potongan(attrs: dict[str, Any]) -> dict[str, Any]:
-    """A potongan is a jenis plus a non-negative nilai; percent tops out at 100."""
-    jenis = attrs.get("potongan_jenis")
-    nilai = attrs.get("potongan_nilai")
+def _validate_pasangan(attrs: dict[str, Any], nama: str) -> dict[str, Any]:
+    """A jenis plus a non-negative nilai, both or neither; percent tops out at 100.
+
+    `nama` is "potongan" or "jumlah": it picks the field names and the wording of the errors.
+    """
+    kunci = f"{nama}_nilai"
+    judul = nama.capitalize()
+    jenis = attrs.get(f"{nama}_jenis")
+    nilai = attrs.get(kunci)
     if (jenis is None) != (nilai is None):
         raise serializers.ValidationError(
-            {"potongan_nilai": ["Jenis dan nilai potongan harus diisi bersamaan"]}
+            {kunci: [f"Jenis dan nilai {nama} harus diisi bersamaan"]}
         )
     if nilai is None:
         return attrs
     if nilai < 0:
-        raise serializers.ValidationError({"potongan_nilai": ["Potongan tidak boleh negatif"]})
+        raise serializers.ValidationError({kunci: [f"{judul} tidak boleh negatif"]})
     if jenis == DraftPencairan.PotonganJenis.PERSEN:
         if nilai > 100:
             raise serializers.ValidationError(
-                {"potongan_nilai": ["Potongan persen tidak boleh lebih dari 100"]}
+                {kunci: [f"{judul} persen tidak boleh lebih dari 100"]}
             )
     elif nilai != nilai.to_integral_value():
-        raise serializers.ValidationError(
-            {"potongan_nilai": ["Potongan rupiah harus berupa rupiah bulat"]}
-        )
+        raise serializers.ValidationError({kunci: [f"{judul} rupiah harus berupa rupiah bulat"]})
     return attrs
+
+
+def _validate_potongan(attrs: dict[str, Any]) -> dict[str, Any]:
+    return _validate_pasangan(attrs, "potongan")
 
 
 def _validate_jumlah(attrs: dict[str, Any]) -> dict[str, Any]:
-    """The jumlah applied to everyone: a jenis plus a nilai, both or neither."""
-    jenis = attrs.get("jumlah_jenis")
-    nilai = attrs.get("jumlah_nilai")
-    if (jenis is None) != (nilai is None):
-        raise serializers.ValidationError(
-            {"jumlah_nilai": ["Jenis dan nilai jumlah harus diisi bersamaan"]}
-        )
-    if nilai is None:
-        return attrs
-    if nilai < 0:
-        raise serializers.ValidationError({"jumlah_nilai": ["Jumlah tidak boleh negatif"]})
-    if jenis == DraftPencairan.PotonganJenis.PERSEN:
-        if nilai > 100:
-            raise serializers.ValidationError(
-                {"jumlah_nilai": ["Jumlah persen tidak boleh lebih dari 100"]}
-            )
-    elif nilai != nilai.to_integral_value():
-        raise serializers.ValidationError(
-            {"jumlah_nilai": ["Jumlah rupiah harus berupa rupiah bulat"]}
-        )
-    return attrs
+    return _validate_pasangan(attrs, "jumlah")
 
 
 class DraftItemInputSerializer(serializers.Serializer[Any]):
