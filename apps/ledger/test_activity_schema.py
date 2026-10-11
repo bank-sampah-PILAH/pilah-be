@@ -7,7 +7,7 @@ from apps.ledger.views import ActivityHistoryView
 
 class ActivitySchemaTests(SimpleTestCase):
     def test_paginated_schema_describes_discriminated_envelopes(self) -> None:
-        schema = SchemaGenerator(
+        schema = SchemaGenerator(  # type: ignore[no-untyped-call]  # drf-spectacular has no typed generator API
             patterns=[path("api/v1/aktivitas", ActivityHistoryView.as_view())]
         ).get_schema(public=True)
         assert schema is not None

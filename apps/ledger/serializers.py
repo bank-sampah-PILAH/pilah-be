@@ -276,9 +276,9 @@ class PencairanRevisiSerializer(serializers.ModelSerializer[Model]):
 
 class SetoranActivityEnvelopeSerializer(serializers.Serializer[Any]):
     tipe = serializers.ChoiceField(choices=["setoran"])
-    data = TransactionListSerializer()
+    data = TransactionListSerializer()  # type: ignore[assignment]  # schema field; DRF removes it before binding Serializer.data
 
 
 class PencairanActivityEnvelopeSerializer(serializers.Serializer[Any]):
     tipe = serializers.ChoiceField(choices=["pencairan"])
-    data = PencairanDetailSerializer()
+    data = PencairanDetailSerializer()  # type: ignore[assignment]  # schema field; DRF removes it before binding Serializer.data
