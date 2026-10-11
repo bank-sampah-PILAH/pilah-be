@@ -571,6 +571,18 @@ class JumlahUmumDraftTests(DraftTestBase):
         self.assertIsNone(response.data["jumlah_jenis"])
         self.assertIsNone(response.data["jumlah_nilai"])
 
+    def test_tanpa_jumlah_umum_disimpan_sebagai_teks_kosong_bukan_null(self) -> None:
+        draft = self._buat(self._item()).data
+        self.assertEqual(DraftPencairan.objects.get(pk=draft["id"]).jumlah_jenis, "")
+
+        diubah = self._buat(self._item(), jumlah_jenis="persen", jumlah_nilai="50").data
+        self.client.patch(
+            f"{URL}/{diubah['id']}", {"jumlah_jenis": None, "jumlah_nilai": None}, format="json"
+        )
+
+        self.assertEqual(DraftPencairan.objects.get(pk=diubah["id"]).jumlah_jenis, "")
+        self.assertIsNone(self.client.get(f"{URL}/{diubah['id']}").data["jumlah_jenis"])
+
     def test_jumlah_umum_tersimpan_dan_terbaca_lagi(self) -> None:
         response = self._buat(self._item(), jumlah_jenis="persen", jumlah_nilai="50")
 
