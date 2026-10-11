@@ -26,8 +26,7 @@ from apps.reporting import exporter
 from shared_kernel.kalkulasi import bulatkan_rupiah
 
 # The statement is a report, not an API timezone: labels are always WIB
-# regardless of the global TIME_ZONE (kept UTC for the API's datetime
-# contract).
+# regardless of overrides to the project timezone.
 _WIB = ZoneInfo("Asia/Jakarta")
 
 # ponytail: full-history walk per statement (one nasabah, hundreds of events);

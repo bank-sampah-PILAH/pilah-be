@@ -6,14 +6,18 @@ from uuid import UUID
 from django.db import IntegrityError
 from django.db.models import QuerySet
 from django.http import HttpResponse
+from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ParseError
+from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from api.models import BankSampah, Pencairan, Transaksi, User
+from apps.ledger.activity import activity_query, serialize_activity_page
+from apps.ledger.schema import ACTIVITY_PARAMETERS, ACTIVITY_RESPONSE
 from apps.ledger.serializers import (
     PencairanCreateSerializer,
     PencairanDetailSerializer,
@@ -30,6 +34,7 @@ from apps.ledger.services import (
 )
 from apps.notification.api import send_setoran_receipt
 from apps.reporting.api import export_excel
+from shared_kernel.pagination import StandardPagination
 from shared_kernel.permissions import (
     IsActivePengelola,
     IsActivePengelolaOrNasabah,
@@ -79,6 +84,23 @@ def _transaction_payload_hash(payload: dict[str, Any]) -> str:
 
 def _find_idempotent_transaction(bank: BankSampah, key: UUID) -> Transaksi | None:
     return Transaksi.objects.filter(bank_sampah=bank, idempotency_key=key).first()
+
+
+class ActivityHistoryView(GenericAPIView[Any]):
+    permission_classes = [IsActivePengelola]
+    pagination_class = StandardPagination
+    serializer_class = TransactionListSerializer
+
+    @extend_schema(parameters=ACTIVITY_PARAMETERS, responses=ACTIVITY_RESPONSE)
+    def get(self, request: Request) -> Response:
+        bank = current_bank(request)
+        try:
+            rows = activity_query(bank, request)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
+        page = self.paginate_queryset(rows)
+        assert page is not None  # StandardPagination always returns a page.
+        return self.get_paginated_response(serialize_activity_page(list(page), bank))
 
 
 class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not

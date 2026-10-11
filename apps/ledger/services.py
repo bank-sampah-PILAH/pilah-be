@@ -1,3 +1,4 @@
+from calendar import monthrange
 from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_DOWN, Decimal
@@ -317,7 +318,7 @@ class TransactionFilterService:
         Without `periode`, [default] applies; `None` means no date filter.
         """
         periode = request.GET.get("periode", default)
-        if periode is None:
+        if periode is None or periode == "semua":
             return queryset
         today = timezone.localdate()
         if periode == "hari_ini":
@@ -331,6 +332,13 @@ class TransactionFilterService:
             last_previous_month = first_this_month - timedelta(days=1)
             start = last_previous_month.replace(day=1)
             end = last_previous_month
+        elif periode in {"1_bulan", "3_bulan", "6_bulan", "12_bulan"}:
+            months = int(periode.split("_")[0])
+            month_index = today.year * 12 + today.month - 1 - months
+            year, month_zero = divmod(month_index, 12)
+            month = month_zero + 1
+            start = date(year, month, min(today.day, monthrange(year, month)[1]))
+            end = today
         elif periode == "custom":
             parsed_start = TransactionFilterService._parse_date(request.GET.get("dari_tanggal"))
             parsed_end = TransactionFilterService._parse_date(request.GET.get("sampai_tanggal"))
@@ -342,7 +350,7 @@ class TransactionFilterService:
                 raise ValueError("Tanggal akhir tidak boleh lebih awal dari tanggal awal")
             start, end = parsed_start, parsed_end
         else:
-            return queryset
+            raise serializers.ValidationError({"periode": "Periode tidak valid"})
 
         tz = timezone.get_current_timezone()
         start_dt = timezone.make_aware(datetime.combine(start, time.min), tz)
