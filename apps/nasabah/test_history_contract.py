@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
@@ -212,3 +213,70 @@ class NasabahHistoryContractTests(APITestCase):
             self.client.get(f"{self.url}/00000000-0000-0000-0000-000000000001").status_code,
             401,
         )
+
+
+class NasabahHistoryPeriodFilterTests(APITestCase):
+    """PIL-315: the riwayat list accepts the shared ``periode`` filter.
+
+    Without the param the queryset is untouched (all-time history) — the
+    regression guard for ``default=None``.
+    """
+
+    url = "/api/v1/nasabah/me/riwayat"
+
+    def setUp(self) -> None:
+        self.bank = BankSampah.objects.create(nama="Melati", no_hp_pic="08123456789")
+        self.user = User.objects.create_user(
+            email="period@example.test", nama="Siti", role=User.Role.NASABAH
+        )
+        self.member = Nasabah.objects.create(
+            email="fixture-period@example.test",
+            user=self.user,
+            bank_sampah=self.bank,
+            nomor="001",
+            nama="Siti",
+            alamat="Depok",
+            no_hp="08123456789",
+        )
+        self.manager = User.objects.create_user(email="staff-pd@example.test", nama="Staff")
+        old = timezone.now() - timedelta(days=10)
+        Transaksi.objects.create(
+            nasabah=self.member,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.manager,
+            total_nilai=Decimal("1000.00"),
+            tanggal=old,
+        )
+        Transaksi.objects.create(
+            nasabah=self.member,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.manager,
+            total_nilai=Decimal("2000.00"),
+            tanggal=timezone.now(),
+        )
+        self.client.force_authenticate(self.user)
+
+    def test_no_periode_param_returns_full_history(self) -> None:
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 2)
+
+    def test_periode_hari_ini_filters_to_today(self) -> None:
+        response = self.client.get(self.url, {"periode": "hari_ini"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["total_nilai"], "2000.00")
+
+    def test_periode_custom_missing_dates_returns_422(self) -> None:
+        response = self.client.get(self.url, {"periode": "custom"})
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.json()["errors"], {"error": "dari_tanggal dan sampai_tanggal wajib diisi"}
+        )
+
+    def test_periode_custom_reversed_dates_returns_400(self) -> None:
+        response = self.client.get(
+            self.url,
+            {"periode": "custom", "dari_tanggal": "2026-10-02", "sampai_tanggal": "2026-10-01"},
+        )
+        self.assertEqual(response.status_code, 400)
