@@ -72,12 +72,22 @@ class DashboardRegressionTests(RegressionTestCase):
         ])
 
     def test_reporting_endpoints_validate_required_query_parameters(self) -> None:
-        for path in (
-            "/api/v1/dashboard/operational-trends",
-            "/api/v1/dashboard/waste-categories",
-        ):
-            response = self.client.get(path)
-            self.assertEqual(response.status_code, 400)
+        invalid_requests = (
+            ("/api/v1/dashboard/operational-trends", {}),
+            ("/api/v1/dashboard/waste-categories", {}),
+            (
+                "/api/v1/dashboard/operational-trends",
+                {"start_date": "2024-02-01", "end_date": "2024-01-01", "granularity": "day"},
+            ),
+            (
+                "/api/v1/dashboard/operational-trends",
+                {"start_date": "2024-01-01", "end_date": "2024-02-01", "granularity": "year"},
+            ),
+        )
+        for path, params in invalid_requests:
+            with self.subTest(path=path, params=params):
+                response = self.client.get(path, params)
+                self.assertEqual(response.status_code, 400)
 
     def test_wa_template_rejects_blank(self) -> None:
         response = self.client.put(
