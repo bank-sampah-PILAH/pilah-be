@@ -214,6 +214,29 @@ class ActivityHistoryTests(APITestCase):
         self.assertEqual(unified.status_code, 200)
         self.assertEqual(unified.data["results"], legacy.data["results"])
 
+    def test_nasabah_opt_in_reversed_range_returns_the_legacy_error_contract(self) -> None:
+        self.client.force_authenticate(self.user)
+        url = "/api/v1/nasabah/me/riwayat"
+        params = {
+            "periode": "custom",
+            "dari_tanggal": "2026-10-08",
+            "sampai_tanggal": "2026-10-07",
+        }
+        legacy = self.client.get(url, params)
+        self.assertEqual(legacy.status_code, 400)
+        self.assertEqual(set(legacy.data), {"error"})
+        self.assertTrue(legacy.data["error"])
+        for kind in ("semua", "setoran", "pencairan"):
+            with self.subTest(tipe=kind):
+                response = self.client.get(url, {**params, "tipe": kind})
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.data, legacy.data)
+
+        # A rejected range must not affect the next valid combined request.
+        valid = self.client.get(url, {"periode": "semua", "tipe": "semua"})
+        self.assertEqual(valid.status_code, 200)
+        self.assertEqual(valid.data["count"], 2)
+
     def test_equal_timestamps_put_deposit_before_payout(self) -> None:
         Pencairan.objects.filter(pk=self.payout.pk).update(
             tanggal=self.setoran.tanggal, created_at=self.setoran.created_at
