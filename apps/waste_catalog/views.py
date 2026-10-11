@@ -11,7 +11,7 @@ from rest_framework.serializers import BaseSerializer
 
 from api.models import JenisSampah
 from apps.nasabah.serializers import StatusSerializer
-from apps.waste_catalog.api import buat_jenis_sampah, daftar_versi_harga, harga_berlaku
+from apps.waste_catalog.api import buat_jenis_sampah, harga_berlaku, susun_riwayat_harga
 from apps.waste_catalog.serializers import (
     FilterJenisSampahSerializer,
     HargaBaruSerializer,
@@ -122,5 +122,5 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
 
     @ubah_harga.mapping.get
     def riwayat_harga(self, request: Request, pk: str | None = None) -> Response:
-        page = self.paginate_queryset(daftar_versi_harga(self.get_object()))
+        page = self.paginate_queryset(susun_riwayat_harga(self.get_object(), timezone.now()))
         return self.get_paginated_response(VersiHargaSerializer(page, many=True).data)

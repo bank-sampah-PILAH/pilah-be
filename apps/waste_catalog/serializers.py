@@ -143,13 +143,16 @@ class FilterJenisSampahSerializer(serializers.Serializer[Any]):
 
 
 class VersiHargaSerializer(serializers.Serializer[Any]):
-    """Satu baris riwayat harga: nominal, satuan, mulai berlaku, dan pembuatnya."""
+    """Satu baris riwayat harga: nominal, satuan, mulai berlaku, pembuat, dan status."""
 
-    id = serializers.IntegerField()
-    harga_per_kg = serializers.DecimalField(max_digits=11, decimal_places=2)
+    id = serializers.IntegerField(source="versi.id")
+    harga_per_kg = serializers.DecimalField(
+        source="versi.harga_per_kg", max_digits=11, decimal_places=2
+    )
     satuan = serializers.SerializerMethodField()
-    berlaku_mulai = serializers.DateTimeField()
-    dibuat_oleh = serializers.CharField(source="dibuat_oleh.nama", allow_null=True)
+    berlaku_mulai = serializers.DateTimeField(source="versi.berlaku_mulai")
+    dibuat_oleh = serializers.CharField(source="versi.dibuat_oleh.nama", allow_null=True)
+    status = serializers.CharField()
 
     def get_satuan(self, obj: Any) -> str:
         return "kg"
