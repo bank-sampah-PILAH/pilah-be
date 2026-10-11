@@ -50,7 +50,7 @@ def _rows(draft: DraftPencairan) -> list[_Baris]:
             int(item.potongan),
             int(item.dibayar),
         )
-        for no, item in enumerate(draft.items.select_related("nasabah", "draft"), start=1)
+        for no, item in enumerate(draft.items.select_related("nasabah"), start=1)
     ]
 
 
