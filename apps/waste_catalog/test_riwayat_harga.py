@@ -14,16 +14,15 @@ class RiwayatHargaTests(HargaApiTestCase):
     def riwayat(self, jenis_id: str) -> Any:
         return self.client.get(f"/api/v1/jenis-sampah/{jenis_id}/harga")
 
-    def jadwalkan(self, jenis_id: str, harga: str, hari: int) -> None:
+    def ubah_harga(self, jenis_id: str, payload: dict[str, str]) -> None:
         response = self.client.post(
-            f"/api/v1/jenis-sampah/{jenis_id}/harga",
-            {
-                "harga_per_kg": harga,
-                "berlaku_mulai": (timezone.now() + timedelta(days=hari)).isoformat(),
-            },
-            format="json",
+            f"/api/v1/jenis-sampah/{jenis_id}/harga", payload, format="json"
         )
         self.assertEqual(response.status_code, 201, response.data)
+
+    def jadwalkan(self, jenis_id: str, harga: str, hari: int) -> None:
+        berlaku_mulai = (timezone.now() + timedelta(days=hari)).isoformat()
+        self.ubah_harga(jenis_id, {"harga_per_kg": harga, "berlaku_mulai": berlaku_mulai})
 
     def test_lists_every_version_newest_first_with_price_unit_start_and_author(self) -> None:
         jenis = self.buat_jenis(harga=3500)
@@ -41,3 +40,25 @@ class RiwayatHargaTests(HargaApiTestCase):
         )
         self.assertEqual({b["satuan"] for b in baris}, {"kg"})
         self.assertEqual({b["dibuat_oleh"] for b in baris}, {"Ibu Sari"})
+
+    def test_marks_each_version_scheduled_current_previous_or_replaced(self) -> None:
+        # Mengoreksi harga terjadwal adalah versi baru dengan berlaku_mulai yang
+        # sama; versi yang dikoreksi tidak akan pernah berlaku, jadi ditandai
+        # "digantikan", bukan "terjadwal".
+        jenis = self.buat_jenis(harga=3500)
+        self.ubah_harga(jenis["id"], {"harga_per_kg": "4000"})
+        lusa = (timezone.now() + timedelta(days=2)).isoformat()
+        self.ubah_harga(jenis["id"], {"harga_per_kg": "5000", "berlaku_mulai": lusa})
+        self.ubah_harga(jenis["id"], {"harga_per_kg": "5500", "berlaku_mulai": lusa})
+
+        baris = self.riwayat(jenis["id"]).data["results"]
+
+        self.assertEqual(
+            [(b["harga_per_kg"], b["status"]) for b in baris],
+            [
+                ("5500.00", "terjadwal"),
+                ("5000.00", "digantikan"),
+                ("4000.00", "berlaku"),
+                ("3500.00", "sebelumnya"),
+            ],
+        )
