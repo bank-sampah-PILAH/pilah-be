@@ -40,5 +40,7 @@ module = [
     "openpyxl.*",
     "google.*",
     "whitenoise.*",
+    "reportlab.*",
+    "PIL.*",
 ]
 ignore_missing_imports = true

@@ -161,13 +161,14 @@ def _export_filter_label(queryset: QuerySet[Transaksi], request: HttpRequest | N
     first_transaction = queryset.first()
     bank_name = first_transaction.bank_sampah.nama if first_transaction else "-"
     downloaded_at = timezone.localtime().strftime("%d/%m/%Y %H:%M")
-    period_label = "Semua Periode"
+    periode_text = "Semua Periode"
     if request:
-        period_label = _period_label(request)
-    return f"Filter periode: {period_label}   |   Bank Sampah: {bank_name}   |   Diunduh: {downloaded_at}"
+        periode_text = period_label(request)
+    return f"Filter periode: {periode_text}   |   Bank Sampah: {bank_name}   |   Diunduh: {downloaded_at}"
 
 
-def _period_label(request: HttpRequest) -> str:
+def period_label(request: HttpRequest) -> str:
+    """Human label for the ``periode`` param, shared by all report exports."""
     periode = request.GET.get("periode", "hari_ini")
     today = timezone.localdate()
     if periode == "hari_ini":
