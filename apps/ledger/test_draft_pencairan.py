@@ -10,6 +10,7 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.models import BankSampah, DraftPencairan, Nasabah, Pencairan, Saldo, User
+from apps.ledger.services import DraftPencairanService
 
 URL = "/api/v1/draft-pencairan"
 
@@ -533,3 +534,63 @@ class DraftPencairanTests(APITestCase):
             return len(queries)
 
         self.assertEqual(jumlah_query(3), jumlah_query(25))
+
+    def test_membuat_draft_besar_tidak_menambah_query_saat_menyusun_respons(self) -> None:
+        def query_penyusunan_respons(jumlah: int) -> int:
+            nasabah = [
+                self._nasabah(f"CRT-{jumlah}{i:03d}", f"Nasabah {jumlah}-{i}", "10000")
+                for i in range(jumlah)
+            ]
+            buat_draft = DraftPencairanService.buat_draft
+            selesai: list[int] = []
+
+            def dicatat(*args: Any, **kwargs: Any) -> DraftPencairan:
+                draft = buat_draft(*args, **kwargs)
+                selesai.append(len(connection.queries_log))
+                return draft
+
+            with (
+                CaptureQueriesContext(connection) as queries,
+                mock.patch.object(DraftPencairanService, "buat_draft", side_effect=dicatat),
+            ):
+                awal = len(connection.queries_log)
+                response = self._buat([{"nasabah_id": str(n.id)} for n in nasabah])
+            self.assertEqual(response.status_code, 201, response.data)
+            self.assertEqual(len(response.data["items"]), jumlah)
+            return len(queries) - (selesai[0] - awal)
+
+        self.assertEqual(query_penyusunan_respons(3), query_penyusunan_respons(25))
+
+    def test_item_memuat_saldo_terkini_untuk_review(self) -> None:
+        draft = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "100000"}]).data
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal(80000))
+
+        item = self.client.get(f"{URL}/{draft['id']}").data["items"][0]
+
+        self.assertEqual(item["nominal"], "100000.00")
+        self.assertEqual(item["saldo_saat_ini"], "80000.00")
+
+    def test_item_tanpa_baris_saldo_dilaporkan_nol(self) -> None:
+        draft = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "100000"}]).data
+        Saldo.objects.filter(nasabah=self.nasabah).delete()
+
+        item = self.client.get(f"{URL}/{draft['id']}").data["items"][0]
+
+        self.assertEqual(item["saldo_saat_ini"], "0.00")
+
+    def test_daftar_draft_tidak_menambah_query_per_draft_dan_tidak_memuat_nasabah(self) -> None:
+        def query_daftar(jumlah_draft: int) -> list[str]:
+            for i in range(jumlah_draft):
+                nasabah = self._nasabah(f"LST-{jumlah_draft}{i:03d}", f"Nasabah {i}", "10000")
+                self._buat([{"nasabah_id": str(nasabah.id)}])
+            with CaptureQueriesContext(connection) as queries:
+                response = self.client.get(URL)
+            self.assertEqual(response.status_code, 200)
+            return [q["sql"] for q in queries.captured_queries]
+
+        sedikit = query_daftar(2)
+        banyak = query_daftar(5)
+
+        self.assertEqual(len(sedikit), len(banyak))
+        # The item order joins nasabah, but none of its columns is read.
+        self.assertFalse([sql for sql in banyak if '"nasabah"."' in sql.split(" FROM ")[0]])
