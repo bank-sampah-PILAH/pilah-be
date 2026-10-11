@@ -9,6 +9,9 @@ from rest_framework import serializers
 from api.models import JenisSampah
 from apps.waste_catalog.api import ringkas_harga
 
+# Semua harga saat ini per kg; PIL-305 menggantinya dengan satuan per jenis.
+SATUAN_HARGA = "kg"
+
 
 class JenisSampahSerializer(serializers.ModelSerializer[Model]):
     satuan = serializers.SerializerMethodField()
@@ -60,7 +63,7 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
         return attrs
 
     def get_satuan(self, obj: Any) -> Any:
-        return "kg"
+        return SATUAN_HARGA
 
     def to_representation(self, instance: Any) -> Any:
         data = super().to_representation(instance)
@@ -155,4 +158,4 @@ class VersiHargaSerializer(serializers.Serializer[Any]):
     status = serializers.CharField()
 
     def get_satuan(self, obj: Any) -> str:
-        return "kg"
+        return SATUAN_HARGA

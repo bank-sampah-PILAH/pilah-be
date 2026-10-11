@@ -110,6 +110,7 @@ def susun_riwayat_harga(jenis: JenisSampah, pada: datetime) -> list[VersiHarga]:
     """
     riwayat: list[VersiHarga] = []
     di_atasnya: HargaSampah | None = None
+    sudah_ada_yang_berlaku = False
     for versi in jenis.riwayat_harga.select_related("dibuat_oleh").order_by(
         "-berlaku_mulai", "-id"
     ):
@@ -118,8 +119,9 @@ def susun_riwayat_harga(jenis: JenisSampah, pada: datetime) -> list[VersiHarga]:
             status = "digantikan"
         elif versi.berlaku_mulai > pada:
             status = "terjadwal"
-        elif all(v.status != "berlaku" for v in riwayat):
+        elif not sudah_ada_yang_berlaku:
             status = "berlaku"
+            sudah_ada_yang_berlaku = True
         else:
             status = "sebelumnya"
         riwayat.append(VersiHarga(versi, status))
