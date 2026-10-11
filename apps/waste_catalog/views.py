@@ -11,11 +11,12 @@ from rest_framework.serializers import BaseSerializer
 
 from api.models import JenisSampah
 from apps.nasabah.serializers import StatusSerializer
-from apps.waste_catalog.api import buat_jenis_sampah, harga_berlaku
+from apps.waste_catalog.api import buat_jenis_sampah, daftar_versi_harga, harga_berlaku
 from apps.waste_catalog.serializers import (
     FilterJenisSampahSerializer,
     HargaBaruSerializer,
     JenisSampahSerializer,
+    VersiHargaSerializer,
 )
 from apps.waste_catalog.services import catat_harga
 from shared_kernel.permissions import IsActivePengelola
@@ -118,3 +119,8 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
         # Muat ulang: riwayat harga hasil prefetch get_object() belum memuat versi baru.
         jenis = self.get_object()
         return Response(self.get_serializer(jenis).data, status=status.HTTP_201_CREATED)
+
+    @ubah_harga.mapping.get
+    def riwayat_harga(self, request: Request, pk: str | None = None) -> Response:
+        page = self.paginate_queryset(daftar_versi_harga(self.get_object()))
+        return self.get_paginated_response(VersiHargaSerializer(page, many=True).data)

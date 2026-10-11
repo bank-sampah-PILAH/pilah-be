@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from django.db import transaction
+from django.db.models import QuerySet
 from django.utils import timezone
 
 from api.models import BankSampah, HargaSampah, JenisSampah, User
@@ -88,3 +89,8 @@ def ringkas_harga(
         ):
             terjadwal = versi
     return berlaku, terjadwal
+
+
+def daftar_versi_harga(jenis: JenisSampah) -> QuerySet[HargaSampah]:
+    """Semua versi harga ``jenis``, terbaru dulu, untuk riwayat dan audit."""
+    return jenis.riwayat_harga.select_related("dibuat_oleh").order_by("-berlaku_mulai", "-id")
