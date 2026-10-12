@@ -134,17 +134,6 @@ class HargaBaruSerializer(serializers.Serializer[Any]):
         return value
 
 
-class FilterJenisSampahSerializer(serializers.Serializer[Any]):
-    """Parameter filter daftar jenis sampah, dicocokkan dengan nilai yang dikenal.
-
-    Nilai di luar daftar ditolak (422), tidak diteruskan ke query atau
-    diam-diam diartikan lain (OWASP A03: validasi input positif di server).
-    """
-
-    status = serializers.ChoiceField(choices=["aktif", "tidak_aktif", "semua"], default="aktif")
-    kategori = serializers.ChoiceField(choices=JenisSampah.Kategori.choices, required=False)
-
-
 class VersiHargaSerializer(serializers.Serializer[Any]):
     """Satu baris riwayat harga: nominal, satuan, mulai berlaku, pembuat, dan status."""
 
