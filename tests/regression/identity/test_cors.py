@@ -47,3 +47,23 @@ class CORSRegressionTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("idempotency-key", response["Access-Control-Allow-Headers"].lower())
+
+    def test_response_exposes_content_disposition_to_the_browser(self) -> None:
+        # Report exports send the file name in Content-Disposition. A browser
+        # hides every response header from JavaScript unless it is listed in
+        # Access-Control-Expose-Headers, so without this the download succeeds
+        # but the client cannot recover the file name.
+        with override_settings(
+            CORS_ALLOW_ALL_ORIGINS=False,
+            CORS_ALLOWED_ORIGINS=["http://localhost:7357"],
+        ):
+            response = self.client.get(
+                "/api/v1/transaksi",
+                HTTP_ORIGIN="http://localhost:7357",
+            )
+
+        self.assertIn("Access-Control-Expose-Headers", response)
+        self.assertIn(
+            "content-disposition",
+            response["Access-Control-Expose-Headers"].lower(),
+        )
