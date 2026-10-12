@@ -8,6 +8,8 @@ from django.core.exceptions import ImproperlyConfigured
 from django.utils.crypto import get_random_string
 from dotenv import load_dotenv
 
+from shared_kernel.http_headers import HEADER_PERMINTAAN_KUSTOM, HEADER_RESPONS_TEREKSPOS
+
 load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -226,17 +228,14 @@ CORS_ALLOWED_ORIGINS = [
 
 # CORS_ALLOW_ALL_ORIGINS permits any origin but NOT arbitrary request headers:
 # django-cors-headers answers the preflight with its own default list, which
-# carries no custom header. POST /api/v1/transaksi sends Idempotency-Key, so
-# without this a browser refuses to send the request at all and only repeated
-# OPTIONS reach the server. Native clients never hit it because CORS is a
-# browser-only mechanism.
-CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key")
-
-# Exports put the file name in Content-Disposition. A browser hides every
-# response header from JavaScript unless it is listed here, so a web client
-# would download the file and still not know what to call it. Only the one
-# header the clients need is exposed.
-CORS_EXPOSE_HEADERS = ("Content-Disposition",)
+# carries no custom header. Both lists below are derived from the registry in
+# shared_kernel/http_headers.py so they cannot drift from the headers the
+# views actually read and write.
+CORS_ALLOW_HEADERS = (
+    *default_headers,
+    *(header.lower() for header in HEADER_PERMINTAAN_KUSTOM),
+)
+CORS_EXPOSE_HEADERS = HEADER_RESPONS_TEREKSPOS
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")

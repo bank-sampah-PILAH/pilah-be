@@ -41,6 +41,7 @@ from apps.ledger.services import (
 from apps.nasabah.api import kandidat_pencairan
 from apps.notification.api import send_setoran_receipt
 from apps.reporting.api import export_draft_pencairan, export_excel
+from shared_kernel.http_headers import IDEMPOTENCY_KEY
 from shared_kernel.permissions import (
     IsActivePengelola,
     IsActivePengelolaOrNasabah,
@@ -60,7 +61,7 @@ def _bank_sampah(request: Request) -> BankSampah:
 
 
 def _idempotency_key(request: Request) -> UUID | None:
-    raw_key = request.headers.get("Idempotency-Key")
+    raw_key = request.headers.get(IDEMPOTENCY_KEY)
     if raw_key is None:
         return None
     try:
