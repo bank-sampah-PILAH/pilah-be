@@ -9,10 +9,15 @@ api.models, other BCs -> reporting port).
 from django.db.models import QuerySet
 from django.http import HttpRequest
 
-from api.models import Nasabah, Transaksi
-from apps.reporting import exporter, statement
+from api.models import DraftPencairan, Nasabah, Transaksi
+from apps.reporting import draft_export, exporter, statement
 
-__all__ = ["export_excel", "export_statement_pdf", "StatementPeriodError"]
+__all__ = [
+    "StatementPeriodError",
+    "export_draft_pencairan",
+    "export_excel",
+    "export_statement_pdf",
+]
 
 
 def export_excel(
@@ -30,3 +35,7 @@ def export_statement_pdf(member: Nasabah, request: HttpRequest) -> tuple[bytes, 
 # error (→ 400) from a render failure (→ 500) by type, without importing the
 # reporting module directly.
 StatementPeriodError = statement.StatementPeriodError
+
+
+def export_draft_pencairan(draft: DraftPencairan, berkas: str) -> tuple[bytes, str, str]:
+    return draft_export.export_draft_pencairan(draft, berkas)
