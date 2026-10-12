@@ -25,6 +25,7 @@ from api.models import (
 )
 from apps.notification.api import DEFAULT_WA_TEMPLATE
 from apps.waste_catalog.api import harga_berlaku
+from apps.waste_catalog.services import catat_harga
 
 CONFIRMATION = "SEED-PILAH-STAGING-DATA"
 
@@ -626,11 +627,11 @@ class Command(BaseCommand):
         if not HargaSampah.objects.filter(jenis_sampah=jenis).exists():
             # Berlaku sebelum riwayat setoran seed yang paling tua, agar harga
             # setiap setoran seed sama dengan harga yang berlaku saat itu.
-            HargaSampah.objects.create(
-                jenis_sampah=jenis,
-                bank_sampah=bank,
-                harga_per_kg=price,
-                berlaku_mulai=timezone.now() - timedelta(days=SEED_HARGA_SEJAK_HARI),
+            catat_harga(
+                jenis,
+                price,
+                timezone.now() - timedelta(days=SEED_HARGA_SEJAK_HARI),
+                oleh=None,
             )
         return jenis
 
