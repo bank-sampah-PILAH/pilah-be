@@ -232,6 +232,12 @@ CORS_ALLOWED_ORIGINS = [
 # browser-only mechanism.
 CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key")
 
+# Exports put the file name in Content-Disposition. A browser hides every
+# response header from JavaScript unless it is listed here, so a web client
+# would download the file and still not know what to call it. Only the one
+# header the clients need is exposed.
+CORS_EXPOSE_HEADERS = ("Content-Disposition",)
+
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "")
