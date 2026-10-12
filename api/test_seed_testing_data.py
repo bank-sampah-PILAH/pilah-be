@@ -22,6 +22,7 @@ from api.models import (
     Transaksi,
     User,
 )
+from apps.waste_catalog.services import catat_harga
 
 
 class SeedTestingDataCommandTests(TestCase):
@@ -291,6 +292,26 @@ class SeedTestingDataCommandTests(TestCase):
         for pk, tanggal in pencairan_dates.items():
             self.assertEqual(Pencairan.objects.get(pk=pk).tanggal, tanggal)
         self.assertEqual(Nasabah.objects.filter(nomor__startswith="NAS-DEMO-").count(), 60)
+
+    @override_settings(DEBUG=True)
+    def test_reseed_after_a_price_change_keeps_historical_setoran_prices(self) -> None:
+        # Setoran seed adalah riwayat: nilainya mengikuti harga yang berlaku
+        # pada tanggal setoran, bukan harga hari ini (BR-03).
+        call_command("seed_testing_data")
+        snapshot = {
+            item.pk: (item.harga_snapshot, item.subtotal) for item in DetailTransaksi.objects.all()
+        }
+        totals = {item.pk: item.total_nilai for item in Transaksi.objects.all()}
+        pengurus = User.objects.get(email="pengurus.demo@example.com")
+        for jenis in JenisSampah.objects.filter(bank_sampah=pengurus.bank_sampah):
+            catat_harga(jenis, Decimal("99999.00"), timezone.now(), pengurus)
+
+        call_command("seed_testing_data")
+
+        for item in DetailTransaksi.objects.all():
+            self.assertEqual((item.harga_snapshot, item.subtotal), snapshot[item.pk])
+        for item in Transaksi.objects.all():
+            self.assertEqual(item.total_nilai, totals[item.pk])
 
     @override_settings(DEBUG=False)
     def test_staging_requires_explicit_confirmation(self) -> None:
