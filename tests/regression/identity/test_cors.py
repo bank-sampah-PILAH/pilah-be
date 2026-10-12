@@ -32,3 +32,18 @@ class CORSRegressionTests(APITestCase):
             )
 
         self.assertNotIn("Access-Control-Allow-Origin", response)
+
+    def test_preflight_allows_the_idempotency_key_header(self) -> None:
+        with override_settings(
+            CORS_ALLOW_ALL_ORIGINS=False,
+            CORS_ALLOWED_ORIGINS=["http://localhost:7357"],
+        ):
+            response = self.client.options(
+                "/api/v1/transaksi",
+                HTTP_ORIGIN="http://localhost:7357",
+                HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
+                HTTP_ACCESS_CONTROL_REQUEST_HEADERS="authorization,content-type,idempotency-key",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("idempotency-key", response["Access-Control-Allow-Headers"].lower())
