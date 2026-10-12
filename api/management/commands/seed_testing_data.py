@@ -433,8 +433,7 @@ class Command(BaseCommand):
                     - timedelta(days=365)
                     + timedelta(days=358 * row_index // (HISTORY_ROWS_PER_CUSTOMER - 1))
                 )
-                total = _harga_seed(jenis) * weight
-                self._upsert_transaction(
+                total = self._upsert_transaction(
                     transaction_id=UUID(
                         int=HISTORY_TRANSACTION_ID_BASE.int + customer_offset + row_index
                     ),
@@ -646,9 +645,16 @@ class Command(BaseCommand):
         transaction_time: datetime,
         note: str,
         items: tuple[tuple[JenisSampah, Decimal], ...],
-    ) -> None:
+    ) -> Decimal:
+        # Harga yang berlaku pada tanggal setoran (BR-03), bukan hari ini. Saat
+        # seed diulang, tanggal yang tersimpan tetap dipakai.
+        tanggal = (
+            Transaksi.objects.filter(pk=transaction_id).values_list("tanggal", flat=True).first()
+            or transaction_time
+        )
+        harga = {jenis.pk: _harga_seed(jenis, tanggal) for jenis, _ in items}
         total = sum(
-            (_harga_seed(jenis) * weight for jenis, weight in items),
+            (harga[jenis.pk] * weight for jenis, weight in items),
             Decimal("0.00"),
         ).quantize(Decimal("0.01"))
         transaksi, created = Transaksi.objects.get_or_create(
@@ -685,7 +691,7 @@ class Command(BaseCommand):
                 ]
             )
         for detail_id, (jenis, weight) in zip(detail_ids, items, strict=True):
-            subtotal = (_harga_seed(jenis) * weight).quantize(Decimal("0.01"))
+            subtotal = (harga[jenis.pk] * weight).quantize(Decimal("0.01"))
             DetailTransaksi.objects.update_or_create(
                 pk=detail_id,
                 defaults={
@@ -693,14 +699,15 @@ class Command(BaseCommand):
                     "jenis_sampah": jenis,
                     "nama_sampah_snapshot": jenis.nama_sampah,
                     "kategori_snapshot": jenis.kategori,
-                    "harga_snapshot": _harga_seed(jenis),
+                    "harga_snapshot": harga[jenis.pk],
                     "berat": weight,
                     "subtotal": subtotal,
                 },
             )
+        return total
 
 
-def _harga_seed(jenis: JenisSampah) -> Decimal:
-    harga = harga_berlaku(jenis, timezone.now())
+def _harga_seed(jenis: JenisSampah, pada: datetime) -> Decimal:
+    harga = harga_berlaku(jenis, pada)
     assert harga is not None  # ponytail: _upsert_waste_type always leaves a version
     return harga

@@ -310,8 +310,8 @@ class SeedTestingDataCommandTests(TestCase):
 
         for item in DetailTransaksi.objects.all():
             self.assertEqual((item.harga_snapshot, item.subtotal), snapshot[item.pk])
-        for item in Transaksi.objects.all():
-            self.assertEqual(item.total_nilai, totals[item.pk])
+        for setoran in Transaksi.objects.all():
+            self.assertEqual(setoran.total_nilai, totals[setoran.pk])
 
     @override_settings(DEBUG=False)
     def test_staging_requires_explicit_confirmation(self) -> None:
