@@ -3,6 +3,7 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from corsheaders.defaults import default_headers
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.crypto import get_random_string
 from dotenv import load_dotenv
@@ -222,6 +223,14 @@ CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "true").lower() == 
 CORS_ALLOWED_ORIGINS = [
     origin.strip() for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if origin.strip()
 ]
+
+# CORS_ALLOW_ALL_ORIGINS permits any origin but NOT arbitrary request headers:
+# django-cors-headers answers the preflight with its own default list, which
+# carries no custom header. POST /api/v1/transaksi sends Idempotency-Key, so
+# without this a browser refuses to send the request at all and only repeated
+# OPTIONS reach the server. Native clients never hit it because CORS is a
+# browser-only mechanism.
+CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key")
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
