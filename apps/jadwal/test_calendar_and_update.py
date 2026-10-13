@@ -24,7 +24,12 @@ def _bank_with_pengelola(nama: str = "Bank Jadwal") -> tuple[BankSampah, User]:
 
 def _nasabah(bank: BankSampah, nomor: str, no_hp: str) -> Nasabah:
     return Nasabah.objects.create(
-        bank_sampah=bank, nomor=nomor, nama=f"Nasabah {nomor}", no_hp=no_hp, alamat="Jl. A"
+        bank_sampah=bank,
+        nomor=nomor,
+        nama=f"Nasabah {nomor}",
+        email=f"{nomor.lower()}@example.test",
+        no_hp=no_hp,
+        alamat="Jl. A",
     )
 
 
@@ -47,6 +52,92 @@ class JadwalCalendarDatesTests(APITestCase):
         self.assertEqual(
             str(response.data["errors"]["date_range"]), "Rentang kalender maksimal 63 hari"
         )
+
+
+class JadwalNasabahListTests(APITestCase):
+    def setUp(self) -> None:
+        self.bank, self.manager = _bank_with_pengelola("Bank Jadwal Satu")
+        self.other_bank, self.other_manager = _bank_with_pengelola("Bank Jadwal Dua")
+        self.user = User.objects.create_user(
+            email="nasabah@example.test", nama="Nasabah", role=User.Role.NASABAH
+        )
+        self.member = _nasabah(self.bank, "NAS-1001", "+628111111111")
+        self.member.user = self.user
+        self.member.status = Nasabah.Status.APPROVED
+        self.member.save()
+        self.other_member = _nasabah(self.other_bank, "NAS-2001", "+628222222222")
+        self.other_member.user = self.user
+        self.other_member.status = Nasabah.Status.APPROVED
+        self.other_member.save()
+        self.unselected_member = _nasabah(self.bank, "NAS-1002", "+628333333333")
+        self.unselected_member.status = Nasabah.Status.APPROVED
+        self.unselected_member.save()
+        self.client.force_authenticate(self.user)
+        starts_at = timezone.now() + timedelta(days=2)
+        self.own_schedule = self._schedule(
+            self.bank, self.manager, starts_at, JadwalKegiatan.CakupanPenerima.SEMUA_NASABAH
+        )
+        self.targeted_schedule = self._schedule(
+            self.bank,
+            self.manager,
+            starts_at + timedelta(days=1),
+            JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH,
+            [self.member],
+        )
+        self.other_targeted_schedule = self._schedule(
+            self.bank,
+            self.manager,
+            starts_at + timedelta(days=2),
+            JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH,
+            [self.unselected_member],
+        )
+        self.other_schedule = self._schedule(
+            self.other_bank,
+            self.other_manager,
+            starts_at,
+            JadwalKegiatan.CakupanPenerima.SEMUA_NASABAH,
+        )
+
+    @staticmethod
+    def _schedule(bank, manager, starts_at, coverage, recipients=()):
+        schedule = JadwalKegiatan.objects.create(
+            bank_sampah=bank,
+            dibuat_oleh=manager,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=starts_at,
+            selesai_pada=starts_at + timedelta(hours=1),
+            lokasi="Balai Warga",
+            cakupan_penerima=coverage,
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+        schedule.penerima.set(recipients)
+        return schedule
+
+    def test_list_is_scoped_to_selected_membership_bank_and_exact_recipients(self) -> None:
+        response = self.client.get("/api/v1/jadwal", {"keanggotaan_id": str(self.member.id)})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            {item["id"] for item in response.data["results"]},
+            {str(self.own_schedule.id), str(self.targeted_schedule.id)},
+        )
+
+    def test_membership_selection_errors_follow_nasabah_contract(self) -> None:
+        for query, expected in (({}, 422), ({"keanggotaan_id": "bad"}, 422)):
+            with self.subTest(query=query):
+                response = self.client.get("/api/v1/jadwal", query)
+                self.assertEqual(response.status_code, expected)
+        foreign = _nasabah(self.bank, "NAS-1003", "+628444444444")
+        response = self.client.get("/api/v1/jadwal", {"keanggotaan_id": str(foreign.id)})
+        self.assertEqual(response.status_code, 404)
+
+    def test_ineligible_selected_membership_is_forbidden(self) -> None:
+        self.member.is_active = False
+        self.member.save()
+
+        response = self.client.get("/api/v1/jadwal", {"keanggotaan_id": str(self.member.id)})
+
+        self.assertEqual(response.status_code, 403)
 
 
 class JadwalUpdateTests(APITestCase):
