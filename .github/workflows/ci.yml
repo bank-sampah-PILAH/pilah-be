@@ -21,7 +21,8 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Do not interrupt a staging deploy/seed pair with a newer push.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/staging' }}
 
 env:
   # Env shared by all management-command steps. Placeholders only — CI never
@@ -243,3 +244,14 @@ jobs:
             echo "healthz=$code, retrying in 10s ($i/12)"; sleep 10
           done
           echo "healthz never returned 200"; exit 1
+
+      - name: Seed verified staging deployment
+        run: python3 scripts/seed_staging.py
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          PILAH_SEED_PENGURUS_EMAIL: ${{ vars.PILAH_SEED_PENGURUS_EMAIL || vars.PILAH_SEED_OPERATOR_EMAIL }}
+          PILAH_SEED_CUSTOMER_EMAIL: ${{ vars.PILAH_SEED_CUSTOMER_EMAIL }}
+          PILAH_SEED_CUSTOMER_TWO_EMAIL: ${{ vars.PILAH_SEED_CUSTOMER_TWO_EMAIL }}
+          PILAH_SEED_SUPERADMIN_EMAIL: ${{ vars.PILAH_SEED_SUPERADMIN_EMAIL }}
+          PILAH_SEED_PENDING_PENGURUS_EMAIL: ${{ vars.PILAH_SEED_PENDING_PENGURUS_EMAIL || vars.PILAH_SEED_PENDING_OPERATOR_EMAIL }}
+          PILAH_SEED_INDUK_EMAIL: ${{ vars.PILAH_SEED_INDUK_EMAIL || 'induk.demo@example.com' }}

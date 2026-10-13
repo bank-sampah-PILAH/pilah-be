@@ -3,8 +3,8 @@ import json
 from typing import Any
 from uuid import UUID
 
-from django.db import IntegrityError
-from django.db.models import QuerySet
+from django.db import IntegrityError, transaction
+from django.db.models import Prefetch, QuerySet
 from django.http import HttpResponse
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
@@ -15,10 +15,18 @@ from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from api.models import BankSampah, Pencairan, Transaksi, User
+from api.models import BankSampah, DraftPencairan, DraftPencairanItem, Pencairan, Transaksi, User
 from apps.ledger.activity import activity_query, serialize_activity_page
 from apps.ledger.schema import ACTIVITY_PARAMETERS, ACTIVITY_RESPONSE
 from apps.ledger.serializers import (
+    DraftBatchSerializer,
+    DraftExportQuerySerializer,
+    DraftKandidatQuerySerializer,
+    DraftKandidatSerializer,
+    DraftPencairanCreateSerializer,
+    DraftPencairanListSerializer,
+    DraftPencairanSerializer,
+    DraftPencairanUpdateSerializer,
     PencairanCreateSerializer,
     PencairanDetailSerializer,
     PencairanEditSerializer,
@@ -28,12 +36,15 @@ from apps.ledger.serializers import (
     TransactionListSerializer,
 )
 from apps.ledger.services import (
+    DraftPencairanService,
+    DraftTidakBisaDiubah,
     PencairanService,
     TransactionFilterService,
     TransactionService,
 )
+from apps.nasabah.api import kandidat_pencairan
 from apps.notification.api import send_setoran_receipt
-from apps.reporting.api import export_excel
+from apps.reporting.api import export_draft_pencairan, export_excel
 from shared_kernel.pagination import StandardPagination
 from shared_kernel.permissions import (
     IsActivePengelola,
@@ -276,3 +287,120 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
                 "revisi": PencairanRevisiSerializer(revisi, many=True).data,
             }
         )
+
+
+class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
+    permission_classes = [IsActivePengelola]
+    serializer_class = DraftPencairanSerializer
+
+    def get_queryset(self) -> QuerySet[DraftPencairan]:
+        return DraftPencairan.objects.filter(
+            bank_sampah=current_bank(self.request)
+        ).prefetch_related(
+            Prefetch(
+                "items",
+                queryset=DraftPencairanItem.objects.select_related("nasabah", "nasabah__saldo"),
+            )
+        )
+
+    def list(self, request: Request) -> Response:
+        # The list only shows totals, so it needs the item rows but not their nasabah.
+        ringkasan = (
+            DraftPencairan.objects.filter(bank_sampah=current_bank(request))
+            .select_related("dibuat_oleh", "diubah_oleh")
+            .prefetch_related("items")
+        )
+        page = self.paginate_queryset(ringkasan)
+        return self.get_paginated_response(DraftPencairanListSerializer(page, many=True).data)
+
+    def retrieve(self, request: Request, pk: str | None = None) -> Response:
+        return Response(DraftPencairanSerializer(self.get_object()).data)
+
+    def create(self, request: Request) -> Response:
+        serializer = DraftPencairanCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        draft = DraftPencairanService.buat_draft(_user(request), serializer.validated_data)
+        return Response(
+            DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
+        draft = self.get_object()
+        serializer = DraftPencairanUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            DraftPencairanService.ubah_draft(_user(request), draft, serializer.validated_data)
+        except DraftTidakBisaDiubah as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data)
+
+    @action(detail=True, methods=["post"], url_path="batalkan")
+    def batalkan(self, request: Request, pk: str | None = None) -> Response:
+        draft = self.get_object()
+        try:
+            DraftPencairanService.batalkan_draft(_user(request), draft)
+        except DraftTidakBisaDiubah as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data)
+
+    @action(detail=False, methods=["get"], url_path="kandidat")
+    def kandidat(self, request: Request) -> Response:
+        """Everyone a draft could pay out, unpaginated, so the picker can select across pages."""
+        query = DraftKandidatQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        nasabah = kandidat_pencairan(current_bank(request), **query.validated_data)
+        return Response(DraftKandidatSerializer(nasabah, many=True).data)
+
+    @action(detail=False, methods=["post"], url_path="batch")
+    def batch(self, request: Request) -> Response:
+        serializer = DraftBatchSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        draft, dilewati = DraftPencairanService.buat_batch(
+            _user(request), serializer.validated_data
+        )
+        data = DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data
+        return Response({**data, "dilewati": dilewati}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="konfirmasi")
+    def konfirmasi(self, request: Request, pk: str | None = None) -> Response:
+        draft = self.get_object()
+        try:
+            DraftPencairanService.konfirmasi_draft(_user(request), draft)
+        except DraftTidakBisaDiubah as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(DraftPencairanSerializer(self.get_queryset().get(pk=draft.pk)).data)
+
+    @action(detail=False, methods=["post"], url_path="export")
+    def export_langsung(self, request: Request) -> HttpResponse:
+        """PDF or Excel of the draft as sent, saved or not. Nothing is written.
+
+        The body is a draft as it would be created, checked the same way and built the same
+        way; the rows are rolled back once the file exists, so a half-edited screen can be
+        exported without being saved.
+        """
+        query = DraftExportQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        serializer = DraftPencairanCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            draft = DraftPencairanService.buat_draft(_user(request), serializer.validated_data)
+            content, filename, content_type = export_draft_pencairan(
+                self.get_queryset().get(pk=draft.pk), query.validated_data["berkas"]
+            )
+            transaction.set_rollback(True)
+        response = HttpResponse(content, content_type=content_type)
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    @action(detail=True, methods=["get"], url_path="export")
+    def export(self, request: Request, pk: str | None = None) -> HttpResponse:
+        """PDF or Excel of the draft. Read-only: it never changes the status or the saldo."""
+        query = DraftExportQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        content, filename, content_type = export_draft_pencairan(
+            self.get_object(), query.validated_data["berkas"]
+        )
+        response = HttpResponse(content, content_type=content_type)
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response

@@ -23,7 +23,12 @@ from apps.bank_sampah.views import (
     TeamView,
 )
 from apps.jadwal.views import JadwalKegiatanViewSet
-from apps.ledger.views import ActivityHistoryView, PencairanViewSet, TransaksiViewSet
+from apps.ledger.views import (
+    ActivityHistoryView,
+    DraftPencairanViewSet,
+    PencairanViewSet,
+    TransaksiViewSet,
+)
 
 # ponytail: views are imported from their canonical bounded-context homes;
 # routes and names are frozen so this compose is behavior-neutral.
@@ -38,7 +43,12 @@ from apps.nasabah.home import (
 from apps.nasabah.profile import NasabahProfileView
 from apps.nasabah.views import NasabahSelfView, NasabahViewSet, RegisterNasabahView, SaldoView
 from apps.notification.views import WATemplateView
-from apps.reporting.views import DashboardRecentTransactionsView, DashboardStatsView
+from apps.reporting.views import (
+    DashboardOperationalTrendsView,
+    DashboardRecentTransactionsView,
+    DashboardStatsView,
+    DashboardWasteCategoriesView,
+)
 from apps.waste_catalog.views import JenisSampahViewSet
 
 router = DefaultRouter(trailing_slash=False)
@@ -47,6 +57,7 @@ router.register("jenis-sampah", JenisSampahViewSet, basename="jenis-sampah")
 router.register("jadwal", JadwalKegiatanViewSet, basename="jadwal")
 router.register("transaksi", TransaksiViewSet, basename="transaksi")
 router.register("pencairan", PencairanViewSet, basename="pencairan")
+router.register("draft-pencairan", DraftPencairanViewSet, basename="draft-pencairan")
 router.register(
     "superadmin/bank-sampah", SuperAdminBankSampahViewSet, basename="superadmin-bank-sampah"
 )
@@ -87,6 +98,16 @@ urlpatterns = [
     path("nasabah/me", NasabahSelfView.as_view(), name="nasabah-me"),
     path("nasabah/<uuid:pk>/saldo", SaldoView.as_view(), name="nasabah-saldo"),
     path("dashboard/stats", DashboardStatsView.as_view(), name="dashboard-stats"),
+    path(
+        "dashboard/operational-trends",
+        DashboardOperationalTrendsView.as_view(),
+        name="dashboard-operational-trends",
+    ),
+    path(
+        "dashboard/waste-categories",
+        DashboardWasteCategoriesView.as_view(),
+        name="dashboard-waste-categories",
+    ),
     path(
         "dashboard/recent-transactions",
         DashboardRecentTransactionsView.as_view(),
