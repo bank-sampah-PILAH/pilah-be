@@ -15,7 +15,7 @@ from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from api.models import BankSampah, JadwalKegiatan, Nasabah, User
+from api.models import BankSampah, JadwalKegiatan, User
 from apps.jadwal.serializers import JadwalKegiatanSerializer
 from apps.nasabah.api import resolve_active_membership
 from shared_kernel.permissions import IsActivePengelola, IsJadwalViewer
@@ -66,22 +66,7 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
                     .distinct()
                 )
             else:
-                queryset = (
-                    queryset.filter(
-                        bank_sampah__status=BankSampah.Status.ACTIVE,
-                        bank_sampah__is_active=True,
-                        bank_sampah__nasabah__user=user,
-                        bank_sampah__nasabah__is_active=True,
-                        bank_sampah__nasabah__status=Nasabah.Status.APPROVED,
-                        status=JadwalKegiatan.Status.DITERBITKAN,
-                        selesai_pada__gte=timezone.now(),
-                    )
-                    .filter(
-                        Q(cakupan_penerima=JadwalKegiatan.CakupanPenerima.SEMUA_NASABAH)
-                        | Q(penerima__user=user, penerima__is_active=True)
-                    )
-                    .distinct()
-                )
+                queryset = queryset.none()
         else:
             overlapping_schedules = (
                 JadwalKegiatan.objects.filter(

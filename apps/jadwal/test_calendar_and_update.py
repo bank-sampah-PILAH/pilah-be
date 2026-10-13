@@ -9,6 +9,7 @@ from rest_framework.test import APITestCase
 
 from api.models import BankSampah, JadwalKegiatan, Nasabah, User
 from apps.jadwal.serializers import JadwalKegiatanSerializer
+from apps.jadwal.views import JadwalKegiatanViewSet
 
 
 def _bank_with_pengelola(nama: str = "Bank Jadwal") -> tuple[BankSampah, User]:
@@ -143,6 +144,13 @@ class JadwalNasabahListTests(APITestCase):
         self.assertEqual(own.status_code, 200)
         self.assertEqual(other.status_code, 404)
         self.assertEqual(missing_selection.status_code, 422)
+
+    def test_nasabah_non_read_queryset_is_empty(self) -> None:
+        viewset = JadwalKegiatanViewSet()
+        viewset.action = "update"
+        viewset.request = SimpleNamespace(user=self.user, query_params={})
+
+        self.assertFalse(viewset.get_queryset().exists())
 
     def test_membership_selection_errors_follow_nasabah_contract(self) -> None:
         for query, expected in (({}, 422), ({"keanggotaan_id": "bad"}, 422)):
