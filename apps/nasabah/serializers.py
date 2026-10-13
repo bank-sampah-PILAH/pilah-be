@@ -196,6 +196,7 @@ class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
     """
 
     bank_sampah = NasabahSelfBankSampahSerializer(read_only=True)
+    total_saldo = serializers.SerializerMethodField()
     alasan_penolakan = serializers.SerializerMethodField()
     riwayat_persetujuan = serializers.SerializerMethodField()
 
@@ -206,10 +207,15 @@ class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
             "bank_sampah",
             "status",
             "is_active",
+            "total_saldo",
             "alasan_penolakan",
             "riwayat_persetujuan",
         ]
         read_only_fields = fields
+
+    def get_total_saldo(self, obj: Nasabah) -> str:
+        saldo = getattr(getattr(obj, "saldo", None), "total_saldo", Decimal("0.00"))
+        return format(saldo, ".2f")
 
     def get_alasan_penolakan(self, obj: Nasabah) -> str | None:
         if obj.status != Nasabah.Status.REJECTED:
