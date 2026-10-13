@@ -660,8 +660,17 @@ class APISpecTests(APITestCase):
             role=User.Role.NASABAH,
             is_profile_complete=False,
         )
+        Nasabah.objects.create(
+            user=nasabah_user,
+            bank_sampah=self.bank,
+            nomor="NAS-QS-1",
+            nama=nasabah_user.nama,
+            alamat="Jl. Kenanga",
+            no_hp="+628123450001",
+            status=Nasabah.Status.APPROVED,
+        )
         view = cast(Any, JadwalKegiatanViewSet())
-        view.request = Mock(user=nasabah_user)
+        view.request = Mock(user=nasabah_user, query_params={})
         view.action = "list"
 
         queryset = view.get_queryset()
@@ -909,12 +918,12 @@ class APISpecTests(APITestCase):
                 HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(member_user).access_token}"
             )
             response = self.client.get("/api/v1/jadwal")
-            self.assertEqual(response.status_code, 200)
             if member_user == recipient_user:
+                self.assertEqual(response.status_code, 200)
                 ids = {item["id"] for item in response.data["results"]}
                 self.assertEqual(ids, {str(public_schedule.id), str(selected_schedule.id)})
             else:
-                self.assertEqual(response.data["results"], [])
+                self.assertEqual(response.status_code, 403)
 
     def test_nasabah_cannot_see_schedules_from_inactive_bank(self) -> None:
         nasabah_user = User.objects.create_user(
@@ -951,9 +960,7 @@ class APISpecTests(APITestCase):
 
         response = self.client.get("/api/v1/jadwal")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["results"], [])
-        self.assertNotIn(str(schedule.id), {item["id"] for item in response.data["results"]})
+        self.assertEqual(response.status_code, 403)
 
     @override_settings(
         ALLOWED_HOSTS=["admin.example.com"],
