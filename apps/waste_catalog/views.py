@@ -144,7 +144,9 @@ class HargaPerbandinganQuerySerializer(serializers.Serializer):  # type: ignore[
             try:
                 UUID(part)
             except ValueError:
-                raise serializers.ValidationError("bank_ids harus berupa UUID dipisah koma") from None
+                raise serializers.ValidationError(
+                    "bank_ids harus berupa UUID dipisah koma"
+                ) from None
         return ids
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
@@ -185,10 +187,9 @@ class HargaPerbandinganView(APIView):
         bank_ids = query.validated_data["bank_ids"]
         jenis_id = query.validated_data["jenis_sampah_id"]
 
-        bank_filter = (
-            BankSampah.objects.filter(status=BankSampah.Status.ACTIVE, is_active=True)
-            .exclude(jenis_organisasi=BankSampah.OrganizationType.INDUK)
-        )
+        bank_filter = BankSampah.objects.filter(
+            status=BankSampah.Status.ACTIVE, is_active=True
+        ).exclude(jenis_organisasi=BankSampah.OrganizationType.INDUK)
         asal = JenisSampah.objects.select_related("bank_sampah").get(id=jenis_id)
         daftar = list(bank_filter.filter(id__in=bank_ids).order_by("nama"))
         baris: list[dict[str, Any]] = []
@@ -216,9 +217,7 @@ class HargaPerbandinganView(APIView):
             jenis = jenis_rows.get(bank.id)
             if jenis is None:
                 # Distinguish: a missing kode row vs an inactive one.
-                masih_ada = JenisSampah.objects.filter(
-                    bank_sampah=bank, nomor=asal.nomor
-                ).exists()
+                masih_ada = JenisSampah.objects.filter(bank_sampah=bank, nomor=asal.nomor).exists()
                 baris.append(_baris_kosong(bank, "jenis_nonaktif" if masih_ada else "tanpa_jenis"))
                 continue
             berlaku, _terjadwal = ringkas_harga(jenis.riwayat_harga.all(), timezone.now())

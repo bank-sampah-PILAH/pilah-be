@@ -125,7 +125,9 @@ class HargaPerbandinganTests(APITestCase):
         ):
             with self.subTest(params=str(params)):
                 self.assertEqual(
-                    self.client.get(URL, params).status_code if params else self.client.get(URL).status_code,
+                    self.client.get(URL, params).status_code
+                    if params
+                    else self.client.get(URL).status_code,
                     422,
                 )
 
