@@ -942,7 +942,7 @@ class APISpecTests(APITestCase):
             status=Nasabah.Status.APPROVED,
         )
         now = timezone.now()
-        schedule = JadwalKegiatan.objects.create(
+        JadwalKegiatan.objects.create(
             bank_sampah=self.bank,
             dibuat_oleh=self.user,
             jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
