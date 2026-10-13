@@ -143,10 +143,29 @@ class JadwalNasabahListTests(APITestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_ineligible_selected_membership_is_forbidden(self) -> None:
-        self.member.is_active = False
-        self.member.save()
+        for update in (
+            {"is_active": False},
+            {"is_active": True, "status": Nasabah.Status.PENDING},
+        ):
+            with self.subTest(update=update):
+                Nasabah.objects.filter(pk=self.member.pk).update(**update)
+                response = self.client.get(
+                    "/api/v1/jadwal", {"keanggotaan_id": str(self.member.id)}
+                )
+                self.assertEqual(response.status_code, 403)
 
+        self.member.refresh_from_db()
+        self.bank.is_active = False
+        self.bank.save(update_fields=["is_active"])
         response = self.client.get("/api/v1/jadwal", {"keanggotaan_id": str(self.member.id)})
+        self.assertEqual(response.status_code, 403)
+
+    def test_no_eligible_membership_is_forbidden(self) -> None:
+        Nasabah.objects.filter(pk__in=[self.member.pk, self.other_member.pk]).update(
+            status=Nasabah.Status.PENDING
+        )
+
+        response = self.client.get("/api/v1/jadwal")
 
         self.assertEqual(response.status_code, 403)
 
