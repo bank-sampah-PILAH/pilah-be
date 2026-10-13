@@ -49,7 +49,7 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
         user = _user(self.request)
         queryset = JadwalKegiatan.objects.select_related("bank_sampah", "dibuat_oleh")
         if user.role == User.Role.NASABAH:
-            if self.action == "list":
+            if self.action in {"list", "calendar_dates"}:
                 member = resolve_active_membership(
                     user, self.request.query_params.get("keanggotaan_id")
                 )
