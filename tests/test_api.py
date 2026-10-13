@@ -3002,6 +3002,9 @@ class APISpecTests(APITestCase):
             bank_sampah=self.bank,
             nomor="NAS-9001",
             nama="Nama Catatan Lama",
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir="1990-01-11",
+            email="old-membership@example.com",
             alamat="Alamat Catatan Lama",
             no_hp="+628555555099",
             status=Nasabah.Status.APPROVED,
@@ -3035,7 +3038,11 @@ class APISpecTests(APITestCase):
         self.assertEqual(existing.status, Nasabah.Status.APPROVED)
         self.assertTrue(existing.is_active)
         self.assertEqual(existing.nama, "Nama Catatan Lama")
+        self.assertEqual(existing.jenis_kelamin, User.Gender.MALE)
+        self.assertEqual(str(existing.tanggal_lahir), "1990-01-11")
+        self.assertEqual(existing.email, "old-membership@example.com")
         self.assertEqual(existing.alamat, "Alamat Catatan Lama")
+        self.assertEqual(existing.no_hp, "+628555555099")
 
         self_view = self.client.get("/api/v1/nasabah/me")
         self.assertEqual(self_view.status_code, 200, self_view.data)
