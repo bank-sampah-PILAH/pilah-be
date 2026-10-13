@@ -2986,6 +2986,72 @@ class APISpecTests(APITestCase):
         self.assertTrue(hasattr(nasabah, "saldo"))
         self.assertEqual(nasabah.saldo.total_saldo, 0)
 
+    def test_nasabah_can_apply_to_another_bank_without_changing_existing_membership(self) -> None:
+        customer = User.objects.create_user(
+            email="second-bank-nasabah@example.com",
+            nama="Nasabah PILAH",
+            role=User.Role.NASABAH,
+            jenis_kelamin=User.Gender.FEMALE,
+            tanggal_lahir="1998-05-20",
+            no_hp="+628555555001",
+            alamat="Jl. Melati No. 5",
+            is_profile_complete=True,
+        )
+        existing = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-9001",
+            nama="Nama Catatan Lama",
+            alamat="Alamat Catatan Lama",
+            no_hp="+628555555099",
+            status=Nasabah.Status.APPROVED,
+        )
+        second_bank = BankSampah.objects.create(
+            nama="Bank Sampah Kedua",
+            alamat="Depok",
+            kota="Depok",
+            no_hp_pic="+628123456780",
+        )
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.post(
+            "/api/v1/onboarding/nasabah",
+            {"bank_sampah_id": str(second_bank.id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        membership = Nasabah.objects.get(user=customer, bank_sampah=second_bank)
+        self.assertEqual(membership.status, Nasabah.Status.PENDING)
+        self.assertEqual(membership.nama, customer.nama)
+        self.assertEqual(membership.jenis_kelamin, customer.jenis_kelamin)
+        self.assertEqual(str(membership.tanggal_lahir), "1998-05-20")
+        self.assertEqual(membership.no_hp, customer.no_hp)
+        self.assertEqual(membership.email, customer.email)
+        self.assertEqual(membership.alamat, customer.alamat)
+
+        existing.refresh_from_db()
+        self.assertEqual(existing.status, Nasabah.Status.APPROVED)
+        self.assertTrue(existing.is_active)
+        self.assertEqual(existing.nama, "Nama Catatan Lama")
+        self.assertEqual(existing.alamat, "Alamat Catatan Lama")
+
+        duplicate = self.client.post(
+            "/api/v1/onboarding/nasabah",
+            {"bank_sampah_id": str(second_bank.id)},
+            format="json",
+        )
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertEqual(Nasabah.objects.filter(user=customer, bank_sampah=second_bank).count(), 1)
+
+        self_view = self.client.get("/api/v1/nasabah/me")
+        self.assertEqual(self_view.status_code, 200, self_view.data)
+        memberships = {entry["id"]: entry for entry in self_view.data}
+        self.assertEqual(len(memberships), 2)
+        self.assertEqual(memberships[str(existing.id)]["status"], Nasabah.Status.APPROVED)
+        self.assertEqual(memberships[str(membership.id)]["status"], Nasabah.Status.PENDING)
+
     def test_nasabah_self_registration_requires_profile_alamat(self) -> None:
         customer = User.objects.create_user(
             email="no-alamat-nasabah@example.com",
