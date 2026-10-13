@@ -259,5 +259,5 @@ class NasabahSelfView(APIView):
     serializer_class = NasabahSelfViewSerializer
 
     def get(self, request: Request) -> Response:
-        memberships = Nasabah.objects.filter(user=_user(request)).select_related("bank_sampah")
+        memberships = Nasabah.objects.filter(user=_user(request)).select_related("bank_sampah", "saldo")
         return Response(NasabahSelfViewSerializer(memberships, many=True).data)

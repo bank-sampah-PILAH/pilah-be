@@ -3634,6 +3634,7 @@ class APISpecTests(APITestCase):
         entry = response.data[0]
         self.assertEqual(entry["id"], str(membership.id))
         self.assertEqual(entry["status"], "pending")
+        self.assertEqual(entry["total_saldo"], "0.00")
         self.assertEqual(entry["bank_sampah"]["id"], str(self.bank.id))
         self.assertEqual(entry["bank_sampah"]["nama"], self.bank.nama)
         self.assertEqual(entry["bank_sampah"]["alamat"], self.bank.alamat)
