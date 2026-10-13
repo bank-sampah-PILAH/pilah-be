@@ -3044,6 +3044,13 @@ class APISpecTests(APITestCase):
         self.assertEqual(memberships[str(existing.id)]["status"], Nasabah.Status.APPROVED)
         self.assertEqual(memberships[str(membership.id)]["status"], Nasabah.Status.PENDING)
 
+        beranda = self.client.get(
+            "/api/v1/nasabah/me/beranda", {"keanggotaan_id": str(existing.id)}
+        )
+        self.assertEqual(beranda.status_code, 200, beranda.data)
+        self.assertEqual(beranda.data["keanggotaan"]["id"], str(existing.id))
+        self.assertEqual(beranda.data["bank_sampah"]["id"], str(self.bank.id))
+
     def test_nasabah_self_registration_requires_profile_alamat(self) -> None:
         customer = User.objects.create_user(
             email="no-alamat-nasabah@example.com",
