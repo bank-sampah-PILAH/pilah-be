@@ -127,6 +127,17 @@ class JadwalNasabahListTests(APITestCase):
             with self.subTest(query=query):
                 response = self.client.get("/api/v1/jadwal", query)
                 self.assertEqual(response.status_code, expected)
+                if not query:
+                    self.assertEqual(
+                        response.data["errors"]["pilihan"],
+                        [
+                            {"id": str(self.member.id), "bank_sampah_nama": self.bank.nama},
+                            {
+                                "id": str(self.other_member.id),
+                                "bank_sampah_nama": self.other_bank.nama,
+                            },
+                        ],
+                    )
         foreign = _nasabah(self.bank, "NAS-1003", "+628444444444")
         response = self.client.get("/api/v1/jadwal", {"keanggotaan_id": str(foreign.id)})
         self.assertEqual(response.status_code, 404)
@@ -155,6 +166,20 @@ class JadwalNasabahListTests(APITestCase):
             response.data["dates"],
             [start.isoformat(), (start + timedelta(days=1)).isoformat()],
         )
+        for query, expected in (
+            ({}, 422),
+            ({"keanggotaan_id": "bad"}, 422),
+        ):
+            with self.subTest(query=query):
+                response = self.client.get(
+                    "/api/v1/jadwal/calendar-dates",
+                    {
+                        "start_date": start.isoformat(),
+                        "end_date": (start + timedelta(days=5)).isoformat(),
+                        **query,
+                    },
+                )
+                self.assertEqual(response.status_code, expected)
 
 
 class JadwalUpdateTests(APITestCase):
