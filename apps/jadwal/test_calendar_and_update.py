@@ -94,7 +94,7 @@ class JadwalNasabahListTests(APITestCase):
         self.other_schedule = self._schedule(
             self.other_bank,
             self.other_manager,
-            starts_at,
+            starts_at + timedelta(days=4),
             JadwalKegiatan.CakupanPenerima.SEMUA_NASABAH,
         )
 
@@ -138,6 +138,23 @@ class JadwalNasabahListTests(APITestCase):
         response = self.client.get("/api/v1/jadwal", {"keanggotaan_id": str(self.member.id)})
 
         self.assertEqual(response.status_code, 403)
+
+    def test_calendar_dates_are_scoped_to_selected_membership_bank_and_recipients(self) -> None:
+        start = (timezone.now() + timedelta(days=2)).date()
+        response = self.client.get(
+            "/api/v1/jadwal/calendar-dates",
+            {
+                "start_date": start.isoformat(),
+                "end_date": (start + timedelta(days=5)).isoformat(),
+                "keanggotaan_id": str(self.member.id),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            response.data["dates"],
+            [start.isoformat(), (start + timedelta(days=1)).isoformat()],
+        )
 
 
 class JadwalUpdateTests(APITestCase):
