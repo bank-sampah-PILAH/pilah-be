@@ -10,9 +10,50 @@ from decimal import Decimal
 from uuid import UUID
 
 from django.db.models import F, Q, QuerySet, Value
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from django.db.models.functions import Coalesce
 
-from api.models import BankSampah, Nasabah
+from api.models import BankSampah, Nasabah, User
+
+
+def resolve_active_membership(user: User, identifier: str | None = None) -> Nasabah:
+    memberships = Nasabah.objects.filter(user=user).select_related("bank_sampah", "saldo")
+    if identifier is not None:
+        try:
+            member_id = UUID(identifier)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValidationError({"keanggotaan_id": "UUID tidak valid."}) from exc
+        selected = memberships.filter(pk=member_id)
+        member = _eligible_memberships(selected).first()
+        if member is not None:
+            return member
+        if selected.exists():
+            raise PermissionDenied("Keanggotaan dan bank sampah harus aktif.")
+        raise NotFound()
+
+    eligible = list(_eligible_memberships(memberships))
+    if not eligible:
+        raise PermissionDenied("Keanggotaan aktif diperlukan.")
+    if len(eligible) > 1:
+        raise ValidationError(
+            {
+                "keanggotaan_id": "Pilih keanggotaan untuk melihat beranda.",
+                "pilihan": [
+                    {"id": str(member.id), "bank_sampah_nama": member.bank_sampah.nama}
+                    for member in eligible
+                ],
+            }
+        )
+    return eligible[0]
+
+
+def _eligible_memberships(memberships: QuerySet[Nasabah]) -> QuerySet[Nasabah]:
+    return memberships.filter(
+        status=Nasabah.Status.APPROVED,
+        is_active=True,
+        bank_sampah__is_active=True,
+        bank_sampah__status=BankSampah.Status.ACTIVE,
+    )
 
 
 def _eligible_in(bank: BankSampah) -> QuerySet[Nasabah]:

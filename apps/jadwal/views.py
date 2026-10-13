@@ -17,6 +17,7 @@ from rest_framework.response import Response
 
 from api.models import BankSampah, JadwalKegiatan, Nasabah, User
 from apps.jadwal.serializers import JadwalKegiatanSerializer
+from apps.nasabah.api import resolve_active_membership
 from shared_kernel.permissions import IsActivePengelola, IsJadwalViewer
 
 
@@ -48,22 +49,39 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
         user = _user(self.request)
         queryset = JadwalKegiatan.objects.select_related("bank_sampah", "dibuat_oleh")
         if user.role == User.Role.NASABAH:
-            queryset = (
-                queryset.filter(
-                    bank_sampah__status=BankSampah.Status.ACTIVE,
-                    bank_sampah__is_active=True,
-                    bank_sampah__nasabah__user=user,
-                    bank_sampah__nasabah__is_active=True,
-                    bank_sampah__nasabah__status=Nasabah.Status.APPROVED,
-                    status=JadwalKegiatan.Status.DITERBITKAN,
-                    selesai_pada__gte=timezone.now(),
+            if self.action == "list":
+                member = resolve_active_membership(
+                    user, self.request.query_params.get("keanggotaan_id")
                 )
-                .filter(
-                    Q(cakupan_penerima=JadwalKegiatan.CakupanPenerima.SEMUA_NASABAH)
-                    | Q(penerima__user=user, penerima__is_active=True)
+                queryset = (
+                    queryset.filter(
+                        bank_sampah_id=member.bank_sampah_id,
+                        status=JadwalKegiatan.Status.DITERBITKAN,
+                        selesai_pada__gte=timezone.now(),
+                    )
+                    .filter(
+                        Q(cakupan_penerima=JadwalKegiatan.CakupanPenerima.SEMUA_NASABAH)
+                        | Q(penerima=member, penerima__is_active=True)
+                    )
+                    .distinct()
                 )
-                .distinct()
-            )
+            else:
+                queryset = (
+                    queryset.filter(
+                        bank_sampah__status=BankSampah.Status.ACTIVE,
+                        bank_sampah__is_active=True,
+                        bank_sampah__nasabah__user=user,
+                        bank_sampah__nasabah__is_active=True,
+                        bank_sampah__nasabah__status=Nasabah.Status.APPROVED,
+                        status=JadwalKegiatan.Status.DITERBITKAN,
+                        selesai_pada__gte=timezone.now(),
+                    )
+                    .filter(
+                        Q(cakupan_penerima=JadwalKegiatan.CakupanPenerima.SEMUA_NASABAH)
+                        | Q(penerima__user=user, penerima__is_active=True)
+                    )
+                    .distinct()
+                )
         else:
             overlapping_schedules = (
                 JadwalKegiatan.objects.filter(

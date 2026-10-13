@@ -6,7 +6,6 @@ from django.db.models import QuerySet
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers
-from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.generics import GenericAPIView, ListAPIView
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -15,6 +14,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from api.models import BankSampah, Nasabah, Transaksi, User
 from apps.ledger.api import apply_period
 from apps.ledger.serializers import TransactionDetailSerializer
+from apps.nasabah.api import resolve_active_membership
 from apps.reporting.api import StatementPeriodError, export_statement_pdf
 from shared_kernel.pagination import StandardPagination
 from shared_kernel.permissions import IsActiveNasabah
@@ -83,53 +83,9 @@ class HomeSerializer(serializers.Serializer[Any]):
 class MembershipService:
     @staticmethod
     def get_active_membership(request: Request) -> Nasabah:
-        memberships = Nasabah.objects.filter(user=cast(User, request.user)).select_related(
-            "bank_sampah", "saldo"
+        return resolve_active_membership(
+            cast(User, request.user), request.query_params.get("keanggotaan_id")
         )
-        identifier = request.query_params.get("keanggotaan_id")
-        if identifier is not None:
-            return MembershipService._get_selected_membership(memberships, identifier)
-        return MembershipService._get_default_membership(memberships)
-
-    @staticmethod
-    def _get_selected_membership(memberships: QuerySet[Nasabah], identifier: str) -> Nasabah:
-        try:
-            member_id = UUID(identifier)
-        except (ValueError, TypeError, AttributeError) as exc:
-            raise ValidationError({"keanggotaan_id": "UUID tidak valid."}) from exc
-        selected = memberships.filter(pk=member_id)
-        member = MembershipService._eligible_memberships(selected).first()
-        if member is not None:
-            return member
-        if selected.exists():
-            raise PermissionDenied("Keanggotaan dan bank sampah harus aktif.")
-        raise NotFound()
-
-    @staticmethod
-    def _eligible_memberships(memberships: QuerySet[Nasabah]) -> QuerySet[Nasabah]:
-        return memberships.filter(
-            status=Nasabah.Status.APPROVED,
-            is_active=True,
-            bank_sampah__is_active=True,
-            bank_sampah__status=BankSampah.Status.ACTIVE,
-        )
-
-    @staticmethod
-    def _get_default_membership(memberships: QuerySet[Nasabah]) -> Nasabah:
-        eligible = list(MembershipService._eligible_memberships(memberships))
-        if not eligible:
-            raise PermissionDenied("Keanggotaan aktif diperlukan.")
-        if len(eligible) > 1:
-            raise ValidationError(
-                {
-                    "keanggotaan_id": "Pilih keanggotaan untuk melihat beranda.",
-                    "pilihan": [
-                        {"id": str(member.id), "bank_sampah_nama": member.bank_sampah.nama}
-                        for member in eligible
-                    ],
-                }
-            )
-        return eligible[0]
 
 
 def balance_data(member: Nasabah) -> dict[str, Any]:
