@@ -1,4 +1,5 @@
 import mimetypes
+import re
 from urllib.parse import urlencode
 
 from django.conf import settings
@@ -38,6 +39,28 @@ from shared_kernel.permissions import (
     IsSuperAdmin,
 )
 from shared_kernel.scoping import current_bank, current_user
+
+_PRAFIKS_KOTA = ("kotamadya ", "kabupaten ", "kab. ", "kota ", "kab ")
+
+
+def normalisasi_kota(teks: str) -> str:
+    """Wujud kanonik sebuah nama wilayah untuk pencocokan teks (PIL-329, opsi A).
+
+    Lowercase, spasi dirapikan, dan awalan jalur administratif ("Kota",
+    "Kotamadya", "Kab.", "Kabupaten") dilucuti berulang, jadi "Kota Depok",
+    "KAB. DEPOK", dan "Depok" bertemu pada satu bentuk. Sisi tersimpan tetap
+    dibandingkan dengan `icontains`, jadi varian yang tersimpan ("Kota Depok")
+    tetap kena oleh bentuk yang dilucuti.
+    """
+    bentuk = re.sub(r"\s+", " ", teks.strip().lower())
+    sebelum = None
+    while sebelum != bentuk:
+        sebelum = bentuk
+        for prafiks in _PRAFIKS_KOTA:
+            if bentuk.startswith(prafiks):
+                bentuk = bentuk[len(prafiks) :]
+                break
+    return bentuk.strip()
 
 
 @require_GET  # S3752: media is read-only; other methods are caller error.
@@ -222,8 +245,9 @@ class BankSampahDirectoryView(ListAPIView[BankSampah]):
     direct membership of their own; a nasabah joins one of their `unit`
     branches, or a standalone `mandiri` bank sampah, instead.
 
-    `q` searches nama/alamat/kota (PIL-308); `kota` is the PIL-329 option-A
-    placeholder until the PO picks a structured region approach.
+    `q` searches nama/alamat/kota (PIL-308); `kota` matches the normalized
+    region text (PIL-329 option A): prefix variants "Kota"/"Kab." collapse,
+    so a stored "Kota Depok" answers both "depok" and "Kota Depok".
     """
 
     permission_classes = [IsAuthenticated]
@@ -238,7 +262,7 @@ class BankSampahDirectoryView(ListAPIView[BankSampah]):
             qs = qs.filter(Q(nama__icontains=q) | Q(alamat__icontains=q) | Q(kota__icontains=q))
         kota = (self.request.query_params.get("kota") or "").strip()
         if kota:
-            qs = qs.filter(kota__icontains=kota)  # PIL-329 option A placeholder
+            qs = qs.filter(kota__icontains=normalisasi_kota(kota))
         return qs
 
 
