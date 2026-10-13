@@ -1,10 +1,12 @@
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 from types import SimpleNamespace
+from typing import cast
 
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework import serializers
+from rest_framework.request import Request
 from rest_framework.test import APITestCase
 
 from api.models import BankSampah, JadwalKegiatan, Nasabah, User
@@ -148,7 +150,9 @@ class JadwalNasabahListTests(APITestCase):
     def test_nasabah_non_read_queryset_is_empty(self) -> None:
         viewset = JadwalKegiatanViewSet()
         viewset.action = "update"
-        viewset.request = SimpleNamespace(user=self.user, query_params={})
+        viewset.request = cast(
+            Request, SimpleNamespace(user=self.user, query_params={})
+        )
 
         self.assertFalse(viewset.get_queryset().exists())
 
