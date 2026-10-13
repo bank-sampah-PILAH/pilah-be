@@ -150,9 +150,7 @@ class JadwalNasabahListTests(APITestCase):
     def test_nasabah_non_read_queryset_is_empty(self) -> None:
         viewset = JadwalKegiatanViewSet()
         viewset.action = "update"
-        viewset.request = cast(
-            Request, SimpleNamespace(user=self.user, query_params={})
-        )
+        viewset.request = cast(Request, SimpleNamespace(user=self.user, query_params={}))
 
         self.assertFalse(viewset.get_queryset().exists())
 
