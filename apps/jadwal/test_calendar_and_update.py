@@ -1,4 +1,5 @@
-from datetime import timedelta
+from collections.abc import Iterable
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from django.test import TestCase
@@ -99,7 +100,13 @@ class JadwalNasabahListTests(APITestCase):
         )
 
     @staticmethod
-    def _schedule(bank, manager, starts_at, coverage, recipients=()):
+    def _schedule(
+        bank: BankSampah,
+        manager: User,
+        starts_at: datetime,
+        coverage: str,
+        recipients: Iterable[Nasabah] = (),
+    ) -> JadwalKegiatan:
         schedule = JadwalKegiatan.objects.create(
             bank_sampah=bank,
             dibuat_oleh=manager,
