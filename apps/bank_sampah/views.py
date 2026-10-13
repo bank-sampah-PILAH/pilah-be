@@ -348,7 +348,10 @@ class BankSampahDirectoryView(ListAPIView[BankSampah]):
         )
         kandidat = sorted(
             (
-                (bank, haversine_km(lat, lng, float(str(bank.latitude)), float(str(bank.longitude))))
+                (
+                    bank,
+                    haversine_km(lat, lng, float(str(bank.latitude)), float(str(bank.longitude))),
+                )
                 for bank in self.get_queryset().filter(
                     latitude__isnull=False, longitude__isnull=False
                 )

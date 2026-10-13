@@ -10,13 +10,13 @@ from rest_framework import serializers
 from rest_framework.test import APITestCase
 
 from api.models import BankSampah, JenisSampah, User
+from apps.bank_sampah.geo import haversine_km
 from apps.bank_sampah.serializers import (
     BankSampahApprovalListSerializer,
     BankSampahDirectorySerializer,
     BankSampahRegistrationSerializer,
     BankSampahSerializer,
 )
-from apps.bank_sampah.geo import haversine_km
 from apps.bank_sampah.services import BankOnboardingService
 
 REGISTRATION = {
@@ -485,7 +485,9 @@ class BankDirectoryLocationSearchTests(APITestCase):
 
     def test_q_and_kota_combine_with_radius(self) -> None:
         self.assertEqual(self._names(self._trio(radius_km=5, q="Menengah")), ["Bank Menengah"])
-        self.assertEqual(self._names(self._trio(radius_km=5, kota="Depok", q="Dekat")), ["Bank Dekat"])
+        self.assertEqual(
+            self._names(self._trio(radius_km=5, kota="Depok", q="Dekat")), ["Bank Dekat"]
+        )
 
     def test_non_joinable_banks_excluded_in_radius_mode(self) -> None:
         induk = BankSampah.objects.create(
