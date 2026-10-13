@@ -129,6 +129,21 @@ class JadwalNasabahListTests(APITestCase):
             {str(self.own_schedule.id), str(self.targeted_schedule.id)},
         )
 
+    def test_retrieve_is_scoped_to_selected_membership(self) -> None:
+        own = self.client.get(
+            f"/api/v1/jadwal/{self.own_schedule.id}",
+            {"keanggotaan_id": str(self.member.id)},
+        )
+        other = self.client.get(
+            f"/api/v1/jadwal/{self.other_schedule.id}",
+            {"keanggotaan_id": str(self.member.id)},
+        )
+        missing_selection = self.client.get(f"/api/v1/jadwal/{self.other_schedule.id}")
+
+        self.assertEqual(own.status_code, 200)
+        self.assertEqual(other.status_code, 404)
+        self.assertEqual(missing_selection.status_code, 422)
+
     def test_membership_selection_errors_follow_nasabah_contract(self) -> None:
         for query, expected in (({}, 422), ({"keanggotaan_id": "bad"}, 422)):
             with self.subTest(query=query):
