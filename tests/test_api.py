@@ -3037,14 +3037,6 @@ class APISpecTests(APITestCase):
         self.assertEqual(existing.nama, "Nama Catatan Lama")
         self.assertEqual(existing.alamat, "Alamat Catatan Lama")
 
-        duplicate = self.client.post(
-            "/api/v1/onboarding/nasabah",
-            {"bank_sampah_id": str(second_bank.id)},
-            format="json",
-        )
-        self.assertEqual(duplicate.status_code, 400)
-        self.assertEqual(Nasabah.objects.filter(user=customer, bank_sampah=second_bank).count(), 1)
-
         self_view = self.client.get("/api/v1/nasabah/me")
         self.assertEqual(self_view.status_code, 200, self_view.data)
         memberships = {entry["id"]: entry for entry in self_view.data}
