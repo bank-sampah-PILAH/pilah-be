@@ -16,6 +16,7 @@ from apps.bank_sampah.serializers import (
     BankSampahRegistrationSerializer,
     BankSampahSerializer,
 )
+from apps.bank_sampah.geo import haversine_km
 from apps.bank_sampah.services import BankOnboardingService
 
 REGISTRATION = {
@@ -334,6 +335,184 @@ class BankDirectorySearchTests(APITestCase):
         # DRF omits `page=1` from the previous link.
         self.assertIn("page_size=1", response.data["previous"])
         self.assertNotIn("page=2", response.data["previous"])
+
+
+class HaversineTests(SimpleTestCase):
+    def test_known_pair_within_tolerance(self) -> None:
+        # Depok ↔ Monas, Jakarta: ~15 km ground truth for this lat band.
+        jarak = haversine_km(-6.362829, 106.828655, -6.175110, 106.827750)
+        self.assertAlmostEqual(jarak, 20.9, delta=0.5)
+
+    def test_same_point_is_zero(self) -> None:
+        self.assertEqual(haversine_km(-6.362829, 106.828655, -6.362829, 106.828655), 0.0)
+
+
+class BankDirectoryLocationSearchTests(APITestCase):
+    """Coordinate + radius search on the directory list (PIL-314)."""
+
+    url = "/api/v1/bank-sampah"
+
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(email="cari@example.test", nama="Pencari")
+        self.client.force_authenticate(self.user)
+        # All in Depok, spread so distances differ: Dekat < Menengah < Jauh.
+        self.dekat = BankSampah.objects.create(
+            nama="Bank Dekat",
+            alamat="Jl. A No. 1",
+            kota="Depok",
+            latitude=Decimal("-6.362829"),
+            longitude=Decimal("106.828655"),
+        )
+        self.menengah = BankSampah.objects.create(
+            nama="Bank Menengah",
+            alamat="Jl. B No. 2",
+            kota="Depok",
+            latitude=Decimal("-6.372000"),
+            longitude=Decimal("106.838000"),
+        )
+        self.jauh = BankSampah.objects.create(
+            nama="Bank Jauh",
+            alamat="Jl. C No. 3",
+            kota="Depok",
+            latitude=Decimal("-6.382000"),
+            longitude=Decimal("106.848000"),
+        )
+        self.tanpa_koord = BankSampah.objects.create(
+            nama="Bank Tanpa Koordinat", alamat="Jl. D No. 4", kota="Depok"
+        )
+        self.pusat = (-6.362829, 106.828655)  # = dekat's own coordinates.
+
+    def _names(self, query: Mapping[str, Any]) -> list[str]:
+        return [item["nama"] for item in self.client.get(self.url, query).data["results"]]
+
+    def _trio(self, **overrides: Any) -> dict[str, Any]:
+        query = {
+            "latitude": str(self.pusat[0]),
+            "longitude": str(self.pusat[1]),
+            "radius_km": "5",
+        }
+        query.update({k: str(v) for k, v in overrides.items()})
+        return query
+
+    def test_radius_returns_only_in_circle_banks_with_jarak_km(self) -> None:
+        # menengah sits ~1.45 km out; radius 1 keeps only dekat (0 km).
+        data = self.client.get(self.url, self._trio(radius_km=1)).data
+        self.assertEqual(data["count"], 1)
+        hasil = data["results"][0]
+        self.assertEqual(hasil["nama"], "Bank Dekat")
+        self.assertIn("jarak_km", hasil)
+        self.assertEqual(float(hasil["jarak_km"]), 0.0)
+
+    def test_radius_hides_null_coordinate_banks(self) -> None:
+        self.assertIn("Bank Tanpa Koordinat", self._names({"kota": "Depok"}))
+        self.assertNotIn("Bank Tanpa Koordinat", self._names(self._trio(radius_km=100)))
+
+    def test_boundary_bank_exactly_at_radius_is_included(self) -> None:
+        # tanpa_koord sits at ~0 km on the same point if given coords; instead
+        # use menengah and ask for exactly its distance from pusat.
+        jarak = haversine_km(
+            self.pusat[0],
+            self.pusat[1],
+            float(str(self.menengah.latitude)),
+            float(str(self.menengah.longitude)),
+        )
+        nama = self._names(self._trio(radius_km=f"{jarak:.6f}"))
+        self.assertIn("Bank Menengah", nama)
+
+    def test_partial_location_trio_is_422(self) -> None:
+        for partial in (
+            {"latitude": "-6.36"},
+            {"longitude": "106.82"},
+            {"radius_km": "5"},
+            {"latitude": "-6.36", "longitude": "106.82"},
+        ):
+            with self.subTest(params=sorted(partial)):
+                response = self.client.get(self.url, partial)
+                self.assertEqual(response.status_code, 422)
+
+    def test_invalid_ranges_and_radius_bounds_are_422(self) -> None:
+        for query in (
+            {"latitude": "95", "longitude": "106", "radius_km": "5"},  # lat out of range
+            {"latitude": "abc", "longitude": "106", "radius_km": "5"},
+            {"latitude": "-6.36", "longitude": "200", "radius_km": "5"},  # lng out of range
+            {"latitude": "-6.36", "longitude": "106", "radius_km": "0"},
+            {"latitude": "-6.36", "longitude": "106", "radius_km": "-1"},
+            {"latitude": "-6.36", "longitude": "106", "radius_km": "101"},  # over cap
+            {"latitude": "-6.36", "longitude": "106", "radius_km": "nol"},
+        ):
+            with self.subTest(query=str(query)):
+                response = self.client.get(self.url, query)
+                self.assertEqual(response.status_code, 422)
+
+    def test_sort_distance_orders_nearest_first_with_jarak_values(self) -> None:
+        data = self.client.get(self.url, self._trio(radius_km=5, sort="distance")).data
+        hasil = data["results"]
+        self.assertEqual([b["nama"] for b in hasil], ["Bank Dekat", "Bank Menengah", "Bank Jauh"])
+        jarak = [float(b["jarak_km"]) for b in hasil]
+        self.assertEqual(jarak, sorted(jarak))
+        self.assertTrue(jarak[0] < jarak[1] < jarak[2])
+
+    def test_sort_distance_without_location_is_422(self) -> None:
+        response = self.client.get(self.url, {"sort": "distance"})
+        self.assertEqual(response.status_code, 422)
+
+    def test_location_sort_defaults_to_nama_not_distance(self) -> None:
+        # No sort param: nama ordering still applies despite distance mode.
+        self.assertEqual(
+            self._names(self._trio(radius_km=5)), ["Bank Dekat", "Bank Jauh", "Bank Menengah"]
+        )
+
+    def test_sort_and_pagination_page_two_is_ranks_three_four_of_full_set(self) -> None:
+        # 5 banks at growing distances; page_size=2 → page 1 = ranks 1-2,
+        # page 2 = ranks 3-4 of the FULL sorted set, never a per-page re-sort.
+        for i in range(3, 6):
+            BankSampah.objects.create(
+                nama=f"Bank K{i}",
+                alamat="Jl. K",
+                kota="Depok",
+                latitude=Decimal(f"-6.40{i}"),  # each ~111 m further south
+                longitude=Decimal("106.828655"),
+            )
+        data = self.client.get(
+            self.url, self._trio(radius_km=10, sort="distance", page_size=2, page=2)
+        ).data
+        self.assertEqual(data["count"], 6)  # dekat + menengah + jauh + 3 new (tanpa_koord hidden)
+        ranks = [b["nama"] for b in data["results"]]
+        # Page 1 would be [Dekat, Menengah]; page 2 must skip to ranks 3-4.
+        self.assertEqual(ranks, ["Bank Jauh", "Bank K3"])
+        jarak = [float(b["jarak_km"]) for b in data["results"]]
+        self.assertTrue(jarak[0] < jarak[1])
+
+    def test_q_and_kota_combine_with_radius(self) -> None:
+        self.assertEqual(self._names(self._trio(radius_km=5, q="Menengah")), ["Bank Menengah"])
+        self.assertEqual(self._names(self._trio(radius_km=5, kota="Depok", q="Dekat")), ["Bank Dekat"])
+
+    def test_non_joinable_banks_excluded_in_radius_mode(self) -> None:
+        induk = BankSampah.objects.create(
+            nama="Induk BTH",
+            jenis_organisasi=BankSampah.OrganizationType.INDUK,
+            latitude=Decimal("-6.362829"),
+            longitude=Decimal("106.828655"),
+            no_hp_pic="081",
+        )
+        pending = BankSampah.objects.create(
+            nama="Bank Pending",
+            status=BankSampah.Status.PENDING,
+            latitude=Decimal("-6.362829"),
+            longitude=Decimal("106.828655"),
+            no_hp_pic="081",
+        )
+        nonaktif = BankSampah.objects.create(
+            nama="Bank Nonaktif",
+            is_active=False,
+            latitude=Decimal("-6.362829"),
+            longitude=Decimal("106.828655"),
+            no_hp_pic="081",
+        )
+        nama_hadir = self._names(self._trio(radius_km=5, sort="distance"))
+        for bank, why in [(induk, "induk"), (pending, "pending"), (nonaktif, "nonaktif")]:
+            with self.subTest(why):
+                self.assertNotIn(bank.nama, nama_hadir)
 
 
 class BankDetailTests(APITestCase):
