@@ -7,6 +7,8 @@
 # Not here on purpose:
 #   - gitleaks / pip-audit / migration-linter -> scheduled-checks.yml
 #     (weekly cron + manual dispatch)
+#   - Nuclei exposure scan -> nuclei-scan.yml (called below after the staging deploy;
+#     also weekly + manual dispatch)
 #   - docker build + trivy -> deploy-cloud-run.yml (built once for deploy,
 #     scanned there; no duplicate image build in CI)
 name: CI
@@ -255,3 +257,16 @@ jobs:
           PILAH_SEED_SUPERADMIN_EMAIL: ${{ vars.PILAH_SEED_SUPERADMIN_EMAIL }}
           PILAH_SEED_PENDING_PENGURUS_EMAIL: ${{ vars.PILAH_SEED_PENDING_PENGURUS_EMAIL || vars.PILAH_SEED_PENDING_OPERATOR_EMAIL }}
           PILAH_SEED_INDUK_EMAIL: ${{ vars.PILAH_SEED_INDUK_EMAIL || 'induk.demo@example.com' }}
+
+  # Read-only exposure scan of the just-deployed staging API. Runs only when verify and
+  # deploy_staging succeeded (skipped otherwise). It does not undo the deploy; a finding
+  # outside KNOWN_NOISE makes this job, and so the commit's CI run, red.
+  nuclei_post_deploy:
+    name: Exposure scan (Nuclei, staging API)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    needs: deploy_staging
+    permissions:
+      contents: read
+    uses: ./.github/workflows/nuclei-scan.yml
+    with:
+      environment: staging
