@@ -30,6 +30,8 @@ jobs:
   deploy:
     name: Build and deploy
     runs-on: ubuntu-latest
+    outputs:
+      url: ${{ steps.service_url.outputs.url }}
 
     steps:
       - name: Checkout
@@ -104,3 +106,22 @@ jobs:
 
       - name: Bootstrap production Superadmins
         run: python3 scripts/bootstrap_cloud_run.py
+
+      - name: Read the deployed service URL
+        id: service_url
+        run: |
+          url="$(gcloud run services describe "${SERVICE_NAME}" \
+            --project "${PROJECT_ID}" --region "${REGION}" --format='value(status.url)')"
+          [[ "$url" =~ ^https://[a-z0-9.-]+\.run\.app$ ]] || { echo "::error::Unexpected Cloud Run URL."; exit 1; }
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+  # Scans what was just deployed. It only flags the commit red; the deploy is already live.
+  nuclei_post_deploy:
+    name: Exposure scan (Nuclei, production API)
+    needs: deploy
+    permissions:
+      contents: read
+    uses: ./.github/workflows/nuclei-scan.yml
+    with:
+      environment: production
+      target_url: ${{ needs.deploy.outputs.url }}
