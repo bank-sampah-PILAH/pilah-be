@@ -3,9 +3,12 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from corsheaders.defaults import default_headers
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.crypto import get_random_string
 from dotenv import load_dotenv
+
+from shared_kernel.http_headers import HEADER_PERMINTAAN_KUSTOM, HEADER_RESPONS_TEREKSPOS
 
 load_dotenv()
 
@@ -222,6 +225,17 @@ CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "true").lower() == 
 CORS_ALLOWED_ORIGINS = [
     origin.strip() for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if origin.strip()
 ]
+
+# CORS_ALLOW_ALL_ORIGINS permits any origin but NOT arbitrary request headers:
+# django-cors-headers answers the preflight with its own default list, which
+# carries no custom header. Both lists below are derived from the registry in
+# shared_kernel/http_headers.py so they cannot drift from the headers the
+# views actually read and write.
+CORS_ALLOW_HEADERS = (
+    *default_headers,
+    *(header.lower() for header in HEADER_PERMINTAAN_KUSTOM),
+)
+CORS_EXPOSE_HEADERS = HEADER_RESPONS_TEREKSPOS
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
