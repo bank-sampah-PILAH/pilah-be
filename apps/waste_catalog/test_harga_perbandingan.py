@@ -168,3 +168,31 @@ class HargaPerbandinganTests(APITestCase):
     def test_unauthenticated_is_401(self) -> None:
         self.client.credentials(HTTP_AUTHORIZATION="")
         self.assertEqual(self._fetch().status_code, 401)
+
+    def test_unknown_uuid_bank_row_falls_back_to_empty_identity(self) -> None:
+        # A syntactically valid UUID that matches no bank at all: the row must
+        # still name nothing without crashing on a missing identity.
+        asing = uuid4()
+        response = self._fetch(banks=f"{self.bank_a.id},{asing}")
+        self.assertEqual(response.status_code, 200)
+        baris_asing = response.data["perbandingan"][1]
+        self.assertEqual(baris_asing["bank_sampah_id"], str(asing))
+        self.assertEqual(baris_asing["nama"], "")
+        self.assertEqual(baris_asing["kota"], "")
+        self.assertEqual(baris_asing["alasan"], "bukan_bank_bisa_gabung")
+
+    def test_non_uuid_bank_ids_is_422(self) -> None:
+        with self.subTest(bank_ids="bukan-uuid"):
+            response = self.client.get(
+                URL, {"jenis_sampah_id": str(self.jenis_asal.id), "bank_ids": "bukan-uuid"}
+            )
+            self.assertEqual(response.status_code, 422)
+        with self.subTest(bank_ids="campuran"):
+            response = self.client.get(
+                URL,
+                {
+                    "jenis_sampah_id": str(self.jenis_asal.id),
+                    "bank_ids": f"{self.bank_a.id},tesss",
+                },
+            )
+            self.assertEqual(response.status_code, 422)

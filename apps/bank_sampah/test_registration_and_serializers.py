@@ -20,6 +20,7 @@ from apps.bank_sampah.serializers import (
     BankSampahSerializer,
 )
 from apps.bank_sampah.services import BankOnboardingService
+from apps.bank_sampah.views import normalisasi_kota
 
 REGISTRATION = {
     "nama": "Bank Sampah Baru",
@@ -656,3 +657,126 @@ class BankHierarchyModelTests(TestCase):
             mandiri.save()
 
         self.assertIn("parent", caught.exception.message_dict)
+
+
+class BankDirectoryCoverageGapsTests(APITestCase):
+    """Branch/condition completeness for the directory endpoints.
+
+    Not new behavior: closes boundary and empty-state branches that earlier
+    PIL-314/326/308 tests left uncovered so new-code coverage stays above 99%.
+    """
+
+    url = "/api/v1/bank-sampah"
+
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(email="cari@example.test", nama="Pencari")
+        self.client.force_authenticate(self.user)
+        self.bank = BankSampah.objects.create(
+            nama="Bank Satu",
+            alamat="Jl. A No. 1",
+            kota="Depok",
+            latitude=Decimal("-6.362829"),
+            longitude=Decimal("106.828655"),
+        )
+
+    def _trio(self, **overrides: Any) -> dict[str, Any]:
+        query = {
+            "latitude": "-6.362829",
+            "longitude": "106.828655",
+            "radius_km": "5",
+            **overrides,
+        }
+        return {k: v for k, v in query.items() if v is not None}
+
+    def test_radius_cap_of_one_hundred_km_is_accepted(self) -> None:
+        # Radius at exactly the cap is valid; only strictly-above is 422.
+        response = self.client.get(self.url, self._trio(radius_km="100"))
+        self.assertEqual(response.status_code, 200)
+
+    def test_coordinate_limits_are_inclusive(self) -> None:
+        # ±90 / ±180 are accepted: the range check is a closed interval.
+        for query in (
+            self._trio(latitude="-90"),
+            self._trio(latitude="90"),
+            self._trio(longitude="-180"),
+            self._trio(longitude="180"),
+        ):
+            with self.subTest(query=str(query)):
+                response = self.client.get(self.url, query)
+                self.assertEqual(response.status_code, 200)
+
+    def test_distance_search_with_no_bank_in_radius_is_empty_envelope(self) -> None:
+        # Nothing within 1 km: count 0, empty results, no crash.
+        response = self.client.get(
+            self.url,
+            self._trio(latitude="-3.0", longitude="105.0", radius_km="1", sort="distance"),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 0)
+        self.assertEqual(response.data["results"], [])
+
+    def test_keyword_search_with_no_match_is_empty_envelope(self) -> None:
+        response = self.client.get(self.url, {"q": "kata-tak-ada", "page_size": "5"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 0)
+        self.assertEqual(response.data["results"], [])
+
+
+class BankDetailCoverageGapsTests(APITestCase):
+    """Detail-endpoint branch completeness (PIL-308/326/351).
+
+    Unauthenticated access, zero-layanan banks, null coordinates, and an
+    active jenis that has never had a price version.
+    """
+
+    url = "/api/v1/bank-sampah"
+
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(email="cari@example.test", nama="Pencari")
+        self.bank = BankSampah.objects.create(
+            nama="Bank Sederhana", alamat="Jl. B No. 2", kota="Depok"
+        )
+
+    def _detail(self, bank: BankSampah | None = None) -> Any:
+        url = f"{self.url}/{(bank or self.bank).id}"
+        return self.client.get(url)
+
+    def test_detail_unauthenticated_is_401(self) -> None:
+        response = self._detail()
+        self.assertEqual(response.status_code, 401)
+
+    def test_detail_of_bank_without_layanan_or_coordinates(self) -> None:
+        self.client.force_authenticate(self.user)
+        data = self._detail().data
+        self.assertEqual(data["layanan"], [])
+        self.assertIsNone(data["latitude"])
+        self.assertIsNone(data["longitude"])
+
+    def test_active_layanan_without_any_price_version_has_null_harga(self) -> None:
+        # An active jenis with no HargaSampah version at all: the row is
+        # listed but prices as null rather than disappearing.
+        self.client.force_authenticate(self.user)
+        JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="K-1",
+            nama_sampah="Kardus",
+            kategori=JenisSampah.Kategori.KERTAS,
+            is_active=True,
+        )
+        data = self._detail().data
+        self.assertEqual(len(data["layanan"]), 1)
+        self.assertIsNone(data["layanan"][0]["harga_per_kg"])
+        self.assertIsNone(data["layanan"][0]["harga_berlaku_mulai"])
+
+
+class KotaNormalisasiTests(SimpleTestCase):
+    """normalisasi_kota stack-loop behavior (PIL-329 option A)."""
+
+    def test_double_prefix_collapses_through_a_second_loop_pass(self) -> None:
+        # "Kabupaten Kota X": the first pass strips "kabupaten ", the second
+        # loop pass strips "kota " from what is now the head of the string.
+        self.assertEqual(normalisasi_kota("Kabupaten Kota Depok"), "depok")
+        self.assertEqual(normalisasi_kota("Kotamadya Kab. Cimahi"), "cimahi")
+
+    def test_plain_name_is_already_stable(self) -> None:
+        self.assertEqual(normalisasi_kota("  Depok  "), "depok")
