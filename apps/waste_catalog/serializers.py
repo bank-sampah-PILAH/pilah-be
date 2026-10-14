@@ -161,8 +161,6 @@ class DirectoryLayananSerializer(serializers.ModelSerializer[Model]):
             "kategori",
             "deskripsi",
             "satuan",
-            "harga_per_kg",
-            "harga_berlaku_mulai",
         ]
 
     def get_satuan(self, obj: Any) -> Any:

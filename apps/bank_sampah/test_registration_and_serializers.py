@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 from unittest.mock import patch
@@ -6,10 +7,11 @@ from unittest.mock import patch
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.test import APITestCase
 
-from api.models import BankSampah, JenisSampah, User
+from api.models import BankSampah, HargaSampah, JenisSampah, User
 from apps.bank_sampah.geo import haversine_km
 from apps.bank_sampah.serializers import (
     BankSampahApprovalListSerializer,
@@ -535,14 +537,20 @@ class BankDetailTests(APITestCase):
             ("P-2", "Botol", "plastik", 2000, True),
             ("X-9", "Nonaktif", "dll", 500, False),
         ]:
-            JenisSampah.objects.create(
+            jenis = JenisSampah.objects.create(
                 bank_sampah=self.bank,
                 nomor=nomor,
                 nama_sampah=nama_sampah,
                 kategori=kategori,
-                harga_per_kg=harga,
                 is_active=aktif,
             )
+            if aktif:
+                HargaSampah.objects.create(
+                    jenis_sampah=jenis,
+                    bank_sampah=self.bank,
+                    harga_per_kg=harga,
+                    berlaku_mulai=timezone.now() - timedelta(days=1),
+                )
 
     def _detail(self, bank: BankSampah | None = None) -> Mapping[str, Any]:
         url = f"{self.url}/{(bank or self.bank).id}"
