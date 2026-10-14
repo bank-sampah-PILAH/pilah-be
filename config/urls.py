@@ -16,14 +16,17 @@ Including another URLconf
 """
 
 from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
 from django.http import HttpRequest, JsonResponse
-from django.urls import include, path
+from django.urls import include, path, re_path
+from django.views.decorators.http import require_GET
 from django.views.generic import TemplateView
+from django.views.static import serve
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-from api.health import healthz
+from apps.bank_sampah.views import bank_sampah_activity_media
+from shared_kernel.debug_only import debug_only
+from shared_kernel.health import healthz
 
 
 class ApiTestView(TemplateView):
@@ -32,9 +35,16 @@ class ApiTestView(TemplateView):
     def get_context_data(self, **kwargs: object) -> dict[str, object]:
         context = super().get_context_data(**kwargs)
         context["google_client_id"] = settings.GOOGLE_CLIENT_ID
+        superadmin_emails = settings.PILAH_SUPERADMIN_EMAILS
+        context["test_superadmin_email"] = (
+            superadmin_emails[0]
+            if settings.DEBUG and settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN and superadmin_emails
+            else ""
+        )
         return context
 
 
+@require_GET  # S3752: static JSON for Android app links; only GET is valid.
 def assetlinks(request: HttpRequest) -> JsonResponse:
     return JsonResponse(
         [
@@ -60,11 +70,25 @@ urlpatterns = [
     path("healthz", healthz, name="healthz"),
     path("admin/", admin.site.urls),
     path(".well-known/assetlinks.json", assetlinks, name="assetlinks"),
-    path("api-test/", ApiTestView.as_view(), name="api-test"),
-    path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
-    path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
+    # Developer tools: served only when DEBUG is on, so staging and production answer 404.
+    path("api-test/", debug_only(ApiTestView.as_view()), name="api-test"),
+    path("api/schema/", debug_only(SpectacularAPIView.as_view()), name="schema"),
+    path(
+        "api/docs/",
+        debug_only(SpectacularSwaggerView.as_view(url_name="schema")),
+        name="swagger-ui",
+    ),
     path("api/v1/", include("api.urls")),
+    path(
+        "media/activity/<path:token>", bank_sampah_activity_media, name="bank-sampah-activity-media"
+    ),
 ]
 
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+if settings.SERVE_MEDIA:
+    urlpatterns += [
+        re_path(
+            r"^media/bank_sampah/logo/(?P<path>.*)$",
+            serve,
+            {"document_root": settings.MEDIA_ROOT / "bank_sampah/logo"},
+        ),
+    ]

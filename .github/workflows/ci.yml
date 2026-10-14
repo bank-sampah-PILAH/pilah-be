@@ -1,7 +1,8 @@
-# CI — the merge gate for pilah-be. One verification job, one dependency
-# install: ruff, postgres tests with coverage, migration checks, django
-# checks, mypy. Deliberately single-job — small/mid project on a limited
-# free-tier Actions budget; merge feedback should be fast and cheap.
+# CI — the merge gate for pilah-be. One verification job runs lint, postgres
+# tests with coverage, migration checks, Django checks, and mypy. Successful
+# staging pushes then deploy the verified commit to Fly.io. Feature branches
+# are also analyzed (push trigger) so SonarCloud shows all branches, not just
+# main/staging.
 #
 # Not here on purpose:
 #   - gitleaks / pip-audit / migration-linter -> scheduled-checks.yml
@@ -15,11 +16,13 @@ on:
     branches:
       - staging
       - main
+      - feature/**
   pull_request:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Do not interrupt a staging deploy/seed pair with a newer push.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/staging' }}
 
 env:
   # Env shared by all management-command steps. Placeholders only — CI never
@@ -60,6 +63,9 @@ jobs:
       DB_PORT: "5432"
     steps:
       - uses: actions/checkout@v4
+        with:
+          # PR diff coverage compares against the actual stacked base branch.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -71,7 +77,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install ruff==0.16.6 coverage mypy==2.3.1 django-stubs djangorestframework-stubs==3.18.1
+          pip install ruff==0.16.6 coverage diff-cover==10.6.0 mypy==2.3.1 django-stubs djangorestframework-stubs==3.18.1
 
       # pyproject.toml [tool.ruff] holds the config. Blocking: a failing rule
       # fails the gate. BLE001/S110/RUF012 are ignored there by design (DRF
@@ -96,10 +102,27 @@ jobs:
       # Plain `manage.py test` = discovery across every Django app, so tests
       # in future apps (not just api/) still gate the build.
       - name: Run tests with coverage
-        run: coverage run --source=api manage.py test -v 2
+        run: coverage run --source=api,apps,config,shared_kernel manage.py test -v 2
 
       - name: Coverage report (fail under 80%)
         run: coverage report --show-missing --skip-covered --fail-under=80
+
+      # XML report for the SonarQube step below (sonar.python.coverage.
+      # reportPaths reads it); not a gate here — the coverage report above
+      # already enforces 80%.
+      - name: Coverage XML for Sonar
+        run: coverage xml
+
+      # Report only executable lines changed by this PR. The base ref comes
+      # from GitHub so stacked PRs compare against their immediate parent.
+      - name: PR diff coverage (fail under 80%)
+        if: github.event_name == 'pull_request'
+        run: >-
+          diff-cover coverage.xml
+          --compare-branch=origin/${{ github.base_ref }}
+          --fail-under=80
+          --total-percent-float
+          --show-uncovered
 
       - name: Django system checks
         run: python manage.py check
@@ -115,4 +138,120 @@ jobs:
       # checking, django-stubs plugin resolves models/FKs. Blocking — new
       # code must be fully typed.
       - name: mypy strict
-        run: mypy api config
+        run: mypy api apps config shared_kernel tests
+
+      # --- SonarCloud analysis (was its own sonar.yml workflow) ---
+      #
+      # Why folded in here instead of a separate workflow:
+      #   1. Coverage: Sonar needs coverage.xml, and that file only exists
+      #      inside this workspace after `coverage run`/`coverage xml`. A
+      #      separate workflow would need artifact upload/download between
+      #      jobs with a race between the two concurrent runs, and an extra
+      #      runner minute burned re-checking out and re-installing. Here the
+      #      report is just there.
+      #   2. One gate, one place: CI is already the merge gate, so a failed
+      #      Sonar push surfaces in the same run a reviewer already watches.
+      #
+      # Reports to SonarCloud (org bank-sampah-pilah, project
+      # bank-sampah-PILAH_pilah-be). Unlike the old self-hosted Community
+      # Edition, SonarCloud owns branch handling: the scanner auto-detects
+      # sonar.branch.* / sonar.pullrequest.* from the Actions environment, so
+      # every branch and PR gets its own analysis without per-branch project
+      # keys. Branch params must NOT be set manually here — SonarCloud
+      # rejects user-supplied ones. No SONAR_HOST_URL: the action defaults to
+      # sonarcloud.io unless pointing at self-hosted. Auth is the
+      # SONAR_TOKEN repo secret (Execute Analysis scope).
+      #
+      # v8 bundles Scanner CLI 8.x: embedded Java 21 JRE (no JRE
+      # provisioning) and JDK-native HTTP client. The CLI 6.x okhttp client
+      # gets 403 from SonarCloud's CDN on api.sonarcloud.io bootstrap calls
+      # (TLS-fingerprint WAF rule) — 8.x resolves that by construction.
+      # Java 21 for the scanner engine: with skipJreProvisioning the CLI never
+      # calls api.sonarcloud.io/analysis/jres (GitHub runner IPs get a
+      # deterministic 403 from SonarCloud's CDN), it just runs on this JDK.
+      - name: Set up Java 21 (scanner engine)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # The SonarCloud API intermittently answers 403 to runner traffic: same
+      # args/token get accepted from one runner and rejected from another
+      # minutes apart (CDN-side; happens at bootstrap, before the scan
+      # itself). First attempt gets continue-on-error, second attempt runs
+      # only on failure — a fresh connection usually gets through. Keep both
+      # arg blocks identical.
+      - name: SonarCloud analysis
+        id: sonar_scan
+        continue-on-error: true
+        uses: SonarSource/sonarqube-scan-action@v8.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=bank-sampah-pilah
+            -Dsonar.projectKey=bank-sampah-PILAH_pilah-be
+            -Dsonar.sources=api,apps,config,shared_kernel,tests
+            -Dsonar.tests=api,apps,tests
+            -Dsonar.test.inclusions=**/tests.py,**/test_*.py
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.exclusions=**/migrations/**,**/*.pyc,**/__pycache__/**,**/staticfiles/**,reference/**
+            -Dsonar.python.version=3.12
+            -Dsonar.scanner.skipJreProvisioning=true
+
+      - name: SonarCloud analysis (retry)
+        if: steps.sonar_scan.outcome == 'failure'
+        uses: SonarSource/sonarqube-scan-action@v8.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=bank-sampah-pilah
+            -Dsonar.projectKey=bank-sampah-PILAH_pilah-be
+            -Dsonar.sources=api,apps,config,shared_kernel,tests
+            -Dsonar.tests=api,apps,tests
+            -Dsonar.test.inclusions=**/tests.py,**/test_*.py
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+            -Dsonar.exclusions=**/migrations/**,**/*.pyc,**/__pycache__/**,**/staticfiles/**,reference/**
+            -Dsonar.python.version=3.12
+            -Dsonar.scanner.skipJreProvisioning=true
+
+  deploy_staging:
+    name: Deploy staging to Fly.io
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://pilah-be-staging.fly.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy verified commit
+        run: flyctl deploy --local-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      # One smoke check after deploy: /healthz does a DB round-trip, so this
+      # catches a deploy that went out but came up dead.
+      - name: Smoke check /healthz
+        run: |
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 https://pilah-be-staging.fly.dev/healthz || true)
+            if [ "$code" = "200" ]; then echo "healthz OK"; exit 0; fi
+            echo "healthz=$code, retrying in 10s ($i/12)"; sleep 10
+          done
+          echo "healthz never returned 200"; exit 1
+
+      - name: Seed verified staging deployment
+        run: python3 scripts/seed_staging.py
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          PILAH_SEED_PENGURUS_EMAIL: ${{ vars.PILAH_SEED_PENGURUS_EMAIL || vars.PILAH_SEED_OPERATOR_EMAIL }}
+          PILAH_SEED_CUSTOMER_EMAIL: ${{ vars.PILAH_SEED_CUSTOMER_EMAIL }}
+          PILAH_SEED_CUSTOMER_TWO_EMAIL: ${{ vars.PILAH_SEED_CUSTOMER_TWO_EMAIL }}
+          PILAH_SEED_SUPERADMIN_EMAIL: ${{ vars.PILAH_SEED_SUPERADMIN_EMAIL }}
+          PILAH_SEED_PENDING_PENGURUS_EMAIL: ${{ vars.PILAH_SEED_PENDING_PENGURUS_EMAIL || vars.PILAH_SEED_PENDING_OPERATOR_EMAIL }}
+          PILAH_SEED_INDUK_EMAIL: ${{ vars.PILAH_SEED_INDUK_EMAIL || 'induk.demo@example.com' }}

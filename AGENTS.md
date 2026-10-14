@@ -6,9 +6,10 @@
   workspace.
 - Keep backend implementation changes here, not in the workspace root or the
   mobile repository.
-- Keep the canonical checkout on `main`; use `staging` as the default worktree
-  baseline and pull request target unless the request explicitly names another
-  branch.
+- Use `staging` as the worktree baseline and PR target unless the request names
+  another branch; never infer `main`. A standalone canonical checkout should
+  remain on `staging`. When nested in the workspace, it may be detached at the
+  parent-pinned commit; leave it untouched and work in a sibling worktree.
 
 ## Development
 
@@ -18,17 +19,118 @@
   `pip install -r requirements.txt` when `uv` is unavailable.
 - Docker setup and environment variables are documented in `README.md`.
 
+## Aturan data nasabah
+
+- Akun dan keanggotaan adalah dua data yang terpisah, dan tidak ada
+  penyalinan di antara keduanya setelah baris keanggotaan dibuat. Profil akun
+  (`User`: `nama`, `jenis_kelamin`, `tanggal_lahir`, `alamat`, `no_hp`) milik
+  nasabah; baris `Nasabah` adalah catatan satu bank sampah tentang nasabah itu,
+  bersama nomor anggota (`kode`), `is_active`, dan `status`. Nasabah yang
+  menyimpan profilnya tidak menimpa catatan pengurus, dan perbaikan pengurus
+  tidak menyentuh akun atau keanggotaan di bank sampah lain. Satu-satunya
+  penyalinan adalah saat pendaftaran keanggotaan (`register_nasabah`, termasuk
+  ajukan ulang setelah ditolak). Nasabah boleh menyimpan ulang profilnya kapan
+  saja; hanya pengelola yang dibatasi satu kali.
+- Pengurus boleh memperbaiki catatan nasabah berakun, karena ialah yang
+  bertemu nasabah di lapangan. Hanya `email` yang terkunci begitu
+  `Nasabah.user` terisi, dan perubahannya ditolak dengan 403 (PIL-288 merevisi
+  PIL-223, OWASP A01). Email adalah kunci penautan akun dan tidak dijaga oleh
+  apa pun selain aturan ini. Daftar field yang terkunci ada di
+  `FIELD_TERKUNCI`.
+- Pengurus melihat profil yang diisikan nasabah sendiri lewat `profil_akun` dan
+  `profil_berbeda` pada detail nasabah (`apps/nasabah/keanggotaan.py`), dan dapat
+  menyamakan catatannya dengan `POST /nasabah/{id}/sinkron-profil`. Salinan itu
+  satu arah (akun ke baris), hanya untuk bank sampah pemanggil, dan sesudahnya
+  catatan tetap dapat disunting. Jangan menambah penyalinan otomatis.
+- Nomor HP unik per bank sampah pada tabel keanggotaan saja, dan hanya
+  diperiksa pada baris yang sedang ditulis. `User.no_hp` tidak unik.
+- Respons nasabah membawa `punya_akun` (read-only) supaya klien dapat
+  menampilkan profil sebagai read-only alih-alih menunggu 403. Penanda
+  tampilan saja; jangan pindahkan keputusan wewenang ke klien (PIL-281).
+- Nasabah tanpa akun tetap dapat dikelola penuh oleh pengurus, karena itulah
+  satu-satunya pihak yang memegang datanya.
+- Semua pemeriksaan wewenang atas data nasabah lewat `apps/nasabah/keanggotaan.py`;
+  jangan menuliskan daftar field terkunci di view.
+- Bandingkan `serializer.validated_data`, bukan `request.data`, saat memeriksa
+  perubahan: nomor HP dinormalisasi ke +62 dan tanggal dikonversi ke `date`.
+
+## Aturan nilai uang
+
+- Rupiah adalah bilangan bulat. Satuan terkecil Rp 1; tidak ada sen maupun
+  setengah rupiah.
+- Setiap perhitungan nilai uang dibulatkan **ke bawah** ke rupiah penuh,
+  mengikuti pola `int()` yang sudah dipakai pada teks WhatsApp dan export
+  Excel.
+- Gunakan `shared_kernel/kalkulasi.py` untuk semua perhitungan dan pembulatan
+  nilai setoran. Jangan memanggil `quantize()` tanpa mode pembulatan: default
+  Python adalah half-even, bukan pembulatan ke bawah.
+- Harga transaksi selalu berasal dari master `JenisSampah` lewat
+  `harga_berlaku()`. Request yang mengirim harga per item ditolak, bukan
+  diabaikan.
+- Pembulatan dilakukan per item, lalu subtotal dijumlahkan menjadi total,
+  supaya total selalu sama dengan angka yang tampil di riwayat dan notifikasi.
+- Data lama dari PILAH 1.0 dapat berisi sen. Bulatkan ke bawah saat nilainya
+  diperbarui, jangan lakukan migrasi massal atas saldo nasabah.
+- Berat (kg) bukan nilai uang: `format_kg` tetap memakai `ROUND_HALF_UP`.
+
+## Aturan input setoran
+
+- Berat boleh desimal hingga 3 angka di belakang koma dan harus lebih dari
+  0 kg.
+- Berat satu item maksimal 500 kg (`BERAT_MAKS_PER_ITEM`) dan total satu
+  setoran maksimal 1.000 kg (`BERAT_MAKS_PER_SETORAN`). Input di atas batas
+  ditolak dengan 422; ubah angkanya hanya lewat konstanta di
+  `apps/ledger/serializers.py`.
+- Harga master harus positif dan dipertahankan presisinya sampai dikalikan
+  dengan berat. Bulatkan subtotal setiap item ke bawah; tolak item yang
+  subtotalnya menjadi Rp 0 supaya transaksi tidak mencatat item tanpa nilai.
+- Peringatan untuk item di atas 100 kg belum dikerjakan; jika dibuat, tempatnya
+  di layar tinjauan setoran pada aplikasi, bukan penolakan di backend.
+
+## Struktur modular monolith
+
+- Kode dibagi per bounded context di `apps/`: `authentication`, `bank_sampah`,
+  `jadwal`, `ledger`, `nasabah`, `notification`, `reporting`, `waste_catalog`;
+  utilitas lintas-context di `shared_kernel/`.
+- Semua model tetap memakai `app_label = "api"` dan `db_table` beku sampai ada
+  squash migration; `api/models.py` hanyalah agregator registry model. Karena
+  itu perpindahan berkas adalah operasi kode murni: jangan membuat migration
+  untuk memindahkan model antar context. Selama squash migration belum ada,
+  `api.models` adalah jalur akses model lintas context (termasuk `Saldo` yang
+  berada di `apps/ledger/models.py`); port `apps/<bc>/api.py` dipakai untuk
+  operasi beratur (query terkunci, aturan eligibility), bukan re-export model.
+- Batas context dijaga test `tests/test_architecture.py`: satu context hanya
+  boleh mengimpor context lain lewat `apps.<bc>.api` (port publik) atau
+  `apps.<bc>.serializers` (DTO), dan tidak boleh menyentuh `api.*` selain
+  `api.models`. Jika context butuh sesuatu dari context lain, tambahkan fungsi
+  ke `apps/<bc>/api.py`, bukan impor langsung ke `services.py`/`views.py`.
+- URL tetap disusun di `api/urls.py`; views diimpor dari rumah canonical-nya
+  di `apps/<bc>/views.py` dengan nama route dan name yang beku.
+- Test penempatan: test mengikuti context-nya (`apps/<bc>/test_*.py`); test
+  lintas-context dan kontrak HTTP dulu ada di `tests/`.
+
 ## Validation
 
-- Run `uv run --with-requirements requirements.txt python manage.py test` when
-  `uv` is available; otherwise run `python manage.py test`.
-- The Docker equivalent is `docker compose exec web python manage.py test`.
+- For backend code or behavior changes, run
+  `uv run --with-requirements requirements.txt python manage.py test` when `uv`
+  is available; otherwise run `python manage.py test`. The Docker equivalent is
+  `docker compose exec web python manage.py test`.
+- For documentation-only changes, run `git diff --check` and configured
+  documentation checks; skip Django tests.
 - Do not commit `.env`, credentials, local databases, media, or generated
   runtime files.
 
 ## Delivery
 
+- When a change involves both backend and mobile, use the workspace
+  `multi-ship` skill with the workspace `ship` skill. Keep backend
+  implementation and ownership of its API contract in this repository; agree
+  the shared contract before parallel work.
+- For Linear-linked work, use the same lowercase issue-derived branch
+  (`feature/<issue-id>`) in each selected repository, with separate PRs to
+  `staging`; do not create a Linear issue unless explicitly requested.
 - Use the local `.agents/skills/ship` skill with the global `ship` workflow for
   feature or fix branches in sibling `pilah-be-worktrees` directories.
+- Keep backend validation tied to the documented Django test command above.
 - Use the local `.agents/skills/lgtm` skill with the global `lgtm` workflow for
   merge and cleanup.

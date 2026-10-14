@@ -1,0 +1,282 @@
+from datetime import timedelta
+from decimal import Decimal
+
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
+from rest_framework.test import APITestCase
+
+from api.models import BankSampah, DetailTransaksi, JenisSampah, Nasabah, Transaksi, User
+
+
+class NasabahHistoryContractTests(APITestCase):
+    url = "/api/v1/nasabah/me/riwayat"
+
+    def setUp(self) -> None:
+        self.bank = BankSampah.objects.create(nama="Melati", no_hp_pic="08123456789")
+        self.user = User.objects.create_user(
+            email="history@example.test", nama="Siti", role=User.Role.NASABAH
+        )
+        self.member = Nasabah.objects.create(
+            email="fixture-1@example.test",
+            user=self.user,
+            bank_sampah=self.bank,
+            nomor="001",
+            nama="Siti",
+            alamat="Depok",
+            no_hp="08123456789",
+        )
+        self.manager = User.objects.create_user(email="staff@example.test", nama="Staff")
+        self.client.force_authenticate(self.user)
+
+    def test_empty_history_has_pagination_contract(self) -> None:
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                "count": 0,
+                "next": None,
+                "previous": None,
+                "results": [],
+            },
+        )
+
+    def test_all_pages_preserve_order_and_decimal_amounts(self) -> None:
+        transactions = [
+            Transaksi.objects.create(
+                nasabah=self.member,
+                bank_sampah=self.bank,
+                dicatat_oleh=self.manager,
+                total_nilai="12500.50",
+                tanggal=timezone.now() + timedelta(minutes=i),
+            )
+            for i in range(3)
+        ]
+        rows = []
+        for number in (1, 2, 3):
+            response = self.client.get(self.url, {"page_size": 1, "page": number})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data["count"], 3)
+            rows.extend(response.data["results"])
+        self.assertEqual(
+            [row["id"] for row in rows], [str(item.id) for item in reversed(transactions)]
+        )
+        self.assertEqual(rows[0]["total_nilai"], "12500.50")
+        self.assertEqual(set(rows[0]), {"id", "tanggal", "tipe", "total_nilai"})
+        self.assertIsNone(response.data["next"])
+
+    def test_customer_cannot_override_owner_with_query_parameters(self) -> None:
+        other = Nasabah.objects.create(
+            email="fixture-2@example.test",
+            bank_sampah=self.bank,
+            nomor="002",
+            nama="Other",
+            alamat="Depok",
+            no_hp="08999999",
+        )
+        Transaksi.objects.create(
+            nasabah=other,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.manager,
+            total_nilai=999,
+        )
+        response = self.client.get(self.url, {"nasabah_id": str(other.id)})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["results"], [])
+
+    def test_customer_can_read_own_transaction_detail(self) -> None:
+        transaction = Transaksi.objects.create(
+            nasabah=self.member,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.manager,
+            total_nilai="5000.00",
+            catatan="Setoran rutin",
+        )
+        kind = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="PLS-001",
+            nama_sampah="Plastik PET",
+            harga_per_kg="5000.00",
+        )
+        item = DetailTransaksi.objects.create(
+            transaksi=transaction,
+            jenis_sampah=kind,
+            nama_sampah_snapshot="Plastik PET",
+            kategori_snapshot="plastik",
+            harga_snapshot="5000.00",
+            berat="1.000",
+            subtotal="5000.00",
+        )
+
+        with CaptureQueriesContext(connection) as one_item_queries:
+            single_item_response = self.client.get(f"{self.url}/{transaction.id}")
+        self.assertEqual(single_item_response.status_code, 200)
+
+        transaction.total_nilai = "7500.00"
+        transaction.save(update_fields=["total_nilai"])
+        second_kind = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="PLS-002",
+            nama_sampah="Karton",
+            harga_per_kg="2500.00",
+        )
+        second_item = DetailTransaksi.objects.create(
+            transaksi=transaction,
+            jenis_sampah=second_kind,
+            nama_sampah_snapshot="Karton",
+            kategori_snapshot="kertas",
+            harga_snapshot="2500.00",
+            berat="1.000",
+            subtotal="2500.00",
+        )
+        with CaptureQueriesContext(connection) as multiple_item_queries:
+            response = self.client.get(f"{self.url}/{transaction.id}")
+
+        self.assertEqual(
+            len(one_item_queries),
+            len(multiple_item_queries),
+            "detail query count must not grow with the number of items",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            set(response.data),
+            {
+                "id",
+                "tanggal",
+                "tipe",
+                "total_nilai",
+                "catatan",
+                "items",
+                "saldo_setelah_transaksi",
+            },
+        )
+        self.assertEqual(response.data["tipe"], "setoran")
+        self.assertEqual(response.data["total_nilai"], "7500.00")
+        self.assertEqual(response.data["catatan"], "Setoran rutin")
+        self.assertEqual(
+            response.data["items"],
+            [
+                {
+                    "id": str(item.id),
+                    "jenis_sampah_id": str(kind.id),
+                    "nama_sampah_snapshot": "Plastik PET",
+                    "harga_snapshot": "5000.00",
+                    "berat": "1.000",
+                    "subtotal": "5000.00",
+                },
+                {
+                    "id": str(second_item.id),
+                    "jenis_sampah_id": str(second_kind.id),
+                    "nama_sampah_snapshot": "Karton",
+                    "harga_snapshot": "2500.00",
+                    "berat": "1.000",
+                    "subtotal": "2500.00",
+                },
+            ],
+        )
+        self.assertNotIn("status_wa", response.data)
+        self.assertNotIn("dicatat_oleh", response.data)
+
+    def test_customer_cannot_read_another_members_transaction_detail(self) -> None:
+        other = Nasabah.objects.create(
+            email="fixture-2@example.test",
+            bank_sampah=self.bank,
+            nomor="002",
+            nama="Other",
+            alamat="Depok",
+            no_hp="08999999",
+        )
+        transaction = Transaksi.objects.create(
+            nasabah=other,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.manager,
+            total_nilai=999,
+        )
+
+        response = self.client.get(f"{self.url}/{transaction.id}")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_pengurus_cannot_use_nasabah_transaction_detail(self) -> None:
+        self.client.force_authenticate(self.manager)
+
+        response = self.client.get(f"{self.url}/00000000-0000-0000-0000-000000000001")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_anonymous_cannot_read_history_or_transaction_detail(self) -> None:
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.get(self.url).status_code, 401)
+        self.assertEqual(
+            self.client.get(f"{self.url}/00000000-0000-0000-0000-000000000001").status_code,
+            401,
+        )
+
+
+class NasabahHistoryPeriodFilterTests(APITestCase):
+    """PIL-315: the riwayat list accepts the shared ``periode`` filter.
+
+    Without the param the queryset is untouched (all-time history) — the
+    regression guard for ``default=None``.
+    """
+
+    url = "/api/v1/nasabah/me/riwayat"
+
+    def setUp(self) -> None:
+        self.bank = BankSampah.objects.create(nama="Melati", no_hp_pic="08123456789")
+        self.user = User.objects.create_user(
+            email="period@example.test", nama="Siti", role=User.Role.NASABAH
+        )
+        self.member = Nasabah.objects.create(
+            email="fixture-period@example.test",
+            user=self.user,
+            bank_sampah=self.bank,
+            nomor="001",
+            nama="Siti",
+            alamat="Depok",
+            no_hp="08123456789",
+        )
+        self.manager = User.objects.create_user(email="staff-pd@example.test", nama="Staff")
+        old = timezone.now() - timedelta(days=10)
+        Transaksi.objects.create(
+            nasabah=self.member,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.manager,
+            total_nilai=Decimal("1000.00"),
+            tanggal=old,
+        )
+        Transaksi.objects.create(
+            nasabah=self.member,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.manager,
+            total_nilai=Decimal("2000.00"),
+            tanggal=timezone.now(),
+        )
+        self.client.force_authenticate(self.user)
+
+    def test_no_periode_param_returns_full_history(self) -> None:
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 2)
+
+    def test_periode_hari_ini_filters_to_today(self) -> None:
+        response = self.client.get(self.url, {"periode": "hari_ini"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["total_nilai"], "2000.00")
+
+    def test_periode_custom_missing_dates_returns_422(self) -> None:
+        response = self.client.get(self.url, {"periode": "custom"})
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.json()["errors"], {"error": "dari_tanggal dan sampai_tanggal wajib diisi"}
+        )
+
+    def test_periode_custom_reversed_dates_returns_400(self) -> None:
+        response = self.client.get(
+            self.url,
+            {"periode": "custom", "dari_tanggal": "2026-10-02", "sampai_tanggal": "2026-10-01"},
+        )
+        self.assertEqual(response.status_code, 400)
