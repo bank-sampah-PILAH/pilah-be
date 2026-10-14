@@ -287,6 +287,16 @@ class PencairanRevisiSerializer(serializers.ModelSerializer[Model]):
         ]
 
 
+class SetoranActivityEnvelopeSerializer(serializers.Serializer[Any]):
+    tipe = serializers.ChoiceField(choices=["setoran"])
+    data = TransactionListSerializer()  # type: ignore[assignment]  # schema field; DRF removes it before binding Serializer.data
+
+
+class PencairanActivityEnvelopeSerializer(serializers.Serializer[Any]):
+    tipe = serializers.ChoiceField(choices=["pencairan"])
+    data = PencairanDetailSerializer()  # type: ignore[assignment]  # schema field; DRF removes it before binding Serializer.data
+
+
 def _validate_pasangan(attrs: dict[str, Any], nama: str) -> dict[str, Any]:
     """A jenis plus a non-negative nilai, both or neither; percent tops out at 100.
 

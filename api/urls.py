@@ -23,7 +23,12 @@ from apps.bank_sampah.views import (
     TeamView,
 )
 from apps.jadwal.views import JadwalKegiatanViewSet
-from apps.ledger.views import DraftPencairanViewSet, PencairanViewSet, TransaksiViewSet
+from apps.ledger.views import (
+    ActivityHistoryView,
+    DraftPencairanViewSet,
+    PencairanViewSet,
+    TransaksiViewSet,
+)
 
 # ponytail: views are imported from their canonical bounded-context homes;
 # routes and names are frozen so this compose is behavior-neutral.
@@ -58,6 +63,7 @@ router.register(
 )
 
 urlpatterns = [
+    path("aktivitas", ActivityHistoryView.as_view(), name="activity-history"),
     path("nasabah/me/beranda", NasabahHomeView.as_view(), name="nasabah-home"),
     path("nasabah/me/saldo", NasabahBalanceView.as_view(), name="nasabah-own-balance"),
     path("nasabah/me/bank-sampah", NasabahBankView.as_view(), name="nasabah-own-bank"),

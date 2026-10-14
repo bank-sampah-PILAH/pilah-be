@@ -32,7 +32,7 @@ class ExportEdgeCaseTests(APITestCase):
         self.assertTrue(filename.endswith(".xlsx"))
         self.assertIn("Riwayat Transaksi", workbook.sheetnames)
 
-    def test_unknown_period_is_labelled_as_all_periods(self) -> None:
+    def test_explicit_all_time_period_is_labelled_as_all_periods(self) -> None:
         jenis = JenisSampah.objects.create(
             bank_sampah=self.bank, nomor="PET", nama_sampah="Botol PET", harga_per_kg=Decimal(3000)
         )
