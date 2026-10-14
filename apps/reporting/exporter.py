@@ -31,7 +31,13 @@ def export_excel(
     wb = Workbook()
     _fill_summary_export_sheet(cast(Worksheet, wb.active), queryset)
     _fill_raw_export_sheet(wb.create_sheet("Riwayat Transaksi"), queryset, request, payouts)
-    ws = wb.create_sheet("Ringkasan")
+    _fill_operational_summary_sheet(wb.create_sheet("Ringkasan"), summary)
+    stream = BytesIO()
+    wb.save(stream)
+    return stream.getvalue(), f"PILAH_Laporan_{_month_label()}.xlsx"
+
+
+def _fill_operational_summary_sheet(ws: Worksheet, summary: OperationalSummary) -> None:
     ws.append(["Metrik", "Nilai"])
     ws.append(["Jumlah transaksi", summary["jumlah_transaksi"]])
     ws.append(["Total berat (kg)", float(summary["total_berat"])])
@@ -41,9 +47,6 @@ def export_excel(
     ws.column_dimensions["A"].width = 30
     ws.column_dimensions["B"].width = 25
     ws.freeze_panes = "A2"
-    stream = BytesIO()
-    wb.save(stream)
-    return stream.getvalue(), f"PILAH_Laporan_{_month_label()}.xlsx"
 
 
 def _month_label() -> str:
