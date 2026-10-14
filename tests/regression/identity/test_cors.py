@@ -1,3 +1,4 @@
+from corsheaders.defaults import default_headers
 from django.test import override_settings
 from rest_framework.test import APITestCase
 
@@ -93,7 +94,14 @@ class CORSRegressionTests(APITestCase):
             with self.subTest(header=header):
                 self.assertIn(header.lower(), allowed)
 
-    def test_preflight_does_not_allow_an_unregistered_custom_header(self) -> None:
+    def test_allowed_headers_are_an_explicit_list_not_a_wildcard(self) -> None:
+        # django-cors-headers never echoes the requested headers back: the
+        # answer is always the configured list. So asking for an unknown header
+        # and asserting it is absent proves nothing on its own. What is worth
+        # pinning is the shape of the answer -- an exact enumeration, never "*".
+        # The tempting wrong fix for this ticket is CORS_ALLOW_HEADERS = ["*"],
+        # which satisfies every other test in this file while opening
+        # everything.
         with override_settings(
             CORS_ALLOW_ALL_ORIGINS=False,
             CORS_ALLOWED_ORIGINS=["http://localhost:7357"],
@@ -105,9 +113,17 @@ class CORSRegressionTests(APITestCase):
                 HTTP_ACCESS_CONTROL_REQUEST_HEADERS="x-pilah-tidak-terdaftar",
             )
 
-        allowed = response["Access-Control-Allow-Headers"].lower()
-        self.assertNotIn("x-pilah-tidak-terdaftar", allowed)
+        allowed = {
+            value.strip().lower()
+            for value in response["Access-Control-Allow-Headers"].split(",")
+            if value.strip()
+        }
         self.assertNotIn("*", allowed)
+        self.assertEqual(
+            allowed,
+            {header.lower() for header in default_headers}
+            | {header.lower() for header in HEADER_PERMINTAAN_KUSTOM},
+        )
 
     def test_exposes_exactly_the_registered_response_headers(self) -> None:
         with override_settings(
