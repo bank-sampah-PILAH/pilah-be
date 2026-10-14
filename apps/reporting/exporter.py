@@ -78,7 +78,7 @@ def _fill_summary_export_sheet(ws: Worksheet, queryset: QuerySet[Transaksi]) -> 
             ]
         )
         current_row += 1
-    ws.append(["", "", "", "TOTAL", f"=SUM(E2:E{current_row - 1})"])
+    ws.append(["", "", "", "TOTAL", f"=SUM(E2:E{current_row - 1})" if current_row > 2 else 0])
     for column in ["A", "B", "C", "D", "E"]:
         ws.column_dimensions[column].width = 22
 
