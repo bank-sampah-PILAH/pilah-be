@@ -179,6 +179,40 @@ class BatchPencairanTests(DraftTestBase):
             },
         )
 
+    def test_saldo_satu_rupiah_tidak_dilewati(self) -> None:
+        receh = self._nasabah("NAS-0010", "Dewi Receh", "1")
+
+        response = self._batch(nasabah_ids=[str(receh.id)], metode="tunai")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["dilewati"], [])
+
+    def test_potongan_sama_dengan_nominal_tidak_dilewati(self) -> None:
+        pas = self._nasabah("NAS-0010", "Dewi Pas", "5000")
+
+        response = self._batch(
+            nasabah_ids=[str(pas.id)],
+            metode="tunai",
+            potongan_jenis="rupiah",
+            potongan_nilai="5000",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["dilewati"], [])
+
+    def test_potongan_persen_dihitung_dari_nominal_bukan_sebagai_rupiah(self) -> None:
+        kecil = self._nasabah("NAS-0010", "Dewi Kecil", "40")
+
+        response = self._batch(
+            nasabah_ids=[str(kecil.id)],
+            metode="tunai",
+            potongan_jenis="persen",
+            potongan_nilai="50",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["items"][0]["potongan"], "20.00")
+
     def test_batch_tanpa_nasabah_yang_layak_ditolak(self) -> None:
         kosong = self._nasabah("NAS-0005", "Eka Kosong", "0")
 

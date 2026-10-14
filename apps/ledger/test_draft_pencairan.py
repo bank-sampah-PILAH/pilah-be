@@ -30,6 +30,12 @@ class DraftPencairanTests(DraftTestBase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["items"][0]["nominal"], "100000.00")
 
+    def test_nominal_satu_rupiah_diterima(self) -> None:
+        response = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "1"}])
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["items"][0]["nominal"], "1.00")
+
     def test_nominal_melebihi_saldo_ditolak_dan_tidak_membuat_draft(self) -> None:
         response = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "465601"}])
 
@@ -50,7 +56,7 @@ class DraftPencairanTests(DraftTestBase):
         response = self._buat([{"nasabah_id": str(kosong.id)}])
 
         self.assertEqual(response.status_code, 422, response.data)
-        self.assertIn("items[0].nominal", response.data["errors"])
+        self.assertEqual(response.data["errors"]["items[0].nominal"], ["Saldo nasabah kosong"])
 
     def test_nasabah_tanpa_baris_saldo_dianggap_kosong(self) -> None:
         belum_transaksi = self._nasabah("NAS-0009", "Belum Transaksi", "0")
@@ -167,8 +173,21 @@ class DraftPencairanTests(DraftTestBase):
         )
 
         self.assertEqual(response.status_code, 422, response.data)
-        self.assertIn("items[1].potongan_nilai", response.data["errors"])
+        self.assertEqual(
+            response.data["errors"]["items[1].potongan_nilai"],
+            ["Potongan melebihi nominal pencairan"],
+        )
         self.assertFalse(DraftPencairan.objects.exists())
+
+    def test_potongan_sama_dengan_nominal_diterima(self) -> None:
+        response = self._buat(
+            [{"nasabah_id": str(self.nasabah.id), "nominal": "100000"}],
+            potongan_jenis="rupiah",
+            potongan_nilai="100000",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["items"][0]["dibayar"], "0.00")
 
     def test_default_potongan_tidak_valid_ditolak(self) -> None:
         response = self._buat(
@@ -324,6 +343,7 @@ class DraftPencairanTests(DraftTestBase):
                 {
                     "nasabah_id": str(self.nasabah.id),
                     "nominal": "100000",
+                    "metode": "transfer",
                     "potongan_jenis": "persen",
                     "potongan_nilai": "5",
                 }
@@ -341,6 +361,7 @@ class DraftPencairanTests(DraftTestBase):
         )
 
         self.assertEqual(tetap.data["items"][0]["nominal"], "100000.00")
+        self.assertEqual(tetap.data["items"][0]["metode"], "transfer")
         self.assertEqual(tetap.data["items"][0]["potongan"], "5000.00")
         self.assertEqual(reset.data["items"][0]["potongan_jenis"], "")
         self.assertEqual(reset.data["items"][0]["potongan"], "1000.00")
@@ -401,6 +422,7 @@ class DraftPencairanTests(DraftTestBase):
 
                 self.assertEqual(ubah.status_code, 409, ubah.data)
                 self.assertEqual(batal.status_code, 409, batal.data)
+                self.assertEqual(batal.data, {"error": f"Draft sudah {status}"})
                 self.assertEqual(DraftPencairan.objects.get(id=draft["id"]).status, status)
 
     def test_batalkan_draft_bank_lain_ditolak(self) -> None:
