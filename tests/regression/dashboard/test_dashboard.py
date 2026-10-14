@@ -5,7 +5,16 @@ from decimal import Decimal
 
 from django.utils import timezone
 
-from api.models import BankSampah, DetailTransaksi, HargaSampah, JenisSampah, Nasabah, Pencairan, Transaksi, User
+from api.models import (
+    BankSampah,
+    DetailTransaksi,
+    HargaSampah,
+    JenisSampah,
+    Nasabah,
+    Pencairan,
+    Transaksi,
+    User,
+)
 from tests.regression.helpers import RegressionTestCase
 
 
