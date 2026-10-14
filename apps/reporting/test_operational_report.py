@@ -315,3 +315,7 @@ class OperationalReportTests(APITestCase):
         wb = self.workbook()
         self.assertEqual(wb["Ringkasan"]["B2"].value, 1)
         self.assertEqual(wb["Riwayat Transaksi"]["K5"].value, "pencairan")
+
+    def test_payout_only_category_sheet_has_zero_not_a_circular_formula(self) -> None:
+        wb = self.workbook(tipe="pencairan")
+        self.assertEqual(wb["Laporan"]["E2"].value, 0)
