@@ -1959,7 +1959,7 @@ class APISpecTests(APITestCase):
         )
         self.assertIn("PILAH_Laporan_", export["Content-Disposition"])
         workbook = load_workbook(BytesIO(export.content), data_only=False)
-        self.assertEqual(workbook.sheetnames, ["Laporan", "Riwayat Transaksi"])
+        self.assertEqual(workbook.sheetnames, ["Laporan", "Riwayat Transaksi", "Ringkasan"])
         summary_sheet = workbook["Laporan"]
         self.assertEqual(
             [summary_sheet.cell(1, col).value for col in range(1, 6)],
@@ -5099,7 +5099,11 @@ class PencairanAPITests(APITestCase):
         export = self.client.get("/api/v1/transaksi/export?periode=bulan_ini")
         self.assertEqual(export.status_code, 200)
         sheet = load_workbook(BytesIO(export.content), data_only=False)["Riwayat Transaksi"]
-        saldo_column = [sheet.cell(row, 10).value for row in (5, 6)]
+        saldo_column = [
+            sheet.cell(row, 10).value
+            for row in range(5, sheet.max_row + 1)
+            if sheet.cell(row, 11).value == "setoran"
+        ]
         self.assertEqual(saldo_column, [140000, 100000])
 
     def test_pencairan_requires_approved_membership(self) -> None:
