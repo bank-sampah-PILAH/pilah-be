@@ -25,6 +25,7 @@ from api.models import (
 )
 from apps.notification.api import DEFAULT_WA_TEMPLATE
 from apps.waste_catalog.api import harga_berlaku
+from shared_kernel.permissions import superadmin_allowlist
 
 CONFIRMATION = "SEED-PILAH-STAGING-DATA"
 
@@ -79,6 +80,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument("--environment", choices=("local", "staging"), default="local")
         parser.add_argument("--confirm")
+        parser.add_argument("--if-missing", action="store_true")
         parser.add_argument(
             "--pengurus-email",
             "--operator-email",
@@ -119,8 +121,12 @@ class Command(BaseCommand):
     def handle(self, *args: object, **options: object) -> None:
         environment = str(options["environment"])
         confirmation = str(options.get("confirm") or "")
+        if settings.PILAH_ENVIRONMENT == "production":
+            raise CommandError("Testing data is forbidden in production")
         if environment == "local" and not settings.DEBUG:
             raise CommandError("Local testing data requires DJANGO_DEBUG=true")
+        if not settings.DEBUG and settings.PILAH_ENVIRONMENT != "staging":
+            raise CommandError("Testing data requires PILAH_ENVIRONMENT=staging outside debug")
         if environment == "staging" and confirmation != CONFIRMATION:
             raise CommandError(f"Pass --confirm={CONFIRMATION} to seed staging data")
 
@@ -133,6 +139,13 @@ class Command(BaseCommand):
             induk_email=self._normalize_email(options["induk_email"]),
         )
 
+        if not settings.DEBUG and identities.superadmin_email.lower() not in superadmin_allowlist():
+            raise CommandError("Seed Superadmin must be in PILAH_SUPERADMIN_EMAILS")
+
+        if bool(options.get("if_missing")) and self._has_seeded_data():
+            self.stdout.write(self.style.SUCCESS("Existing fixture rows found; skipping reseed."))
+            return
+
         with transaction.atomic():
             self._seed(identities)
 
@@ -144,6 +157,25 @@ class Command(BaseCommand):
             f"{customer_count} customers, 4 waste types, "
             f"{3 + history_count} setoran, {history_count} pencairan, "
             "and recalculated balances."
+        )
+
+    @staticmethod
+    def _has_seeded_data() -> bool:
+        return (
+            BankSampah.objects.filter(
+                pk__in=(ACTIVE_BANK_ID, PENDING_BANK_ID, INDUK_BANK_ID)
+            ).exists()
+            or User.objects.filter(
+                pk__in=(
+                    PENGURUS_ID,
+                    PENDING_PENGURUS_ID,
+                    SUPERADMIN_ID,
+                    INDUK_PENGELOLA_ID,
+                    CUSTOMER_ONE_USER_ID,
+                    CUSTOMER_TWO_USER_ID,
+                )
+            ).exists()
+            or Nasabah.objects.filter(pk__in=(CUSTOMER_ONE_ID, CUSTOMER_TWO_ID)).exists()
         )
 
     @staticmethod

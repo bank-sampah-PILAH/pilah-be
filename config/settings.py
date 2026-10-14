@@ -3,9 +3,12 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from corsheaders.defaults import default_headers
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.crypto import get_random_string
 from dotenv import load_dotenv
+
+from shared_kernel.http_headers import HEADER_PERMINTAAN_KUSTOM, HEADER_RESPONS_TEREKSPOS
 
 load_dotenv()
 
@@ -149,7 +152,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "id"
 
-TIME_ZONE = "UTC"
+TIME_ZONE = "Asia/Jakarta"
 
 USE_I18N = True
 
@@ -198,6 +201,10 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 20,
     "EXCEPTION_HANDLER": "shared_kernel.exceptions.api_exception_handler",
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # Scoped rates: keys are the throttle scope of the views declaring one.
+    # statement_pdf = the riwayat statement render (CPU-heavy; see
+    # apps.nasabah.home.NasabahHistoryExportPdfView).
+    "DEFAULT_THROTTLE_RATES": {"statement_pdf": "10/min"},
 }
 
 SPECTACULAR_SETTINGS = {
@@ -219,6 +226,17 @@ CORS_ALLOWED_ORIGINS = [
     origin.strip() for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if origin.strip()
 ]
 
+# CORS_ALLOW_ALL_ORIGINS permits any origin but NOT arbitrary request headers:
+# django-cors-headers answers the preflight with its own default list, which
+# carries no custom header. Both lists below are derived from the registry in
+# shared_kernel/http_headers.py so they cannot drift from the headers the
+# views actually read and write.
+CORS_ALLOW_HEADERS = (
+    *default_headers,
+    *(header.lower() for header in HEADER_PERMINTAAN_KUSTOM),
+)
+CORS_EXPOSE_HEADERS = HEADER_RESPONS_TEREKSPOS
+
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "")
@@ -227,6 +245,7 @@ PILAH_ALLOW_FAKE_GOOGLE_TOKEN = (
 )
 if PILAH_ALLOW_FAKE_GOOGLE_TOKEN and not DEBUG:
     raise ImproperlyConfigured("PILAH_ALLOW_FAKE_GOOGLE_TOKEN requires DJANGO_DEBUG=true")
+PILAH_ENVIRONMENT = os.getenv("PILAH_ENVIRONMENT", "")
 PILAH_SUPERADMIN_EMAILS = tuple(
     email.strip().lower()
     for email in os.getenv("PILAH_SUPERADMIN_EMAILS", "").split(",")
