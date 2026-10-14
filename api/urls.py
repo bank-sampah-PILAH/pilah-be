@@ -39,7 +39,7 @@ from apps.nasabah.profile import NasabahProfileView
 from apps.nasabah.views import NasabahSelfView, NasabahViewSet, RegisterNasabahView, SaldoView
 from apps.notification.views import WATemplateView
 from apps.reporting.views import DashboardRecentTransactionsView, DashboardStatsView
-from apps.waste_catalog.views import JenisSampahViewSet
+from apps.waste_catalog.views import HargaPerbandinganView, JenisSampahViewSet
 
 router = DefaultRouter(trailing_slash=False)
 router.register("nasabah", NasabahViewSet, basename="nasabah")
@@ -75,6 +75,13 @@ urlpatterns = [
     path("invites/accept", AcceptInviteView.as_view(), name="invite-accept"),
     path("bank-sampah/invite/join", AcceptInviteView.as_view(), name="bank-sampah-invite-join"),
     path("bank-sampah/me", BankSampahMeView.as_view(), name="bank-sampah-me"),
+    # Before "bank-sampah" directory: "harga-perbandingan" must not be eaten
+    # by that (or any future <pk>) path — top-down matching (PIL-309).
+    path(
+        "bank-sampah/harga-perbandingan",
+        HargaPerbandinganView.as_view(),
+        name="bank-sampah-harga-perbandingan",
+    ),
     path("bank-sampah", BankSampahDirectoryView.as_view(), name="bank-sampah-directory"),
     path("bank-sampah/<uuid:pk>", BankSampahDetailView.as_view(), name="bank-sampah-detail"),
     path("team", TeamView.as_view(), name="team"),

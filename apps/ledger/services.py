@@ -21,10 +21,9 @@ from api.models import (
     User,
 )
 from apps.nasabah.api import get_locked_nasabah
-from apps.waste_catalog.api import get_active_jenis
+from apps.waste_catalog.api import get_active_jenis, harga_berlaku
 from shared_kernel.kalkulasi import (
     bulatkan_rupiah,
-    harga_berlaku,
     hitung_subtotal,
     total_setoran,
 )
@@ -70,8 +69,10 @@ class TransactionService:
                         ]
                     }
                 )
-            harga = harga_berlaku(jenis)
-            if harga <= 0:
+            # Harga diambil di dalam transaksi database, pada waktu transaksi
+            # itu sendiri (SDS SD-01 pesan 10), bukan dari nilai yang dikirim client.
+            harga = harga_berlaku(jenis, transaksi.tanggal)
+            if harga is None:
                 raise serializers.ValidationError(
                     {f"items[{index}].jenis_sampah_id": ["Harga jenis sampah belum diatur"]}
                 )
