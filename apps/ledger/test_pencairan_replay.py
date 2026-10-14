@@ -141,6 +141,20 @@ class HitungUlangSaldoTests(TestCase):
         self.assertEqual(self._snapshot(lainnya), (Decimal(100000), Decimal(90000)))
         self.assertEqual(self._snapshot(diedit), (Decimal(90000), Decimal(60000)))
 
+    def test_pencairan_sebelum_titik_mulai_tidak_ikut_diputar_ulang(self) -> None:
+        t = self.sekarang
+        self._setoran(self.nasabah, "100000", t - timedelta(hours=6))
+        lama = self._pencairan(self.nasabah, "100000", "10000", t - timedelta(hours=5))
+        self._setoran(self.nasabah, "50000", t - timedelta(hours=4))
+        diedit = self._pencairan(self.nasabah, "140000", "20000", t - timedelta(hours=3))
+        self._saldo(self.nasabah, "120000")
+
+        self._edit(diedit, nominal=Decimal(30000))
+
+        self.assertEqual(self._snapshot(lama), (Decimal(100000), Decimal(90000)))
+        self.assertEqual(self._snapshot(diedit), (Decimal(140000), Decimal(110000)))
+        self.assertEqual(Saldo.objects.get(nasabah=self.nasabah).total_saldo, Decimal(110000))
+
     def test_nominal_boleh_sama_dengan_seluruh_saldo(self) -> None:
         t = self.sekarang
         self._setoran(self.nasabah, "50000", t - timedelta(hours=2))
