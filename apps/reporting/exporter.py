@@ -254,7 +254,7 @@ def _export_filter_label(queryset: QuerySet[Transaksi], request: HttpRequest | N
     downloaded_at = timezone.localtime().strftime("%d/%m/%Y %H:%M")
     periode_text = "Semua Periode"
     if request:
-        periode_text = period_label(request) if request.GET.get("periode") else "Semua Periode"
+        periode_text = period_label(request, default="semua")
     kind = request.GET.get("tipe", "semua") if request else "semua"
     search = request.GET.get("search", "").strip() if request else ""
     user_bank = getattr(getattr(request, "user", None), "bank_sampah", None)
@@ -266,9 +266,9 @@ def _export_filter_label(queryset: QuerySet[Transaksi], request: HttpRequest | N
     )
 
 
-def period_label(request: HttpRequest) -> str:
+def period_label(request: HttpRequest, *, default: str = "hari_ini") -> str:
     """Human label for the ``periode`` param, shared by all report exports."""
-    periode = request.GET.get("periode", "hari_ini")
+    periode = request.GET.get("periode", default)
     today = timezone.localdate()
     if periode == "hari_ini":
         return f"Hari Ini ({today.strftime('%d/%m/%Y')})"
