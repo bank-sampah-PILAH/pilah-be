@@ -9,21 +9,28 @@ api.models, other BCs -> reporting port).
 from django.db.models import QuerySet
 from django.http import HttpRequest
 
-from api.models import DraftPencairan, Nasabah, Transaksi
+from api.models import DraftPencairan, Nasabah, Pencairan, Transaksi
 from apps.reporting import draft_export, exporter, statement
+from apps.reporting.operational import OperationalSummary, operational_queries, operational_summary
 
 __all__ = [
     "StatementPeriodError",
     "export_draft_pencairan",
     "export_excel",
     "export_statement_pdf",
+    "operational_queries",
+    "operational_summary",
 ]
 
 
 def export_excel(
-    queryset: QuerySet[Transaksi], request: HttpRequest | None = None
+    queryset: QuerySet[Transaksi],
+    request: HttpRequest | None = None,
+    *,
+    payouts: QuerySet[Pencairan] | None = None,
+    summary: OperationalSummary | None = None,
 ) -> tuple[bytes, str]:
-    return exporter.export_excel(queryset, request)
+    return exporter.export_excel(queryset, request, payouts=payouts, summary=summary)
 
 
 def export_statement_pdf(member: Nasabah, request: HttpRequest) -> tuple[bytes, str] | None:

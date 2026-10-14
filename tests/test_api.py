@@ -5161,7 +5161,10 @@ class PencairanAPITests(APITestCase):
         self.assertEqual(detail.data["saldo_setelah_transaksi"], Decimal("100000.00"))
         export = self.client.get("/api/v1/transaksi/export?periode=bulan_ini")
         sheet = load_workbook(BytesIO(export.content), data_only=False)["Riwayat Transaksi"]
-        self.assertEqual(sheet.cell(5, 10).value, 100000)
+        deposit_rows = [
+            row for row in sheet.iter_rows(min_row=5, values_only=True) if row[10] == "setoran"
+        ]
+        self.assertEqual(deposit_rows[0][9], 100000)
 
     def test_pencairan_drops_legacy_sen_from_saldo(self) -> None:
         Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("10000.50"))
