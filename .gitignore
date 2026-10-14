@@ -96,3 +96,6 @@ agent-runs/
 agent-output/
 tmp/
 temp/
+
+# mutmut
+mutants/
