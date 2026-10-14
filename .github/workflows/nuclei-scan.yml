@@ -13,7 +13,7 @@
 # No -dast: fuzzing a deployed environment can trigger WhatsApp/GCS and change data.
 # The target is a fixed choice, not a free URL. URLs come from repository variables
 # (Settings -> Secrets and variables -> Actions -> Variables):
-#   NUCLEI_STAGING_API_URL      (optional, default below)
+#   NUCLEI_STAGING_API_URL      (required for staging)
 #   NUCLEI_PRODUCTION_API_URL   (required for production)
 name: Nuclei scan
 
@@ -49,7 +49,7 @@ jobs:
     env:
       NUCLEI_IMAGE: projectdiscovery/nuclei:v3.11.0
       ENVIRONMENT: ${{ inputs.environment || 'staging' }}
-      STAGING_API_URL: ${{ vars.NUCLEI_STAGING_API_URL || 'https://pilah-be-staging.fly.dev' }}
+      STAGING_API_URL: ${{ vars.NUCLEI_STAGING_API_URL }}
       PRODUCTION_API_URL: ${{ vars.NUCLEI_PRODUCTION_API_URL }}
     steps:
       - name: Resolve target
@@ -61,7 +61,7 @@ jobs:
           esac
           case "$url" in
             https://*) ;;
-            *) echo "::error::Missing or non-HTTPS API URL for $ENVIRONMENT; set the NUCLEI_*_API_URL repository variable."; exit 1 ;;
+            *) echo "::error::Missing or non-HTTPS API URL for $ENVIRONMENT; set the NUCLEI_${ENVIRONMENT^^}_API_URL repository variable."; exit 1 ;;
           esac
           echo "TARGET=$url" >> "$GITHUB_ENV"
 
