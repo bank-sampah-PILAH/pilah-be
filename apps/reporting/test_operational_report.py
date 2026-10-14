@@ -319,3 +319,15 @@ class OperationalReportTests(APITestCase):
     def test_payout_only_category_sheet_has_zero_not_a_circular_formula(self) -> None:
         wb = self.workbook(tipe="pencairan")
         self.assertEqual(wb["Laporan"]["E2"].value, 0)
+
+    def test_export_metadata_names_the_actual_selected_period(self) -> None:
+        for months in (1, 3, 6, 12):
+            with self.subTest(months=months):
+                label = self.workbook(periode=f"{months}_bulan")["Riwayat Transaksi"]["A2"].value
+                self.assertIn(f"{months} Bulan Terakhir", label)
+                self.assertNotIn("Semua Periode", label)
+        with self.subTest(default="semua"):
+            response = self.client.get(self.export_url)
+            self.assertEqual(response.status_code, 200)
+            label = load_workbook(BytesIO(response.content))["Riwayat Transaksi"]["A2"].value
+            self.assertIn("Semua Periode", label)
