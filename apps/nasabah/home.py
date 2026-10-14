@@ -16,6 +16,7 @@ from api.models import BankSampah, Nasabah, Transaksi, User
 from apps.ledger.api import apply_period
 from apps.ledger.serializers import TransactionDetailSerializer
 from apps.reporting.api import StatementPeriodError, export_statement_pdf
+from shared_kernel.http_headers import CONTENT_DISPOSITION
 from shared_kernel.pagination import StandardPagination
 from shared_kernel.permissions import IsActiveNasabah
 
@@ -240,7 +241,7 @@ class NasabahHistoryExportPdfView(GenericAPIView[Nasabah]):
             return Response({"error": "Tidak ada data pada periode ini"}, status=400)
         content, filename = result
         response = HttpResponse(content, content_type="application/pdf")
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response[CONTENT_DISPOSITION] = f'attachment; filename="{filename}"'
         return response
 
 

@@ -41,7 +41,7 @@ from apps.ledger.services import (
 from apps.nasabah.api import kandidat_pencairan
 from apps.notification.api import send_setoran_receipt
 from apps.reporting.api import export_draft_pencairan, export_excel
-from shared_kernel.http_headers import IDEMPOTENCY_KEY
+from shared_kernel.http_headers import CONTENT_DISPOSITION, IDEMPOTENCY_KEY
 from shared_kernel.permissions import (
     IsActivePengelola,
     IsActivePengelolaOrNasabah,
@@ -148,7 +148,7 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
             content,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response[CONTENT_DISPOSITION] = f'attachment; filename="{filename}"'
         return response
 
     def create(self, request: Request) -> Response:
@@ -369,7 +369,7 @@ class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg] 
             )
             transaction.set_rollback(True)
         response = HttpResponse(content, content_type=content_type)
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response[CONTENT_DISPOSITION] = f'attachment; filename="{filename}"'
         return response
 
     @action(detail=True, methods=["get"], url_path="export")
@@ -381,5 +381,5 @@ class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg] 
             self.get_object(), query.validated_data["berkas"]
         )
         response = HttpResponse(content, content_type=content_type)
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response[CONTENT_DISPOSITION] = f'attachment; filename="{filename}"'
         return response
