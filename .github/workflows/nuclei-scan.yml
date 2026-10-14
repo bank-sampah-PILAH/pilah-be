@@ -2,8 +2,8 @@
 # deployed (DEBUG left on, public docs, wildcard CORS, leaked files, TLS).
 # The Flutter web app lives in pilah-mobile and has its own scan there.
 # Three ways in:
-#   - ci.yml calls it after a successful staging deploy (workflow_call), so a bad
-#     commit turns red right after it ships. Works from the staging branch.
+#   - ci.yml calls it after a successful staging deploy and deploy-cloud-run.yml after the
+#     production deploy (workflow_call), so a bad commit turns red right after it ships.
 #   - weekly cron on the default branch (main): catches drift with no deploy, e.g. a
 #     Fly secret changed by hand.
 #   - manual dispatch (needs this file on main): Actions tab -> Nuclei scan -> Run workflow.
@@ -11,10 +11,12 @@
 # no PR and never rolls back a deploy; it only flags the commit.
 #
 # No -dast: fuzzing a deployed environment can trigger WhatsApp/GCS and change data.
-# The target is a fixed choice, not a free URL. URLs come from repository variables
+# The target is a fixed choice, not a free URL. Only a workflow in this repo can pass
+# target_url (the production deploy does, with the URL it just read from Cloud Run).
+# Otherwise URLs come from repository variables
 # (Settings -> Secrets and variables -> Actions -> Variables):
 #   NUCLEI_STAGING_API_URL      (required for staging)
-#   NUCLEI_PRODUCTION_API_URL   (required for production)
+#   NUCLEI_PRODUCTION_API_URL   (only for a manual production run; the deploy passes its own)
 name: Nuclei scan
 
 on:
@@ -27,6 +29,10 @@ on:
         description: staging or production
         type: string
         default: staging
+      target_url:
+        description: HTTPS URL to scan; overrides the repository variable (the production deploy passes the URL it just deployed)
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       environment:
@@ -49,6 +55,7 @@ jobs:
     env:
       NUCLEI_IMAGE: projectdiscovery/nuclei:v3.11.0
       ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+      TARGET_URL_INPUT: ${{ inputs.target_url }}
       STAGING_API_URL: ${{ vars.NUCLEI_STAGING_API_URL }}
       PRODUCTION_API_URL: ${{ vars.NUCLEI_PRODUCTION_API_URL }}
     steps:
@@ -59,6 +66,8 @@ jobs:
             production) url="$PRODUCTION_API_URL" ;;
             *) echo "::error::environment must be staging or production, got '$ENVIRONMENT'."; exit 1 ;;
           esac
+          # A caller (the production deploy) can pass the URL it just deployed.
+          url="${TARGET_URL_INPUT:-$url}"
           case "$url" in
             https://*) ;;
             *) echo "::error::Missing or non-HTTPS API URL for $ENVIRONMENT; set the NUCLEI_${ENVIRONMENT^^}_API_URL repository variable."; exit 1 ;;
