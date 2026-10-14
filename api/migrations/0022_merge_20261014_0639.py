@@ -4,11 +4,9 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('api', '0020_banksampah_latitude_banksampah_longitude'),
-        ('api', '0021_backfill_harga_sampah_drop_harga_per_kg'),
+        ("api", "0020_banksampah_latitude_banksampah_longitude"),
+        ("api", "0021_backfill_harga_sampah_drop_harga_per_kg"),
     ]
 
-    operations = [
-    ]
+    operations = []

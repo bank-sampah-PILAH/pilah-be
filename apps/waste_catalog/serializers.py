@@ -141,6 +141,7 @@ class FilterJenisSampahSerializer(serializers.Serializer[Any]):
     status = serializers.ChoiceField(choices=["aktif", "tidak_aktif", "semua"], default="aktif")
     kategori = serializers.ChoiceField(choices=JenisSampah.Kategori.choices, required=False)
 
+
 class DirectoryLayananSerializer(serializers.ModelSerializer[Model]):
     """Compact public read of one layanan (jenis sampah) for directory detail.
 
@@ -174,4 +175,3 @@ class DirectoryLayananSerializer(serializers.ModelSerializer[Model]):
             _WAKTU.to_representation(berlaku.berlaku_mulai) if berlaku else None
         )
         return data
-
