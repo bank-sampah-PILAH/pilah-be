@@ -254,7 +254,7 @@ def _export_filter_label(queryset: QuerySet[Transaksi], request: HttpRequest | N
     downloaded_at = timezone.localtime().strftime("%d/%m/%Y %H:%M")
     periode_text = "Semua Periode"
     if request:
-        periode_text = period_label(request)
+        periode_text = period_label(request) if request.GET.get("periode") else "Semua Periode"
     kind = request.GET.get("tipe", "semua") if request else "semua"
     search = request.GET.get("search", "").strip() if request else ""
     user_bank = getattr(getattr(request, "user", None), "bank_sampah", None)
@@ -289,6 +289,8 @@ def period_label(request: HttpRequest) -> str:
         start_date = request.GET.get("dari_tanggal", "")
         end_date = request.GET.get("sampai_tanggal", "")
         return f"Custom ({start_date} - {end_date})"
+    if periode in {"1_bulan", "3_bulan", "6_bulan", "12_bulan"}:
+        return f"{periode.split('_')[0]} Bulan Terakhir (bergulir)"
     return "Semua Periode"
 
 
