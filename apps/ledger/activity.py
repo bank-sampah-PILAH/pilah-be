@@ -24,9 +24,10 @@ PERIODS = {
 }
 
 
-def activity_query(
+def activity_sources(
     bank: BankSampah, request: HttpRequest, member: Nasabah | None = None
-) -> QuerySet[Any]:
+) -> tuple[QuerySet[Transaksi], QuerySet[Pencairan]]:
+    """One authorization/filter policy for history, totals and exports."""
     period = request.GET.get("periode", "semua")
     kind = request.GET.get("tipe", "semua")
     if period not in PERIODS:
@@ -44,6 +45,18 @@ def activity_query(
         payouts = payouts.filter(nasabah__nama__icontains=search)
     deposits = TransactionFilterService.apply_period(deposits, request, default=None)
     payouts = TransactionFilterService.apply_period(payouts, request, default=None)
+    if kind == "pencairan":
+        deposits = deposits.none()
+    elif kind == "setoran":
+        payouts = payouts.none()
+    return deposits, payouts
+
+
+def activity_query(
+    bank: BankSampah, request: HttpRequest, member: Nasabah | None = None
+) -> QuerySet[Any]:
+    deposits, payouts = activity_sources(bank, request, member)
+    kind = request.GET.get("tipe", "semua")
     fields = ("id", "tanggal", "created_at", "tipe_aktivitas")
     deposit_rows = (
         deposits.order_by()

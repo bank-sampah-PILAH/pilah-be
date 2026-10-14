@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 from django.utils import timezone
@@ -78,7 +78,7 @@ class OperationalReportTests(APITestCase):
     def summary(self, **filters: Any) -> dict[str, Any]:
         response = self.client.get(self.feed_url, {**self.params, **filters})
         self.assertEqual(response.status_code, 200, response.data)
-        return response.data["summary"]
+        return cast(dict[str, Any], response.data["summary"])
 
     def workbook(self, **filters: Any) -> Any:
         response = self.client.get(self.export_url, {**self.params, **filters})
