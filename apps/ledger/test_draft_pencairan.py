@@ -1,0 +1,639 @@
+import uuid
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any
+from unittest import mock
+
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+
+from api.models import BankSampah, DraftPencairan, Nasabah, Pencairan, Saldo, User
+from apps.ledger.draft_testing import URL, DraftTestBase
+from apps.ledger.services import DraftPencairanService
+
+
+class DraftPencairanTests(DraftTestBase):
+    def test_buat_draft_satu_nasabah_nominal_default_seluruh_saldo(self) -> None:
+        response = self._buat([{"nasabah_id": str(self.nasabah.id)}])
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["status"], "draft")
+        self.assertEqual(len(response.data["items"]), 1)
+        self.assertEqual(response.data["items"][0]["nominal"], "465600.00")
+        self.assertEqual(response.data["items"][0]["metode"], "tunai")
+        self.assertEqual(Saldo.objects.get(nasabah=self.nasabah).total_saldo, Decimal(465600))
+        self.assertFalse(Pencairan.objects.exists())
+
+    def test_nominal_sebagian_dipakai_apa_adanya(self) -> None:
+        response = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "100000"}])
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["items"][0]["nominal"], "100000.00")
+
+    def test_nominal_melebihi_saldo_ditolak_dan_tidak_membuat_draft(self) -> None:
+        response = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "465601"}])
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("items[0].nominal", response.data["errors"])
+        self.assertFalse(DraftPencairan.objects.exists())
+
+    def test_nominal_nol_atau_tidak_bulat_ditolak(self) -> None:
+        for nominal in ("0", "-5", "1000.50"):
+            with self.subTest(nominal=nominal):
+                response = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": nominal}])
+
+                self.assertEqual(response.status_code, 422, response.data)
+
+    def test_saldo_kosong_tanpa_nominal_ditolak(self) -> None:
+        kosong = self._nasabah("NAS-0002", "Budi Kosong", "0")
+
+        response = self._buat([{"nasabah_id": str(kosong.id)}])
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("items[0].nominal", response.data["errors"])
+
+    def test_nasabah_tanpa_baris_saldo_dianggap_kosong(self) -> None:
+        belum_transaksi = self._nasabah("NAS-0009", "Belum Transaksi", "0")
+        Saldo.objects.filter(nasabah=belum_transaksi).delete()
+
+        response = self._buat([{"nasabah_id": str(belum_transaksi.id)}])
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("items[0].nominal", response.data["errors"])
+
+    def test_potongan_persen_dibulatkan_ke_bawah_per_item_dan_total_adalah_jumlah_item(
+        self,
+    ) -> None:
+        budi = self._nasabah("NAS-0002", "Budi Santoso", "10001")
+        persen = {"potongan_jenis": "persen", "potongan_nilai": "5"}
+
+        response = self._buat(
+            [
+                {"nasabah_id": str(self.nasabah.id), "nominal": "10001", **persen},
+                {"nasabah_id": str(budi.id), **persen},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        for item in response.data["items"]:
+            self.assertEqual(item["potongan"], "500.00")
+            self.assertEqual(item["dibayar"], "9501.00")
+        self.assertEqual(response.data["total_nominal"], "20002.00")
+        self.assertEqual(response.data["total_potongan"], "1000.00")
+        self.assertEqual(response.data["total_dibayar"], "19002.00")
+
+    def test_potongan_rupiah_dipotong_dari_nominal(self) -> None:
+        response = self._buat(
+            [
+                {
+                    "nasabah_id": str(self.nasabah.id),
+                    "nominal": "100000",
+                    "potongan_jenis": "rupiah",
+                    "potongan_nilai": "2500",
+                }
+            ]
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["items"][0]["potongan"], "2500.00")
+        self.assertEqual(response.data["items"][0]["dibayar"], "97500.00")
+
+    def test_potongan_tidak_valid_ditolak(self) -> None:
+        kasus = {
+            "rupiah melebihi nominal": ("rupiah", "100001"),
+            "persen lebih dari 100": ("persen", "100.5"),
+            "nilai negatif": ("rupiah", "-1"),
+            "rupiah pecahan": ("rupiah", "10.5"),
+        }
+        for nama, (jenis, nilai) in kasus.items():
+            with self.subTest(nama):
+                response = self._buat(
+                    [
+                        {
+                            "nasabah_id": str(self.nasabah.id),
+                            "nominal": "100000",
+                            "potongan_jenis": jenis,
+                            "potongan_nilai": nilai,
+                        }
+                    ]
+                )
+
+                self.assertEqual(response.status_code, 422, response.data)
+                self.assertFalse(DraftPencairan.objects.exists())
+
+    def test_jenis_potongan_tanpa_nilai_ditolak(self) -> None:
+        response = self._buat([{"nasabah_id": str(self.nasabah.id), "potongan_jenis": "persen"}])
+
+        self.assertEqual(response.status_code, 422, response.data)
+
+    def test_potongan_item_menimpa_default_draft(self) -> None:
+        budi = self._nasabah("NAS-0002", "Budi Santoso", "200000")
+        citra = self._nasabah("NAS-0003", "Citra Dewi", "200000")
+
+        response = self._buat(
+            [
+                {"nasabah_id": str(self.nasabah.id), "nominal": "100000"},
+                {
+                    "nasabah_id": str(budi.id),
+                    "potongan_jenis": "rupiah",
+                    "potongan_nilai": "1000",
+                },
+                {"nasabah_id": str(citra.id), "potongan_jenis": "persen", "potongan_nilai": "0"},
+            ],
+            potongan_jenis="persen",
+            potongan_nilai="10",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["potongan_jenis"], "persen")
+        self.assertEqual(response.data["potongan_nilai"], "10.00")
+        potongan = {item["nasabah_nama"]: item["potongan"] for item in response.data["items"]}
+        self.assertEqual(
+            potongan,
+            {"Ahmad Ridwan": "10000.00", "Budi Santoso": "1000.00", "Citra Dewi": "0.00"},
+        )
+        self.assertEqual(response.data["total_potongan"], "11000.00")
+
+    def test_default_potongan_rupiah_melebihi_nominal_salah_satu_item_ditolak(self) -> None:
+        kecil = self._nasabah("NAS-0002", "Budi Kecil", "5000")
+
+        response = self._buat(
+            [
+                {"nasabah_id": str(self.nasabah.id), "nominal": "100000"},
+                {"nasabah_id": str(kecil.id)},
+            ],
+            potongan_jenis="rupiah",
+            potongan_nilai="6000",
+        )
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("items[1].potongan_nilai", response.data["errors"])
+        self.assertFalse(DraftPencairan.objects.exists())
+
+    def test_default_potongan_tidak_valid_ditolak(self) -> None:
+        response = self._buat(
+            [{"nasabah_id": str(self.nasabah.id)}], potongan_jenis="persen", potongan_nilai="101"
+        )
+
+        self.assertEqual(response.status_code, 422, response.data)
+
+    def test_galat_item_memakai_urutan_permintaan_bukan_urutan_nama(self) -> None:
+        kecil = self._nasabah("NAS-0002", "Zed Kecil", "5000")
+
+        response = self._buat(
+            [
+                {"nasabah_id": str(kecil.id)},
+                {"nasabah_id": str(self.nasabah.id), "nominal": "100000"},
+            ],
+            potongan_jenis="rupiah",
+            potongan_nilai="6000",
+        )
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertEqual(list(response.data["errors"]), ["items[0].potongan_nilai"])
+
+    def test_nasabah_tidak_memenuhi_syarat_ditolak(self) -> None:
+        nonaktif = self._nasabah("NAS-0002", "Budi Nonaktif", "50000", is_active=False)
+        menunggu = self._nasabah(
+            "NAS-0003", "Citra Menunggu", "50000", status=Nasabah.Status.PENDING
+        )
+        bank_lain = BankSampah.objects.create(
+            nama="Bank Lain",
+            alamat="Bogor",
+            kota="Bogor",
+            no_hp_pic="+628111111111",
+            status=BankSampah.Status.ACTIVE,
+        )
+        asing = self._nasabah("NAS-0004", "Dewi Asing", "50000", bank=bank_lain)
+
+        for nasabah_id in (
+            nonaktif.id,
+            menunggu.id,
+            asing.id,
+            "5b2c8a54-0000-4000-8000-000000000000",
+        ):
+            with self.subTest(nasabah_id=str(nasabah_id)):
+                response = self._buat([{"nasabah_id": str(nasabah_id)}])
+
+                self.assertEqual(response.status_code, 422, response.data)
+                self.assertIn("items[0].nasabah_id", response.data["errors"])
+        self.assertFalse(DraftPencairan.objects.exists())
+
+    def test_draft_berisi_banyak_nasabah_dan_nasabah_ganda_ditolak(self) -> None:
+        budi = self._nasabah("NAS-0002", "Budi Santoso", "50000")
+
+        response = self._buat([{"nasabah_id": str(self.nasabah.id)}, {"nasabah_id": str(budi.id)}])
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["total_nominal"], "515600.00")
+        duplikat = self._buat([{"nasabah_id": str(budi.id)}, {"nasabah_id": str(budi.id)}])
+        self.assertEqual(duplikat.status_code, 422, duplikat.data)
+        self.assertEqual(DraftPencairan.objects.count(), 1)
+
+    def test_daftar_dan_detail_hanya_draft_bank_sendiri(self) -> None:
+        sendiri = self._buat([{"nasabah_id": str(self.nasabah.id)}]).data["id"]
+        asing = self._draft_bank_lain()
+
+        daftar = self.client.get(URL)
+        detail = self.client.get(f"{URL}/{sendiri}")
+        detail_asing = self.client.get(f"{URL}/{asing.id}")
+
+        self.assertEqual(daftar.status_code, 200, daftar.data)
+        self.assertEqual([draft["id"] for draft in daftar.data["results"]], [sendiri])
+        self.assertEqual(detail.status_code, 200, detail.data)
+        self.assertEqual(detail.data["items"][0]["nasabah_nama"], "Ahmad Ridwan")
+        self.assertEqual(detail.data["total_dibayar"], "465600.00")
+        self.assertEqual(detail_asing.status_code, 404)
+
+    def test_daftar_draft_memuat_ringkasan_tanpa_rincian_item(self) -> None:
+        self._buat([{"nasabah_id": str(self.nasabah.id)}])
+
+        draft = self.client.get(URL).data["results"][0]
+
+        self.assertEqual(draft["jumlah_item"], 1)
+        self.assertEqual(draft["total_dibayar"], "465600.00")
+        self.assertNotIn("items", draft)
+
+    def test_nama_default_otomatis_memuat_tanggal_dan_jam_dan_bisa_diberi_nama(self) -> None:
+        item = [{"nasabah_id": str(self.nasabah.id)}]
+        # 22:35 UTC on the 7th is already 05:35 on the 8th for a pengurus in WIB.
+        sekarang = datetime(2026, 10, 7, 22, 35, 12, tzinfo=UTC)
+
+        with mock.patch("django.utils.timezone.now", return_value=sekarang):
+            otomatis = self._buat(item)
+        bernama = self._buat(item, nama="Cair Lebaran")
+
+        self.assertEqual(otomatis.data["nama"], "Pencairan 8 Okt 2026, 05:35")
+        self.assertEqual(bernama.data["nama"], "Cair Lebaran")
+
+    def test_draft_memuat_pembuat_dan_waktu(self) -> None:
+        response = self._buat([{"nasabah_id": str(self.nasabah.id)}])
+
+        self.assertEqual(response.data["dibuat_oleh_nama"], "Ibu Sari")
+        self.assertEqual(response.data["diubah_oleh_nama"], "Ibu Sari")
+        self.assertIn("created_at", response.data)
+        self.assertIn("updated_at", response.data)
+        daftar = self.client.get(URL).data["results"][0]
+        self.assertEqual(daftar["nama"], response.data["nama"])
+        self.assertEqual(daftar["diubah_oleh_nama"], "Ibu Sari")
+
+    def test_ubah_nama_item_dan_potongan_default(self) -> None:
+        budi = self._nasabah("NAS-0002", "Budi Santoso", "50000")
+        citra = self._nasabah("NAS-0003", "Citra Dewi", "80000")
+        draft = self._buat(
+            [
+                {"nasabah_id": str(self.nasabah.id), "nominal": "100000"},
+                {"nasabah_id": str(budi.id)},
+            ]
+        ).data
+        pengurus_lain = User.objects.create_user(
+            email="budi@example.com",
+            nama="Pak Budi",
+            bank_sampah=self.bank,
+            is_profile_complete=True,
+        )
+        self._login(pengurus_lain)
+
+        response = self._patch(
+            draft["id"],
+            nama="Revisi Oktober",
+            potongan_jenis="persen",
+            potongan_nilai="10",
+            items=[
+                {"nasabah_id": str(self.nasabah.id), "nominal": "200000", "metode": "transfer"},
+                {"nasabah_id": str(citra.id)},
+            ],
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["nama"], "Revisi Oktober")
+        self.assertEqual(response.data["dibuat_oleh_nama"], "Ibu Sari")
+        self.assertEqual(response.data["diubah_oleh_nama"], "Pak Budi")
+        self.assertGreater(response.data["updated_at"], draft["updated_at"])
+        items = {item["nasabah_nama"]: item for item in response.data["items"]}
+        self.assertEqual(sorted(items), ["Ahmad Ridwan", "Citra Dewi"])
+        self.assertEqual(items["Ahmad Ridwan"]["nominal"], "200000.00")
+        self.assertEqual(items["Ahmad Ridwan"]["metode"], "transfer")
+        self.assertEqual(items["Citra Dewi"]["nominal"], "80000.00")
+        self.assertEqual(response.data["total_potongan"], "28000.00")
+        self.assertEqual(Saldo.objects.get(nasabah=self.nasabah).total_saldo, Decimal(465600))
+
+    def test_item_yang_tidak_disebut_fieldnya_tetap_dan_null_menghapus_override(self) -> None:
+        draft = self._buat(
+            [
+                {
+                    "nasabah_id": str(self.nasabah.id),
+                    "nominal": "100000",
+                    "potongan_jenis": "persen",
+                    "potongan_nilai": "5",
+                }
+            ],
+            potongan_jenis="rupiah",
+            potongan_nilai="1000",
+        ).data
+
+        tetap = self._patch(draft["id"], items=[{"nasabah_id": str(self.nasabah.id)}])
+        reset = self._patch(
+            draft["id"],
+            items=[
+                {"nasabah_id": str(self.nasabah.id), "potongan_jenis": None, "potongan_nilai": None}
+            ],
+        )
+
+        self.assertEqual(tetap.data["items"][0]["nominal"], "100000.00")
+        self.assertEqual(tetap.data["items"][0]["potongan"], "5000.00")
+        self.assertEqual(reset.data["items"][0]["potongan_jenis"], "")
+        self.assertEqual(reset.data["items"][0]["potongan"], "1000.00")
+
+    def test_ubah_tanpa_item_menjaga_item_dan_memeriksa_potongan_baru(self) -> None:
+        draft = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "100000"}]).data
+
+        response = self._patch(draft["id"], nama="Hanya nama")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["nama"], "Hanya nama")
+        self.assertEqual([item["nominal"] for item in response.data["items"]], ["100000.00"])
+
+        terlalu_besar = self._patch(draft["id"], potongan_jenis="rupiah", potongan_nilai="150000")
+
+        self.assertEqual(terlalu_besar.status_code, 422, terlalu_besar.data)
+
+    def test_ubah_tidak_valid_membatalkan_seluruh_perubahan(self) -> None:
+        draft = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "100000"}]).data
+
+        response = self._patch(
+            draft["id"],
+            nama="Tidak Boleh Tersimpan",
+            items=[{"nasabah_id": str(self.nasabah.id), "nominal": "999999999"}],
+        )
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("items[0].nominal", response.data["errors"])
+        tersimpan = DraftPencairan.objects.get(id=draft["id"])
+        self.assertEqual(tersimpan.nama, draft["nama"])
+        self.assertEqual(tersimpan.items.get().nominal, Decimal(100000))
+
+    def test_ubah_draft_bank_lain_ditolak(self) -> None:
+        asing = self._draft_bank_lain()
+
+        response = self._patch(str(asing.id), nama="Curang")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_batalkan_draft_menandai_dibatalkan_tanpa_mengubah_saldo(self) -> None:
+        draft = self._buat([{"nasabah_id": str(self.nasabah.id)}]).data
+
+        response = self.client.post(f"{URL}/{draft['id']}/batalkan")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["status"], "dibatalkan")
+        self.assertEqual(self.client.get(f"{URL}/{draft['id']}").data["status"], "dibatalkan")
+        self.assertEqual(Saldo.objects.get(nasabah=self.nasabah).total_saldo, Decimal(465600))
+
+    def test_draft_dibatalkan_atau_dikonfirmasi_tidak_bisa_diubah_atau_dibatalkan(self) -> None:
+        for status in ("dibatalkan", "dikonfirmasi"):
+            with self.subTest(status):
+                draft = self._buat([{"nasabah_id": str(self.nasabah.id)}]).data
+                DraftPencairan.objects.filter(id=draft["id"]).update(status=status)
+
+                ubah = self._patch(draft["id"], nama="Baru")
+                batal = self.client.post(f"{URL}/{draft['id']}/batalkan")
+
+                self.assertEqual(ubah.status_code, 409, ubah.data)
+                self.assertEqual(batal.status_code, 409, batal.data)
+                self.assertEqual(DraftPencairan.objects.get(id=draft["id"]).status, status)
+
+    def test_batalkan_draft_bank_lain_ditolak(self) -> None:
+        asing = self._draft_bank_lain()
+
+        response = self.client.post(f"{URL}/{asing.id}/batalkan")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_nasabah_tidak_boleh_memakai_draft_pencairan(self) -> None:
+        akun_nasabah = User.objects.create_user(
+            email="siti@example.test", nama="Siti", role=User.Role.NASABAH
+        )
+        self._login(akun_nasabah)
+
+        daftar = self.client.get(URL)
+        buat = self._buat([{"nasabah_id": str(self.nasabah.id)}])
+
+        self.assertEqual(daftar.status_code, 403)
+        self.assertEqual(buat.status_code, 403)
+
+    def test_draft_lebih_dari_batas_item_ditolak_saat_dibuat(self) -> None:
+        # Past the limit nothing else is looked at: the ids need not even exist.
+        terlalu_banyak = [{"nasabah_id": str(uuid.uuid4())} for _ in range(1001)]
+
+        response = self._buat(terlalu_banyak)
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("1000", str(response.data["errors"]["items"]))
+        self.assertFalse(DraftPencairan.objects.exists())
+
+    def test_batas_item_berlaku_juga_saat_mengubah_draft(self) -> None:
+        draft = self._buat([{"nasabah_id": str(self.nasabah.id)}]).data
+
+        with mock.patch.object(DraftPencairan, "MAKSIMAL_ITEM", 2):
+            response = self.client.patch(
+                f"{URL}/{draft['id']}",
+                {"items": [{"nasabah_id": str(uuid.uuid4())} for _ in range(3)]},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("2", str(response.data["errors"]["items"]))
+
+    def test_draft_tepat_sebesar_batas_masih_diterima(self) -> None:
+        kedua = self._nasabah("NAS-0002", "Budi Santoso", "50000")
+        items = [{"nasabah_id": str(self.nasabah.id)}, {"nasabah_id": str(kedua.id)}]
+
+        with mock.patch.object(DraftPencairan, "MAKSIMAL_ITEM", 2):
+            response = self._buat(items)
+
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def test_rincian_draft_berurutan_nama_lalu_id_apa_pun_urutan_permintaan(self) -> None:
+        budi = self._nasabah("NAS-0002", "Budi Santoso", "50000")
+        citra = self._nasabah("NAS-0003", "Citra Dewi", "75000")
+
+        response = self._buat([{"nasabah_id": str(n.id)} for n in (citra, self.nasabah, budi)])
+
+        self.assertEqual(
+            [item["nasabah_nama"] for item in response.data["items"]],
+            ["Ahmad Ridwan", "Budi Santoso", "Citra Dewi"],
+        )
+
+    def test_membaca_draft_besar_tidak_menambah_query_per_item(self) -> None:
+        def jumlah_query(jumlah: int) -> int:
+            nasabah = [
+                self._nasabah(f"BNY-{jumlah}{i:03d}", f"Nasabah {jumlah}-{i}", "10000")
+                for i in range(jumlah)
+            ]
+            draft = self._buat([{"nasabah_id": str(n.id)} for n in nasabah]).data
+            with CaptureQueriesContext(connection) as queries:
+                response = self.client.get(f"{URL}/{draft['id']}")
+            self.assertEqual(len(response.data["items"]), jumlah)
+            return len(queries)
+
+        self.assertEqual(jumlah_query(3), jumlah_query(25))
+
+    def test_membuat_draft_besar_tidak_menambah_query_saat_menyusun_respons(self) -> None:
+        def query_penyusunan_respons(jumlah: int) -> int:
+            nasabah = [
+                self._nasabah(f"CRT-{jumlah}{i:03d}", f"Nasabah {jumlah}-{i}", "10000")
+                for i in range(jumlah)
+            ]
+            buat_draft = DraftPencairanService.buat_draft
+            selesai: list[int] = []
+
+            def dicatat(*args: Any, **kwargs: Any) -> DraftPencairan:
+                draft = buat_draft(*args, **kwargs)
+                selesai.append(len(connection.queries_log))
+                return draft
+
+            with (
+                CaptureQueriesContext(connection) as queries,
+                mock.patch.object(DraftPencairanService, "buat_draft", side_effect=dicatat),
+            ):
+                awal = len(connection.queries_log)
+                response = self._buat([{"nasabah_id": str(n.id)} for n in nasabah])
+            self.assertEqual(response.status_code, 201, response.data)
+            self.assertEqual(len(response.data["items"]), jumlah)
+            return len(queries) - (selesai[0] - awal)
+
+        self.assertEqual(query_penyusunan_respons(3), query_penyusunan_respons(25))
+
+    def test_item_memuat_saldo_terkini_untuk_review(self) -> None:
+        draft = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "100000"}]).data
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal(80000))
+
+        item = self.client.get(f"{URL}/{draft['id']}").data["items"][0]
+
+        self.assertEqual(item["nominal"], "100000.00")
+        self.assertEqual(item["saldo_saat_ini"], "80000.00")
+
+    def test_item_tanpa_baris_saldo_dilaporkan_nol(self) -> None:
+        draft = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "100000"}]).data
+        Saldo.objects.filter(nasabah=self.nasabah).delete()
+
+        item = self.client.get(f"{URL}/{draft['id']}").data["items"][0]
+
+        self.assertEqual(item["saldo_saat_ini"], "0.00")
+
+    def test_daftar_draft_tidak_menambah_query_per_draft_dan_tidak_memuat_nasabah(self) -> None:
+        def query_daftar(jumlah_draft: int) -> list[str]:
+            for i in range(jumlah_draft):
+                nasabah = self._nasabah(f"LST-{jumlah_draft}{i:03d}", f"Nasabah {i}", "10000")
+                self._buat([{"nasabah_id": str(nasabah.id)}])
+            with CaptureQueriesContext(connection) as queries:
+                response = self.client.get(URL)
+            self.assertEqual(response.status_code, 200)
+            return [q["sql"] for q in queries.captured_queries]
+
+        sedikit = query_daftar(2)
+        banyak = query_daftar(5)
+
+        self.assertEqual(len(sedikit), len(banyak))
+        # The item order joins nasabah, but none of its columns is read.
+        self.assertFalse([sql for sql in banyak if '"nasabah"."' in sql.split(" FROM ")[0]])
+
+    def test_menyimpan_draft_besar_tidak_menambah_select_per_nasabah(self) -> None:
+        def jumlah_select(jumlah: int) -> list[int]:
+            nasabah = [
+                self._nasabah(f"SAV-{jumlah}{i:03d}", f"Nasabah {jumlah}-{i}", "10000")
+                for i in range(jumlah)
+            ]
+            items = [{"nasabah_id": str(n.id), "nominal": "5000"} for n in nasabah]
+            with CaptureQueriesContext(connection) as buat:
+                draft = self._buat(items).data
+            with CaptureQueriesContext(connection) as ubah:
+                self.client.patch(f"{URL}/{draft['id']}", {"items": items}, format="json")
+            return [
+                len([q for q in konteks.captured_queries if q["sql"].startswith("SELECT")])
+                for konteks in (buat, ubah)
+            ]
+
+        self.assertEqual(jumlah_select(3), jumlah_select(25))
+
+
+class JumlahUmumDraftTests(DraftTestBase):
+    """The jumlah the pengurus applied to everyone, kept so the form reopens as it was left."""
+
+    def _item(self) -> list[dict[str, Any]]:
+        return [{"nasabah_id": str(self.nasabah.id), "nominal": "232800"}]
+
+    def test_tanpa_jumlah_umum_keduanya_kosong(self) -> None:
+        response = self._buat(self._item())
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertIsNone(response.data["jumlah_jenis"])
+        self.assertIsNone(response.data["jumlah_nilai"])
+
+    def test_tanpa_jumlah_umum_disimpan_sebagai_teks_kosong_bukan_null(self) -> None:
+        draft = self._buat(self._item()).data
+        self.assertEqual(DraftPencairan.objects.get(pk=draft["id"]).jumlah_jenis, "")
+
+        diubah = self._buat(self._item(), jumlah_jenis="persen", jumlah_nilai="50").data
+        self.client.patch(
+            f"{URL}/{diubah['id']}", {"jumlah_jenis": None, "jumlah_nilai": None}, format="json"
+        )
+
+        self.assertEqual(DraftPencairan.objects.get(pk=diubah["id"]).jumlah_jenis, "")
+        self.assertIsNone(self.client.get(f"{URL}/{diubah['id']}").data["jumlah_jenis"])
+
+    def test_jumlah_umum_tersimpan_dan_terbaca_lagi(self) -> None:
+        response = self._buat(self._item(), jumlah_jenis="persen", jumlah_nilai="50")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        detail = self.client.get(f"{URL}/{response.data['id']}")
+        self.assertEqual(detail.data["jumlah_jenis"], "persen")
+        self.assertEqual(detail.data["jumlah_nilai"], "50.00")
+
+    def test_jumlah_rupiah_tersimpan(self) -> None:
+        response = self._buat(self._item(), jumlah_jenis="rupiah", jumlah_nilai="100000")
+
+        self.assertEqual(response.data["jumlah_jenis"], "rupiah")
+        self.assertEqual(response.data["jumlah_nilai"], "100000.00")
+
+    def test_jumlah_umum_bisa_diubah_dan_dikosongkan(self) -> None:
+        draft = self._buat(self._item(), jumlah_jenis="persen", jumlah_nilai="50").data
+
+        ubah = self.client.patch(
+            f"{URL}/{draft['id']}",
+            {"jumlah_jenis": "rupiah", "jumlah_nilai": "75000"},
+            format="json",
+        )
+        self.assertEqual(
+            (ubah.data["jumlah_jenis"], ubah.data["jumlah_nilai"]), ("rupiah", "75000.00")
+        )
+
+        kosong = self.client.patch(
+            f"{URL}/{draft['id']}", {"jumlah_jenis": None, "jumlah_nilai": None}, format="json"
+        )
+        self.assertEqual(kosong.status_code, 200, kosong.data)
+        self.assertIsNone(kosong.data["jumlah_jenis"])
+        self.assertIsNone(kosong.data["jumlah_nilai"])
+
+    def test_ubah_hal_lain_tidak_menyentuh_jumlah_umum(self) -> None:
+        draft = self._buat(self._item(), jumlah_jenis="persen", jumlah_nilai="50").data
+
+        ubah = self.client.patch(f"{URL}/{draft['id']}", {"nama": "Baru"}, format="json")
+
+        self.assertEqual(ubah.data["jumlah_jenis"], "persen")
+        self.assertEqual(ubah.data["jumlah_nilai"], "50.00")
+
+    def test_jumlah_umum_tidak_valid_ditolak(self) -> None:
+        kasus = [
+            {"jumlah_jenis": "persen"},
+            {"jumlah_nilai": "50"},
+            {"jumlah_jenis": "persen", "jumlah_nilai": "100.01"},
+            {"jumlah_jenis": "persen", "jumlah_nilai": "-1"},
+            {"jumlah_jenis": "rupiah", "jumlah_nilai": "1000.5"},
+            {"jumlah_jenis": "ons", "jumlah_nilai": "5"},
+        ]
+        for body in kasus:
+            with self.subTest(body=body):
+                response = self._buat(self._item(), **body)
+                self.assertEqual(response.status_code, 422, response.data)
