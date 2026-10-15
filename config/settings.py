@@ -201,6 +201,9 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 20,
     "EXCEPTION_HANDLER": "shared_kernel.exceptions.api_exception_handler",
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # Cloud Run appends the client address and two proxy hops to X-Forwarded-For.
+    # DRF's NUM_PROXIES selects from the right, excluding any caller-supplied prefix.
+    "NUM_PROXIES": 3,
     # Scoped rates: keys are the throttle scope of the views declaring one.
     # statement_pdf = the riwayat statement render (CPU-heavy; see
     # apps.nasabah.home.NasabahHistoryExportPdfView).

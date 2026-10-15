@@ -231,3 +231,19 @@ class ReviewerAuthenticationTests(APITestCase):
 
         self.assertEqual(throttled.status_code, 429)
         self.assertIn("no-store", throttled["Cache-Control"])
+
+    def test_untrusted_forwarded_prefix_cannot_bypass_source_throttle(self) -> None:
+        self.client.defaults["REMOTE_ADDR"] = "10.0.0.5"
+
+        for octet in range(1, 6):
+            self.client.defaults["HTTP_X_FORWARDED_FOR"] = (
+                f"198.51.100.{octet}, 192.0.2.251, 198.51.100.250, 203.0.113.250"
+            )
+            self.assertEqual(self._login(password="wrong-password").status_code, 401)
+
+        self.client.defaults["HTTP_X_FORWARDED_FOR"] = (
+            "203.0.113.99, 192.0.2.251, 198.51.100.250, 203.0.113.250"
+        )
+        throttled = self._login(password="wrong-password")
+
+        self.assertEqual(throttled.status_code, 429)
