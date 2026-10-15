@@ -18,6 +18,7 @@ from rest_framework.test import APIRequestFactory
 from api.models import (
     BankSampah,
     DetailTransaksi,
+    HargaSampah,
     JenisSampah,
     Nasabah,
     Pencairan,
@@ -46,12 +47,19 @@ class NasabahStatementDataTests(TestCase):
             alamat="Depok",
             no_hp="08120",
         )
+        # Harga hidup sebagai versi di HargaSampah sejak PIL-304; transaksi
+        # lama masih membaca harga lewat snapshot DetailTransaksi.
         self.jenis = JenisSampah.objects.create(
             bank_sampah=self.bank,
             nomor="01",
             nama_sampah="Plastik PET",
             kategori="plastik",
+        )
+        HargaSampah.objects.create(
+            jenis_sampah=self.jenis,
+            bank_sampah=self.bank,
             harga_per_kg=Decimal("3500.00"),
+            berlaku_mulai=timezone.now() - timedelta(days=1),
         )
         Transaksi.objects.create(
             nasabah=self.member,

@@ -1,11 +1,20 @@
 """Dashboard contracts: stats, recent transactions, reporting, WA template."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.utils import timezone
 
-from api.models import BankSampah, DetailTransaksi, JenisSampah, Nasabah, Pencairan, Transaksi, User
+from api.models import (
+    BankSampah,
+    DetailTransaksi,
+    HargaSampah,
+    JenisSampah,
+    Nasabah,
+    Pencairan,
+    Transaksi,
+    User,
+)
 from tests.regression.helpers import RegressionTestCase
 
 
@@ -201,7 +210,12 @@ class DashboardRegressionTests(RegressionTestCase):
             nomor="PLS-OTHER",
             nama_sampah="Plastik",
             kategori=JenisSampah.Kategori.PLASTIK,
+        )
+        HargaSampah.objects.create(
+            jenis_sampah=other_jenis,
+            bank_sampah=other_bank,
             harga_per_kg=Decimal("1000.00"),
+            berlaku_mulai=timezone.now() - timedelta(days=1),
         )
         today = timezone.localdate()
         timestamp = timezone.make_aware(datetime.combine(today, datetime.min.time()))

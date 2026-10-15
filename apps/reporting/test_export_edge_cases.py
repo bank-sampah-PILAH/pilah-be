@@ -5,8 +5,9 @@ from django.test import RequestFactory
 from openpyxl import load_workbook
 from rest_framework.test import APITestCase
 
-from api.models import BankSampah, DetailTransaksi, JenisSampah, Nasabah, Transaksi, User
+from api.models import BankSampah, DetailTransaksi, Nasabah, Transaksi, User
 from apps.reporting.api import export_excel
+from apps.waste_catalog.api import buat_jenis_sampah
 
 
 class ExportEdgeCaseTests(APITestCase):
@@ -32,8 +33,8 @@ class ExportEdgeCaseTests(APITestCase):
         self.assertTrue(filename.endswith(".xlsx"))
         self.assertIn("Riwayat Transaksi", workbook.sheetnames)
 
-    def test_explicit_all_time_period_is_labelled_as_all_periods(self) -> None:
-        jenis = JenisSampah.objects.create(
+    def test_unknown_period_is_labelled_as_all_periods(self) -> None:
+        jenis = buat_jenis_sampah(
             bank_sampah=self.bank, nomor="PET", nama_sampah="Botol PET", harga_per_kg=Decimal(3000)
         )
         transaksi = Transaksi.objects.create(
