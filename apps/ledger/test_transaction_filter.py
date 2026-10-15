@@ -33,12 +33,14 @@ class ApplyPeriodTests(TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def _catat(self, nilai: int, *waktu: int) -> None:
+    def _catat(
+        self, nilai: int, tahun: int, bulan: int, hari: int, jam: int = 0, menit: int = 0
+    ) -> None:
         Transaksi.objects.create(
             nasabah=self.nasabah,
             bank_sampah=self.bank,
             dicatat_oleh=self.pengurus,
-            tanggal=datetime(*waktu, tzinfo=WIB),
+            tanggal=datetime(tahun, bulan, hari, jam, menit, tzinfo=WIB),
             total_nilai=Decimal(nilai),
         )
 
@@ -74,7 +76,7 @@ class ApplyPeriodTests(TestCase):
             with self.subTest(params=params), self.assertRaises(ValidationError) as ctx:
                 self._nilai(periode="custom", **params)
             self.assertEqual(
-                dict(ctx.exception.detail),
+                ctx.exception.detail,
                 {"error": "dari_tanggal dan sampai_tanggal wajib diisi"},
             )
 
@@ -90,10 +92,10 @@ class ApplyPeriodTests(TestCase):
         with self.assertRaises(ValidationError) as ctx:
             self._nilai(periode="kemarin")
 
-        self.assertEqual(dict(ctx.exception.detail), {"periode": "Periode tidak valid"})
+        self.assertEqual(ctx.exception.detail, {"periode": "Periode tidak valid"})
 
     def test_tanggal_custom_tidak_valid_ditolak_dengan_pesan_format(self) -> None:
         with self.assertRaises(ValidationError) as ctx:
             self._nilai(periode="custom", dari_tanggal="14/10/2026", sampai_tanggal="2026-10-14")
 
-        self.assertEqual(dict(ctx.exception.detail), {"error": "Format tanggal harus YYYY-MM-DD"})
+        self.assertEqual(ctx.exception.detail, {"error": "Format tanggal harus YYYY-MM-DD"})

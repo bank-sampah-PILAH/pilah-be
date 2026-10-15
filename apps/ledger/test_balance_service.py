@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -28,7 +28,7 @@ class SaldoAtTests(TestCase):
         )
 
     def _setoran(
-        self, nasabah: Nasabah, nilai: str, tanggal: object, bank: BankSampah | None = None
+        self, nasabah: Nasabah, nilai: str, tanggal: datetime, bank: BankSampah | None = None
     ) -> Transaksi:
         return Transaksi.objects.create(
             nasabah=nasabah,
@@ -39,7 +39,7 @@ class SaldoAtTests(TestCase):
         )
 
     def _pencairan(
-        self, nasabah: Nasabah, sebelum: str, sesudah: str, tanggal: object
+        self, nasabah: Nasabah, sebelum: str, sesudah: str, tanggal: datetime
     ) -> Pencairan:
         return Pencairan.objects.create(
             nasabah=nasabah,
