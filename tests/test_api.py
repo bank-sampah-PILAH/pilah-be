@@ -4853,6 +4853,54 @@ class PencairanAPITests(APITestCase):
         saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
         self.assertEqual(saldo.data["total_saldo"], "265600.00")
 
+    def test_pencairan_sebesar_seluruh_saldo_diterima(self) -> None:
+        response = self.client.post(
+            "/api/v1/pencairan",
+            {"nasabah_id": str(self.nasabah.id), "nominal": "465600", "metode": "tunai"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["saldo_sesudah"], "0.00")
+
+    def test_pencairan_tanpa_keterangan_menyimpan_teks_kosong(self) -> None:
+        self.client.post(
+            "/api/v1/pencairan",
+            {"nasabah_id": str(self.nasabah.id), "nominal": "1000", "metode": "tunai"},
+            format="json",
+        )
+
+        self.assertEqual(Pencairan.objects.get().keterangan, "")
+
+    def test_aktivitas_nasabah_lain_tidak_membatasi_tanggal_pencairan(self) -> None:
+        lain = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0002",
+            nama="Budi Lain",
+            no_hp="+628123456780",
+            alamat="Jl. Melati",
+        )
+        Transaksi.objects.create(
+            nasabah=lain,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.user,
+            tanggal=timezone.now(),
+            total_nilai=Decimal(1000),
+        )
+
+        response = self.client.post(
+            "/api/v1/pencairan",
+            {
+                "nasabah_id": str(self.nasabah.id),
+                "nominal": "1000",
+                "metode": "tunai",
+                "tanggal": (timezone.now() - timedelta(days=1)).isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+
     def test_pencairan_above_saldo_is_rejected(self) -> None:
         response = self.client.post(
             "/api/v1/pencairan",
