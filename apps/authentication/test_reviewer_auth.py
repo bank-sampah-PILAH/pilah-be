@@ -123,6 +123,17 @@ class ReviewerAuthenticationTests(APITestCase):
         self._assert_invalid_credentials(wrong_password)
         self._assert_invalid_credentials(missing_credentials)
 
+    def test_ambiguous_case_insensitive_reviewer_email_is_rejected(self) -> None:
+        User.objects.create_user(
+            email=self.email.upper(),
+            nama="A Duplicate Reviewer",
+            role=User.Role.PENGELOLA,
+            bank_sampah=self.bank,
+            is_profile_complete=True,
+        )
+
+        self._assert_invalid_credentials(self._login())
+
     def test_reviewer_auth_logs_generic_events_without_sensitive_data(self) -> None:
         attempted_password = "never-log-this-password"
         with self.assertLogs("apps.authentication.views", level="INFO") as captured:

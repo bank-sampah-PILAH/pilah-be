@@ -50,17 +50,23 @@ class AuthService:
         except ValueError as exc:
             raise AuthService._invalid_reviewer_credentials() from exc
 
-        user = User.objects.filter(
-            email__iexact=reviewer_email,
-            role=User.Role.PENGELOLA,
-            is_active=True,
-            is_staff=False,
-            is_superuser=False,
-            bank_sampah_id=configured_bank_id,
-            bank_sampah__status=BankSampah.Status.ACTIVE,
-            bank_sampah__is_active=True,
-        ).first()
-        if user is None:
+        matches = list(
+            User.objects.select_related("bank_sampah").filter(email__iexact=reviewer_email)[:2]
+        )
+        if len(matches) != 1:
+            raise AuthService._invalid_reviewer_credentials()
+        user = matches[0]
+        bank = user.bank_sampah
+        if (
+            user.role != User.Role.PENGELOLA
+            or not user.is_active
+            or user.is_staff
+            or user.is_superuser
+            or user.bank_sampah_id != configured_bank_id
+            or bank is None
+            or bank.status != BankSampah.Status.ACTIVE
+            or not bank.is_active
+        ):
             raise AuthService._invalid_reviewer_credentials()
         return AuthService._session_response(user, is_new_user=False)
 
