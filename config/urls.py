@@ -19,9 +19,9 @@ from django.conf import settings
 from django.contrib import admin
 from django.http import HttpRequest, JsonResponse
 from django.urls import include, path, re_path
-from django.views.decorators.http import require_GET
 from django.views.generic import TemplateView
 from django.views.static import serve
+from django.views.decorators.http import require_GET
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from apps.bank_sampah.views import bank_sampah_activity_media
@@ -66,17 +66,9 @@ def assetlinks(request: HttpRequest) -> JsonResponse:
     )
 
 
-@require_GET
-def public_config(request: HttpRequest) -> JsonResponse:
-    response = JsonResponse({"demoLoginEnabled": settings.PILAH_ENABLE_DEMO_LOGIN})
-    response["Cache-Control"] = "no-store"
-    return response
-
-
 urlpatterns = [
     path("healthz", healthz, name="healthz"),
     path("admin/", admin.site.urls),
-    path("api/public-config", public_config, name="public-config"),
     path(".well-known/assetlinks.json", assetlinks, name="assetlinks"),
     # Developer tools: served only when DEBUG is on, so staging and production answer 404.
     path("api-test/", debug_only(ApiTestView.as_view()), name="api-test"),
@@ -86,7 +78,7 @@ urlpatterns = [
         debug_only(SpectacularSwaggerView.as_view(url_name="schema")),
         name="swagger-ui",
     ),
-    path("api/v1/", include("api.urls")),
+    path("", include("api.urls")),
     path(
         "media/activity/<path:token>", bank_sampah_activity_media, name="bank-sampah-activity-media"
     ),
