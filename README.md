@@ -157,6 +157,10 @@ Auth and app variables:
 ```env
 GOOGLE_CLIENT_ID=
 PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false
+PILAH_ENABLE_DEMO_LOGIN=false
+PILAH_REVIEWER_EMAIL=
+PILAH_REVIEWER_PASSWORD_HASH=
+PILAH_REVIEWER_BANK_SAMPAH_ID=
 PILAH_PUBLIC_APP_URL=https://pilah.example.com
 PILAH_SUPERADMIN_EMAILS=admin@example.com,another-admin@example.com
 ```
@@ -170,6 +174,45 @@ Set `PILAH_SUPERADMIN_EMAILS` on Fly and as a GitHub repository variable for
 Cloud Run. It is the authoritative comma-separated list of Superadmin Google
 accounts. The deploy workflow stops before deployment if the repository
 variable is empty.
+
+## Google Play reviewer login
+
+Reviewer login stays disabled unless the backend runtime sets
+`PILAH_ENABLE_DEMO_LOGIN=true`; this switch is independent of `DJANGO_DEBUG`.
+The unauthenticated `/api/public-config` response contains only that switch,
+with `Cache-Control: no-store`. When disabled, `/api/v1/auth/reviewer` returns
+404. Keep `DJANGO_DEBUG=false` and `PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false` in
+production.
+
+Before enabling it, prepare a dedicated active synthetic bank and an active
+`pengelola` user assigned to that bank. The user must not be a staff account or
+Superadmin. Set the server-only `PILAH_REVIEWER_EMAIL`,
+`PILAH_REVIEWER_PASSWORD_HASH`, and `PILAH_REVIEWER_BANK_SAMPAH_ID` to that
+account, a Django password hash, and the bank UUID. Reviewer passwords are
+separate from Django user passwords. The endpoint issues the standard PILAH
+session only when all three settings, the submitted credentials, the account,
+and active-bank state match. Attempts are rate-limited to five per minute per
+source IP; authentication failures share a generic response and are not logged
+with credentials or tokens.
+
+Generate the password hash in a trusted operator shell without putting the raw
+password in shell history or process arguments:
+
+```text
+python manage.py shell
+>>> from getpass import getpass
+>>> from django.contrib.auth.hashers import make_password
+>>> print(make_password(getpass("Reviewer password: ")))
+```
+
+For Cloud Run, set `PILAH_ENABLE_DEMO_LOGIN`, `PILAH_REVIEWER_EMAIL`, and
+`PILAH_REVIEWER_BANK_SAMPAH_ID` as repository variables, and store
+`PILAH_REVIEWER_PASSWORD_HASH` as a GitHub Actions secret. The deployment
+workflow passes these settings to the backend only; unset values keep the
+switch disabled. Keep the switch enabled for the full Play review period so
+subsequent reviews use the same account, and disable it when reviewer access is
+no longer needed. No reviewer credentials or production tenant data belong in
+the mobile app or repository.
 
 WhatsApp gateway variables:
 

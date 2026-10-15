@@ -155,6 +155,24 @@ sign-in as an allowlisted Superadmin. Confirm the production database contains
 no demo fixture records. No live cloud/Google Console changes are made merely
 by merging this code; required variables and promotion must be completed.
 
+## Google Play reviewer login
+
+Cloud Run keeps reviewer login disabled when `PILAH_ENABLE_DEMO_LOGIN` is
+unset or false. It is independent of `DJANGO_DEBUG`, which remains false in
+production. Before enabling review access, provision a dedicated synthetic
+bank and an active non-admin `pengelola` account through the approved operator
+process; the deployment and Superadmin bootstrap do not create reviewer data.
+
+Set `PILAH_ENABLE_DEMO_LOGIN`, `PILAH_REVIEWER_EMAIL`, and
+`PILAH_REVIEWER_BANK_SAMPAH_ID` as GitHub repository variables, and store the
+Django-hashed `PILAH_REVIEWER_PASSWORD_HASH` as a GitHub Actions secret. The
+workflow passes only these server settings to Cloud Run. Deploy the backend to
+apply changes; the mobile app reads the no-store `/api/public-config` response
+and needs no rebuild. Keep the flag enabled during the review period so later
+reviews can use the same credentials. Setting it false disables new reviewer
+logins; sessions already issued keep their normal JWT lifetime and revocation
+behavior.
+
 ## Important Production Notes
 
 Set these before production use:
@@ -164,6 +182,10 @@ Set these before production use:
 - `DJANGO_ALLOWED_HOSTS` to the Cloud Run domain or custom domain.
 - `PILAH_WEB_ORIGIN` to the actual dashboard HTTPS origin (required).
 - `PILAH_SUPERADMIN_EMAILS` to the authoritative production Google accounts.
+- `PILAH_ENABLE_DEMO_LOGIN` to `true` only while reviewer demo access is needed;
+  unset or false keeps the login disabled.
+- `PILAH_REVIEWER_PASSWORD_HASH` as an Actions secret, plus the configured
+  reviewer email and synthetic bank UUID repository variables.
 - `CORS_ALLOW_ALL_ORIGINS=false`; both deploy paths enforce explicit origins.
 - `PILAH_PUBLIC_APP_URL` to the public app or API URL used for invite links.
 - `WHATSAPP_GATEWAY_URL` and `WHATSAPP_GATEWAY_TOKEN` if WhatsApp sending is enabled.
