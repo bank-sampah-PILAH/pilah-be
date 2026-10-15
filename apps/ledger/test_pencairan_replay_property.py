@@ -21,7 +21,9 @@ _PENCAIRAN = st.lists(
 )
 
 
-def _urut(setoran: list[tuple[int, int, str]], pencairan: list[tuple[int, int, str]]):
+def _urut(
+    setoran: list[tuple[int, int, str]], pencairan: list[tuple[int, int, str]]
+) -> list[tuple[int, int, str, int]]:
     """Ledger order: by instant, a setoran before a pencairan, pencairan by id."""
     peristiwa = [(jam, 0, kunci, nilai) for jam, nilai, kunci in setoran]
     peristiwa += [(jam, 1, kunci, nilai) for jam, nilai, kunci in pencairan]

@@ -35,7 +35,7 @@ class SetoranEdgeCaseTests(APITransactionTestCase):
             bank_sampah=self.bank, nomor="PET", nama_sampah="Botol PET", harga_per_kg=Decimal(3000)
         )
         self.client.force_authenticate(self.pengelola)
-        self.payload = {
+        self.payload: dict[str, Any] = {
             "nasabah_id": str(self.nasabah.id),
             "items": [{"jenis_sampah_id": str(self.jenis.id), "berat": "2.000"}],
         }
