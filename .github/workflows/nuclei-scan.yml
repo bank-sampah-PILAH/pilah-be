@@ -15,8 +15,8 @@
 # target_url (the production deploy does, with the URL it just read from Cloud Run).
 # Otherwise URLs come from repository variables
 # (Settings -> Secrets and variables -> Actions -> Variables):
-#   NUCLEI_STAGING_API_URL      (required for staging)
-#   NUCLEI_PRODUCTION_API_URL   (only for a manual production run; the deploy passes its own)
+#   STAGING_API_URL      (required for staging)
+#   PRODUCTION_API_URL   (only for a manual production run; the deploy passes its own)
 name: Nuclei scan
 
 on:
@@ -56,8 +56,8 @@ jobs:
       NUCLEI_IMAGE: projectdiscovery/nuclei:v3.11.0
       ENVIRONMENT: ${{ inputs.environment || 'staging' }}
       TARGET_URL_INPUT: ${{ inputs.target_url }}
-      STAGING_API_URL: ${{ vars.NUCLEI_STAGING_API_URL }}
-      PRODUCTION_API_URL: ${{ vars.NUCLEI_PRODUCTION_API_URL }}
+      STAGING_API_URL: ${{ vars.STAGING_API_URL }}
+      PRODUCTION_API_URL: ${{ vars.PRODUCTION_API_URL }}
     steps:
       - name: Resolve target
         run: |
@@ -70,7 +70,7 @@ jobs:
           url="${TARGET_URL_INPUT:-$url}"
           case "$url" in
             https://*) ;;
-            *) echo "::error::Missing or non-HTTPS API URL for $ENVIRONMENT; set the NUCLEI_${ENVIRONMENT^^}_API_URL repository variable."; exit 1 ;;
+            *) echo "::error::Missing or non-HTTPS API URL for $ENVIRONMENT; set the ${ENVIRONMENT^^}_API_URL repository variable."; exit 1 ;;
           esac
           echo "TARGET=$url" >> "$GITHUB_ENV"
 
