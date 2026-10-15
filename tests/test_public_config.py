@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 from django.test import SimpleTestCase, override_settings
 from django.urls import resolve
 
@@ -5,7 +7,7 @@ from django.urls import resolve
 class PublicRuntimeConfigTests(SimpleTestCase):
     def test_public_config_view_is_owned_by_the_authentication_context(self) -> None:
         match = resolve("/api/public-config")
-        view_class = getattr(match.func, "view_class")
+        view_class = cast(Any, match.func).view_class
 
         self.assertEqual(match.url_name, "public-config")
         self.assertEqual(view_class.__module__, "apps.authentication.views")
