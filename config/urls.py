@@ -66,9 +66,17 @@ def assetlinks(request: HttpRequest) -> JsonResponse:
     )
 
 
+@require_GET
+def public_config(request: HttpRequest) -> JsonResponse:
+    response = JsonResponse({"demoLoginEnabled": settings.PILAH_ENABLE_DEMO_LOGIN})
+    response["Cache-Control"] = "no-store"
+    return response
+
+
 urlpatterns = [
     path("healthz", healthz, name="healthz"),
     path("admin/", admin.site.urls),
+    path("api/public-config", public_config, name="public-config"),
     path(".well-known/assetlinks.json", assetlinks, name="assetlinks"),
     # Developer tools: served only when DEBUG is on, so staging and production answer 404.
     path("api-test/", debug_only(ApiTestView.as_view()), name="api-test"),
