@@ -1,5 +1,6 @@
 import mimetypes
 import re
+from typing import Any
 from urllib.parse import urlencode
 
 from django.conf import settings
@@ -8,7 +9,7 @@ from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.db.models import Q, QuerySet
 from django.http import FileResponse, Http404, HttpRequest
 from django.views.decorators.http import require_GET
-from rest_framework import viewsets
+from rest_framework import serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -19,6 +20,7 @@ from rest_framework.views import APIView
 
 from api.models import BankSampah, User
 from apps.authentication.api import user_state_hint
+from apps.bank_sampah.geo import haversine_km
 from apps.bank_sampah.serializers import (
     ApprovalDecisionSerializer,
     ApprovalLogSerializer,
@@ -238,6 +240,52 @@ def _joinable_banks() -> QuerySet[BankSampah]:
     )
 
 
+JARAK_MAKSIMAL_KM = 100  # Radius cap: the directory is join-distance, not intercity freight.
+
+
+class BankSampahLokasiQuerySerializer(serializers.Serializer):  # type: ignore[type-arg]  # stubs are generic, runtime is not
+    """Validates the coordinate trio of the directory list (PIL-314).
+
+    All-or-nothing: half a coordinate pair pinpoints nothing, so any
+    incomplete combination is rejected rather than silently reduced to a
+    keyword search.
+    """
+
+    latitude = serializers.FloatField(required=False)
+    longitude = serializers.FloatField(required=False)
+    radius_km = serializers.FloatField(required=False)
+    sort = serializers.CharField(required=False)
+
+    _WILAYAH = {"latitude": (-90, 90), "longitude": (-180, 180)}
+
+    def validate_latitude(self, value: float) -> float:
+        if not -90 <= value <= 90:
+            raise serializers.ValidationError("Lintang harus di antara -90 dan 90")
+        return value
+
+    def validate_longitude(self, value: float) -> float:
+        if not -180 <= value <= 180:
+            raise serializers.ValidationError("Bujur harus di antara -180 dan 180")
+        return value
+
+    def validate_radius_km(self, value: float) -> float:
+        if value <= 0 or value > JARAK_MAKSIMAL_KM:
+            raise serializers.ValidationError(
+                f"Radius harus lebih dari 0 dan maksimal {JARAK_MAKSIMAL_KM} km"
+            )
+        return value
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        hadir = [k for k in ("latitude", "longitude", "radius_km") if k in attrs]
+        if hadir and len(hadir) != 3:
+            raise serializers.ValidationError(
+                "latitude, longitude, dan radius_km dikirim bersamaan atau tidak sama sekali"
+            )
+        if attrs.get("sort") == "distance" and "radius_km" not in attrs:
+            raise serializers.ValidationError("sort=distance membutuhkan koordinat lengkap")
+        return attrs
+
+
 class BankSampahDirectoryView(ListAPIView[BankSampah]):
     """Lists bank sampah a calon nasabah can apply to join.
 
@@ -248,6 +296,14 @@ class BankSampahDirectoryView(ListAPIView[BankSampah]):
     `q` searches nama/alamat/kota (PIL-308); `kota` matches the normalized
     region text (PIL-329 option A): prefix variants "Kota"/"Kab." collapse,
     so a stored "Kota Depok" answers both "depok" and "Kota Depok".
+
+    The coordinate trio (latitude/longitude/radius_km) turns the list into a
+    distance search (PIL-314): only banks with stored coordinates qualify,
+    rows leave the radius circle are dropped, and every row gains a
+    `jarak_km` string. Sorting and pagination then happen in Python — the
+    full filtered set is sorted once (jarak asc with nama as tie-break, or
+    plain nama), and standard page slicing follows, so page 2 is always ranks
+    3+ of the full ordering, never a fresh sort of the current page.
     """
 
     permission_classes = [IsAuthenticated]
@@ -264,6 +320,57 @@ class BankSampahDirectoryView(ListAPIView[BankSampah]):
         if kota:
             qs = qs.filter(kota__icontains=normalisasi_kota(kota))
         return qs
+
+    def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        lokasi = BankSampahLokasiQuerySerializer(data=request.query_params)
+        # Issue contract wants 422 for bad filter input, not DRF's default 400.
+        try:
+            lokasi.is_valid(raise_exception=True)
+        except serializers.ValidationError as exc:
+            return Response({"errors": exc.detail}, status=422)
+        params = lokasi.validated_data
+        if params.get("sort") == "distance" or "radius_km" in params:
+            return self._list_dengan_jarak(params)
+        return super().list(request, *args, **kwargs)
+
+    def _list_dengan_jarak(self, params: dict[str, Any]) -> Response:
+        """Distance mode (PIL-314): radius filter, optional distance sort.
+
+        The whole filtered set is scored and sorted once, then paginated, so
+        page 2 is always ranks page_size+1.. of the full ordering — never a
+        re-sort of just the current page.
+        """
+        lat, lng = params["latitude"], params["longitude"]
+        kunci = (
+            (lambda item: (item[1], item[0].nama))
+            if params.get("sort") == "distance"
+            else (lambda item: item[0].nama)  # location mode without sort stays nama-ordered
+        )
+        kandidat = sorted(
+            (
+                (
+                    bank,
+                    haversine_km(lat, lng, float(str(bank.latitude)), float(str(bank.longitude))),
+                )
+                for bank in self.get_queryset().filter(
+                    latitude__isnull=False, longitude__isnull=False
+                )
+            ),
+            key=kunci,
+        )
+        if "radius_km" in params:
+            kandidat = [(bank, jarak) for bank, jarak in kandidat if jarak <= params["radius_km"]]
+        konteks = self.get_serializer_context()
+        rows = [
+            {
+                **BankSampahDirectorySerializer(bank, context=konteks).data,
+                "jarak_km": f"{jarak:.2f}",
+            }
+            for bank, jarak in kandidat
+        ]
+        paginator = StandardPagination()
+        page = paginator.paginate_queryset(rows, self.request, view=self)
+        return paginator.get_paginated_response(page)
 
 
 class BankSampahDetailView(RetrieveAPIView[BankSampah]):
