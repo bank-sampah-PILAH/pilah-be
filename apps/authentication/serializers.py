@@ -86,6 +86,11 @@ class GoogleAuthSerializer(serializers.Serializer[Any]):
     id_token = serializers.CharField(required=True)
 
 
+class ReviewerAuthSerializer(serializers.Serializer[Any]):
+    email = serializers.EmailField(max_length=254)
+    password = serializers.CharField(max_length=256, trim_whitespace=False, write_only=True)
+
+
 class RefreshTokenSerializer(serializers.Serializer[Any]):
     refresh_token = serializers.CharField(required=True)
 

@@ -1,14 +1,18 @@
 import json
+import logging
 from typing import Any
 
 import requests
 from django.conf import settings
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.http import HttpResponse, HttpResponseRedirect
+from django.utils.decorators import method_decorator
 from django.utils.http import urlencode
+from django.views.decorators.cache import never_cache
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -19,6 +23,7 @@ from apps.authentication.serializers import (
     GoogleRegistrationSerializer,
     LogoutSerializer,
     RefreshTokenSerializer,
+    ReviewerAuthSerializer,
     UserProfileSerializer,
 )
 from apps.authentication.services import (
@@ -30,6 +35,8 @@ from shared_kernel.permissions import (
     IsRegistrationRole,
 )
 from shared_kernel.scoping import current_user
+
+logger = logging.getLogger(__name__)
 
 # Local page a finished OAuth popup redirects to when no `next` URL survives.
 _OAUTH_FALLBACK_PATH = "/api-test/"
@@ -49,6 +56,34 @@ class GoogleAuthView(APIView):
             return Response({"error": str(exc), "code": exc.code}, status=exc.status_code)
         except Exception:
             return Response({"error": "ID Token invalid atau expired"}, status=401)
+
+
+@method_decorator(never_cache, name="dispatch")
+class ReviewerAuthView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "reviewer_login"
+    serializer_class = ReviewerAuthSerializer
+
+    def post(self, request: Request) -> Response:
+        if not settings.PILAH_ENABLE_DEMO_LOGIN:
+            logger.info("reviewer_auth.disabled")
+            return Response({"detail": "Not found."}, status=404)
+
+        serializer = ReviewerAuthSerializer(data=request.data)
+        if not serializer.is_valid():
+            logger.warning("reviewer_auth.failure")
+            return _auth_service_error_response(AuthService._invalid_reviewer_credentials())
+        try:
+            payload = AuthService.login_with_reviewer(
+                serializer.validated_data["email"], serializer.validated_data["password"]
+            )
+        except AuthServiceError as exc:
+            logger.warning("reviewer_auth.failure")
+            return _auth_service_error_response(exc)
+        logger.info("reviewer_auth.success")
+        return Response(payload)
 
 
 class GoogleOAuthStartView(APIView):
