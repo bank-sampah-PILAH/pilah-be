@@ -47,6 +47,17 @@ class DeploymentWorkflowTests(SimpleTestCase):
         self.assertIn("CSRF_TRUSTED_ORIGINS=${PILAH_WEB_ORIGIN}", deploy)
         self.assertIn("PILAH_ENVIRONMENT=production", deploy)
         self.assertIn("PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false", deploy)
+        deploy_environment = steps[names.index("Deploy Cloud Run")]["env"]
+        reviewer_settings = {
+            "PILAH_ENABLE_DEMO_LOGIN": "${{ vars.PILAH_ENABLE_DEMO_LOGIN }}",
+            "PILAH_REVIEWER_EMAIL": "${{ vars.PILAH_REVIEWER_EMAIL }}",
+            "PILAH_REVIEWER_PASSWORD_HASH": "${{ secrets.PILAH_REVIEWER_PASSWORD_HASH }}",
+            "PILAH_REVIEWER_BANK_SAMPAH_ID": "${{ vars.PILAH_REVIEWER_BANK_SAMPAH_ID }}",
+        }
+        for name, source in reviewer_settings.items():
+            with self.subTest(name=name):
+                self.assertEqual(deploy_environment[name], source)
+                self.assertIn(f"{name}=${{{name}}}", deploy)
         bootstrap = steps[names.index("Bootstrap production Superadmins")]
         self.assertEqual(bootstrap["run"], "python3 scripts/bootstrap_cloud_run.py")
         self.assertNotIn("continue-on-error", bootstrap)
