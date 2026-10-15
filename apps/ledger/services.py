@@ -1,9 +1,12 @@
+from calendar import monthrange
 from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_DOWN, Decimal
 from typing import Any, TypeVar, cast
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from django.db.models import Exists, F, Max, Model, OuterRef, Q, QuerySet, Subquery, Sum
 from django.db.models.functions import Coalesce
@@ -14,20 +17,31 @@ from rest_framework import serializers
 from api.models import (
     BankSampah,
     DetailTransaksi,
+    DraftPencairan,
+    DraftPencairanItem,
+    Nasabah,
     Pencairan,
     PencairanRevisi,
     Saldo,
     Transaksi,
     User,
 )
-from apps.nasabah.api import get_locked_nasabah
+from apps.nasabah.api import (
+    get_eligible_nasabah_map,
+    get_locked_nasabah,
+    kandidat_pencairan,
+)
 from apps.waste_catalog.api import get_active_jenis
 from shared_kernel.kalkulasi import (
     bulatkan_rupiah,
     harga_berlaku,
+    hitung_potongan,
     hitung_subtotal,
     total_setoran,
 )
+
+_NASABAH_TIDAK_AKTIF = "Nasabah tidak ditemukan atau tidak aktif"
+_SALDO_KURANG = "Saldo nasabah tidak mencukupi"
 
 
 class TransactionService:
@@ -43,9 +57,7 @@ class TransactionService:
         assert bank is not None  # ponytail: views gate on IsActivePengelola
         nasabah = get_locked_nasabah(bank, payload["nasabah_id"])
         if not nasabah:
-            raise serializers.ValidationError(
-                {"nasabah_id": ["Nasabah tidak ditemukan atau tidak aktif"]}
-            )
+            raise serializers.ValidationError({"nasabah_id": [_NASABAH_TIDAK_AKTIF]})
 
         saldo, _ = Saldo.objects.select_for_update().get_or_create(nasabah=nasabah)
         transaksi = Transaksi.objects.create(
@@ -117,9 +129,7 @@ class PencairanService:
         assert bank is not None  # ponytail: views gate on IsActivePengelola
         nasabah = get_locked_nasabah(bank, payload["nasabah_id"])
         if not nasabah:
-            raise serializers.ValidationError(
-                {"nasabah_id": ["Nasabah tidak ditemukan atau tidak aktif"]}
-            )
+            raise serializers.ValidationError({"nasabah_id": [_NASABAH_TIDAK_AKTIF]})
 
         tanggal = payload.get("tanggal") or timezone.now()
         # The balance check below reads the current saldo, which is only the saldo
@@ -138,21 +148,49 @@ class PencairanService:
 
         saldo, _ = Saldo.objects.select_for_update().get_or_create(nasabah=nasabah)
         nominal = payload["nominal"]
-        saldo_sebelum = saldo.total_saldo
-        if nominal > saldo_sebelum:
-            raise serializers.ValidationError({"nominal": ["Saldo nasabah tidak mencukupi"]})
+        if nominal > saldo.total_saldo:
+            raise serializers.ValidationError({"nominal": [_SALDO_KURANG]})
+        return PencairanService.realisasi(
+            user=user,
+            nasabah=nasabah,
+            saldo=saldo,
+            nominal=nominal,
+            metode=payload["metode"],
+            tanggal=tanggal,
+            keterangan=payload.get("keterangan") or "",
+        )
 
-        # Whole rupiah, rounded down: drops sen left in PILAH 1.0 saldo, matching
-        # the setoran rule. Swap for kalkulasi.bulatkan_rupiah once PR #22 lands.
-        saldo_sesudah = (saldo_sebelum - nominal).quantize(Decimal(1), rounding=ROUND_DOWN)
+    @staticmethod
+    def realisasi(
+        *,
+        user: User,
+        nasabah: Nasabah,
+        saldo: Saldo,
+        nominal: Decimal,
+        metode: str,
+        tanggal: datetime,
+        keterangan: str,
+        potongan: Decimal = Decimal(0),
+        draft: DraftPencairan | None = None,
+    ) -> Pencairan:
+        """Debit `nominal` from the locked `saldo` and record the pencairan.
+
+        The one place a pencairan moves money, shared by the single recording flow and
+        draft confirmation. The caller holds the row locks and checked the balance.
+        """
+        saldo_sebelum = saldo.total_saldo
+        # Whole rupiah, rounded down: drops sen left in PILAH 1.0 saldo, matching the setoran rule.
+        saldo_sesudah = bulatkan_rupiah(saldo_sebelum - nominal)
         pencairan = Pencairan.objects.create(
             nasabah=nasabah,
-            bank_sampah=bank,
+            bank_sampah=nasabah.bank_sampah,
             dicatat_oleh=user,
             tanggal=tanggal,
             nominal=nominal,
-            metode=payload["metode"],
-            keterangan=payload.get("keterangan") or "",
+            metode=metode,
+            keterangan=keterangan,
+            potongan=potongan,
+            draft=draft,
             saldo_sebelum=saldo_sebelum,
             saldo_sesudah=saldo_sesudah,
         )
@@ -172,6 +210,23 @@ class PencairanService:
         tanggal = payload.get("tanggal", pencairan.tanggal)
         metode = payload.get("metode", pencairan.metode)
         keterangan = payload.get("keterangan", pencairan.keterangan) or ""
+        if pencairan.potongan > 0:
+            # A client that echoes the stored tanggal can lose sub-second digits
+            # (web DateTime keeps milliseconds), so a hair's difference is no edit.
+            if abs(tanggal - pencairan.tanggal) < timedelta(seconds=1):
+                tanggal = pencairan.tanggal
+        if pencairan.potongan > 0:
+            diubah = [
+                nama
+                for nama, baru, lama in (
+                    ("nominal", nominal, pencairan.nominal),
+                    ("tanggal", tanggal, pencairan.tanggal),
+                )
+                if baru != lama
+            ]
+            if diubah:
+                pesan = "Pencairan berpotongan hanya boleh diubah metode dan keterangannya"
+                raise serializers.ValidationError({nama: [pesan] for nama in diubah})
         if (nominal, tanggal, metode, keterangan) == (
             pencairan.nominal,
             pencairan.tanggal,
@@ -317,7 +372,7 @@ class TransactionFilterService:
         Without `periode`, [default] applies; `None` means no date filter.
         """
         periode = request.GET.get("periode", default)
-        if periode is None:
+        if periode is None or periode == "semua":
             return queryset
         today = timezone.localdate()
         if periode == "hari_ini":
@@ -331,6 +386,13 @@ class TransactionFilterService:
             last_previous_month = first_this_month - timedelta(days=1)
             start = last_previous_month.replace(day=1)
             end = last_previous_month
+        elif periode in {"1_bulan", "3_bulan", "6_bulan", "12_bulan"}:
+            months = int(periode.split("_")[0])
+            month_index = today.year * 12 + today.month - 1 - months
+            year, month_zero = divmod(month_index, 12)
+            month = month_zero + 1
+            start = date(year, month, min(today.day, monthrange(year, month)[1]))
+            end = today
         elif periode == "custom":
             parsed_start = TransactionFilterService._parse_date(request.GET.get("dari_tanggal"))
             parsed_end = TransactionFilterService._parse_date(request.GET.get("sampai_tanggal"))
@@ -342,7 +404,7 @@ class TransactionFilterService:
                 raise ValueError("Tanggal akhir tidak boleh lebih awal dari tanggal awal")
             start, end = parsed_start, parsed_end
         else:
-            return queryset
+            raise serializers.ValidationError({"periode": "Periode tidak valid"})
 
         tz = timezone.get_current_timezone()
         start_dt = timezone.make_aware(datetime.combine(start, time.min), tz)
@@ -381,3 +443,275 @@ class BalanceService:
             total=Coalesce(Sum(F("saldo_sebelum") - F("saldo_sesudah")), Decimal("0.00"))
         )["total"]
         return cast(Decimal, masuk - keluar)
+
+
+# The server runs on UTC, but a pengurus reads the name on a clock in WIB.
+ZONA_PENGURUS = ZoneInfo("Asia/Jakarta")
+
+_BULAN_SINGKAT = (
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "Mei",
+    "Jun",
+    "Jul",
+    "Agu",
+    "Sep",
+    "Okt",
+    "Nov",
+    "Des",
+)
+
+
+class DraftTidakBisaDiubah(Exception):
+    """The draft left `draft` status: a confirmed or cancelled one is final."""
+
+
+class DraftPencairanService:
+    @staticmethod
+    def nama_default() -> str:
+        sekarang = timezone.localtime(timezone=ZONA_PENGURUS)
+        return (
+            f"Pencairan {sekarang.day} {_BULAN_SINGKAT[sekarang.month - 1]} {sekarang.year}, "
+            f"{sekarang:%H:%M}"
+        )
+
+    @staticmethod
+    @transaction.atomic
+    def buat_draft(user: User, payload: Mapping[str, Any]) -> DraftPencairan:
+        bank = user.bank_sampah
+        assert bank is not None  # ponytail: views gate on IsActivePengelola
+        draft = DraftPencairan.objects.create(
+            bank_sampah=bank,
+            nama=DraftPencairanService._nama(payload.get("nama")),
+            dibuat_oleh=user,
+            diubah_oleh=user,
+            potongan_jenis=payload.get("potongan_jenis", DraftPencairan.PotonganJenis.PERSEN),
+            potongan_nilai=payload.get("potongan_nilai", Decimal(0)),
+            jumlah_jenis=payload.get("jumlah_jenis") or "",
+            jumlah_nilai=payload.get("jumlah_nilai"),
+        )
+        items = DraftPencairanService._sinkronkan_item(draft, payload["items"])
+        DraftPencairanService._periksa_potongan(items)
+        return draft
+
+    @staticmethod
+    @transaction.atomic
+    def buat_batch(
+        user: User, payload: Mapping[str, Any]
+    ) -> tuple[DraftPencairan, list[dict[str, str]]]:
+        """Draft for many nasabah at once; those that cannot be paid are skipped, with a reason.
+
+        Each nasabah gets the whole saldo and the draft-level potongan. A nasabah that
+        fails (not eligible, no saldo, potongan above the nominal) never blocks the rest.
+        """
+        bank = user.bank_sampah
+        assert bank is not None  # ponytail: views gate on IsActivePengelola
+        if payload["semua"]:
+            # The candidates already carry their saldo, and by construction are eligible.
+            layak = {nasabah.id: nasabah for nasabah in kandidat_pencairan(bank)}
+            ids = list(layak)
+            kunci = "semua"
+        else:
+            ids = list(dict.fromkeys(payload["nasabah_ids"]))
+            layak = get_eligible_nasabah_map(bank, ids)
+            kunci = "nasabah_ids"
+        if len(ids) > DraftPencairan.MAKSIMAL_ITEM:
+            # Checked before the per-nasabah work, so an oversized request stays cheap.
+            raise serializers.ValidationError(
+                {
+                    kunci: [
+                        f"Satu draft paling banyak {DraftPencairan.MAKSIMAL_ITEM} nasabah. "
+                        "Pilih lebih sedikit atau bagi menjadi beberapa draft."
+                    ]
+                }
+            )
+        jenis = payload.get("potongan_jenis", DraftPencairan.PotonganJenis.PERSEN)
+        nilai = payload.get("potongan_nilai", Decimal(0))
+        items: list[dict[str, Any]] = []
+        dilewati: list[dict[str, str]] = []
+        for nasabah_id in ids:
+            alasan = DraftPencairanService._alasan_dilewati(layak.get(nasabah_id), jenis, nilai)
+            if alasan:
+                dilewati.append({"nasabah_id": str(nasabah_id), "alasan": alasan})
+            else:
+                items.append({"nasabah_id": nasabah_id, "metode": payload["metode"]})
+        if not items:
+            raise serializers.ValidationError(
+                {"nasabah_ids": ["Tidak ada nasabah yang dapat dicairkan"], "dilewati": dilewati}
+            )
+        draft = DraftPencairanService.buat_draft(user, {**payload, "items": items})
+        return draft, dilewati
+
+    @staticmethod
+    def _alasan_dilewati(nasabah: Nasabah | None, jenis: str, nilai: Decimal) -> str:
+        if nasabah is None:
+            return _NASABAH_TIDAK_AKTIF
+        nominal = DraftPencairanService._saldo_tersedia(nasabah)
+        if nominal <= 0:
+            return "Saldo nasabah kosong"
+        if hitung_potongan(nominal, jenis, nilai) > nominal:
+            return "Potongan melebihi nominal pencairan"
+        return ""
+
+    @staticmethod
+    @transaction.atomic
+    def ubah_draft(user: User, draft: DraftPencairan, payload: Mapping[str, Any]) -> DraftPencairan:
+        """Apply an edit; `items`, when sent, is the full desired list (omitted ones are removed).
+
+        `draft` comes from the caller's bank-scoped queryset; it is re-read under lock.
+        """
+        draft = DraftPencairanService._kunci_draft(draft)
+        if "nama" in payload:
+            draft.nama = DraftPencairanService._nama(payload["nama"])
+        if "potongan_jenis" in payload:
+            draft.potongan_jenis = payload["potongan_jenis"]
+            draft.potongan_nilai = payload["potongan_nilai"]
+        if "jumlah_jenis" in payload:
+            draft.jumlah_jenis = payload["jumlah_jenis"] or ""
+            draft.jumlah_nilai = payload.get("jumlah_nilai")
+        draft.diubah_oleh = user
+        draft.save()
+        if "items" in payload:
+            items = DraftPencairanService._sinkronkan_item(draft, payload["items"])
+        else:
+            items = list(draft.items.select_related("draft"))
+        DraftPencairanService._periksa_potongan(items)
+        return draft
+
+    @staticmethod
+    @transaction.atomic
+    def konfirmasi_draft(user: User, draft: DraftPencairan) -> DraftPencairan:
+        """Record the payment: debit every item and write its pencairan, all or nothing.
+
+        Items are re-validated against the saldo as it is now, since it may have moved
+        since the draft was made. Every failing item is reported before anything is written.
+        """
+        draft = DraftPencairanService._kunci_draft(draft)
+        items = list(draft.items.select_related("nasabah", "draft"))
+        ids = sorted(item.nasabah_id for item in items)
+        # Lock in id order so two confirmations sharing nasabah cannot deadlock.
+        nasabah_terkunci = {
+            n.id: n for n in Nasabah.objects.select_for_update().filter(id__in=ids).order_by("id")
+        }
+        saldo_terkunci = {
+            s.nasabah_id: s
+            for s in Saldo.objects.select_for_update()
+            .filter(nasabah_id__in=ids)
+            .order_by("nasabah_id")
+        }
+        galat: dict[str, list[str]] = {}
+        for index, item in enumerate(items):
+            nasabah = nasabah_terkunci[item.nasabah_id]
+            saldo = saldo_terkunci.get(item.nasabah_id)
+            if not (nasabah.is_active and nasabah.status == Nasabah.Status.APPROVED):
+                galat[f"items[{index}].nasabah_id"] = [_NASABAH_TIDAK_AKTIF]
+            elif saldo is None or item.nominal > saldo.total_saldo:
+                galat[f"items[{index}].nominal"] = [_SALDO_KURANG]
+        if galat:
+            raise serializers.ValidationError(galat)
+        tanggal = timezone.now()
+        for item in items:
+            item.saldo_sebelum = saldo_terkunci[item.nasabah_id].total_saldo
+            item.save(update_fields=["saldo_sebelum", "updated_at"])
+            PencairanService.realisasi(
+                user=user,
+                nasabah=nasabah_terkunci[item.nasabah_id],
+                saldo=saldo_terkunci[item.nasabah_id],
+                nominal=item.nominal,
+                metode=item.metode,
+                tanggal=tanggal,
+                keterangan=f"Draft: {draft.nama}"[:255],
+                potongan=item.potongan,
+                draft=draft,
+            )
+        draft.status = DraftPencairan.Status.DIKONFIRMASI
+        draft.diubah_oleh = user
+        draft.save(update_fields=["status", "diubah_oleh", "updated_at"])
+        return draft
+
+    @staticmethod
+    @transaction.atomic
+    def batalkan_draft(user: User, draft: DraftPencairan) -> DraftPencairan:
+        draft = DraftPencairanService._kunci_draft(draft)
+        draft.status = DraftPencairan.Status.DIBATALKAN
+        draft.diubah_oleh = user
+        draft.save(update_fields=["status", "diubah_oleh", "updated_at"])
+        return draft
+
+    @staticmethod
+    def _kunci_draft(draft: DraftPencairan) -> DraftPencairan:
+        """Re-read under lock and refuse anything no longer in `draft` status."""
+        draft = DraftPencairan.objects.select_for_update().get(pk=draft.pk)
+        if draft.status != DraftPencairan.Status.DRAFT:
+            raise DraftTidakBisaDiubah(f"Draft sudah {draft.get_status_display().lower()}")
+        return draft
+
+    @staticmethod
+    def _nama(nama: str | None) -> str:
+        return (nama or "").strip() or DraftPencairanService.nama_default()
+
+    @staticmethod
+    def _sinkronkan_item(
+        draft: DraftPencairan, payload_items: list[Mapping[str, Any]]
+    ) -> list[DraftPencairanItem]:
+        """Upsert items by nasabah in request order and drop the ones not sent.
+
+        A field the request leaves out keeps its stored value; a null potongan pair
+        clears the item's override so it follows the draft default again.
+        """
+        bank = draft.bank_sampah
+        ada = {item.nasabah_id: item for item in draft.items.select_related("draft")}
+        layak = get_eligible_nasabah_map(bank, [data["nasabah_id"] for data in payload_items])
+        hasil: list[DraftPencairanItem] = []
+        for index, data in enumerate(payload_items):
+            nasabah = layak.get(data["nasabah_id"])
+            if nasabah is None:
+                raise serializers.ValidationError(
+                    {f"items[{index}].nasabah_id": [_NASABAH_TIDAK_AKTIF]}
+                )
+            current = ada.pop(nasabah.id, None)
+            item = current or DraftPencairanItem(draft=draft, nasabah=nasabah)
+            diminta = data.get("nominal", current.nominal if current else None)
+            item.nominal = DraftPencairanService._nominal(nasabah, diminta, index)
+            item.metode = data.get("metode", current.metode if current else Pencairan.Metode.TUNAI)
+            if "potongan_jenis" in data:
+                item.potongan_jenis = data["potongan_jenis"] or ""
+                item.potongan_nilai = data.get("potongan_nilai")
+            item.save()
+            hasil.append(item)
+        for sisa in ada.values():
+            sisa.delete()
+        return hasil
+
+    @staticmethod
+    def _periksa_potongan(items: list[DraftPencairanItem]) -> None:
+        """Reject a draft whose effective potongan on any item exceeds its nominal.
+
+        `items` keeps the request order so a reported index matches the client's list.
+        """
+        for index, item in enumerate(items):
+            if item.potongan > item.nominal:
+                raise serializers.ValidationError(
+                    {f"items[{index}].potongan_nilai": ["Potongan melebihi nominal pencairan"]}
+                )
+
+    @staticmethod
+    def _saldo_tersedia(nasabah: Nasabah) -> Decimal:
+        """Whole rupiah the nasabah holds; a nasabah who never transacted has no Saldo row."""
+        try:
+            return bulatkan_rupiah(nasabah.saldo.total_saldo)
+        except ObjectDoesNotExist:
+            return Decimal(0)
+
+    @staticmethod
+    def _nominal(nasabah: Nasabah, diminta: Decimal | None, index: int) -> Decimal:
+        """Requested nominal, or the whole saldo; never above the saldo, never zero."""
+        tersedia = DraftPencairanService._saldo_tersedia(nasabah)
+        nominal = tersedia if diminta is None else diminta
+        if nominal <= 0:
+            raise serializers.ValidationError({f"items[{index}].nominal": ["Saldo nasabah kosong"]})
+        if nominal > tersedia:
+            raise serializers.ValidationError({f"items[{index}].nominal": [_SALDO_KURANG]})
+        return nominal
