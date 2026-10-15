@@ -1,5 +1,6 @@
 from typing import Any
 
+from django.conf import settings
 from django.contrib.auth.hashers import make_password
 from django.test import override_settings
 from rest_framework.test import APITestCase
@@ -235,15 +236,17 @@ class ReviewerAuthenticationTests(APITestCase):
     def test_untrusted_forwarded_prefix_cannot_bypass_source_throttle(self) -> None:
         self.client.defaults["REMOTE_ADDR"] = "10.0.0.5"
 
-        for octet in range(1, 6):
-            self.client.defaults["HTTP_X_FORWARDED_FOR"] = (
-                f"198.51.100.{octet}, 192.0.2.251, 198.51.100.250, 203.0.113.250"
-            )
-            self.assertEqual(self._login(password="wrong-password").status_code, 401)
+        cloud_run_framework_settings = {**settings.REST_FRAMEWORK, "NUM_PROXIES": 3}
+        with override_settings(REST_FRAMEWORK=cloud_run_framework_settings):
+            for octet in range(1, 6):
+                self.client.defaults["HTTP_X_FORWARDED_FOR"] = (
+                    f"198.51.100.{octet}, 192.0.2.251, 198.51.100.250, 203.0.113.250"
+                )
+                self.assertEqual(self._login(password="wrong-password").status_code, 401)
 
-        self.client.defaults["HTTP_X_FORWARDED_FOR"] = (
-            "203.0.113.99, 192.0.2.251, 198.51.100.250, 203.0.113.250"
-        )
-        throttled = self._login(password="wrong-password")
+            self.client.defaults["HTTP_X_FORWARDED_FOR"] = (
+                "203.0.113.99, 192.0.2.251, 198.51.100.250, 203.0.113.250"
+            )
+            throttled = self._login(password="wrong-password")
 
         self.assertEqual(throttled.status_code, 429)

@@ -31,6 +31,14 @@ class ServerEntrypointTests(SimpleTestCase):
 
 
 class SettingsInProcessTests(SimpleTestCase):
+    def test_cloud_run_proxy_depth_is_used_only_for_production(self) -> None:
+        for environment, expected in (("production", 3), ("staging", 0)):
+            with self.subTest(environment=environment):
+                with patch.dict(os.environ, {"PILAH_ENVIRONMENT": environment}):
+                    settings = _run("config.settings")
+
+                self.assertEqual(settings["REST_FRAMEWORK"]["NUM_PROXIES"], expected)
+
     def test_migration_linter_app_is_registered_only_when_requested(self) -> None:
         with patch.dict(os.environ, {"MIGRATION_LINTER": "1"}):
             self.assertIn("django_migration_linter", _run("config.settings")["INSTALLED_APPS"])
