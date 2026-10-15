@@ -60,6 +60,14 @@ class ReviewerAuthenticationTests(APITestCase):
         self.assertIn("no-store", response["Cache-Control"])
 
     def test_configured_reviewer_gets_standard_session_and_is_tenant_scoped(self) -> None:
+        own_nasabah = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0002",
+            nama="Synthetic Customer",
+            no_hp="+628128888888",
+            alamat="Jl. Melati No. 2",
+            email="synthetic-customer@example.test",
+        )
         other_bank = BankSampah.objects.create(
             nama="Other Bank",
             alamat="Bogor",
@@ -100,7 +108,9 @@ class ReviewerAuthenticationTests(APITestCase):
         access = AccessToken(response.data["access_token"])
         self.assertEqual(access["role"], User.Role.PENGELOLA)
         self.assertEqual(access["bank_sampah_id"], str(self.bank.id))
+        self.assertGreater(access["exp"], access["iat"])
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access_token']}")
+        self.assertEqual(self.client.get(f"/api/v1/nasabah/{own_nasabah.id}").status_code, 200)
         self.assertEqual(self.client.get(f"/api/v1/nasabah/{other_nasabah.id}").status_code, 404)
 
     def test_wrong_email_and_password_return_the_same_generic_error(self) -> None:
