@@ -19,9 +19,9 @@ from django.conf import settings
 from django.contrib import admin
 from django.http import HttpRequest, JsonResponse
 from django.urls import include, path, re_path
+from django.views.decorators.http import require_GET
 from django.views.generic import TemplateView
 from django.views.static import serve
-from django.views.decorators.http import require_GET
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from apps.bank_sampah.views import bank_sampah_activity_media

@@ -1,4 +1,4 @@
-from django.urls import include, path
+from django.urls import URLPattern, URLResolver, include, path
 from rest_framework.routers import DefaultRouter
 
 # ponytail: views live in their canonical bounded-context homes; routes and
@@ -64,7 +64,7 @@ router.register(
     "superadmin/bank-sampah", SuperAdminBankSampahViewSet, basename="superadmin-bank-sampah"
 )
 
-api_v1_urlpatterns = [
+api_v1_urlpatterns: list[URLPattern | URLResolver] = [
     path("aktivitas", ActivityHistoryView.as_view(), name="activity-history"),
     path("nasabah/me/beranda", NasabahHomeView.as_view(), name="nasabah-home"),
     path("nasabah/me/saldo", NasabahBalanceView.as_view(), name="nasabah-own-balance"),

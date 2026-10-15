@@ -5,9 +5,10 @@ from django.urls import resolve
 class PublicRuntimeConfigTests(SimpleTestCase):
     def test_public_config_view_is_owned_by_the_authentication_context(self) -> None:
         match = resolve("/api/public-config")
+        view_class = getattr(match.func, "view_class")
 
         self.assertEqual(match.url_name, "public-config")
-        self.assertEqual(match.func.view_class.__module__, "apps.authentication.views")
+        self.assertEqual(view_class.__module__, "apps.authentication.views")
 
     def test_enabled_flag_is_public_and_never_cached(self) -> None:
         with override_settings(DEBUG=False, PILAH_ENABLE_DEMO_LOGIN=True):
