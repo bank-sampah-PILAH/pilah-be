@@ -204,7 +204,7 @@ REST_FRAMEWORK = {
     # Scoped rates: keys are the throttle scope of the views declaring one.
     # statement_pdf = the riwayat statement render (CPU-heavy; see
     # apps.nasabah.home.NasabahHistoryExportPdfView).
-    "DEFAULT_THROTTLE_RATES": {"statement_pdf": "10/min"},
+    "DEFAULT_THROTTLE_RATES": {"statement_pdf": "10/min", "reviewer_login": "5/min"},
 }
 
 SPECTACULAR_SETTINGS = {
@@ -241,6 +241,9 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "")
 PILAH_ENABLE_DEMO_LOGIN = os.getenv("PILAH_ENABLE_DEMO_LOGIN", "false").lower() == "true"
+PILAH_REVIEWER_EMAIL = os.getenv("PILAH_REVIEWER_EMAIL", "").strip().lower()
+PILAH_REVIEWER_PASSWORD_HASH = os.getenv("PILAH_REVIEWER_PASSWORD_HASH", "")
+PILAH_REVIEWER_BANK_SAMPAH_ID = os.getenv("PILAH_REVIEWER_BANK_SAMPAH_ID", "").strip()
 PILAH_ALLOW_FAKE_GOOGLE_TOKEN = (
     os.getenv("PILAH_ALLOW_FAKE_GOOGLE_TOKEN", "false").lower() == "true"
 )

@@ -1,8 +1,10 @@
 from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any, cast
+from uuid import UUID
 
 from django.conf import settings
+from django.contrib.auth.hashers import check_password
 from django.core import signing
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -26,6 +28,42 @@ class AuthServiceError(Exception):
 
 
 class AuthService:
+    @staticmethod
+    def _invalid_reviewer_credentials() -> AuthServiceError:
+        return AuthServiceError(
+            "Kredensial tidak valid", code="invalid_credentials", status_code=401
+        )
+
+    @staticmethod
+    def login_with_reviewer(email: str, password: str) -> dict[str, Any]:
+        reviewer_email = settings.PILAH_REVIEWER_EMAIL.strip().lower()
+        password_hash = settings.PILAH_REVIEWER_PASSWORD_HASH
+        bank_sampah_id = settings.PILAH_REVIEWER_BANK_SAMPAH_ID.strip()
+        if not reviewer_email or not password_hash or not bank_sampah_id:
+            raise AuthService._invalid_reviewer_credentials()
+
+        password_matches = check_password(password, password_hash)
+        if email.strip().lower() != reviewer_email or not password_matches:
+            raise AuthService._invalid_reviewer_credentials()
+        try:
+            configured_bank_id = UUID(bank_sampah_id)
+        except ValueError as exc:
+            raise AuthService._invalid_reviewer_credentials() from exc
+
+        user = User.objects.filter(
+            email__iexact=reviewer_email,
+            role=User.Role.PENGELOLA,
+            is_active=True,
+            is_staff=False,
+            is_superuser=False,
+            bank_sampah_id=configured_bank_id,
+            bank_sampah__status=BankSampah.Status.ACTIVE,
+            bank_sampah__is_active=True,
+        ).first()
+        if user is None:
+            raise AuthService._invalid_reviewer_credentials()
+        return AuthService._session_response(user, is_new_user=False)
+
     @staticmethod
     def register_with_google(registration_token: str, role: str) -> tuple[dict[str, Any], bool]:
         try:
