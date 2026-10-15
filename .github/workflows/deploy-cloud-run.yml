@@ -6,6 +6,10 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: cloud-run-production
+  cancel-in-progress: false
+
 permissions:
   contents: read
   id-token: write
@@ -20,6 +24,7 @@ env:
   RUNTIME_SERVICE_ACCOUNT: ${{ vars.RUNTIME_SERVICE_ACCOUNT }}
   GS_BUCKET_NAME: ${{ vars.GS_BUCKET_NAME }}
   PILAH_SUPERADMIN_EMAILS: ${{ vars.PILAH_SUPERADMIN_EMAILS }}
+  PILAH_WEB_ORIGIN: ${{ vars.PILAH_WEB_ORIGIN }}
 
 jobs:
   deploy:
@@ -30,12 +35,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate Superadmin allowlist
-        run: |
-          if [ -z "${PILAH_SUPERADMIN_EMAILS}" ]; then
-            echo "::error::Set the repository variable PILAH_SUPERADMIN_EMAILS before deploying."
-            exit 1
-          fi
+      - name: Validate production origin and Superadmin allowlist
+        run: python3 scripts/bootstrap_cloud_run.py --validate-only
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -69,6 +70,27 @@ jobs:
           ignore-unfixed: true
 
       - name: Deploy Cloud Run
+        env:
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DJANGO_SECRET_KEY: ${{ secrets.DJANGO_SECRET_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_API_KEY_SECRET: ${{ secrets.TWILIO_API_KEY_SECRET }}
+          TWILIO_API_KEY_SID: ${{ secrets.TWILIO_API_KEY_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_MESSAGING_SERVICE_SID: ${{ secrets.TWILIO_MESSAGING_SERVICE_SID }}
+          WHATSAPP_GATEWAY_TOKEN: ${{ secrets.WHATSAPP_GATEWAY_TOKEN }}
+          WHATSAPP_GATEWAY_URL: ${{ secrets.WHATSAPP_GATEWAY_URL }}
+          GOOGLE_REDIRECT_URI: ${{ vars.GOOGLE_REDIRECT_URI }}
+          GS_IAM_SIGN_BLOB: ${{ vars.GS_IAM_SIGN_BLOB }}
+          GS_LOCATION: ${{ vars.GS_LOCATION }}
+          GS_QUERYSTRING_AUTH: ${{ vars.GS_QUERYSTRING_AUTH }}
+          PILAH_PUBLIC_APP_URL: ${{ vars.PILAH_PUBLIC_APP_URL }}
+          TWILIO_CONTENT_SID: ${{ vars.TWILIO_CONTENT_SID }}
+          TWILIO_WHATSAPP_FROM: ${{ vars.TWILIO_WHATSAPP_FROM }}
         run: |
           gcloud run deploy "${SERVICE_NAME}" \
             --project "${PROJECT_ID}" \
@@ -78,4 +100,7 @@ jobs:
             --allow-unauthenticated \
             --service-account "${RUNTIME_SERVICE_ACCOUNT}" \
             --add-cloudsql-instances "${SQL_CONNECTION_NAME}" \
-            --set-env-vars "^|^DJANGO_DEBUG=false|DJANGO_ALLOWED_HOSTS=*|CORS_ALLOW_ALL_ORIGINS=true|CSRF_TRUSTED_ORIGINS=${{ vars.PILAH_PUBLIC_APP_URL }}|DB_ENGINE=django.db.backends.postgresql|DB_NAME=${{ secrets.DB_NAME }}|DB_USER=${{ secrets.DB_USER }}|DB_PASSWORD=${{ secrets.DB_PASSWORD }}|DB_HOST=/cloudsql/${SQL_CONNECTION_NAME}|DB_PORT=5432|GS_BUCKET_NAME=${GS_BUCKET_NAME}|GS_LOCATION=${{ vars.GS_LOCATION }}|GS_QUERYSTRING_AUTH=${{ vars.GS_QUERYSTRING_AUTH }}|GS_IAM_SIGN_BLOB=${{ vars.GS_IAM_SIGN_BLOB }}|GS_SA_EMAIL=${RUNTIME_SERVICE_ACCOUNT}|PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false|PILAH_PUBLIC_APP_URL=${{ vars.PILAH_PUBLIC_APP_URL }}|PILAH_SUPERADMIN_EMAILS=${PILAH_SUPERADMIN_EMAILS}|GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}|GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}|GOOGLE_REDIRECT_URI=${{ vars.GOOGLE_REDIRECT_URI }}|WHATSAPP_GATEWAY_URL=${{ secrets.WHATSAPP_GATEWAY_URL }}|WHATSAPP_GATEWAY_TOKEN=${{ secrets.WHATSAPP_GATEWAY_TOKEN }}|TWILIO_ACCOUNT_SID=${{ secrets.TWILIO_ACCOUNT_SID }}|TWILIO_AUTH_TOKEN=${{ secrets.TWILIO_AUTH_TOKEN }}|TWILIO_API_KEY_SID=${{ secrets.TWILIO_API_KEY_SID }}|TWILIO_API_KEY_SECRET=${{ secrets.TWILIO_API_KEY_SECRET }}|TWILIO_WHATSAPP_FROM=${{ vars.TWILIO_WHATSAPP_FROM }}|TWILIO_MESSAGING_SERVICE_SID=${{ secrets.TWILIO_MESSAGING_SERVICE_SID }}|TWILIO_CONTENT_SID=${{ vars.TWILIO_CONTENT_SID }}|DJANGO_SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}"
+            --set-env-vars "^|^DJANGO_DEBUG=false|DJANGO_ALLOWED_HOSTS=*|PILAH_ENVIRONMENT=production|CORS_ALLOW_ALL_ORIGINS=false|CORS_ALLOWED_ORIGINS=${PILAH_WEB_ORIGIN}|CSRF_TRUSTED_ORIGINS=${PILAH_WEB_ORIGIN}|DB_ENGINE=django.db.backends.postgresql|DB_NAME=${DB_NAME}|DB_USER=${DB_USER}|DB_PASSWORD=${DB_PASSWORD}|DB_HOST=/cloudsql/${SQL_CONNECTION_NAME}|DB_PORT=5432|GS_BUCKET_NAME=${GS_BUCKET_NAME}|GS_LOCATION=${GS_LOCATION}|GS_QUERYSTRING_AUTH=${GS_QUERYSTRING_AUTH}|GS_IAM_SIGN_BLOB=${GS_IAM_SIGN_BLOB}|GS_SA_EMAIL=${RUNTIME_SERVICE_ACCOUNT}|PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false|PILAH_PUBLIC_APP_URL=${PILAH_PUBLIC_APP_URL}|PILAH_SUPERADMIN_EMAILS=${PILAH_SUPERADMIN_EMAILS}|GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}|GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}|GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}|WHATSAPP_GATEWAY_URL=${WHATSAPP_GATEWAY_URL}|WHATSAPP_GATEWAY_TOKEN=${WHATSAPP_GATEWAY_TOKEN}|TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}|TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}|TWILIO_API_KEY_SID=${TWILIO_API_KEY_SID}|TWILIO_API_KEY_SECRET=${TWILIO_API_KEY_SECRET}|TWILIO_WHATSAPP_FROM=${TWILIO_WHATSAPP_FROM}|TWILIO_MESSAGING_SERVICE_SID=${TWILIO_MESSAGING_SERVICE_SID}|TWILIO_CONTENT_SID=${TWILIO_CONTENT_SID}|DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}"
+
+      - name: Bootstrap production Superadmins
+        run: python3 scripts/bootstrap_cloud_run.py

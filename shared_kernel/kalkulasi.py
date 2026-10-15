@@ -62,6 +62,17 @@ def total_setoran(subtotal: Iterable[Decimal]) -> Decimal:
     return bulatkan_rupiah(sum(subtotal, Decimal(0)))
 
 
+def hitung_potongan(nominal: Decimal, jenis: str, nilai: Decimal) -> Decimal:
+    """Potongan atas satu item pencairan, dibulatkan ke bawah ke rupiah penuh.
+
+    ``jenis`` adalah "persen" (nilai 0-100 dari nominal) atau "rupiah". Pembulatan
+    per item, sama seperti setoran, supaya total draft selalu jumlah itemnya.
+    """
+    if jenis == "persen":
+        return bulatkan_rupiah(nominal * nilai / 100)
+    return bulatkan_rupiah(nilai)
+
+
 def format_ribuan(nilai: Decimal) -> str:
     """Tulis nilai sebagai rupiah penuh dengan pemisah ribuan, mis. "1.000".
 
