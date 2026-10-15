@@ -191,6 +191,7 @@ STORAGES = {
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "api.User"
 AUTHENTICATION_BACKENDS = ("apps.authentication.backends.AllowlistedSuperadminBackend",)
+PILAH_ENVIRONMENT = os.getenv("PILAH_ENVIRONMENT", "").strip().lower()
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -203,7 +204,8 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     # Cloud Run appends the client address and two proxy hops to X-Forwarded-For.
     # DRF's NUM_PROXIES selects from the right, excluding any caller-supplied prefix.
-    "NUM_PROXIES": 3,
+    # Other environments use REMOTE_ADDR because their ingress depth differs.
+    "NUM_PROXIES": 3 if PILAH_ENVIRONMENT == "production" else 0,
     # Scoped rates: keys are the throttle scope of the views declaring one.
     # statement_pdf = the riwayat statement render (CPU-heavy; see
     # apps.nasabah.home.NasabahHistoryExportPdfView).
@@ -252,7 +254,6 @@ PILAH_ALLOW_FAKE_GOOGLE_TOKEN = (
 )
 if PILAH_ALLOW_FAKE_GOOGLE_TOKEN and not DEBUG:
     raise ImproperlyConfigured("PILAH_ALLOW_FAKE_GOOGLE_TOKEN requires DJANGO_DEBUG=true")
-PILAH_ENVIRONMENT = os.getenv("PILAH_ENVIRONMENT", "")
 PILAH_SUPERADMIN_EMAILS = tuple(
     email.strip().lower()
     for email in os.getenv("PILAH_SUPERADMIN_EMAILS", "").split(",")
