@@ -42,6 +42,16 @@ logger = logging.getLogger(__name__)
 _OAUTH_FALLBACK_PATH = "/api-test/"
 
 
+class PublicRuntimeConfigView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request: Request) -> Response:
+        response = Response({"demoLoginEnabled": settings.PILAH_ENABLE_DEMO_LOGIN})
+        response["Cache-Control"] = "no-store"
+        return response
+
+
 class GoogleAuthView(APIView):
     permission_classes = [AllowAny]
     serializer_class = GoogleAuthSerializer

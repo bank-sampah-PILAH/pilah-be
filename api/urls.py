@@ -11,6 +11,7 @@ from apps.authentication.views import (
     GoogleOAuthStartView,
     GoogleRegistrationView,
     LogoutView,
+    PublicRuntimeConfigView,
     RefreshTokenView,
     ReviewerAuthView,
 )
@@ -63,7 +64,7 @@ router.register(
     "superadmin/bank-sampah", SuperAdminBankSampahViewSet, basename="superadmin-bank-sampah"
 )
 
-urlpatterns = [
+api_v1_urlpatterns = [
     path("aktivitas", ActivityHistoryView.as_view(), name="activity-history"),
     path("nasabah/me/beranda", NasabahHomeView.as_view(), name="nasabah-home"),
     path("nasabah/me/saldo", NasabahBalanceView.as_view(), name="nasabah-own-balance"),
@@ -117,4 +118,9 @@ urlpatterns = [
     ),
     path("pengaturan/wa-template", WATemplateView.as_view(), name="wa-template"),
     path("", include(router.urls)),
+]
+
+urlpatterns = [
+    path("api/public-config", PublicRuntimeConfigView.as_view(), name="public-config"),
+    path("api/v1/", include(api_v1_urlpatterns)),
 ]
