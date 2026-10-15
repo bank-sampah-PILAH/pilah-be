@@ -16,12 +16,12 @@
 # Otherwise URLs come from repository variables
 # (Settings -> Secrets and variables -> Actions -> Variables):
 #   STAGING_API_URL      (required for staging)
-#   PRODUCTION_API_URL   (only for a manual production run; the deploy passes its own)
+#   PRODUCTION_API_URL   (production cron and manual runs; the deploy passes its own)
 name: Nuclei scan
 
 on:
   schedule:
-    # Mondays, off the hour, after scheduled-checks. Staging only.
+    # Mondays, off the hour, after scheduled-checks. Staging and production.
     - cron: "47 3 * * 1"
   workflow_call:
     inputs:
@@ -46,15 +46,20 @@ permissions:
 
 jobs:
   nuclei-scan:
-    name: API exposure scan (${{ inputs.environment || 'staging' }})
+    name: API exposure scan (${{ matrix.environment }})
     runs-on: ubuntu-latest
+    # The weekly cron scans staging and production; any other trigger scans one environment.
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(github.event_name == 'schedule' && '["staging","production"]' || format('["{0}"]', inputs.environment || 'staging')) }}
     timeout-minutes: 20
     concurrency:
-      group: nuclei-scan-${{ inputs.environment || 'staging' }}
+      group: nuclei-scan-${{ matrix.environment }}
       cancel-in-progress: false
     env:
       NUCLEI_IMAGE: projectdiscovery/nuclei:v3.11.0
-      ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+      ENVIRONMENT: ${{ matrix.environment }}
       TARGET_URL_INPUT: ${{ inputs.target_url }}
       STAGING_API_URL: ${{ vars.STAGING_API_URL }}
       PRODUCTION_API_URL: ${{ vars.PRODUCTION_API_URL }}
