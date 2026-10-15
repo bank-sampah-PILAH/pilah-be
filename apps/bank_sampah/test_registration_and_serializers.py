@@ -304,6 +304,25 @@ class BankDirectorySearchTests(APITestCase):
     def test_kota_and_q_combine(self) -> None:
         self.assertEqual(self._names({"kota": "Depok", "q": "Garis"}), ["Bank Garis Dua"])
 
+    def test_kota_filter_collapses_administrative_prefix_variants(self) -> None:
+        # PIL-329 option A: "Kota"/"Kab." prefixes on either side collapse.
+        for kota in ("Depok", "Kota Depok", "KAB. DEPOK", "Kabupaten Depok", "kota  depok"):
+            with self.subTest(kota=kota):
+                self.assertEqual(self._names({"kota": kota}), ["Bank Garis Dua", "Bank Kosong"])
+
+    def test_kota_prefix_strip_does_not_widen_the_match(self) -> None:
+        # Stripping the prefix must not turn one city into another.
+        self.assertEqual(self._names({"kota": "Kab. Bandung"}), [])
+
+    def test_kota_filter_never_matches_a_bank_with_empty_kota(self) -> None:
+        BankSampah.objects.create(nama="Bank Tanpa Kota", alamat="Jl. Itu", kota="")
+        self.assertEqual(self._names({"kota": "Kota "}), [])
+        self.assertEqual(self._names({"kota": "Depok"}), ["Bank Garis Dua", "Bank Kosong"])
+
+    def test_q_still_matches_a_stored_kota_with_prefix(self) -> None:
+        # `q` stays raw text search: only the `kota` param is normalized.
+        self.assertEqual(self._names({"q": "Kabupaten Depok"}), [])
+
     def test_pagination_envelope_and_second_page(self) -> None:
         response = self.client.get(self.url, {"page_size": 1, "page": 1})
         self.assertEqual(response.data["count"], 2)
