@@ -52,3 +52,30 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
 
     def get_satuan(self, obj: Any) -> Any:
         return "kg"
+
+
+class DirectoryLayananSerializer(serializers.ModelSerializer[Model]):
+    """Compact public read of one layanan (jenis sampah) for directory detail.
+
+    Write-side stays in `JenisSampahSerializer`; this one is for the bank
+    sampah directory detail view (PIL-308), so no admin fields like
+    `is_active`/`updated_at`.
+    """
+
+    satuan = serializers.SerializerMethodField()
+    kode = serializers.CharField(source="nomor")
+
+    class Meta:
+        model = JenisSampah
+        fields = [
+            "id",
+            "kode",
+            "nama_sampah",
+            "kategori",
+            "deskripsi",
+            "satuan",
+            "harga_per_kg",
+        ]
+
+    def get_satuan(self, obj: Any) -> Any:
+        return "kg"

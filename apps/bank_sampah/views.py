@@ -4,10 +4,12 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
+from django.db.models import Q, QuerySet
 from django.http import FileResponse, Http404, HttpRequest
 from django.views.decorators.http import require_GET
 from rest_framework import viewsets
 from rest_framework.decorators import action
+from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
@@ -20,6 +22,7 @@ from apps.bank_sampah.serializers import (
     ApprovalDecisionSerializer,
     ApprovalLogSerializer,
     BankSampahApprovalListSerializer,
+    BankSampahDetailSerializer,
     BankSampahDirectorySerializer,
     BankSampahRegistrationSerializer,
     BankSampahSerializer,
@@ -27,6 +30,7 @@ from apps.bank_sampah.serializers import (
     TeamMemberSerializer,
 )
 from apps.bank_sampah.services import ApprovalService, BankOnboardingService, TeamService
+from shared_kernel.pagination import StandardPagination
 from shared_kernel.permissions import (
     IsActivePengelola,
     IsPengelola,
@@ -202,21 +206,51 @@ class GenerateInviteView(APIView):
         )
 
 
-class BankSampahDirectoryView(APIView):
+def _joinable_banks() -> QuerySet[BankSampah]:
+    """Banks calon nasabah may join, shared by the directory list and detail."""
+    return (
+        BankSampah.objects.filter(status=BankSampah.Status.ACTIVE, is_active=True)
+        .exclude(jenis_organisasi=BankSampah.OrganizationType.INDUK)
+        .order_by("nama")
+    )
+
+
+class BankSampahDirectoryView(ListAPIView[BankSampah]):
     """Lists bank sampah a calon nasabah can apply to join.
 
     Excludes `induk` organizations — they are administrative parents with no
     direct membership of their own; a nasabah joins one of their `unit`
     branches, or a standalone `mandiri` bank sampah, instead.
+
+    `q` searches nama/alamat/kota (PIL-308); `kota` is the PIL-329 option-A
+    placeholder until the PO picks a structured region approach.
     """
 
     permission_classes = [IsAuthenticated]
-    serializer_class = BankSampahDirectorySerializer
+    serializer_class = BankSampahDirectorySerializer  # type: ignore[assignment]  # DRF stubs type serializer_class too narrowly
+    pagination_class = StandardPagination
 
-    def get(self, request: Request) -> Response:
-        banks = (
-            BankSampah.objects.filter(status=BankSampah.Status.ACTIVE, is_active=True)
-            .exclude(jenis_organisasi=BankSampah.OrganizationType.INDUK)
-            .order_by("nama")
-        )
-        return Response(BankSampahDirectorySerializer(banks, many=True).data)
+    def get_queryset(self) -> QuerySet[BankSampah]:
+        qs = _joinable_banks()
+        q = (self.request.query_params.get("q") or "").strip()
+        # Threshold mirrors JenisSampahViewSet: a single character is noise.
+        if len(q) >= 2:
+            qs = qs.filter(Q(nama__icontains=q) | Q(alamat__icontains=q) | Q(kota__icontains=q))
+        kota = (self.request.query_params.get("kota") or "").strip()
+        if kota:
+            qs = qs.filter(kota__icontains=kota)  # PIL-329 option A placeholder
+        return qs
+
+
+class BankSampahDetailView(RetrieveAPIView[BankSampah]):
+    """Detail of one joinable bank: profile, status, layanan, and coordinates.
+
+    The lookup goes through the same joinable filter as the directory, so a
+    pending/rejected/induk bank returns 404 instead of leaking its data.
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = BankSampahDetailSerializer  # type: ignore[assignment]  # DRF stubs type serializer_class too narrowly
+
+    def get_queryset(self) -> QuerySet[BankSampah]:
+        return _joinable_banks()
