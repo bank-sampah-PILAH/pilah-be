@@ -7,6 +7,7 @@ from django.db import connection
 from django.test import RequestFactory
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework.response import Response
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -333,8 +334,11 @@ class PencairanEditTests(APITestCase):
                 if message:
                     self.assertEqual(response.data["errors"]["tanggal"], [message])
                 else:
+                    # Offset shape follows the active TIME_ZONE (UTC or WIB);
+                    # compare as parsed timestamps, not formatted strings.
                     self.assertEqual(
-                        response.data["tanggal"], tanggal.isoformat().replace("+00:00", "Z")
+                        parse_datetime(response.data["tanggal"]),
+                        parse_datetime(tanggal.isoformat()),
                     )
 
     def test_edit_tanggal_reorders_snapshots(self) -> None:
@@ -449,8 +453,10 @@ class PencairanEditTests(APITestCase):
         awal = timezone.now() - timedelta(days=1)
         pencairan = self._catat(tanggal=awal.isoformat())
         batas = timedelta(days=BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI)
-        expected = (awal - batas).isoformat().replace("+00:00", "Z")
-        self.assertEqual(self._detail(pencairan["id"])["tanggal_edit_minimum"], expected)
+        # Offset shape follows the active TIME_ZONE; compare as timestamps.
+        expected = parse_datetime((awal - batas).isoformat())
+        actual = parse_datetime(self._detail(pencairan["id"])["tanggal_edit_minimum"])
+        self.assertEqual(actual, expected)
 
         self._edit(
             pencairan["id"],
@@ -458,7 +464,8 @@ class PencairanEditTests(APITestCase):
         )
 
         # Still counted from the tanggal first recorded.
-        self.assertEqual(self._detail(pencairan["id"])["tanggal_edit_minimum"], expected)
+        masih = parse_datetime(self._detail(pencairan["id"])["tanggal_edit_minimum"])
+        self.assertEqual(masih, expected)
 
     def test_django_admin_shows_revisi_read_only(self) -> None:
         superuser = User.objects.create_user(
