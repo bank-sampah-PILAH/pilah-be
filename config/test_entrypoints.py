@@ -56,6 +56,31 @@ class SettingsInProcessTests(SimpleTestCase):
 
         self.assertIn("PILAH_SUPERADMIN_EMAILS is empty", logs.output[0])
 
+    def test_demo_login_is_disabled_by_default_and_independent_of_debug(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "DJANGO_DEBUG": "false",
+                "PILAH_ALLOW_FAKE_GOOGLE_TOKEN": "false",
+                "PILAH_ENABLE_DEMO_LOGIN": "",
+            },
+        ):
+            disabled = _run("config.settings")
+        self.assertFalse(disabled["DEBUG"])
+        self.assertFalse(disabled["PILAH_ENABLE_DEMO_LOGIN"])
+
+        with patch.dict(
+            os.environ,
+            {
+                "DJANGO_DEBUG": "false",
+                "PILAH_ALLOW_FAKE_GOOGLE_TOKEN": "false",
+                "PILAH_ENABLE_DEMO_LOGIN": "true",
+            },
+        ):
+            enabled = _run("config.settings")
+        self.assertFalse(enabled["DEBUG"])
+        self.assertTrue(enabled["PILAH_ENABLE_DEMO_LOGIN"])
+
 
 class MediaRoutingTests(SimpleTestCase):
     @staticmethod
