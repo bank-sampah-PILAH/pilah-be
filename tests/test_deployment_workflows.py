@@ -10,6 +10,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DeploymentWorkflowTests(SimpleTestCase):
+    def test_manual_cloud_run_deploy_wires_reviewer_settings_defaulting_off(self) -> None:
+        script = (ROOT / "scripts/deploy-cloud-run.sh").read_text()
+        defaults = {
+            "PILAH_ENABLE_DEMO_LOGIN": "false",
+            "PILAH_REVIEWER_EMAIL": "",
+            "PILAH_REVIEWER_PASSWORD_HASH": "",
+            "PILAH_REVIEWER_BANK_SAMPAH_ID": "",
+        }
+        for name, default in defaults.items():
+            with self.subTest(name=name):
+                self.assertIn(f'{name}="${{{name}:-{default}}}"', script)
+
+        deploy_env = next(line for line in script.splitlines() if "--set-env-vars=" in line)
+        for name in defaults:
+            with self.subTest(name=name):
+                self.assertIn(f"{name}=${{{name}}}", deploy_env)
+
     def test_staging_seed_is_owned_by_verified_deploy_and_not_dispatch(self) -> None:
         workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
         deploy = workflow["jobs"]["deploy_staging"]
