@@ -9,7 +9,7 @@ api.models, other BCs -> reporting port).
 from django.db.models import QuerySet
 from django.http import HttpRequest
 
-from api.models import DraftPencairan, Nasabah, Pencairan, Transaksi
+from api.models import BankSampah, DraftPencairan, Nasabah, Pencairan, Transaksi
 from apps.reporting import draft_export, exporter, statement
 from apps.reporting.operational import OperationalSummary, operational_queries, operational_summary
 from apps.reporting.snapshot import export_snapshot
@@ -18,11 +18,22 @@ __all__ = [
     "StatementPeriodError",
     "export_draft_pencairan",
     "export_excel",
-    "export_snapshot",
+    "export_operational_report",
     "export_statement_pdf",
     "operational_queries",
     "operational_summary",
 ]
+
+
+def export_operational_report(bank: BankSampah, request: HttpRequest) -> tuple[bytes, str] | None:
+    """Read all workbook data from one bank/member-filtered database snapshot."""
+    with export_snapshot():
+        deposits, payouts = operational_queries(bank, request)
+        if not deposits.exists() and not payouts.exists():
+            return None
+        return export_excel(
+            deposits, request, payouts=payouts, summary=operational_summary(deposits, payouts)
+        )
 
 
 def export_excel(

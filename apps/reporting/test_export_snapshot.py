@@ -37,7 +37,7 @@ class ExportSnapshotTests(OperationalReportFixture):
                 executor.submit(writer).result(timeout=10)
                 return summary
 
-            with patch("apps.ledger.views.operational_summary", side_effect=after_summary):
+            with patch("apps.reporting.api.operational_summary", side_effect=after_summary):
                 return self.workbook()
 
     def assert_original_snapshot(self, wb: Any) -> None:
