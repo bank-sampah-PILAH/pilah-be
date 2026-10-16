@@ -47,11 +47,12 @@ class ApiTestView(TemplateView):
 
 
 @require_GET
-def invite_redirect(request: HttpRequest) -> HttpResponseRedirect | HttpResponseServerError:
+def invite_redirect(
+    request: HttpRequest, token: str | None = None
+) -> HttpResponseRedirect | HttpResponseServerError:
     if not settings.PILAH_WEB_ORIGIN:
         return HttpResponseServerError("PILAH_WEB_ORIGIN is not configured.")
     origin = settings.PILAH_WEB_ORIGIN.rstrip("/")
-    token = request.GET.get("token")
     invite_path = f"/#/invite/{quote(token, safe='')}" if token else "/#/invite"
     return HttpResponseRedirect(f"{origin}{invite_path}")
 
@@ -83,6 +84,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path(".well-known/assetlinks.json", assetlinks, name="assetlinks"),
     path("invite", invite_redirect, name="invite-redirect"),
+    path("invite/<str:token>", invite_redirect, name="invite-token-redirect"),
     # Developer tools: served only when DEBUG is on, so staging and production answer 404.
     path("api-test/", debug_only(ApiTestView.as_view()), name="api-test"),
     path("api/schema/", debug_only(SpectacularAPIView.as_view()), name="schema"),

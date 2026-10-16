@@ -20,6 +20,7 @@ class MembershipRegressionTests(RegressionTestCase):
         self.assertEqual(generated.status_code, 201)
         for key in ("token", "invite_url", "expires_at"):
             self.assertIn(key, generated.data)
+        self.assertTrue(generated.data["invite_url"].endswith(f"/invite/{generated.data['token']}"))
 
         newcomer = self.fresh_pengelola("gabung@example.com")
         self.auth_as(newcomer)
@@ -39,24 +40,27 @@ class MembershipRegressionTests(RegressionTestCase):
         PILAH_WEB_ORIGIN="https://web.example.test",
         ALLOWED_HOSTS=["attacker.example.test"],
     )
-    def test_invite_link_falls_back_to_configured_web_hash_path(self) -> None:
+    def test_invite_path_falls_back_to_configured_web_hash_path(self) -> None:
         response = self.client.get(
-            "/invite?token=synthetic%2Btoken%2Fvalue",
+            "/invite/synthetic-token_123",
             HTTP_HOST="attacker.example.test",
         )
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(
             response["Location"],
-            "https://web.example.test/#/invite/synthetic%2Btoken%2Fvalue",
+            "https://web.example.test/#/invite/synthetic-token_123",
         )
 
     @override_settings(
         PILAH_WEB_ORIGIN="https://web.example.test",
         ALLOWED_HOSTS=["attacker.example.test"],
     )
-    def test_invite_link_without_token_redirects_to_bare_web_hash_path(self) -> None:
-        response = self.client.get("/invite", HTTP_HOST="attacker.example.test")
+    def test_legacy_invite_query_does_not_forward_token_to_browser(self) -> None:
+        response = self.client.get(
+            "/invite?token=synthetic-token",
+            HTTP_HOST="attacker.example.test",
+        )
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], "https://web.example.test/#/invite")

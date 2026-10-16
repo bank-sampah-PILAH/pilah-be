@@ -278,10 +278,12 @@ production deployment; both CORS and CSRF explicitly allow it. Add each dashboar
 origin to the Google Web OAuth client's Authorized JavaScript origins. Backend
 `GOOGLE_CLIENT_ID` must match frontend `GOOGLE_SERVER_CLIENT_ID`.
 `PILAH_PUBLIC_APP_URL` is the separate invite-link base, not the API base or CORS
-setting; keep it on the backend host for Android App Links. Browser invite URLs
-redirect to `/#/invite/<token>` on `PILAH_WEB_ORIGIN`, which must be the trusted
-Flutter web origin (no path or trailing slash). See [Cloud Run](CLOUD_RUN.md) for
-first-deploy URL ordering and IAM, and [Fly staging](FLY_STAGING.md) for its
+setting; keep it on the backend host for Android App Links. New invite links use
+`/invite/<token>` and browser requests redirect to `/#/invite/<token>` on
+`PILAH_WEB_ORIGIN`, which must be the trusted Flutter web origin (no path or
+trailing slash). Older `/invite?token=...` links remain supported by the native
+app; browser fallback does not forward their query token. See [Cloud Run](CLOUD_RUN.md)
+for first-deploy URL ordering and IAM, and [Fly staging](FLY_STAGING.md) for its
 configured origin.
 
 Production deployment on `main` automatically runs `bootstrap_superadmins` in
