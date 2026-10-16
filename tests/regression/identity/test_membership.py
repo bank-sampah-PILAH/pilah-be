@@ -35,7 +35,10 @@ class MembershipRegressionTests(RegressionTestCase):
         members = self.client.get("/api/v1/team")
         self.assertEqual(len(members.data["members"]), 2)
 
-    @override_settings(PILAH_WEB_ORIGIN="https://web.example.test")
+    @override_settings(
+        PILAH_WEB_ORIGIN="https://web.example.test",
+        ALLOWED_HOSTS=["attacker.example.test"],
+    )
     def test_invite_link_falls_back_to_configured_web_hash_route(self) -> None:
         response = self.client.get(
             "/invite?token=synthetic%2Btoken%2Fvalue",
