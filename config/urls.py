@@ -17,8 +17,9 @@ Including another URLconf
 
 from django.conf import settings
 from django.contrib import admin
-from django.http import HttpRequest, JsonResponse
+from django.http import HttpRequest, HttpResponseRedirect, HttpResponseServerError, JsonResponse
 from django.urls import include, path, re_path
+from django.utils.http import urlencode
 from django.views.decorators.http import require_GET
 from django.views.generic import TemplateView
 from django.views.static import serve
@@ -42,6 +43,16 @@ class ApiTestView(TemplateView):
             else ""
         )
         return context
+
+
+@require_GET
+def invite_redirect(request: HttpRequest) -> HttpResponseRedirect | HttpResponseServerError:
+    if not settings.PILAH_WEB_ORIGIN:
+        return HttpResponseServerError("PILAH_WEB_ORIGIN is not configured.")
+    query = urlencode({"token": request.GET.get("token", "")})
+    return HttpResponseRedirect(
+        f"{settings.PILAH_WEB_ORIGIN.rstrip('/')}/#/invite?{query}"
+    )
 
 
 @require_GET  # S3752: static JSON for Android app links; only GET is valid.
@@ -70,6 +81,7 @@ urlpatterns = [
     path("healthz", healthz, name="healthz"),
     path("admin/", admin.site.urls),
     path(".well-known/assetlinks.json", assetlinks, name="assetlinks"),
+    path("invite", invite_redirect, name="invite-redirect"),
     # Developer tools: served only when DEBUG is on, so staging and production answer 404.
     path("api-test/", debug_only(ApiTestView.as_view()), name="api-test"),
     path("api/schema/", debug_only(SpectacularAPIView.as_view()), name="schema"),
