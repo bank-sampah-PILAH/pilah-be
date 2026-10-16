@@ -52,6 +52,13 @@ class MembershipRegressionTests(RegressionTestCase):
             "https://web.example.test/#/invite/synthetic-token_123",
         )
 
+    @override_settings(PILAH_WEB_ORIGIN="")
+    def test_invite_redirect_errors_without_web_origin(self) -> None:
+        response = self.client.get("/invite/synthetic-token_123")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.content, b"PILAH_WEB_ORIGIN is not configured.")
+
     @override_settings(
         PILAH_WEB_ORIGIN="https://web.example.test",
         ALLOWED_HOSTS=["attacker.example.test"],
