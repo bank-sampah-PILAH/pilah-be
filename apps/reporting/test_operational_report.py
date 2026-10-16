@@ -5,16 +5,17 @@ from decimal import Decimal
 from io import BytesIO
 from typing import Any, cast
 from unittest.mock import patch
+from uuid import uuid4
 
 from django.utils import timezone
 from openpyxl import load_workbook
-from rest_framework.test import APITestCase
+from rest_framework.test import APITransactionTestCase
 from rest_framework_simplejwt.tokens import AccessToken
 
 from api.models import BankSampah, DetailTransaksi, JenisSampah, Nasabah, Pencairan, Transaksi, User
 
 
-class OperationalReportTests(APITestCase):
+class OperationalReportFixture(APITransactionTestCase):
     feed_url = "/api/v1/aktivitas"
     export_url = "/api/v1/transaksi/export"
     params = {"periode": "custom", "dari_tanggal": "2026-10-01", "sampai_tanggal": "2026-10-07"}
@@ -85,6 +86,8 @@ class OperationalReportTests(APITestCase):
         self.assertEqual(response.status_code, 200, getattr(response, "data", None))
         return load_workbook(BytesIO(response.content), data_only=False)
 
+
+class OperationalReportTests(OperationalReportFixture):
     def test_positive_summary_counts_events_not_detail_rows_or_page(self) -> None:
         DetailTransaksi.objects.create(
             transaksi=self.first,
@@ -331,3 +334,70 @@ class OperationalReportTests(APITestCase):
             self.assertEqual(response.status_code, 200)
             label = load_workbook(BytesIO(response.content))["Riwayat Transaksi"]["A2"].value
             self.assertIn("Semua Periode", label)
+
+    def test_member_filter_scopes_both_ledgers_summary_and_category_sheet(self) -> None:
+        other = Nasabah.objects.create(
+            bank_sampah=self.bank, nomor="002", nama="Ani", no_hp="081299", email="ani@example.test"
+        )
+        deposit = self.deposit("2026-10-03T12:00:00+07:00", "9000", "1.125")
+        deposit.nasabah = other
+        deposit.save(update_fields=["nasabah"])
+        payout = Pencairan.objects.create(
+            bank_sampah=self.bank,
+            nasabah=other,
+            dicatat_oleh=self.manager,
+            tanggal=self.payout.tanggal,
+            nominal=4000,
+            metode="tunai",
+            saldo_sebelum=9000,
+            saldo_sesudah=5000,
+        )
+        for member, ids, value, paid, weight in [
+            (
+                self.member,
+                {str(self.first.id), str(self.second.id), str(self.payout.id)},
+                20000,
+                5000,
+                3.5,
+            ),
+            (other, {str(deposit.id), str(payout.id)}, 9000, 4000, 1.125),
+        ]:
+            with self.subTest(member=member.nomor):
+                wb = self.workbook(nasabah_id=str(member.id))
+                rows = list(wb["Riwayat Transaksi"].iter_rows(min_row=5, values_only=True))
+                self.assertEqual({row[13] for row in rows}, ids)
+                self.assertTrue(all(row[4] == member.nomor for row in rows))
+                self.assertEqual(wb["Ringkasan"]["B2"].value, len(ids))
+                self.assertEqual(wb["Ringkasan"]["B3"].value, weight)
+                self.assertEqual(wb["Ringkasan"]["B4"].value, value)
+                self.assertEqual(wb["Ringkasan"]["B5"].value, paid)
+                self.assertEqual(wb["Ringkasan"]["B6"].value, value - paid)
+                self.assertEqual(
+                    sum(
+                        row[3] or 0 for row in wb["Laporan"].iter_rows(min_row=2, values_only=True)
+                    ),
+                    weight,
+                )
+                self.assertEqual(
+                    self.summary(nasabah_id=str(member.id))["jumlah_transaksi"], len(ids)
+                )
+                self.assertEqual(
+                    self.workbook(nasabah_id=str(member.id), tipe="pencairan")["Ringkasan"][
+                        "B4"
+                    ].value,
+                    0,
+                )
+
+    def test_member_filter_rejects_invalid_ids_and_does_not_expand_bank_scope(self) -> None:
+        foreign_bank = BankSampah.objects.create(nama="Other", no_hp_pic="081244")
+        foreign = Nasabah.objects.create(
+            bank_sampah=foreign_bank, nomor="X", nama="Other", no_hp="081255"
+        )
+        for member_id in [str(foreign.id), str(uuid4())]:
+            with self.subTest(member_id=member_id):
+                response = self.client.get(
+                    self.export_url, {**self.params, "nasabah_id": member_id}
+                )
+                self.assertEqual(response.status_code, 400)
+        response = self.client.get(self.export_url, {**self.params, "nasabah_id": "invalid"})
+        self.assertEqual(response.status_code, 422)
