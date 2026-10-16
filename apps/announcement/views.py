@@ -1,4 +1,5 @@
-"""Pengumuman HTTP layer: pengurus authoring/manage (PIL-243, PIL-332).
+"""Pengumuman HTTP layer: pengurus authoring/manage (PIL-243, PIL-332) and
+nasabah list/detail/read state (PIL-244).
 
 Thin adapter — permissions, scoping, and marshalling. Workflow rules live in
 apps/announcement/services.py; payload validation in serializers.py.
@@ -7,18 +8,25 @@ apps/announcement/services.py; payload validation in serializers.py.
 from typing import Any
 from uuid import UUID
 
-from django.db.models import Case, CharField, QuerySet, Value, When
+from django.db.models import Case, CharField, Exists, OuterRef, QuerySet, Subquery, Value, When
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from rest_framework import serializers, status, viewsets
+from rest_framework import generics, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from api.models import BankSampah, Pengumuman, User
+from api.models import BankSampah, Pengumuman, PengumumanDibaca, User
 from apps.announcement.exceptions import TransisiStatusTidakValid
-from apps.announcement.serializers import PengumumanSerializer, TerbitkanSerializer
+from apps.announcement.serializers import (
+    PengumumanNasabahListSerializer,
+    PengumumanSerializer,
+    TerbitkanSerializer,
+)
 from apps.announcement.services import PengumumanService
-from shared_kernel.permissions import IsActivePengelola
+from apps.nasabah.api import aktif_keanggotaan
+from shared_kernel.pagination import StandardPagination
+from shared_kernel.permissions import IsActiveNasabah, IsActivePengelola
 
 _STATUS_EFEKTIF_VALUES = {"draft", "terjadwal", "terbit", "kedaluwarsa", "ditarik"}
 
@@ -133,3 +141,50 @@ class PengumumanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stu
         except TransisiStatusTidakValid as exc:
             return Response({"error": exc.message}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self.get_serializer(pengumuman).data)
+
+
+def _dibaca_annotations(user: User) -> dict[str, Subquery]:
+    read_rows = PengumumanDibaca.objects.filter(pengumuman=OuterRef("pk"), user=user)
+    return {
+        "_dibaca": Exists(read_rows),
+        "_dibaca_pada": Subquery(read_rows.values("dibaca_pada")[:1]),
+    }
+
+
+def _aktif_untuk(request: Request) -> QuerySet[Pengumuman]:
+    """The nasabah's active announcements for their active membership's bank."""
+    member = aktif_keanggotaan(request)
+    return Pengumuman.aktif().filter(bank_sampah=member.bank_sampah)
+
+
+class NasabahPengumumanListView(generics.ListAPIView[Pengumuman]):
+    permission_classes = [IsActiveNasabah]
+    serializer_class = PengumumanNasabahListSerializer
+    pagination_class = StandardPagination
+
+    def get_queryset(self) -> QuerySet[Pengumuman]:
+        return _aktif_untuk(self.request).annotate(**_dibaca_annotations(_user(self.request)))
+
+
+class NasabahPengumumanDetailView(generics.RetrieveAPIView[Pengumuman]):
+    permission_classes = [IsActiveNasabah]
+    serializer_class = PengumumanNasabahListSerializer
+
+    def get_object(self) -> Pengumuman:
+        # Other-bank, expired, and withdrawn announcements are all simply
+        # absent from the scoped aktif queryset — one 404 path for all.
+        return get_object_or_404(
+            _aktif_untuk(self.request).annotate(**_dibaca_annotations(_user(self.request))),
+            pk=self.kwargs["pk"],
+        )
+
+
+class NasabahPengumumanBacaView(generics.GenericAPIView[Pengumuman]):
+    permission_classes = [IsActiveNasabah]
+
+    def post(self, request: Request, pk: UUID) -> Response:
+        pengumuman = get_object_or_404(_aktif_untuk(request), pk=pk)
+        row, _created = PengumumanDibaca.objects.get_or_create(
+            pengumuman=pengumuman, user=_user(request)
+        )
+        return Response({"id": str(pengumuman.id), "dibaca": True, "dibaca_pada": row.dibaca_pada})

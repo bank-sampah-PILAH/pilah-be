@@ -3,7 +3,12 @@ from rest_framework.routers import DefaultRouter
 
 # ponytail: views live in their canonical bounded-context homes; routes and
 # names are frozen so this compose is behavior-neutral.
-from apps.announcement.views import PengumumanViewSet
+from apps.announcement.views import (
+    NasabahPengumumanBacaView,
+    NasabahPengumumanDetailView,
+    NasabahPengumumanListView,
+    PengumumanViewSet,
+)
 from apps.authentication.views import (
     AuthMeView,
     CompleteProfileView,
@@ -79,6 +84,17 @@ urlpatterns = [
         "nasabah/me/riwayat/<uuid:pk>",
         NasabahTransactionDetailView.as_view(),
         name="nasabah-own-transaction-detail",
+    ),
+    path("nasabah/me/pengumuman", NasabahPengumumanListView.as_view(), name="nasabah-pengumuman"),
+    path(
+        "nasabah/me/pengumuman/<uuid:pk>",
+        NasabahPengumumanDetailView.as_view(),
+        name="nasabah-pengumuman-detail",
+    ),
+    path(
+        "nasabah/me/pengumuman/<uuid:pk>/baca",
+        NasabahPengumumanBacaView.as_view(),
+        name="nasabah-pengumuman-baca",
     ),
     path("nasabah/me/profil", NasabahProfileView.as_view(), name="nasabah-own-profile"),
     path("auth/google", GoogleAuthView.as_view(), name="auth-google"),

@@ -10,6 +10,42 @@ from api.models import Pengumuman
 _BANK_SAMPAH_ID = "bank_sampah.id"
 
 
+class PengumumanNasabahListSerializer(serializers.ModelSerializer[Pengumuman]):
+    """Nasabah-facing row: no staff audit fields, carries the read flag.
+
+    The view annotates _dibaca / _dibaca_pada per row; the fallbacks below
+    cover direct (un-annotated) serializer use.
+    """
+
+    dibaca = serializers.SerializerMethodField()
+    dibaca_pada = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Pengumuman
+        fields = ["id", "judul", "isi", "terbit_pada", "dibaca", "dibaca_pada"]
+        read_only_fields = fields
+
+    def get_dibaca(self, obj: Pengumuman) -> bool:
+        return bool(getattr(obj, "_dibaca", False))
+
+    def get_dibaca_pada(self, obj: Pengumuman) -> Any:
+        return getattr(obj, "_dibaca_pada", None)
+
+
+class PengumumanBerandaSerializer(serializers.ModelSerializer[Pengumuman]):
+    """Compact row for the beranda summary (PIL-333)."""
+
+    dibaca = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Pengumuman
+        fields = ["id", "judul", "terbit_pada", "dibaca"]
+        read_only_fields = fields
+
+    def get_dibaca(self, obj: Pengumuman) -> bool:
+        return bool(getattr(obj, "_dibaca", False))
+
+
 class TerbitkanSerializer(serializers.Serializer[Any]):
     """Publish-now or schedule payload for POST /pengumuman/{id}/terbitkan.
 
