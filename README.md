@@ -47,6 +47,10 @@ Open:
 - OpenAPI schema: `http://localhost:8000/api/schema/`
 - Swagger UI: `http://localhost:8000/api/docs/`
 
+The API test runner, OpenAPI schema and Swagger UI are developer tools served
+only when `DJANGO_DEBUG=true` (the Docker setup sets it). With `DJANGO_DEBUG=false`,
+as on staging and production, they answer 404.
+
 Create or update a SuperAdmin account:
 
 ```bash
@@ -134,6 +138,7 @@ DJANGO_SECRET_KEY=change-me
 DJANGO_DEBUG=false
 DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
 CORS_ALLOW_ALL_ORIGINS=false
+CORS_ALLOWED_ORIGINS=http://localhost:7357
 ```
 
 Database variables:
@@ -152,10 +157,14 @@ Auth and app variables:
 ```env
 GOOGLE_CLIENT_ID=
 PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false
-PILAH_SUPERADMIN_EMAILS=admin@example.com
 PILAH_PUBLIC_APP_URL=https://pilah.example.com
 PILAH_SUPERADMIN_EMAILS=admin@example.com,another-admin@example.com
 ```
+
+`CORS_ALLOWED_ORIGINS` is a comma-separated list of browser origins (scheme,
+host, and optional port; no path). For web Google login, set backend
+`GOOGLE_CLIENT_ID` to the same Web OAuth client ID used by mobile's
+`GOOGLE_SERVER_CLIENT_ID`; the API validates the token audience against it.
 
 Set `PILAH_SUPERADMIN_EMAILS` on Fly and as a GitHub repository variable for
 Cloud Run. It is the authoritative comma-separated list of Superadmin Google
@@ -251,11 +260,32 @@ Cloud Run workflow reads the production allowlist from the GitHub variable with
 the same name.
 Existing Superadmin accounts not present in this list cannot use Google login.
 
-Run the confirmation-gated **Seed Staging Testing Data** GitHub Actions
-workflow and enter `SEED-PILAH-STAGING-DATA` exactly. The workflow connects to
-the documented `pilah-be-staging` Fly.io app and runs the same idempotent
-command with `--environment staging`; it never enables fake authentication.
-See [Fly.io staging](FLY_STAGING.md) for setup details.
+CI automatically seeds `pilah-be-staging` only after a verified staging deploy
+and successful health check. Seeding is part of deploy success, uses the same
+idempotent fixture command and never resets unrelated data or enables fake
+Google tokens. Non-debug seeding requires runtime `PILAH_ENVIRONMENT=staging`,
+confirmation and an allowlisted fixture Superadmin; production always rejects
+fixtures. See [Fly.io staging](FLY_STAGING.md) for required variables.
+
+The staging dashboard is `https://pilah-web-staging.fly.dev`, separate from the
+backend origin `https://pilah-be-staging.fly.dev`. Mobile `BASE_URL_DEV` and
+`BASE_URL_PROD` use backend origins without paths because request paths already
+include `/api/v1`. Production uses the actual provider-generated `pilah-web`
+Cloud Run URL. Set backend repository variable
+`PILAH_WEB_ORIGIN` to that exact HTTPS origin (no path/trailing slash) before
+production deployment; both CORS and CSRF explicitly allow it. Add each dashboard
+origin to the Google Web OAuth client's Authorized JavaScript origins. Backend
+`GOOGLE_CLIENT_ID` must match frontend `GOOGLE_SERVER_CLIENT_ID`.
+`PILAH_PUBLIC_APP_URL` is the separate invite-link base, not the API base or CORS
+setting. See [Cloud Run](CLOUD_RUN.md) for first-deploy URL ordering and IAM.
+
+Production deployment on `main` automatically runs `bootstrap_superadmins` in
+a Cloud Run Job with the service's image, DB environment and runtime identity.
+It creates only missing allowlisted Superadmins (Google login, no usable
+password); existing profiles/passwords remain unchanged. Role conflicts and
+missing/invalid allowlists fail deployment. It never seeds banks or demo data.
+Manual Cloud Run deployment uses the same bootstrap. Neither cloud provisioning
+nor OAuth Console configuration is performed by this code delivery itself.
 
 Bank Sampah organizations can be `mandiri`, `induk`, or `unit`. A unit must
 belong to an induk organization. A Nasabah user can have one membership per
@@ -350,6 +380,18 @@ Pencairan:
 - `PATCH /api/v1/pencairan/:id`
 - `GET /api/v1/pencairan/:id/riwayat`
 
+Draft pencairan (pengurus only):
+
+- `GET /api/v1/draft-pencairan`
+- `POST /api/v1/draft-pencairan`
+- `GET /api/v1/draft-pencairan/:id`
+- `PATCH /api/v1/draft-pencairan/:id`
+- `POST /api/v1/draft-pencairan/:id/batalkan`
+- `POST /api/v1/draft-pencairan/:id/konfirmasi`
+- `GET /api/v1/draft-pencairan/:id/export?berkas=pdf|xlsx`
+- `GET /api/v1/draft-pencairan/kandidat`
+- `POST /api/v1/draft-pencairan/batch`
+
 Dashboard and settings:
 
 - `GET /api/v1/dashboard/stats`
@@ -396,6 +438,82 @@ export) debits `saldo_sebelum - saldo_sesudah`, so it matches the stored saldo.
 Only pengurus record pencairan. `GET /api/v1/pencairan` and
 `GET /api/v1/pencairan/:id` also accept nasabah accounts, which see only the
 pencairan on their own memberships. Django admin shows pencairan read-only.
+
+## Draft pencairan
+
+A pengurus plans a payout for one or many nasabah as a **draft**, checks the
+numbers, pays outside the app (transfer or cash), then **confirms** the payment.
+A draft never changes a saldo: only confirmation does, once, atomically.
+
+Status is `draft`, `dikonfirmasi` or `dibatalkan`. A confirmed or cancelled
+draft is final: changing or cancelling it returns 409, and so does confirming
+it twice.
+
+```http
+POST /api/v1/draft-pencairan
+{
+  "nama": "Cair Oktober",
+  "potongan_jenis": "persen",
+  "potongan_nilai": "10",
+  "items": [
+    { "nasabah_id": "uuid", "nominal": "100000", "metode": "transfer" },
+    { "nasabah_id": "uuid", "potongan_jenis": "rupiah", "potongan_nilai": "1500" }
+  ]
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `nama` | Optional, max 150 characters. Blank becomes `Pencairan 7 Okt 2026, 14:35` (the current date and time in WIB). |
+| `potongan_jenis`, `potongan_nilai` | The draft's default potongan: `persen` (0-100) or `rupiah`. Sent together. |
+| `jumlah_jenis`, `jumlah_nilai` | The jumlah last applied to everyone (`persen` 0-100, or whole `rupiah`), kept so the form reopens as it was. Sent together; only a record, the item nominals decide what is paid. `null` for both clears it. |
+| `items[].nasabah_id` | Required. Active, approved nasabah of the pengurus' bank; once per draft. |
+| `items[].nominal` | Optional, defaults to the whole saldo. Whole rupiah, above zero, not above the saldo. |
+| `items[].metode` | `tunai` (default) or `transfer`. |
+| `items[].potongan_jenis`, `items[].potongan_nilai` | The item's own potongan, overriding the draft default. `null` for both clears it. |
+
+A potongan is rounded **down** to whole rupiah per item, and the draft totals
+are sums of the items. A potongan above its item's nominal is rejected. Each
+item reports `potongan` (the effective amount), `dibayar` (`nominal - potongan`)
+and `saldo_saat_ini`.
+
+`PATCH` takes the same body, every field optional. `items`, when sent, is the
+whole desired list: a field left out of an item keeps its value, and an item
+left out of the list is removed.
+
+A draft holds at most **1000 nasabah**, on create, `PATCH` and `batch` alike;
+past that the request is rejected with 422 and the pengurus splits the payout
+into several drafts. A draft is read, saved and confirmed whole, in one request
+and one transaction, which is what the limit protects. Items always come back
+ordered by nasabah name, then id, so they can be paginated by cursor if banks
+ever outgrow the limit; the totals are already computed server-side.
+
+`POST /api/v1/draft-pencairan/:id/konfirmasi` re-checks every item against the
+saldo as it is now, reports all failing items before writing anything, then
+debits each nasabah and writes one `pencairan` per item (carrying `potongan` and
+the draft). `nominal` still leaves the saldo in full; the potongan is only
+recorded. A pencairan with a potongan cannot have its `nominal` or `tanggal`
+edited afterwards.
+
+`GET /api/v1/draft-pencairan/:id/export?berkas=pdf|xlsx` downloads the draft as
+PDF or Excel. It works in any status, repeatedly, and changes nothing.
+
+`POST /api/v1/draft-pencairan/export?berkas=pdf|xlsx` takes the same body as a
+create and returns the file for that draft as it stands, without saving it: the
+draft is built and validated, then rolled back. Use it to export edits that were
+not saved yet.
+
+`GET /api/v1/draft-pencairan/kandidat` lists, unpaginated, the nasabah that can
+still be paid out (active, approved, saldo of at least Rp 1) so a picker can
+select across pages. It accepts `search` (2+ characters), `saldo_min` and
+`ordering` (`nama`, `-nama`, `saldo`, `-saldo`). With `termasuk_kosong=true` it
+also lists nasabah whose saldo is Rp 0 or who have no saldo yet, so a picker can
+show them as empty; they still cannot be put in a draft.
+
+`POST /api/v1/draft-pencairan/batch` builds a draft from `{"semua": true}` or
+`{"nasabah_ids": [...]}`, paying each their whole saldo with the optional
+`nama`, `metode` and default potongan. Anyone who cannot be paid is skipped and
+listed in `dilewati` with the reason, instead of failing the rest.
 
 ### Riwayat pencairan filters
 
@@ -527,7 +645,7 @@ Generate schema locally:
 python manage.py spectacular --file openapi.yaml --validate
 ```
 
-Served endpoints:
+Served endpoints (only when `DJANGO_DEBUG=true`; 404 otherwise):
 
 - `GET /api/schema/`
 - `GET /api/docs/`

@@ -10,7 +10,7 @@ from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from api.management.commands.seed_testing_data import Command
+from api.management.commands.seed_testing_data import ACTIVE_BANK_ID, CUSTOMER_ONE_ID, Command
 from api.models import (
     BankSampah,
     BankSampahApprovalLog,
@@ -262,6 +262,27 @@ class SeedTestingDataCommandTests(TestCase):
         self.assertEqual(user.nama, "Existing Pengurus")
 
     @override_settings(DEBUG=True)
+    def test_if_missing_preserves_existing_fixture_edits(self) -> None:
+        call_command("seed_testing_data")
+        bank = BankSampah.objects.get(pk=ACTIVE_BANK_ID)
+        bank.alamat = "Tester's address"
+        bank.save(update_fields=["alamat"])
+        customer = Nasabah.objects.get(pk=CUSTOMER_ONE_ID)
+        customer.status = Nasabah.Status.PENDING
+        customer.is_active = False
+        customer.save(update_fields=["status", "is_active"])
+
+        output = StringIO()
+        call_command("seed_testing_data", if_missing=True, stdout=output)
+
+        self.assertIn("Existing fixture rows found; skipping reseed.", output.getvalue())
+        bank.refresh_from_db()
+        customer.refresh_from_db()
+        self.assertEqual(bank.alamat, "Tester's address")
+        self.assertEqual(customer.status, Nasabah.Status.PENDING)
+        self.assertFalse(customer.is_active)
+
+    @override_settings(DEBUG=True)
     def test_seed_reuses_existing_account_for_configured_email(self) -> None:
         User.objects.create_user(
             email="pengurus.demo@example.com",
@@ -313,7 +334,11 @@ class SeedTestingDataCommandTests(TestCase):
         for setoran in Transaksi.objects.all():
             self.assertEqual(setoran.total_nilai, totals[setoran.pk])
 
-    @override_settings(DEBUG=False)
+    @override_settings(
+        DEBUG=False,
+        PILAH_ENVIRONMENT="staging",
+        PILAH_SUPERADMIN_EMAILS=("superadmin.demo@example.com",),
+    )
     def test_staging_requires_explicit_confirmation(self) -> None:
         with self.assertRaisesRegex(CommandError, "SEED-PILAH-STAGING-DATA"):
             call_command("seed_testing_data", environment="staging")

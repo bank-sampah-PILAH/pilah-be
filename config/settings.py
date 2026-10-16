@@ -3,8 +3,12 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from corsheaders.defaults import default_headers
 from django.core.exceptions import ImproperlyConfigured
+from django.utils.crypto import get_random_string
 from dotenv import load_dotenv
+
+from shared_kernel.http_headers import HEADER_PERMINTAAN_KUSTOM, HEADER_RESPONS_TEREKSPOS
 
 load_dotenv()
 
@@ -14,12 +18,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() == "true"
 # The fallback exists only so local test runs without a `.env` (no DB either)
 # start at all. Never used by staging/production, which set DJANGO_SECRET_KEY.
-# See README: generating a production key and where to store it.
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-local-pilah-dev-key")
-if SECRET_KEY.startswith("django-insecure") and not DEBUG:
+# Deliberately not a secret-shaped literal (nothing else detects the old
+# "django-insecure" marker; SonarCloud secrets:S6687 flags any such string in
+# source). See README: generating a production key and where to store it.
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "")
+if not SECRET_KEY and not DEBUG:
     raise ImproperlyConfigured(
         "DJANGO_SECRET_KEY must be set to a strong unique value outside local development."
     )
+if not SECRET_KEY:
+    # Dev-only fallback, generated per-process: no literal in source, so
+    # SonarCloud secrets:S6687 has nothing to flag. Local dev only — sessions
+    # reset on restart, which is fine for a throwaway key.
+    SECRET_KEY = get_random_string(50)
 ALLOWED_HOSTS = [
     host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()
 ]
@@ -141,7 +152,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "id"
 
-TIME_ZONE = "UTC"
+TIME_ZONE = "Asia/Jakarta"
 
 USE_I18N = True
 
@@ -190,6 +201,10 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 20,
     "EXCEPTION_HANDLER": "shared_kernel.exceptions.api_exception_handler",
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # Scoped rates: keys are the throttle scope of the views declaring one.
+    # statement_pdf = the riwayat statement render (CPU-heavy; see
+    # apps.nasabah.home.NasabahHistoryExportPdfView).
+    "DEFAULT_THROTTLE_RATES": {"statement_pdf": "10/min"},
 }
 
 SPECTACULAR_SETTINGS = {
@@ -207,6 +222,20 @@ SIMPLE_JWT = {
 }
 
 CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "true").lower() == "true"
+CORS_ALLOWED_ORIGINS = [
+    origin.strip() for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if origin.strip()
+]
+
+# CORS_ALLOW_ALL_ORIGINS permits any origin but NOT arbitrary request headers:
+# django-cors-headers answers the preflight with its own default list, which
+# carries no custom header. Both lists below are derived from the registry in
+# shared_kernel/http_headers.py so they cannot drift from the headers the
+# views actually read and write.
+CORS_ALLOW_HEADERS = (
+    *default_headers,
+    *(header.lower() for header in HEADER_PERMINTAAN_KUSTOM),
+)
+CORS_EXPOSE_HEADERS = HEADER_RESPONS_TEREKSPOS
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
@@ -216,6 +245,7 @@ PILAH_ALLOW_FAKE_GOOGLE_TOKEN = (
 )
 if PILAH_ALLOW_FAKE_GOOGLE_TOKEN and not DEBUG:
     raise ImproperlyConfigured("PILAH_ALLOW_FAKE_GOOGLE_TOKEN requires DJANGO_DEBUG=true")
+PILAH_ENVIRONMENT = os.getenv("PILAH_ENVIRONMENT", "")
 PILAH_SUPERADMIN_EMAILS = tuple(
     email.strip().lower()
     for email in os.getenv("PILAH_SUPERADMIN_EMAILS", "").split(",")
