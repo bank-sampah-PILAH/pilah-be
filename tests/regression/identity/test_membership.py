@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 
+from django.test import override_settings
 from django.utils import timezone
 
 from tests.regression.helpers import RegressionTestCase
@@ -33,6 +34,19 @@ class MembershipRegressionTests(RegressionTestCase):
         self.auth_as(self.user)
         members = self.client.get("/api/v1/team")
         self.assertEqual(len(members.data["members"]), 2)
+
+    @override_settings(PILAH_WEB_ORIGIN="https://web.example.test")
+    def test_invite_link_falls_back_to_configured_web_hash_route(self) -> None:
+        response = self.client.get(
+            "/invite?token=synthetic%2Btoken%2Fvalue",
+            HTTP_HOST="attacker.example.test",
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response["Location"],
+            "https://web.example.test/#/invite?token=synthetic%2Btoken%2Fvalue",
+        )
 
     def test_invite_accept_rejects_expired(self) -> None:
         generated = self.client.post("/api/v1/team/invite", {}, format="json")
