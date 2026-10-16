@@ -50,9 +50,7 @@ def invite_redirect(request: HttpRequest) -> HttpResponseRedirect | HttpResponse
     if not settings.PILAH_WEB_ORIGIN:
         return HttpResponseServerError("PILAH_WEB_ORIGIN is not configured.")
     query = urlencode({"token": request.GET.get("token", "")})
-    return HttpResponseRedirect(
-        f"{settings.PILAH_WEB_ORIGIN.rstrip('/')}/#/invite?{query}"
-    )
+    return HttpResponseRedirect(f"{settings.PILAH_WEB_ORIGIN.rstrip('/')}/#/invite?{query}")
 
 
 @require_GET  # S3752: static JSON for Android app links; only GET is valid.
