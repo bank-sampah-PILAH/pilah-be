@@ -15,11 +15,12 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
+from urllib.parse import quote
+
 from django.conf import settings
 from django.contrib import admin
 from django.http import HttpRequest, HttpResponseRedirect, HttpResponseServerError, JsonResponse
 from django.urls import include, path, re_path
-from django.utils.http import urlencode
 from django.views.decorators.http import require_GET
 from django.views.generic import TemplateView
 from django.views.static import serve
@@ -49,8 +50,10 @@ class ApiTestView(TemplateView):
 def invite_redirect(request: HttpRequest) -> HttpResponseRedirect | HttpResponseServerError:
     if not settings.PILAH_WEB_ORIGIN:
         return HttpResponseServerError("PILAH_WEB_ORIGIN is not configured.")
-    query = urlencode({"token": request.GET.get("token", "")})
-    return HttpResponseRedirect(f"{settings.PILAH_WEB_ORIGIN.rstrip('/')}/#/invite?{query}")
+    origin = settings.PILAH_WEB_ORIGIN.rstrip("/")
+    token = request.GET.get("token")
+    invite_path = f"/#/invite/{quote(token, safe='')}" if token else "/#/invite"
+    return HttpResponseRedirect(f"{origin}{invite_path}")
 
 
 @require_GET  # S3752: static JSON for Android app links; only GET is valid.

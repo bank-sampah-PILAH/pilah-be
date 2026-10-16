@@ -279,7 +279,7 @@ origin to the Google Web OAuth client's Authorized JavaScript origins. Backend
 `GOOGLE_CLIENT_ID` must match frontend `GOOGLE_SERVER_CLIENT_ID`.
 `PILAH_PUBLIC_APP_URL` is the separate invite-link base, not the API base or CORS
 setting; keep it on the backend host for Android App Links. Browser invite URLs
-redirect to the hash route on `PILAH_WEB_ORIGIN`, which must be the trusted
+redirect to `/#/invite/<token>` on `PILAH_WEB_ORIGIN`, which must be the trusted
 Flutter web origin (no path or trailing slash). See [Cloud Run](CLOUD_RUN.md) for
 first-deploy URL ordering and IAM, and [Fly staging](FLY_STAGING.md) for its
 configured origin.

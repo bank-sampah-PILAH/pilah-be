@@ -39,7 +39,7 @@ guess a URL hash or configure a custom domain.
 `PILAH_WEB_ORIGIN` (trusted browser origin) and the frontend `BASE_URL_PROD`
 (backend origin only; mobile request paths include `/api/v1`). Keep the invite
 base on the backend host for Android App Links. Browser GET `/invite?token=...`
-redirects to `PILAH_WEB_ORIGIN/#/invite?token=...`; the production workflow
+redirects to `PILAH_WEB_ORIGIN/#/invite/<token>`; the production workflow
 already passes the required `PILAH_WEB_ORIGIN` variable to Cloud Run. Keep fake
 tokens and Django debug **false**.
 

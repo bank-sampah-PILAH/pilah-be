@@ -36,8 +36,8 @@ https://pilah-be-staging.fly.dev/api/v1/auth/google/callback
 `PILAH_PUBLIC_APP_URL` is the invite-link base, not the CORS origin or frontend
 API base; it remains `https://pilah-be-staging.fly.dev` in `fly.toml` so Android
 App Links continue to open the app. Browser GET `/invite?token=...` redirects to
-the Flutter hash route on `PILAH_WEB_ORIGIN` (`https://pilah-web-staging.fly.dev`)
-with the token in the fragment. This origin is configured in `fly.toml`; never
+the Flutter hash path `/#/invite/<token>` on `PILAH_WEB_ORIGIN`
+(`https://pilah-web-staging.fly.dev`). This origin is configured in `fly.toml`; never
 construct the redirect destination from the request host. Keep
 `PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false` and `DJANGO_DEBUG=false`; web hosting does
 not enable demo login.
