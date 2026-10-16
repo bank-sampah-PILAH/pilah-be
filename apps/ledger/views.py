@@ -47,6 +47,7 @@ from apps.notification.api import send_setoran_receipt
 from apps.reporting.api import (
     export_draft_pencairan,
     export_excel,
+    export_snapshot,
     operational_queries,
     operational_summary,
 )
@@ -167,23 +168,24 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
 
     @action(detail=False, methods=["get"], url_path="export")
     def export(self, request: Request) -> HttpResponse:
-        try:
-            qs, payouts = operational_queries(current_bank(request), request)
-        except ValueError as exc:
-            return Response({"error": str(exc)}, status=400)
-        if not qs.exists() and not payouts.exists():
-            return Response({"error": "Tidak ada data pada periode ini"}, status=400)
-        content, filename = export_excel(
-            qs, request, payouts=payouts, summary=operational_summary(qs, payouts)
-        )
-        response = HttpResponse(
-            content,
-            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-        response[CONTENT_DISPOSITION] = f'attachment; filename="{filename}"'
-        response["Cache-Control"] = "private, no-store"
-        response["X-Content-Type-Options"] = "nosniff"
-        return response
+        with export_snapshot():
+            try:
+                qs, payouts = operational_queries(current_bank(request), request)
+            except ValueError as exc:
+                return Response({"error": str(exc)}, status=400)
+            if not qs.exists() and not payouts.exists():
+                return Response({"error": "Tidak ada data pada periode ini"}, status=400)
+            content, filename = export_excel(
+                qs, request, payouts=payouts, summary=operational_summary(qs, payouts)
+            )
+            response = HttpResponse(
+                content,
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+            response[CONTENT_DISPOSITION] = f'attachment; filename="{filename}"'
+            response["Cache-Control"] = "private, no-store"
+            response["X-Content-Type-Options"] = "nosniff"
+            return response
 
     def create(self, request: Request) -> Response:
         serializer = TransactionCreateSerializer(data=request.data)

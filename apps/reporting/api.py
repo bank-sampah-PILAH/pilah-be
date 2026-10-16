@@ -12,11 +12,13 @@ from django.http import HttpRequest
 from api.models import DraftPencairan, Nasabah, Pencairan, Transaksi
 from apps.reporting import draft_export, exporter, statement
 from apps.reporting.operational import OperationalSummary, operational_queries, operational_summary
+from apps.reporting.snapshot import export_snapshot
 
 __all__ = [
     "StatementPeriodError",
     "export_draft_pencairan",
     "export_excel",
+    "export_snapshot",
     "export_statement_pdf",
     "operational_queries",
     "operational_summary",

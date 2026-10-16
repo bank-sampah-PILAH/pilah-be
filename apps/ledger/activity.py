@@ -39,6 +39,15 @@ def activity_sources(
     if member is not None:
         deposits = deposits.filter(nasabah=member)
         payouts = payouts.filter(nasabah=member)
+    member_id = request.GET.get("nasabah_id")
+    if member_id:
+        # Intersect with the authorized bank/member scope; never replace it.
+        try:
+            member_id = serializers.UUIDField().run_validation(member_id)
+        except serializers.ValidationError as exc:
+            raise serializers.ValidationError({"nasabah_id": exc.detail}) from exc
+        deposits = deposits.filter(nasabah_id=member_id)
+        payouts = payouts.filter(nasabah_id=member_id)
     search = request.GET.get("search", "").strip()
     if search:
         deposits = deposits.filter(nasabah__nama__icontains=search)

@@ -25,7 +25,7 @@ from django.urls import Resolver404, resolve
 from django.utils import timezone
 from django.views.static import serve
 from openpyxl import load_workbook
-from rest_framework.test import APIClient, APITestCase
+from rest_framework.test import APIClient, APITestCase, APITransactionTestCase
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from api.models import (
@@ -46,7 +46,7 @@ from apps.nasabah.keanggotaan import sinkronkan_dari_akun
 from apps.nasabah.services import NasabahApprovalService
 
 
-class APISpecTests(APITestCase):
+class APISpecTests(APITransactionTestCase):
     _fake_tokens: ClassVar[Any]
 
     @classmethod
@@ -4392,7 +4392,7 @@ class StatusPenautanAkunNasabahTests(APITestCase):
         self.assertIsNone(self.tanpa_akun.user)
 
 
-class SetoranTestBase(APITestCase):
+class SetoranFixture(APITransactionTestCase):
     """Pengurus, nasabah, dan satu jenis sampah untuk skenario setoran."""
 
     def setUp(self) -> None:
@@ -4448,6 +4448,10 @@ class SetoranTestBase(APITestCase):
 
     def _saldo(self) -> Any:
         return self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo").data["total_saldo"]
+
+
+class SetoranTestBase(SetoranFixture, APITestCase):
+    """Keep savepoint-based isolation for non-export deposit tests."""
 
 
 class IdempotensiSetoranTests(SetoranTestBase):
@@ -4579,7 +4583,7 @@ class IdempotensiSetoranTests(SetoranTestBase):
         self.assertEqual(Transaksi.objects.count(), 1)
 
 
-class KalkulasiSetoranTests(SetoranTestBase):
+class KalkulasiSetoranTests(SetoranFixture):
     """Nilai setoran memakai harga master dan dibulatkan ke bawah ke rupiah penuh."""
 
     def test_subtotal_dibulatkan_ke_bawah_ke_rupiah_penuh(self) -> None:
@@ -4805,7 +4809,7 @@ class ValidasiInputSetoranTests(SetoranTestBase):
         self.assertEqual(detail.harga_snapshot, Decimal("0.50"))
 
 
-class PencairanAPITests(APITestCase):
+class PencairanAPITests(APITransactionTestCase):
     def setUp(self) -> None:
         self.bank = BankSampah.objects.create(
             nama="Bank Sampah BTH",

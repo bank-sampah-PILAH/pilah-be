@@ -7,11 +7,12 @@ from typing import Any
 from unittest import skipUnless
 from unittest.mock import patch
 
-from django.db import connection, connections, transaction
+from django.db import DatabaseError, connection, connections, transaction
 from django.db.models import QuerySet
 
 from api.models import DetailTransaksi, Pencairan, Transaksi
 from apps.reporting.operational import OperationalSummary, operational_summary
+from apps.reporting.snapshot import export_snapshot
 from apps.reporting.test_operational_report import OperationalReportFixture
 
 
@@ -50,7 +51,13 @@ class ExportSnapshotTests(OperationalReportFixture):
         self.assertEqual(wb["Ringkasan"]["B4"].value, 20000)
         self.assertEqual(wb["Ringkasan"]["B6"].value, 15000)
         self.assertEqual(
-            sum(row[3] or 0 for row in wb["Laporan"].iter_rows(min_row=2, values_only=True)), 3.5
+            sum(
+                row[3] or 0
+                for row in wb["Laporan"].iter_rows(
+                    min_row=2, max_row=wb["Laporan"].max_row - 1, values_only=True
+                )
+            ),
+            3.5,
         )
 
     def test_committed_insert_between_summary_and_rows_is_not_partially_exported(self) -> None:
@@ -62,10 +69,35 @@ class ExportSnapshotTests(OperationalReportFixture):
 
     def test_committed_edit_between_summary_and_rows_preserves_original_values(self) -> None:
         def edit() -> None:
-            Transaksi.objects.filter(pk=self.first.pk).update(total_nilai=Decimal("20000"))
+            Transaksi.objects.filter(pk=self.first.pk).update(total_nilai=Decimal(20000))
             DetailTransaksi.objects.filter(transaksi=self.first).update(
-                berat=Decimal("2.500"), subtotal=Decimal("20000")
+                berat=Decimal("2.500"), subtotal=Decimal(20000)
             )
 
         self.assert_original_snapshot(self.workbook_with_interleaved_write(edit))
         self.assertEqual(self.workbook()["Ringkasan"]["B4"].value, 28000)
+
+    def test_snapshot_is_read_only_and_connection_recovers_after_failure(self) -> None:
+        with self.assertRaises(DatabaseError), export_snapshot():
+            with connection.cursor() as cursor:
+                cursor.execute("SHOW transaction_isolation")
+                self.assertEqual(cursor.fetchone(), ("repeatable read",))
+                cursor.execute("SHOW transaction_read_only")
+                self.assertEqual(cursor.fetchone(), ("on",))
+            Transaksi.objects.filter(pk=self.first.pk).update(total_nilai=99999)
+        self.assertFalse(connection.in_atomic_block)
+        with connection.cursor() as cursor:
+            cursor.execute("SHOW transaction_isolation")
+            self.assertEqual(cursor.fetchone(), ("read committed",))
+            cursor.execute("SHOW transaction_read_only")
+            self.assertEqual(cursor.fetchone(), ("off",))
+        # Ordinary writes on the reused connection still work after rollback.
+        self.deposit("2026-10-03T12:00:00+07:00", "9000", "1.125")
+        self.first.refresh_from_db()
+        self.assertEqual(self.first.total_nilai, 12000)
+
+    def test_snapshot_refuses_a_preexisting_read_committed_transaction(self) -> None:
+        with transaction.atomic():
+            Transaksi.objects.count()
+            with self.assertRaisesMessage(RuntimeError, "cannot be nested"), export_snapshot():
+                self.fail("A nested transaction must not silently weaken snapshot isolation")

@@ -374,7 +374,10 @@ class OperationalReportTests(OperationalReportFixture):
                 self.assertEqual(wb["Ringkasan"]["B6"].value, value - paid)
                 self.assertEqual(
                     sum(
-                        row[3] or 0 for row in wb["Laporan"].iter_rows(min_row=2, values_only=True)
+                        row[3] or 0
+                        for row in wb["Laporan"].iter_rows(
+                            min_row=2, max_row=wb["Laporan"].max_row - 1, values_only=True
+                        )
                     ),
                     weight,
                 )

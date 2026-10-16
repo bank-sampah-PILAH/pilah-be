@@ -3,12 +3,12 @@ from typing import Any
 from unittest.mock import patch
 
 from rest_framework.response import Response
-from rest_framework.test import APITestCase
+from rest_framework.test import APITransactionTestCase
 
 from api.models import BankSampah, Nasabah, Pencairan, Transaksi, User
 
 
-class ActivityHistoryTests(APITestCase):
+class ActivityHistoryTests(APITransactionTestCase):
     url = "/api/v1/aktivitas"
 
     def setUp(self) -> None:
