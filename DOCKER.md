@@ -13,6 +13,9 @@ Open:
 - OpenAPI schema: http://localhost:8000/api/schema/
 - Swagger UI: http://localhost:8000/api/docs/
 
+The API tester, schema and Swagger UI are served only when `DJANGO_DEBUG=true`
+(set in `docker-compose.yml`). With `DJANGO_DEBUG=false` they answer 404.
+
 Create or update a SuperAdmin:
 
 ```bash
@@ -21,6 +24,15 @@ docker compose exec web python manage.py createsuperadmin \
   --password password123 \
   --nama "Admin PILAH"
 ```
+
+Populate the local Docker database with deterministic E2E data:
+
+```bash
+docker compose exec web python manage.py seed_testing_data
+```
+
+The command is safe to rerun and preserves unrelated rows. It is guarded by
+`DJANGO_DEBUG=true` for local use.
 
 Run tests inside the container:
 
@@ -40,3 +52,7 @@ The compose setup uses Postgres with local development credentials:
 - user: `pilah`
 - password: `pilah`
 - host from Django container: `db`
+
+Docker Compose explicitly enables fake Google tokens for local development.
+Keep that setting out of any public deployment; the backend rejects fake-token
+mode when `DJANGO_DEBUG=false`.
