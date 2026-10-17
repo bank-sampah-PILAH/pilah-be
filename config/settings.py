@@ -35,6 +35,7 @@ ALLOWED_HOSTS = [
     host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()
 ]
 PILAH_PUBLIC_APP_URL = os.getenv("PILAH_PUBLIC_APP_URL", "")
+PILAH_WEB_ORIGIN = os.getenv("PILAH_WEB_ORIGIN", "")
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
 CSRF_TRUSTED_ORIGINS = [

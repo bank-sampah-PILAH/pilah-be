@@ -15,9 +15,11 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
+from urllib.parse import quote
+
 from django.conf import settings
 from django.contrib import admin
-from django.http import HttpRequest, JsonResponse
+from django.http import HttpRequest, HttpResponseRedirect, HttpResponseServerError, JsonResponse
 from django.urls import include, path, re_path
 from django.views.decorators.http import require_GET
 from django.views.generic import TemplateView
@@ -42,6 +44,17 @@ class ApiTestView(TemplateView):
             else ""
         )
         return context
+
+
+@require_GET
+def invite_redirect(
+    request: HttpRequest, token: str | None = None
+) -> HttpResponseRedirect | HttpResponseServerError:
+    if not settings.PILAH_WEB_ORIGIN:
+        return HttpResponseServerError("PILAH_WEB_ORIGIN is not configured.")
+    origin = settings.PILAH_WEB_ORIGIN.rstrip("/")
+    invite_path = f"/#/invite/{quote(token, safe='')}" if token else "/#/invite"
+    return HttpResponseRedirect(f"{origin}{invite_path}")
 
 
 @require_GET  # S3752: static JSON for Android app links; only GET is valid.
@@ -70,6 +83,8 @@ urlpatterns = [
     path("healthz", healthz, name="healthz"),
     path("admin/", admin.site.urls),
     path(".well-known/assetlinks.json", assetlinks, name="assetlinks"),
+    path("invite", invite_redirect, name="invite-redirect"),
+    path("invite/<str:token>", invite_redirect, name="invite-token-redirect"),
     # Developer tools: served only when DEBUG is on, so staging and production answer 404.
     path("api-test/", debug_only(ApiTestView.as_view()), name="api-test"),
     path("api/schema/", debug_only(SpectacularAPIView.as_view()), name="schema"),
