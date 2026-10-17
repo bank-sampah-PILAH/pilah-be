@@ -5,6 +5,7 @@ from rest_framework.routers import DefaultRouter
 # names are frozen so this compose is behavior-neutral.
 from apps.announcement.views import (
     NasabahPengumumanBacaView,
+    NasabahPengumumanBerandaView,
     NasabahPengumumanDetailView,
     NasabahPengumumanListView,
     PengumumanViewSet,
@@ -84,6 +85,11 @@ urlpatterns = [
         "nasabah/me/riwayat/<uuid:pk>",
         NasabahTransactionDetailView.as_view(),
         name="nasabah-own-transaction-detail",
+    ),
+    path(
+        "nasabah/me/pengumuman/beranda",
+        NasabahPengumumanBerandaView.as_view(),
+        name="nasabah-pengumuman-beranda",
     ),
     path("nasabah/me/pengumuman", NasabahPengumumanListView.as_view(), name="nasabah-pengumuman"),
     path(

@@ -19,6 +19,7 @@ from rest_framework.response import Response
 from api.models import BankSampah, Pengumuman, PengumumanDibaca, User
 from apps.announcement.exceptions import TransisiStatusTidakValid
 from apps.announcement.serializers import (
+    PengumumanBerandaSerializer,
     PengumumanNasabahListSerializer,
     PengumumanSerializer,
     TerbitkanSerializer,
@@ -188,3 +189,25 @@ class NasabahPengumumanBacaView(generics.GenericAPIView[Pengumuman]):
             pengumuman=pengumuman, user=_user(request)
         )
         return Response({"id": str(pengumuman.id), "dibaca": True, "dibaca_pada": row.dibaca_pada})
+
+
+class NasabahPengumumanBerandaView(generics.ListAPIView[Pengumuman]):
+    """The beranda summary (PIL-333): the 3 latest active announcements and
+    how many of the nasabah's active ones are still unread, in one round trip.
+
+    Same aktif rule and membership scoping as the full list — the beranda just
+    caps items and drops pagination.
+    """
+
+    permission_classes = [IsActiveNasabah]
+    serializer_class = PengumumanBerandaSerializer
+    pagination_class = None
+
+    def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        # The unread count covers every active announcement, not only the three
+        # that land on the beranda, so the annotation is applied before slicing.
+        aktif = _aktif_untuk(self.request).annotate(**_dibaca_annotations(_user(self.request)))
+        unread = aktif.filter(**{"_dibaca": False}).count()
+        queryset = aktif.order_by("-terbit_pada", "id")[:3]
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({"items": serializer.data, "unread_count": unread})
