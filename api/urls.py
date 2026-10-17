@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 # ponytail: views live in their canonical bounded-context homes; routes and
 # names are frozen so this compose is behavior-neutral.
+from apps.announcement.views import PengumumanViewSet
 from apps.authentication.views import (
     AuthMeView,
     CompleteProfileView,
@@ -52,6 +53,7 @@ from apps.reporting.views import (
 from apps.waste_catalog.views import JenisSampahViewSet
 
 router = DefaultRouter(trailing_slash=False)
+router.register("pengumuman", PengumumanViewSet, basename="pengumuman")
 router.register("nasabah", NasabahViewSet, basename="nasabah")
 router.register("jenis-sampah", JenisSampahViewSet, basename="jenis-sampah")
 router.register("jadwal", JadwalKegiatanViewSet, basename="jadwal")
