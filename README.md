@@ -369,6 +369,11 @@ Jenis sampah:
   tanpa `berlaku_mulai` harga berlaku sekarang. Respons jenis sampah memuat
   `harga_per_kg` yang berlaku, `harga_berlaku_mulai`, dan `harga_terjadwal`
   (`{harga_per_kg, berlaku_mulai}` atau `null`).
+- `GET /api/v1/jenis-sampah/:id/harga` — riwayat versi harga, terbaru dulu,
+  dengan pagination standar. Setiap baris: `id`, `harga_per_kg`, `satuan`,
+  `berlaku_mulai`, `dibuat_oleh` (nama, `null` untuk data hasil migrasi), dan
+  `status`: `terjadwal`, `berlaku`, `sebelumnya`, atau `digantikan` (harga
+  terjadwal yang sudah dikoreksi versi lain dengan `berlaku_mulai` sama).
 
 Transaksi:
 

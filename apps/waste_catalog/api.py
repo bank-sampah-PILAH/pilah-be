@@ -1,9 +1,10 @@
 """Public port of the catalog context."""
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from django.db import transaction
@@ -88,3 +89,41 @@ def ringkas_harga(
         ):
             terjadwal = versi
     return berlaku, terjadwal
+
+
+StatusVersi = Literal["terjadwal", "berlaku", "sebelumnya", "digantikan"]
+
+
+@dataclass(frozen=True)
+class VersiHarga:
+    versi: HargaSampah
+    status: StatusVersi
+
+
+def susun_riwayat_harga(jenis: JenisSampah, pada: datetime) -> list[VersiHarga]:
+    """Semua versi harga ``jenis``, terbaru dulu, beserta statusnya pada ``pada``.
+
+    Urutannya sama dengan ``harga_berlaku``: ``berlaku_mulai`` lalu ``id``.
+    Versi pertama yang sudah mulai adalah yang berlaku; versi dengan
+    ``berlaku_mulai`` sama dengan baris di atasnya sudah dikoreksi dan tidak
+    pernah (atau tidak akan) berlaku, jadi "digantikan".
+    """
+    riwayat: list[VersiHarga] = []
+    di_atasnya: HargaSampah | None = None
+    sudah_ada_yang_berlaku = False
+    for versi in jenis.riwayat_harga.select_related("dibuat_oleh").order_by(
+        "-berlaku_mulai", "-id"
+    ):
+        status: StatusVersi
+        if di_atasnya is not None and versi.berlaku_mulai == di_atasnya.berlaku_mulai:
+            status = "digantikan"
+        elif versi.berlaku_mulai > pada:
+            status = "terjadwal"
+        elif not sudah_ada_yang_berlaku:
+            status = "berlaku"
+            sudah_ada_yang_berlaku = True
+        else:
+            status = "sebelumnya"
+        riwayat.append(VersiHarga(versi, status))
+        di_atasnya = versi
+    return riwayat
