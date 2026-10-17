@@ -16,6 +16,7 @@ from api.management.commands.seed_play_demo_accounts import (
 from api.models import (
     BankSampah,
     DetailTransaksi,
+    HargaSampah,
     JadwalKegiatan,
     JenisSampah,
     Nasabah,
@@ -145,6 +146,7 @@ class SeedPlayDemoAccountsTests(TestCase):
         self.assertEqual(BankSampah.objects.get(pk=REVIEW_BANK_ID).status, BankSampah.Status.ACTIVE)
         self.assertEqual(Transaksi.objects.filter(nasabah=membership).count(), 3)
         self.assertEqual(DetailTransaksi.objects.filter(transaksi__nasabah=membership).count(), 4)
+        self.assertEqual(HargaSampah.objects.filter(jenis_sampah__bank_sampah=bank).count(), 4)
         self.assertEqual(JadwalKegiatan.objects.filter(bank_sampah=bank).count(), 2)
 
     def test_reserved_waste_type_id_collision_preserves_unrelated_data(self) -> None:
@@ -154,7 +156,6 @@ class SeedPlayDemoAccountsTests(TestCase):
             bank_sampah=other_bank,
             nomor="OTHER-01",
             nama_sampah="Unrelated Type",
-            harga_per_kg=Decimal(123),
         )
         bank_before = BankSampah.objects.filter(pk=other_bank.pk).values().get()
         type_before = JenisSampah.objects.filter(pk=other_type.pk).values().get()
@@ -324,15 +325,29 @@ class SeedPlayDemoAccountsTests(TestCase):
         types = list(
             JenisSampah.objects.filter(bank_sampah=bank)
             .order_by("nomor")
-            .values_list("nama_sampah", "kategori", "harga_per_kg", "is_active")
+            .values_list("nama_sampah", "kategori", "is_active")
         )
         self.assertEqual(
             types,
             [
-                ("Plastik PET", JenisSampah.Kategori.PLASTIK, Decimal("3500.00"), True),
-                ("Kardus", JenisSampah.Kategori.KERTAS, Decimal("2000.00"), True),
-                ("Botol Kaca", JenisSampah.Kategori.KACA, Decimal("1000.00"), True),
-                ("Kaleng Aluminium", JenisSampah.Kategori.LOGAM, Decimal("5000.00"), True),
+                ("Plastik PET", JenisSampah.Kategori.PLASTIK, True),
+                ("Kardus", JenisSampah.Kategori.KERTAS, True),
+                ("Botol Kaca", JenisSampah.Kategori.KACA, True),
+                ("Kaleng Aluminium", JenisSampah.Kategori.LOGAM, True),
+            ],
+        )
+        prices = list(
+            HargaSampah.objects.filter(jenis_sampah__bank_sampah=bank)
+            .order_by("jenis_sampah__nomor")
+            .values_list("jenis_sampah__nama_sampah", "harga_per_kg")
+        )
+        self.assertEqual(
+            prices,
+            [
+                ("Plastik PET", Decimal("3500.00")),
+                ("Kardus", Decimal("2000.00")),
+                ("Botol Kaca", Decimal("1000.00")),
+                ("Kaleng Aluminium", Decimal("5000.00")),
             ],
         )
 

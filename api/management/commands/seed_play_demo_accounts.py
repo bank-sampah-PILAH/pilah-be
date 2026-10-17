@@ -12,6 +12,7 @@ from django.utils import timezone
 from api.models import (
     BankSampah,
     DetailTransaksi,
+    HargaSampah,
     JadwalKegiatan,
     JenisSampah,
     Nasabah,
@@ -21,6 +22,8 @@ from api.models import (
     User,
 )
 from apps.bank_sampah.constants import REVIEW_BANK_ID
+from apps.waste_catalog.api import harga_berlaku
+from apps.waste_catalog.services import catat_harga
 from shared_kernel.kalkulasi import hitung_subtotal, total_setoran
 from shared_kernel.permissions import review_superadmin_allowlist, superadmin_allowlist
 
@@ -42,6 +45,7 @@ DEMO_NASABAH_EMAIL = "pilah.nasabah@gmail.com"
 SUPERADMIN_EMAIL = "pilah.superadmin@gmail.com"
 REVIEW_OWNER_EMAIL = "pilah.review-owner@example.test"
 DEMO_NASABAH_ADDRESS = "Alamat demo untuk akun nasabah PILAH"
+SEED_HARGA_SEJAK_HARI = 400
 
 WASTE_TYPE_FIXTURES = (
     (
@@ -462,10 +466,16 @@ class Command(BaseCommand):
                     "nama_sampah": name,
                     "kategori": category,
                     "deskripsi": description,
-                    "harga_per_kg": price,
                     "is_active": True,
                 },
             )
+            if not HargaSampah.objects.filter(jenis_sampah=jenis).exists():
+                catat_harga(
+                    jenis,
+                    price,
+                    timezone.now() - timedelta(days=SEED_HARGA_SEJAK_HARI),
+                    oleh=None,
+                )
             result[name] = jenis
         return result
 
@@ -502,8 +512,16 @@ class Command(BaseCommand):
         )
         for transaction_id, detail_ids, date, note, items in fixtures:
             priced_items = tuple((waste_types[name], weight) for name, weight in items)
+            transaction_date = (
+                Transaksi.objects.filter(pk=transaction_id)
+                .values_list("tanggal", flat=True)
+                .first()
+                or date
+            )
+            prices = tuple(_seed_price(jenis, transaction_date) for jenis, _weight in priced_items)
             subtotals = tuple(
-                hitung_subtotal(jenis.harga_per_kg, weight) for jenis, weight in priced_items
+                hitung_subtotal(price, weight)
+                for price, (_jenis, weight) in zip(prices, priced_items, strict=True)
             )
             total = total_setoran(subtotals)
             transaksi, created = Transaksi.objects.get_or_create(
@@ -536,8 +554,8 @@ class Command(BaseCommand):
                         "updated_at",
                     ]
                 )
-            for detail_id, (jenis, weight), subtotal in zip(
-                detail_ids, priced_items, subtotals, strict=True
+            for detail_id, (jenis, weight), price, subtotal in zip(
+                detail_ids, priced_items, prices, subtotals, strict=True
             ):
                 DetailTransaksi.objects.update_or_create(
                     pk=detail_id,
@@ -546,7 +564,7 @@ class Command(BaseCommand):
                         "jenis_sampah": jenis,
                         "nama_sampah_snapshot": jenis.nama_sampah,
                         "kategori_snapshot": jenis.kategori,
-                        "harga_snapshot": jenis.harga_per_kg,
+                        "harga_snapshot": price,
                         "berat": weight,
                         "subtotal": subtotal,
                     },
@@ -594,3 +612,10 @@ class Command(BaseCommand):
         if saldo.total_saldo != total_saldo:
             saldo.total_saldo = total_saldo
             saldo.save(update_fields=["total_saldo", "updated_at"])
+
+
+def _seed_price(jenis: JenisSampah, pada: datetime) -> Decimal:
+    price = harga_berlaku(jenis, pada)
+    if price is None:
+        raise CommandError(f"Production demo waste type {jenis.pk} has no active price")
+    return price
