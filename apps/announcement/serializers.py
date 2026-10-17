@@ -33,14 +33,21 @@ class PengumumanNasabahListSerializer(serializers.ModelSerializer[Pengumuman]):
 
 
 class PengumumanBerandaSerializer(serializers.ModelSerializer[Pengumuman]):
-    """Compact row for the beranda summary (PIL-333)."""
+    """Compact row for the beranda summary (PIL-333).
+
+    isi comes along so tapping a beranda row can open the detail without a
+    second round trip.
+    """
 
     dibaca = serializers.SerializerMethodField()
 
     class Meta:
         model = Pengumuman
-        fields = ["id", "judul", "terbit_pada", "dibaca"]
+        fields = ["id", "judul", "isi", "terbit_pada", "dibaca", "dibaca_pada"]
         read_only_fields = fields
+
+    def get_dibaca_pada(self, obj: Pengumuman) -> Any:
+        return getattr(obj, "_dibaca_pada", None)
 
     def get_dibaca(self, obj: Pengumuman) -> bool:
         return bool(getattr(obj, "_dibaca", False))
