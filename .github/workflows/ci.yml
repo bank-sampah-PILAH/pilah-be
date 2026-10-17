@@ -101,8 +101,10 @@ jobs:
 
       # Plain `manage.py test` = discovery across every Django app, so tests
       # in future apps (not just api/) still gate the build.
+      # Match Sonar's source roots, including shared regression fixtures in
+      # tests/: otherwise executed helpers are incorrectly reported as untested.
       - name: Run tests with coverage
-        run: coverage run --source=api,apps,config,shared_kernel manage.py test -v 2
+        run: coverage run --source=api,apps,config,shared_kernel,tests manage.py test -v 2
 
       - name: Coverage report (fail under 80%)
         run: coverage report --show-missing --skip-covered --fail-under=80

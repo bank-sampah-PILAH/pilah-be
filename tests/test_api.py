@@ -25,7 +25,7 @@ from django.urls import Resolver404, resolve
 from django.utils import timezone
 from django.views.static import serve
 from openpyxl import load_workbook
-from rest_framework.test import APIClient, APITestCase
+from rest_framework.test import APIClient, APITestCase, APITransactionTestCase
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from api.models import (
@@ -46,7 +46,7 @@ from apps.nasabah.keanggotaan import sinkronkan_dari_akun
 from apps.nasabah.services import NasabahApprovalService
 
 
-class APISpecTests(APITestCase):
+class APISpecTests(APITransactionTestCase):
     _fake_tokens: ClassVar[Any]
 
     @classmethod
@@ -1959,7 +1959,7 @@ class APISpecTests(APITestCase):
         )
         self.assertIn("PILAH_Laporan_", export["Content-Disposition"])
         workbook = load_workbook(BytesIO(export.content), data_only=False)
-        self.assertEqual(workbook.sheetnames, ["Laporan", "Riwayat Transaksi"])
+        self.assertEqual(workbook.sheetnames, ["Laporan", "Riwayat Transaksi", "Ringkasan"])
         summary_sheet = workbook["Laporan"]
         self.assertEqual(
             [summary_sheet.cell(1, col).value for col in range(1, 6)],
@@ -1969,7 +1969,7 @@ class APISpecTests(APITestCase):
         self.assertEqual(summary_sheet["B2"].value, "Plastik PET")
         self.assertEqual(summary_sheet["C2"].value, 3500)
         self.assertEqual(summary_sheet["D2"].value, 3.5)
-        self.assertEqual(summary_sheet["E2"].value, "=C2*D2")
+        self.assertEqual(summary_sheet["E2"].value, 12250)
         sheet = workbook["Riwayat Transaksi"]
         self.assertEqual(sheet.freeze_panes, "A5")
         self.assertEqual(sheet["A1"].value, "PILAH - Riwayat Transaksi")
@@ -4392,7 +4392,7 @@ class StatusPenautanAkunNasabahTests(APITestCase):
         self.assertIsNone(self.tanpa_akun.user)
 
 
-class SetoranTestBase(APITestCase):
+class SetoranFixture(APITransactionTestCase):
     """Pengurus, nasabah, dan satu jenis sampah untuk skenario setoran."""
 
     def setUp(self) -> None:
@@ -4448,6 +4448,10 @@ class SetoranTestBase(APITestCase):
 
     def _saldo(self) -> Any:
         return self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo").data["total_saldo"]
+
+
+class SetoranTestBase(SetoranFixture, APITestCase):
+    """Keep savepoint-based isolation for non-export deposit tests."""
 
 
 class IdempotensiSetoranTests(SetoranTestBase):
@@ -4579,7 +4583,7 @@ class IdempotensiSetoranTests(SetoranTestBase):
         self.assertEqual(Transaksi.objects.count(), 1)
 
 
-class KalkulasiSetoranTests(SetoranTestBase):
+class KalkulasiSetoranTests(SetoranFixture):
     """Nilai setoran memakai harga master dan dibulatkan ke bawah ke rupiah penuh."""
 
     def test_subtotal_dibulatkan_ke_bawah_ke_rupiah_penuh(self) -> None:
@@ -4805,7 +4809,7 @@ class ValidasiInputSetoranTests(SetoranTestBase):
         self.assertEqual(detail.harga_snapshot, Decimal("0.50"))
 
 
-class PencairanAPITests(APITestCase):
+class PencairanAPITests(APITransactionTestCase):
     def setUp(self) -> None:
         self.bank = BankSampah.objects.create(
             nama="Bank Sampah BTH",
@@ -5099,7 +5103,11 @@ class PencairanAPITests(APITestCase):
         export = self.client.get("/api/v1/transaksi/export?periode=bulan_ini")
         self.assertEqual(export.status_code, 200)
         sheet = load_workbook(BytesIO(export.content), data_only=False)["Riwayat Transaksi"]
-        saldo_column = [sheet.cell(row, 10).value for row in (5, 6)]
+        saldo_column = [
+            sheet.cell(row, 10).value
+            for row in range(5, sheet.max_row + 1)
+            if sheet.cell(row, 11).value == "setoran"
+        ]
         self.assertEqual(saldo_column, [140000, 100000])
 
     def test_pencairan_requires_approved_membership(self) -> None:
@@ -5157,7 +5165,10 @@ class PencairanAPITests(APITestCase):
         self.assertEqual(detail.data["saldo_setelah_transaksi"], Decimal("100000.00"))
         export = self.client.get("/api/v1/transaksi/export?periode=bulan_ini")
         sheet = load_workbook(BytesIO(export.content), data_only=False)["Riwayat Transaksi"]
-        self.assertEqual(sheet.cell(5, 10).value, 100000)
+        deposit_rows = [
+            row for row in sheet.iter_rows(min_row=5, values_only=True) if row[10] == "setoran"
+        ]
+        self.assertEqual(deposit_rows[0][9], 100000)
 
     def test_pencairan_drops_legacy_sen_from_saldo(self) -> None:
         Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("10000.50"))
