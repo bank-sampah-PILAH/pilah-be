@@ -47,6 +47,11 @@ class DeploymentWorkflowTests(SimpleTestCase):
         self.assertIn("CSRF_TRUSTED_ORIGINS=${PILAH_WEB_ORIGIN}", deploy)
         self.assertIn("PILAH_ENVIRONMENT=production", deploy)
         self.assertIn("PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false", deploy)
+        self.assertIn("PILAH_REVIEW_SUPERADMIN_EMAILS=${PILAH_REVIEW_SUPERADMIN_EMAILS}", deploy)
+        self.assertEqual(
+            workflow["env"]["PILAH_REVIEW_SUPERADMIN_EMAILS"],
+            "${{ vars.PILAH_REVIEW_SUPERADMIN_EMAILS }}",
+        )
         bootstrap = steps[names.index("Bootstrap production Superadmins")]
         self.assertEqual(bootstrap["run"], "python3 scripts/bootstrap_cloud_run.py")
         self.assertNotIn("continue-on-error", bootstrap)
@@ -78,6 +83,25 @@ class DeploymentWorkflowTests(SimpleTestCase):
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("PILAH_SUPERADMIN_EMAILS", result.stderr)
                     self.assertFalse(called.exists())
+            result = subprocess.run(
+                ["bash", str(ROOT / "scripts/deploy-cloud-run.sh")],
+                env={
+                    **os.environ,
+                    "PATH": f"{directory}:{os.environ['PATH']}",
+                    "DB_PASSWORD": "placeholder",
+                    "GCS_BUCKET": "placeholder",
+                    "DJANGO_SECRET_KEY": "placeholder",
+                    "PILAH_WEB_ORIGIN": "https://web.run.app",
+                    "PILAH_SUPERADMIN_EMAILS": "admin@example.com",
+                    "PILAH_REVIEW_SUPERADMIN_EMAILS": " Admin@Example.com ",
+                },
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("PILAH_REVIEW_SUPERADMIN_EMAILS", result.stderr)
+            self.assertFalse(called.exists())
 
     def test_manual_deploy_rejects_invalid_origin_before_any_cloud_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

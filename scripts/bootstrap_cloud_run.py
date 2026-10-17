@@ -39,6 +39,13 @@ def validate_configuration() -> None:
         for email in emails
     ):
         raise ValueError("PILAH_SUPERADMIN_EMAILS must contain valid email addresses")
+    review_emails = {
+        email.strip().lower()
+        for email in os.environ.get("PILAH_REVIEW_SUPERADMIN_EMAILS", "").split(",")
+        if email.strip()
+    }
+    if {email.lower() for email in emails} & review_emails:
+        raise ValueError("PILAH_REVIEW_SUPERADMIN_EMAILS must not overlap PILAH_SUPERADMIN_EMAILS")
 
 
 def bootstrap_cloud_run() -> None:

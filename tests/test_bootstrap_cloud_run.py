@@ -206,6 +206,21 @@ class BootstrapCloudRunTests(SimpleTestCase):
                 with self.assertRaises(ValueError):
                     validate_configuration()
                 run.assert_not_called()
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PILAH_WEB_ORIGIN": "https://web.run.app",
+                    "PILAH_SUPERADMIN_EMAILS": "Admin@example.com",
+                    "PILAH_REVIEW_SUPERADMIN_EMAILS": " admin@EXAMPLE.com ",
+                },
+                clear=True,
+            ),
+            patch("subprocess.run") as run,
+        ):
+            with self.assertRaisesRegex(ValueError, "PILAH_REVIEW_SUPERADMIN_EMAILS"):
+                validate_configuration()
+            run.assert_not_called()
         for allowlist in ("", "invalid", "admin@example.com,"):
             with (
                 self.subTest(allowlist=allowlist),
