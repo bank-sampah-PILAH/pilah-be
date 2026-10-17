@@ -18,7 +18,6 @@ from rest_framework.test import APIRequestFactory
 from api.models import (
     BankSampah,
     DetailTransaksi,
-    JenisSampah,
     Nasabah,
     Pencairan,
     Saldo,
@@ -28,6 +27,7 @@ from api.models import (
 from apps.ledger.api import saldo_at
 from apps.reporting.render import _tanggal_label
 from apps.reporting.statement import MAX_DISPLAYED_ROWS, StatementPeriodError, build_statement
+from apps.waste_catalog.api import buat_jenis_sampah
 from shared_kernel.kalkulasi import bulatkan_rupiah
 
 
@@ -46,7 +46,7 @@ class NasabahStatementDataTests(TestCase):
             alamat="Depok",
             no_hp="08120",
         )
-        self.jenis = JenisSampah.objects.create(
+        self.jenis = buat_jenis_sampah(
             bank_sampah=self.bank,
             nomor="01",
             nama_sampah="Plastik PET",

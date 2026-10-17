@@ -12,7 +12,8 @@ from openpyxl import load_workbook
 from rest_framework.test import APITransactionTestCase
 from rest_framework_simplejwt.tokens import AccessToken
 
-from api.models import BankSampah, DetailTransaksi, JenisSampah, Nasabah, Pencairan, Transaksi, User
+from api.models import BankSampah, DetailTransaksi, Nasabah, Pencairan, Transaksi, User
+from apps.waste_catalog.api import buat_jenis_sampah
 
 
 class OperationalReportFixture(APITransactionTestCase):
@@ -36,7 +37,7 @@ class OperationalReportFixture(APITransactionTestCase):
             no_hp="081201",
             alamat="Depok",
         )
-        self.waste = JenisSampah.objects.create(
+        self.waste = buat_jenis_sampah(
             bank_sampah=self.bank,
             nomor="PET",
             nama_sampah="Botol",

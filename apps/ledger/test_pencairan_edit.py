@@ -23,6 +23,7 @@ from api.models import (
     User,
 )
 from apps.ledger.services import BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI
+from apps.waste_catalog.api import buat_jenis_sampah
 
 
 class PencairanEditTests(APITestCase):
@@ -278,15 +279,15 @@ class PencairanEditTests(APITestCase):
         self.assertEqual(self._saldo(), "215600.00")
 
     def _setor(self, harga: str = "100000.00", berat: str = "1.000") -> None:
-        jenis, _ = JenisSampah.objects.get_or_create(
-            bank_sampah=self.bank,
-            nomor="PLS-001",
-            defaults={
-                "nama_sampah": "Plastik PET",
-                "kategori": JenisSampah.Kategori.PLASTIK,
-                "harga_per_kg": Decimal(harga),
-            },
-        )
+        jenis = JenisSampah.objects.filter(bank_sampah=self.bank, nomor="PLS-001").first()
+        if jenis is None:
+            jenis = buat_jenis_sampah(
+                self.bank,
+                nomor="PLS-001",
+                nama_sampah="Plastik PET",
+                kategori=JenisSampah.Kategori.PLASTIK,
+                harga_per_kg=harga,
+            )
         response = self.client.post(
             "/api/v1/transaksi",
             {
