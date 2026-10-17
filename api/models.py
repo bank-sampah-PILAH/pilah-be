@@ -1,6 +1,7 @@
 # ponytail: canonical homes are apps.*.models. This module stays as the Django
 # app's model registry (aggregator) so AUTH_USER_MODEL and migrations are
 # untouched; all logic lives in apps/*.
+from apps.announcement.models import Pengumuman, PengumumanDibaca  # noqa: F401
 from apps.authentication.models import User, UserManager  # noqa: F401
 from apps.bank_sampah.models import BankSampah, BankSampahApprovalLog  # noqa: F401
 from apps.jadwal.models import JadwalKegiatan  # noqa: F401
@@ -28,6 +29,8 @@ __all__ = [
     "JadwalKegiatan",
     "Nasabah",
     "NasabahApprovalLog",
+    "Pengumuman",
+    "PengumumanDibaca",
     "Pencairan",
     "PencairanRevisi",
     "Saldo",
