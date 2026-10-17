@@ -11,6 +11,7 @@ from uuid import UUID
 
 from django.db.models import F, Q, QuerySet, Value
 from django.db.models.functions import Coalesce
+from rest_framework.request import Request
 
 from api.models import BankSampah, Nasabah
 
@@ -70,3 +71,17 @@ def kandidat_pencairan(
             Q(nama__icontains=search) | Q(nomor__icontains=search) | Q(no_hp__icontains=search)
         )
     return qs.order_by(_KANDIDAT_URUTAN[ordering], "nomor")
+
+
+def aktif_keanggotaan(request: Request) -> Nasabah:
+    """Resolve the caller's eligible membership for a nasabah-me endpoint.
+
+    Delegates to MembershipService so the keanggotaan_id picking and the 422
+    "pilihan" membership picker stay single-sourced (PIL-244 announcement
+    scoping uses the same rule as the beranda endpoints).
+    """
+    # Lazy: nasabah.home pulls ledger/reporting ports, which import this
+    # module — a top-level import would be circular.
+    from apps.nasabah.home import MembershipService
+
+    return MembershipService.get_active_membership(request)
