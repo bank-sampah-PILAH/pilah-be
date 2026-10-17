@@ -17,7 +17,8 @@ PILAH is a Django REST Framework backend for a digital bank sampah management sy
 
 - Google OAuth token verification with JWT session issuance
 - Development auth token support for local testing
-- Role-based access for `pengelola` and `superadmin`
+- Login roles for `pengelola`, `pengelola_induk`, `nasabah`, and `superadmin`
+- Role-based API access remains scoped to `pengelola` and `superadmin`
 - Bank sampah registration with pending, active, and rejected states
 - SuperAdmin approval and rejection workflow
 - Pengelola utama invitation links for additional team members
@@ -46,6 +47,10 @@ Open:
 - OpenAPI schema: `http://localhost:8000/api/schema/`
 - Swagger UI: `http://localhost:8000/api/docs/`
 
+The API test runner, OpenAPI schema and Swagger UI are developer tools served
+only when `DJANGO_DEBUG=true` (the Docker setup sets it). With `DJANGO_DEBUG=false`,
+as on staging and production, they answer 404.
+
 Create or update a SuperAdmin account:
 
 ```bash
@@ -67,7 +72,7 @@ Reset local Docker data:
 docker compose down -v
 ```
 
-For Google Cloud Run deployment, see [CLOUD_RUN.md](CLOUD_RUN.md).
+For deployment, see [Google Cloud Run](CLOUD_RUN.md) or [Fly.io staging](FLY_STAGING.md).
 
 ## Direct Local Setup
 
@@ -90,11 +95,27 @@ Create a local `.env` from the example if needed:
 cp .env.example .env
 ```
 
+For local fake-token login, explicitly opt in after copying the example:
+
+```env
+DJANGO_DEBUG=true
+PILAH_ALLOW_FAKE_GOOGLE_TOKEN=true
+```
+
+The backend refuses to start if fake tokens are enabled while debug mode is
+off. Keep both values `false` for staging and production.
+
 Run migrations:
 
 ```bash
 python manage.py migrate
+python manage.py seed_testing_data
 ```
+
+`seed_testing_data` is idempotent and only runs locally when `DJANGO_DEBUG=true`.
+It creates the deterministic banks, users, customers, waste types, balances,
+transactions, and approval log used by mobile E2E tests. Re-running it updates
+that fixture without deleting unrelated rows.
 
 Start the development server:
 
@@ -117,6 +138,7 @@ DJANGO_SECRET_KEY=change-me
 DJANGO_DEBUG=false
 DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
 CORS_ALLOW_ALL_ORIGINS=false
+CORS_ALLOWED_ORIGINS=http://localhost:7357
 ```
 
 Database variables:
@@ -136,7 +158,19 @@ Auth and app variables:
 GOOGLE_CLIENT_ID=
 PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false
 PILAH_PUBLIC_APP_URL=https://pilah.example.com
+PILAH_WEB_ORIGIN=https://web.example.com
+PILAH_SUPERADMIN_EMAILS=admin@example.com,another-admin@example.com
 ```
+
+`CORS_ALLOWED_ORIGINS` is a comma-separated list of browser origins (scheme,
+host, and optional port; no path). For web Google login, set backend
+`GOOGLE_CLIENT_ID` to the same Web OAuth client ID used by mobile's
+`GOOGLE_SERVER_CLIENT_ID`; the API validates the token audience against it.
+
+Set `PILAH_SUPERADMIN_EMAILS` on Fly and as a GitHub repository variable for
+Cloud Run. It is the authoritative comma-separated list of Superadmin Google
+accounts. The deploy workflow stops before deployment if the repository
+variable is empty.
 
 WhatsApp gateway variables:
 
@@ -161,7 +195,7 @@ Pengelola:
 
 ```json
 {
-  "id_token": "dev:user@example.com:User Name"
+  "id_token": "dev-pengelola:user@example.com:User Name"
 }
 ```
 
@@ -173,7 +207,96 @@ SuperAdmin:
 }
 ```
 
+The `/api-test/` Run Full Flow runner uses the first address in
+`PILAH_SUPERADMIN_EMAILS` as its stable SuperAdmin identity. For local fake-auth
+runs, use an address that is allowlisted and belongs to a SuperAdmin test account.
+
+Pengelola Induk and Nasabah:
+
+```json
+{
+  "id_token": "dev-pengelola-induk:induk@example.com:Pengelola Induk"
+}
+```
+
+```json
+{
+  "id_token": "dev-nasabah:nasabah@example.com:Nasabah PILAH"
+}
+```
+
+Role-specific token prefixes are local test helpers and work only while
+`PILAH_ALLOW_FAKE_GOOGLE_TOKEN=true`. A new identity using `dev:email:name`
+still goes through role selection; an existing account signs in with its stored
+role. Google profile claims cannot assign a PILAH role.
+
 Use only real Google ID tokens in production.
+
+## Staging E2E data and Google accounts
+
+Staging keeps genuine Google OAuth enabled. Add the staging test-account
+emails to the Google OAuth consent screen's test-user list, and configure the
+same values as GitHub `staging` environment variables:
+
+```text
+PILAH_SEED_PENGURUS_EMAIL
+PILAH_SEED_CUSTOMER_EMAIL
+PILAH_SEED_CUSTOMER_TWO_EMAIL
+PILAH_SEED_SUPERADMIN_EMAIL
+PILAH_SEED_PENDING_PENGURUS_EMAIL
+PILAH_SEED_INDUK_EMAIL
+```
+
+`PILAH_SEED_INDUK_EMAIL` is optional and defaults to
+`induk.demo@example.com` in both the workflow and seed command.
+
+The old `PILAH_SEED_OPERATOR_EMAIL` and
+`PILAH_SEED_PENDING_OPERATOR_EMAIL` names remain supported as temporary
+fallbacks; the Pengurus names take precedence. The command also accepts the
+old `--operator-email` and `--pending-operator-email` flags.
+
+Set `PILAH_SUPERADMIN_EMAILS` on Fly to the comma-separated authoritative
+Superadmin Google accounts; the seeded Superadmin email must be included. The
+Cloud Run workflow reads the production allowlist from the GitHub variable with
+the same name.
+Existing Superadmin accounts not present in this list cannot use Google login.
+
+CI automatically seeds `pilah-be-staging` only after a verified staging deploy
+and successful health check. Seeding is part of deploy success, uses the same
+idempotent fixture command and never resets unrelated data or enables fake
+Google tokens. Non-debug seeding requires runtime `PILAH_ENVIRONMENT=staging`,
+confirmation and an allowlisted fixture Superadmin; production always rejects
+fixtures. See [Fly.io staging](FLY_STAGING.md) for required variables.
+
+The staging dashboard is `https://pilah-web-staging.fly.dev`, separate from the
+backend origin `https://pilah-be-staging.fly.dev`. Mobile `BASE_URL_DEV` and
+`BASE_URL_PROD` use backend origins without paths because request paths already
+include `/api/v1`. Production uses the actual provider-generated `pilah-web`
+Cloud Run URL. Set backend repository variable
+`PILAH_WEB_ORIGIN` to that exact HTTPS origin (no path/trailing slash) before
+production deployment; both CORS and CSRF explicitly allow it. Add each dashboard
+origin to the Google Web OAuth client's Authorized JavaScript origins. Backend
+`GOOGLE_CLIENT_ID` must match frontend `GOOGLE_SERVER_CLIENT_ID`.
+`PILAH_PUBLIC_APP_URL` is the separate invite-link base, not the API base or CORS
+setting; keep it on the backend host for Android App Links. New invite links use
+`/invite/<token>` and browser requests redirect to `/#/invite/<token>` on
+`PILAH_WEB_ORIGIN`, which must be the trusted Flutter web origin (no path or
+trailing slash). Older `/invite?token=...` links remain supported by the native
+app; browser fallback does not forward their query token. See [Cloud Run](CLOUD_RUN.md)
+for first-deploy URL ordering and IAM, and [Fly staging](FLY_STAGING.md) for its
+configured origin.
+
+Production deployment on `main` automatically runs `bootstrap_superadmins` in
+a Cloud Run Job with the service's image, DB environment and runtime identity.
+It creates only missing allowlisted Superadmins (Google login, no usable
+password); existing profiles/passwords remain unchanged. Role conflicts and
+missing/invalid allowlists fail deployment. It never seeds banks or demo data.
+Manual Cloud Run deployment uses the same bootstrap. Neither cloud provisioning
+nor OAuth Console configuration is performed by this code delivery itself.
+
+Bank Sampah organizations can be `mandiri`, `induk`, or `unit`. A unit must
+belong to an induk organization. A Nasabah user can have one membership per
+bank and can belong to multiple banks.
 
 ## Role Flow
 
@@ -209,6 +332,7 @@ SuperAdmin flow:
 Authentication:
 
 - `POST /api/v1/auth/google`
+- `POST /api/v1/auth/google/register`
 - `POST /api/v1/auth/refresh`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
@@ -241,6 +365,15 @@ Jenis sampah:
 - `POST /api/v1/jenis-sampah`
 - `PUT /api/v1/jenis-sampah/:id`
 - `PATCH /api/v1/jenis-sampah/:id/status`
+- `POST /api/v1/jenis-sampah/:id/harga` — `{harga_per_kg, berlaku_mulai?}`;
+  tanpa `berlaku_mulai` harga berlaku sekarang. Respons jenis sampah memuat
+  `harga_per_kg` yang berlaku, `harga_berlaku_mulai`, dan `harga_terjadwal`
+  (`{harga_per_kg, berlaku_mulai}` atau `null`).
+- `GET /api/v1/jenis-sampah/:id/harga` — riwayat versi harga, terbaru dulu,
+  dengan pagination standar. Setiap baris: `id`, `harga_per_kg`, `satuan`,
+  `berlaku_mulai`, `dibuat_oleh` (nama, `null` untuk data hasil migrasi), dan
+  `status`: `terjadwal`, `berlaku`, `sebelumnya`, atau `digantikan` (harga
+  terjadwal yang sudah dikoreksi versi lain dengan `berlaku_mulai` sama).
 
 Transaksi:
 
@@ -249,6 +382,27 @@ Transaksi:
 - `GET /api/v1/transaksi/:id`
 - `POST /api/v1/transaksi/:id/notify-wa`
 - `GET /api/v1/transaksi/export`
+
+Pencairan:
+
+- `GET /api/v1/pencairan`
+- `GET /api/v1/pencairan?nasabah_id=:id&periode=:periode&search=:nama`
+- `POST /api/v1/pencairan`
+- `GET /api/v1/pencairan/:id`
+- `PATCH /api/v1/pencairan/:id`
+- `GET /api/v1/pencairan/:id/riwayat`
+
+Draft pencairan (pengurus only):
+
+- `GET /api/v1/draft-pencairan`
+- `POST /api/v1/draft-pencairan`
+- `GET /api/v1/draft-pencairan/:id`
+- `PATCH /api/v1/draft-pencairan/:id`
+- `POST /api/v1/draft-pencairan/:id/batalkan`
+- `POST /api/v1/draft-pencairan/:id/konfirmasi`
+- `GET /api/v1/draft-pencairan/:id/export?berkas=pdf|xlsx`
+- `GET /api/v1/draft-pencairan/kandidat`
+- `POST /api/v1/draft-pencairan/batch`
 
 Dashboard and settings:
 
@@ -263,6 +417,164 @@ SuperAdmin:
 - `GET /api/v1/superadmin/bank-sampah/:id`
 - `POST /api/v1/superadmin/bank-sampah/:id/approve`
 - `POST /api/v1/superadmin/bank-sampah/:id/reject`
+
+## Pencairan
+
+Pengurus record a payout for a nasabah. There is no payment gateway: the API
+only records what was paid out and lowers the saldo once, atomically.
+
+```http
+POST /api/v1/pencairan
+{
+  "nasabah_id": "uuid",
+  "nominal": "200000",
+  "metode": "tunai",
+  "tanggal": "2026-09-20T10:15:00+07:00",
+  "keterangan": "Diambil pagi"
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `nasabah_id` | Required. Active nasabah of the pengurus' own bank sampah. |
+| `nominal` | Required. Greater than zero, whole rupiah, not above the saldo. |
+| `metode` | Required. `tunai` or `transfer`. |
+| `tanggal` | Optional, defaults to now. Cannot be in the future, or earlier than the nasabah's latest setoran or pencairan. |
+| `keterangan` | Optional, max 255 characters. |
+
+The response carries `status` (`tercatat`) plus the `saldo_sebelum` and
+`saldo_sesudah` snapshots taken when the payout was recorded. `saldo_sesudah`
+is rounded down to whole rupiah, and saldo history (`saldo_setelah_transaksi`,
+export) debits `saldo_sebelum - saldo_sesudah`, so it matches the stored saldo.
+
+Only pengurus record pencairan. `GET /api/v1/pencairan` and
+`GET /api/v1/pencairan/:id` also accept nasabah accounts, which see only the
+pencairan on their own memberships. Django admin shows pencairan read-only.
+
+## Draft pencairan
+
+A pengurus plans a payout for one or many nasabah as a **draft**, checks the
+numbers, pays outside the app (transfer or cash), then **confirms** the payment.
+A draft never changes a saldo: only confirmation does, once, atomically.
+
+Status is `draft`, `dikonfirmasi` or `dibatalkan`. A confirmed or cancelled
+draft is final: changing or cancelling it returns 409, and so does confirming
+it twice.
+
+```http
+POST /api/v1/draft-pencairan
+{
+  "nama": "Cair Oktober",
+  "potongan_jenis": "persen",
+  "potongan_nilai": "10",
+  "items": [
+    { "nasabah_id": "uuid", "nominal": "100000", "metode": "transfer" },
+    { "nasabah_id": "uuid", "potongan_jenis": "rupiah", "potongan_nilai": "1500" }
+  ]
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `nama` | Optional, max 150 characters. Blank becomes `Pencairan 7 Okt 2026, 14:35` (the current date and time in WIB). |
+| `potongan_jenis`, `potongan_nilai` | The draft's default potongan: `persen` (0-100) or `rupiah`. Sent together. |
+| `jumlah_jenis`, `jumlah_nilai` | The jumlah last applied to everyone (`persen` 0-100, or whole `rupiah`), kept so the form reopens as it was. Sent together; only a record, the item nominals decide what is paid. `null` for both clears it. |
+| `items[].nasabah_id` | Required. Active, approved nasabah of the pengurus' bank; once per draft. |
+| `items[].nominal` | Optional, defaults to the whole saldo. Whole rupiah, above zero, not above the saldo. |
+| `items[].metode` | `tunai` (default) or `transfer`. |
+| `items[].potongan_jenis`, `items[].potongan_nilai` | The item's own potongan, overriding the draft default. `null` for both clears it. |
+
+A potongan is rounded **down** to whole rupiah per item, and the draft totals
+are sums of the items. A potongan above its item's nominal is rejected. Each
+item reports `potongan` (the effective amount), `dibayar` (`nominal - potongan`)
+and `saldo_saat_ini`.
+
+`PATCH` takes the same body, every field optional. `items`, when sent, is the
+whole desired list: a field left out of an item keeps its value, and an item
+left out of the list is removed.
+
+A draft holds at most **1000 nasabah**, on create, `PATCH` and `batch` alike;
+past that the request is rejected with 422 and the pengurus splits the payout
+into several drafts. A draft is read, saved and confirmed whole, in one request
+and one transaction, which is what the limit protects. Items always come back
+ordered by nasabah name, then id, so they can be paginated by cursor if banks
+ever outgrow the limit; the totals are already computed server-side.
+
+`POST /api/v1/draft-pencairan/:id/konfirmasi` re-checks every item against the
+saldo as it is now, reports all failing items before writing anything, then
+debits each nasabah and writes one `pencairan` per item (carrying `potongan` and
+the draft). `nominal` still leaves the saldo in full; the potongan is only
+recorded. A pencairan with a potongan cannot have its `nominal` or `tanggal`
+edited afterwards.
+
+`GET /api/v1/draft-pencairan/:id/export?berkas=pdf|xlsx` downloads the draft as
+PDF or Excel. It works in any status, repeatedly, and changes nothing.
+
+`POST /api/v1/draft-pencairan/export?berkas=pdf|xlsx` takes the same body as a
+create and returns the file for that draft as it stands, without saving it: the
+draft is built and validated, then rolled back. Use it to export edits that were
+not saved yet.
+
+`GET /api/v1/draft-pencairan/kandidat` lists, unpaginated, the nasabah that can
+still be paid out (active, approved, saldo of at least Rp 1) so a picker can
+select across pages. It accepts `search` (2+ characters), `saldo_min` and
+`ordering` (`nama`, `-nama`, `saldo`, `-saldo`). With `termasuk_kosong=true` it
+also lists nasabah whose saldo is Rp 0 or who have no saldo yet, so a picker can
+show them as empty; they still cannot be put in a draft.
+
+`POST /api/v1/draft-pencairan/batch` builds a draft from `{"semua": true}` or
+`{"nasabah_ids": [...]}`, paying each their whole saldo with the optional
+`nama`, `metode` and default potongan. Anyone who cannot be paid is skipped and
+listed in `dilewati` with the reason, instead of failing the rest.
+
+### Riwayat pencairan filters
+
+`GET /api/v1/pencairan` accepts, in any combination:
+
+| Parameter | Values | Notes |
+| --- | --- | --- |
+| `periode` | `hari_ini`, `minggu_ini`, `bulan_ini`, `bulan_lalu`, `custom` | Same values as the transaksi list. Omitted means the whole history (transaksi defaults to `hari_ini` instead). An unrecognized value is ignored rather than rejected, also as on the transaksi list, so it reads as the whole history too. |
+| `dari_tanggal`, `sampai_tanggal` | `YYYY-MM-DD` | Required with `periode=custom`: missing returns 422, an end before the start returns 400. |
+| `nasabah_id` | UUID | One nasabah's riwayat. |
+| `search` | 2+ characters | Case-insensitive match on the nasabah name. A shorter value is ignored, so clients should not send one. |
+
+Results are always limited to the pengurus' own bank sampah, newest first, paginated.
+
+### Editing a pencairan
+
+Pengurus correct a recorded payout with `PATCH /api/v1/pencairan/:id`. Every
+edit keeps the replaced version as an append-only revision.
+
+```http
+PATCH /api/v1/pencairan/:id
+{
+  "nominal": "150000",
+  "tanggal": "2026-09-19T10:15:00+07:00",
+  "metode": "transfer",
+  "keterangan": "Ditransfer ke BRI",
+  "alasan": "Salah ketik nominal"
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `alasan` | Required, max 255 characters. Stored with the replaced version. |
+| `nominal`, `metode`, `keterangan` | Optional, same rules as recording. |
+| `tanggal` | Optional. Not in the future, and at most `BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI` (7) days before the tanggal the pencairan was first recorded with, however many edits follow. |
+
+An edit that changes nothing returns 422. Changing `nominal` or `tanggal`
+recomputes `saldo_sebelum`/`saldo_sesudah` of this and every later pencairan of
+the nasabah and moves the saldo by the difference, all in one transaction. The
+edit is rejected (422 on `nominal`) if the saldo would not cover this or any
+later pencairan. Later pencairan are not marked as edited.
+
+Pencairan responses carry `diperbarui` (true once edited) and
+`tanggal_edit_minimum`, the earliest tanggal an edit may set.
+
+`GET /api/v1/pencairan/:id/riwayat` (pengurus only) returns the current
+`pencairan` and its replaced versions in `revisi`, newest first, each with
+`versi`, the old values and snapshots, `alasan`, `diubah_oleh_nama` and
+`diubah_pada`. Django admin shows revisions read-only.
 
 ## Report Export
 
@@ -345,7 +657,7 @@ Generate schema locally:
 python manage.py spectacular --file openapi.yaml --validate
 ```
 
-Served endpoints:
+Served endpoints (only when `DJANGO_DEBUG=true`; 404 otherwise):
 
 - `GET /api/schema/`
 - `GET /api/docs/`
@@ -397,6 +709,59 @@ Run tests:
 ```bash
 python manage.py test
 ```
+
+## Nasabah home API (PIL-225)
+
+All endpoints require a Bearer JWT for an active user with role `nasabah`.
+
+| GET endpoint | Response |
+| --- | --- |
+| `/api/v1/nasabah/me/beranda` | `user`, `keanggotaan`, `bank_sampah`, `saldo`, and up to five `aktivitas_terbaru` |
+| `/api/v1/nasabah/me/saldo` | `total_saldo` (decimal string), `updated_at` |
+| `/api/v1/nasabah/me/bank-sampah` | Public details of the selected membership's bank |
+| `/api/v1/nasabah/me/riwayat` | Paginated `count`, `next`, `previous`, `results`; newest transactions first |
+
+The membership must belong to the authenticated user, have status `approved`,
+and be active. Its bank must also have status `active` and be active.
+No request can select another user's data. Bank credentials and invite tokens
+are excluded from responses. Reads never create or update balances.
+
+Pass `?keanggotaan_id=<UUID>` to select a membership. When omitted, the API uses
+the user's only eligible membership. If several are eligible, it returns 422
+with `errors.keanggotaan_id` and `errors.pilihan` containing the available IDs
+and bank names. Invalid UUIDs also return 422, another user's or missing
+membership returns 404, and ineligible memberships return 403.
+History supports `page` and `page_size` (default 20, maximum 100); retain the
+membership selection when requesting subsequent pages.
+
+Balances without a row return `"0.00"` and `updated_at: null`; empty history
+returns an empty list. Activity fields are `id`, `tanggal`, `tipe`, and
+`total_nilai`. These represent the transactions available in staging
+(currently deposits); this change does not implement withdrawals.
+
+Mobile integration must handle staging's `next_step: "nasabah_dashboard"`,
+then load this API to check membership eligibility. Bank status from the
+login payload alone is not proof of active membership. The existing mobile
+preview is still mock data until its repository/state layer calls these APIs.
+This backend branch does not modify the mobile application or login contract.
+
+## Nasabah profile API (PIL-226)
+
+`GET /api/v1/nasabah/me/profil` requires a Bearer JWT for an active user with
+role `nasabah`. It returns only `id`, `nama`, `email`, and `role` from the
+authenticated account. Query parameters cannot select a different user.
+Profile access does not require active bank membership.
+
+Anonymous or invalid-token requests return 401; management roles return 403.
+POST, PUT, PATCH, and DELETE return 405. This endpoint does not expose bank
+management settings and does not implement profile editing or logout.
+
+Mobile may load this endpoint to refresh the read-only profile; the existing
+login response and `GET /api/v1/auth/me` remain unchanged. Staging returns
+`nasabah_dashboard` as the nasabah login state, which must be handled by the
+mobile router. This backend branch does not modify the mobile application.
+PIL-226 is based directly on staging and can be integrated independently of
+the PIL-225 backend branch.
 
 ## Notes
 
