@@ -51,6 +51,36 @@ class PengumumanAuthoringTests(APITestCase):
         self.assertEqual(response.data["status"], "draft")
         self.assertEqual(response.data["dibuat_oleh_id"], str(self.pengelola.id))
 
+    def test_creating_a_draft_with_a_past_publish_time_is_rejected(self) -> None:
+        response = self.client.post(
+            URL,
+            {
+                "judul": "Pengumuman",
+                "isi": "Isi.",
+                "terbit_pada": (timezone.now() - timedelta(hours=1)).isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("terbit_pada", response.data["errors"])
+
+    def test_creating_a_draft_with_expiry_before_publish_time_is_rejected(self) -> None:
+        nanti = timezone.now() + timedelta(days=3)
+        response = self.client.post(
+            URL,
+            {
+                "judul": "Pengumuman",
+                "isi": "Isi.",
+                "terbit_pada": nanti.isoformat(),
+                "masa_berlaku_hingga": (nanti - timedelta(days=1)).isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("masa_berlaku_hingga", response.data["errors"])
+
     def test_created_draft_is_not_visible_via_aktif(self) -> None:
         created = self.client.post(URL, {"judul": "Pengumuman", "isi": "Isi."}, format="json")
         self.assertEqual(created.status_code, 201, created.data)
