@@ -40,6 +40,7 @@ class PengumumanBerandaSerializer(serializers.ModelSerializer[Pengumuman]):
     """
 
     dibaca = serializers.SerializerMethodField()
+    dibaca_pada = serializers.SerializerMethodField()
 
     class Meta:
         model = Pengumuman
