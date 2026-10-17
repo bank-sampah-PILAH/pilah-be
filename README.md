@@ -158,6 +158,7 @@ Auth and app variables:
 GOOGLE_CLIENT_ID=
 PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false
 PILAH_PUBLIC_APP_URL=https://pilah.example.com
+PILAH_WEB_ORIGIN=https://web.example.com
 PILAH_SUPERADMIN_EMAILS=admin@example.com,another-admin@example.com
 ```
 
@@ -277,7 +278,13 @@ production deployment; both CORS and CSRF explicitly allow it. Add each dashboar
 origin to the Google Web OAuth client's Authorized JavaScript origins. Backend
 `GOOGLE_CLIENT_ID` must match frontend `GOOGLE_SERVER_CLIENT_ID`.
 `PILAH_PUBLIC_APP_URL` is the separate invite-link base, not the API base or CORS
-setting. See [Cloud Run](CLOUD_RUN.md) for first-deploy URL ordering and IAM.
+setting; keep it on the backend host for Android App Links. New invite links use
+`/invite/<token>` and browser requests redirect to `/#/invite/<token>` on
+`PILAH_WEB_ORIGIN`, which must be the trusted Flutter web origin (no path or
+trailing slash). Older `/invite?token=...` links remain supported by the native
+app; browser fallback does not forward their query token. See [Cloud Run](CLOUD_RUN.md)
+for first-deploy URL ordering and IAM, and [Fly staging](FLY_STAGING.md) for its
+configured origin.
 
 Production deployment on `main` automatically runs `bootstrap_superadmins` in
 a Cloud Run Job with the service's image, DB environment and runtime identity.
@@ -358,6 +365,15 @@ Jenis sampah:
 - `POST /api/v1/jenis-sampah`
 - `PUT /api/v1/jenis-sampah/:id`
 - `PATCH /api/v1/jenis-sampah/:id/status`
+- `POST /api/v1/jenis-sampah/:id/harga` — `{harga_per_kg, berlaku_mulai?}`;
+  tanpa `berlaku_mulai` harga berlaku sekarang. Respons jenis sampah memuat
+  `harga_per_kg` yang berlaku, `harga_berlaku_mulai`, dan `harga_terjadwal`
+  (`{harga_per_kg, berlaku_mulai}` atau `null`).
+- `GET /api/v1/jenis-sampah/:id/harga` — riwayat versi harga, terbaru dulu,
+  dengan pagination standar. Setiap baris: `id`, `harga_per_kg`, `satuan`,
+  `berlaku_mulai`, `dibuat_oleh` (nama, `null` untuk data hasil migrasi), dan
+  `status`: `terjadwal`, `berlaku`, `sebelumnya`, atau `digantikan` (harga
+  terjadwal yang sudah dikoreksi versi lain dengan `berlaku_mulai` sama).
 
 Transaksi:
 

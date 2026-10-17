@@ -1,7 +1,7 @@
 from calendar import monthrange
 from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta
-from decimal import ROUND_DOWN, Decimal
+from decimal import Decimal
 from typing import Any, TypeVar, cast
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -31,10 +31,9 @@ from apps.nasabah.api import (
     get_locked_nasabah,
     kandidat_pencairan,
 )
-from apps.waste_catalog.api import get_active_jenis
+from apps.waste_catalog.api import get_active_jenis, harga_berlaku
 from shared_kernel.kalkulasi import (
     bulatkan_rupiah,
-    harga_berlaku,
     hitung_potongan,
     hitung_subtotal,
     total_setoran,
@@ -82,8 +81,10 @@ class TransactionService:
                         ]
                     }
                 )
-            harga = harga_berlaku(jenis)
-            if harga <= 0:
+            # Harga diambil di dalam transaksi database, pada waktu transaksi
+            # itu sendiri (SDS SD-01 pesan 10), bukan dari nilai yang dikirim client.
+            harga = harga_berlaku(jenis, transaksi.tanggal)
+            if harga is None:
                 raise serializers.ValidationError(
                     {f"items[{index}].jenis_sampah_id": ["Harga jenis sampah belum diatur"]}
                 )
@@ -339,7 +340,9 @@ class PencairanService:
                     raise serializers.ValidationError(
                         {"nominal": ["Saldo nasabah tidak mencukupi untuk perubahan ini"]}
                     )
-                sesudah = (saldo_berjalan - nilai).quantize(Decimal(1), rounding=ROUND_DOWN)
+                # Per pencairan, not once at the end: legacy setoran can carry sen, and
+                # recording dropped it at each pencairan too.
+                sesudah = bulatkan_rupiah(saldo_berjalan - nilai)
                 snapshot[pencairan_id] = (saldo_berjalan, sesudah)
                 saldo_berjalan = sesudah
             return saldo_berjalan, snapshot

@@ -3,13 +3,14 @@ from io import BytesIO
 
 from django.test import RequestFactory
 from openpyxl import load_workbook
-from rest_framework.test import APITestCase
+from rest_framework.test import APITransactionTestCase
 
-from api.models import BankSampah, DetailTransaksi, JenisSampah, Nasabah, Transaksi, User
+from api.models import BankSampah, DetailTransaksi, Nasabah, Transaksi, User
 from apps.reporting.api import export_excel
+from apps.waste_catalog.api import buat_jenis_sampah
 
 
-class ExportEdgeCaseTests(APITestCase):
+class ExportEdgeCaseTests(APITransactionTestCase):
     def setUp(self) -> None:
         self.bank = BankSampah.objects.create(nama="Bank Laporan", alamat="Depok", kota="Depok")
         self.pengelola = User.objects.create_user(
@@ -33,7 +34,7 @@ class ExportEdgeCaseTests(APITestCase):
         self.assertIn("Riwayat Transaksi", workbook.sheetnames)
 
     def test_explicit_all_time_period_is_labelled_as_all_periods(self) -> None:
-        jenis = JenisSampah.objects.create(
+        jenis = buat_jenis_sampah(
             bank_sampah=self.bank, nomor="PET", nama_sampah="Botol PET", harga_per_kg=Decimal(3000)
         )
         transaksi = Transaksi.objects.create(
