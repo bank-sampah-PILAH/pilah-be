@@ -4,11 +4,9 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('api', '0024_merge_harga_sampah_draft_pencairan'),
-        ('api', '0024_pengumuman_pengumumandibaca_and_more'),
+        ("api", "0024_merge_harga_sampah_draft_pencairan"),
+        ("api", "0024_pengumuman_pengumumandibaca_and_more"),
     ]
 
-    operations = [
-    ]
+    operations = []
