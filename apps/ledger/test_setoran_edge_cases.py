@@ -4,7 +4,7 @@ from typing import Any
 from unittest.mock import patch
 
 from django.db import IntegrityError
-from rest_framework.test import APITestCase
+from rest_framework.test import APITransactionTestCase
 
 from api.models import BankSampah, JenisSampah, Nasabah, Transaksi, User
 from apps.ledger.services import TransactionService
@@ -12,7 +12,7 @@ from apps.ledger.views import TransaksiViewSet
 from apps.waste_catalog.api import buat_jenis_sampah
 
 
-class SetoranEdgeCaseTests(APITestCase):
+class SetoranEdgeCaseTests(APITransactionTestCase):
     def setUp(self) -> None:
         self.bank = BankSampah.objects.create(
             nama="Bank Ledger", alamat="Depok", kota="Depok", no_hp_pic="+628123456789"

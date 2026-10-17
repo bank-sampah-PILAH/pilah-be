@@ -6,6 +6,8 @@ from apps.bank_sampah.models import BankSampah, BankSampahApprovalLog  # noqa: F
 from apps.jadwal.models import JadwalKegiatan  # noqa: F401
 from apps.ledger.models import (  # noqa: F401
     DetailTransaksi,
+    DraftPencairan,
+    DraftPencairanItem,
     Pencairan,
     PencairanRevisi,
     Saldo,
@@ -20,6 +22,8 @@ __all__ = [
     "BankSampahApprovalLog",
     "DetailTransaksi",
     "HargaSampah",
+    "DraftPencairan",
+    "DraftPencairanItem",
     "JenisSampah",
     "JadwalKegiatan",
     "Nasabah",

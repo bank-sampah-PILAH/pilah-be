@@ -7,11 +7,21 @@ from django.db import connection
 from django.test import RequestFactory
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework.response import Response
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import BankSampah, JenisSampah, Nasabah, Pencairan, PencairanRevisi, Saldo, User
+from api.models import (
+    BankSampah,
+    JenisSampah,
+    Nasabah,
+    Pencairan,
+    PencairanRevisi,
+    Saldo,
+    Transaksi,
+    User,
+)
 from apps.ledger.services import BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI
 from apps.waste_catalog.api import buat_jenis_sampah
 
@@ -227,6 +237,47 @@ class PencairanEditTests(APITestCase):
         self.assertEqual(response.data["saldo_sesudah"], "315600.00")
         self.assertEqual(self._saldo(), "315600.00")
 
+    def test_edit_replay_drops_legacy_sen_like_recording_does(self) -> None:
+        # Saldo warisan PILAH 1.0 bisa bersen. Pencatatan membuang sennya, dan
+        # pemutaran ulang saat edit harus membulatkan dengan aturan yang sama.
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("465600.75"))
+        pencairan = self._catat("200000")
+        self.assertEqual(self._saldo(), "265600.00")
+
+        response = self._edit(pencairan["id"], {"nominal": "150000", "alasan": "Salah ketik"})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["saldo_sebelum"], "465600.75")
+        self.assertEqual(response.data["saldo_sesudah"], "315600.00")
+        self.assertEqual(self._saldo(), "315600.00")
+
+    def test_edit_replay_rounds_at_every_pencairan_not_once_at_the_end(self) -> None:
+        # Setoran warisan PILAH 1.0 juga bisa bersen. Sen yang masuk di antara
+        # dua pencairan dibuang di pencairan berikutnya, jadi pembulatan harus
+        # per langkah: dibulatkan sekali di akhir, hasilnya Rp 1 lebih besar.
+        sekarang = timezone.now()
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("465600.75"))
+        pertama = self._catat("200000", tanggal=(sekarang - timedelta(hours=3)).isoformat())
+        Transaksi.objects.create(
+            nasabah=self.nasabah,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.user,
+            tanggal=sekarang - timedelta(hours=2),
+            total_nilai=Decimal("0.90"),
+        )
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("265600.90"))
+        kedua = self._catat("100000", tanggal=(sekarang - timedelta(hours=1)).isoformat())
+        self.assertEqual(self._saldo(), "165600.00")
+
+        response = self._edit(pertama["id"], {"nominal": "150000", "alasan": "Salah ketik"})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["saldo_sesudah"], "315600.00")
+        berikutnya = self._detail(kedua["id"])
+        self.assertEqual(berikutnya["saldo_sebelum"], "315600.90")
+        self.assertEqual(berikutnya["saldo_sesudah"], "215600.00")
+        self.assertEqual(self._saldo(), "215600.00")
+
     def _setor(self, harga: str = "100000.00", berat: str = "1.000") -> None:
         jenis = JenisSampah.objects.filter(bank_sampah=self.bank, nomor="PLS-001").first()
         if jenis is None:
@@ -334,8 +385,11 @@ class PencairanEditTests(APITestCase):
                 if message:
                     self.assertEqual(response.data["errors"]["tanggal"], [message])
                 else:
+                    # Offset shape follows the active TIME_ZONE (UTC or WIB);
+                    # compare as parsed timestamps, not formatted strings.
                     self.assertEqual(
-                        response.data["tanggal"], tanggal.isoformat().replace("+00:00", "Z")
+                        parse_datetime(response.data["tanggal"]),
+                        parse_datetime(tanggal.isoformat()),
                     )
 
     def test_edit_tanggal_reorders_snapshots(self) -> None:
@@ -450,8 +504,10 @@ class PencairanEditTests(APITestCase):
         awal = timezone.now() - timedelta(days=1)
         pencairan = self._catat(tanggal=awal.isoformat())
         batas = timedelta(days=BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI)
-        expected = (awal - batas).isoformat().replace("+00:00", "Z")
-        self.assertEqual(self._detail(pencairan["id"])["tanggal_edit_minimum"], expected)
+        # Offset shape follows the active TIME_ZONE; compare as timestamps.
+        expected = parse_datetime((awal - batas).isoformat())
+        actual = parse_datetime(self._detail(pencairan["id"])["tanggal_edit_minimum"])
+        self.assertEqual(actual, expected)
 
         self._edit(
             pencairan["id"],
@@ -459,7 +515,8 @@ class PencairanEditTests(APITestCase):
         )
 
         # Still counted from the tanggal first recorded.
-        self.assertEqual(self._detail(pencairan["id"])["tanggal_edit_minimum"], expected)
+        masih = parse_datetime(self._detail(pencairan["id"])["tanggal_edit_minimum"])
+        self.assertEqual(masih, expected)
 
     def test_django_admin_shows_revisi_read_only(self) -> None:
         superuser = User.objects.create_user(
