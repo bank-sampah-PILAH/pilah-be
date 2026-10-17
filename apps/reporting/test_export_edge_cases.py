@@ -3,14 +3,14 @@ from io import BytesIO
 
 from django.test import RequestFactory
 from openpyxl import load_workbook
-from rest_framework.test import APITestCase
+from rest_framework.test import APITransactionTestCase
 
 from api.models import BankSampah, DetailTransaksi, Nasabah, Transaksi, User
 from apps.reporting.api import export_excel
 from apps.waste_catalog.api import buat_jenis_sampah
 
 
-class ExportEdgeCaseTests(APITestCase):
+class ExportEdgeCaseTests(APITransactionTestCase):
     def setUp(self) -> None:
         self.bank = BankSampah.objects.create(nama="Bank Laporan", alamat="Depok", kota="Depok")
         self.pengelola = User.objects.create_user(

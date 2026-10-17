@@ -20,6 +20,17 @@ class ActivitySchemaTests(SimpleTestCase):
             "application/json"
         ]["schema"]
         page = components[response["$ref"].split("/")[-1]]
+        self.assertIn("summary", page["required"])
+        self.assertEqual(
+            set(page["properties"]["summary"]["properties"]),
+            {
+                "jumlah_transaksi",
+                "total_berat",
+                "total_setoran",
+                "total_pencairan",
+                "saldo",
+            },
+        )
         self.assertEqual(
             page["properties"]["results"]["items"]["$ref"], "#/components/schemas/ActivityEnvelope"
         )
