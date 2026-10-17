@@ -5,7 +5,8 @@ import requests
 from django.test import override_settings
 from rest_framework.test import APITestCase
 
-from api.models import BankSampah, JenisSampah, Nasabah, Transaksi, User
+from api.models import BankSampah, Nasabah, Transaksi, User
+from apps.waste_catalog.api import buat_jenis_sampah
 
 TWILIO = {
     "TWILIO_ACCOUNT_SID": "ACx",
@@ -32,7 +33,7 @@ class TwilioDeliveryTests(APITestCase):
         nasabah = Nasabah.objects.create(
             bank_sampah=bank, nomor="NAS-0001", nama="Budi", no_hp="+628123456789"
         )
-        jenis = JenisSampah.objects.create(
+        jenis = buat_jenis_sampah(
             bank_sampah=bank, nomor="PET", nama_sampah="Botol PET", harga_per_kg=Decimal(3000)
         )
         self.client.force_authenticate(pengelola)

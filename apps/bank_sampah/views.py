@@ -1,5 +1,4 @@
 import mimetypes
-from urllib.parse import urlencode
 
 from django.conf import settings
 from django.core.files.storage import default_storage
@@ -189,7 +188,7 @@ class GenerateInviteView(APIView):
     def post(self, request: Request) -> Response:
         bank = current_bank(request)
         token = TeamService.generate_invite(bank)
-        invite_path = f"/invite?{urlencode({'token': token})}"
+        invite_path = f"/invite/{token}"
         base_url = request.build_absolute_uri("/")[:-1]
         public_base = getattr(settings, "PILAH_PUBLIC_APP_URL", "") or base_url
         return Response(
