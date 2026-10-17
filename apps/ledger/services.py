@@ -1,7 +1,7 @@
 from calendar import monthrange
 from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta
-from decimal import ROUND_DOWN, Decimal
+from decimal import Decimal
 from typing import Any, TypeVar, cast
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -339,7 +339,9 @@ class PencairanService:
                     raise serializers.ValidationError(
                         {"nominal": ["Saldo nasabah tidak mencukupi untuk perubahan ini"]}
                     )
-                sesudah = (saldo_berjalan - nilai).quantize(Decimal(1), rounding=ROUND_DOWN)
+                # Per pencairan, not once at the end: legacy setoran can carry sen, and
+                # recording dropped it at each pencairan too.
+                sesudah = bulatkan_rupiah(saldo_berjalan - nilai)
                 snapshot[pencairan_id] = (saldo_berjalan, sesudah)
                 saldo_berjalan = sesudah
             return saldo_berjalan, snapshot
