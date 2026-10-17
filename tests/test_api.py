@@ -1969,7 +1969,7 @@ class APISpecTests(APITransactionTestCase):
         self.assertEqual(summary_sheet["B2"].value, "Plastik PET")
         self.assertEqual(summary_sheet["C2"].value, 3500)
         self.assertEqual(summary_sheet["D2"].value, 3.5)
-        self.assertEqual(summary_sheet["E2"].value, "=C2*D2")
+        self.assertEqual(summary_sheet["E2"].value, 12250)
         sheet = workbook["Riwayat Transaksi"]
         self.assertEqual(sheet.freeze_panes, "A5")
         self.assertEqual(sheet["A1"].value, "PILAH - Riwayat Transaksi")
