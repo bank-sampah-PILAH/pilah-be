@@ -16,8 +16,8 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from api.models import BankSampah, DraftPencairan, DraftPencairanItem, Pencairan, Transaksi, User
-from apps.ledger.activity import activity_query, serialize_activity_page
-from apps.ledger.schema import ACTIVITY_PARAMETERS, ACTIVITY_RESPONSE
+from apps.ledger.activity import activity_rows, serialize_activity_page
+from apps.ledger.schema import ACTIVITY_PARAMETERS, ACTIVITY_RESPONSE, ActivityPagination
 from apps.ledger.serializers import (
     DraftBatchSerializer,
     DraftExportQuerySerializer,
@@ -44,9 +44,13 @@ from apps.ledger.services import (
 )
 from apps.nasabah.api import kandidat_pencairan
 from apps.notification.api import send_setoran_receipt
-from apps.reporting.api import export_draft_pencairan, export_excel
+from apps.reporting.api import (
+    export_draft_pencairan,
+    export_operational_report,
+    operational_queries,
+    operational_summary,
+)
 from shared_kernel.http_headers import CONTENT_DISPOSITION, IDEMPOTENCY_KEY
-from shared_kernel.pagination import StandardPagination
 from shared_kernel.permissions import (
     IsActivePengelola,
     IsActivePengelolaOrNasabah,
@@ -100,19 +104,24 @@ def _find_idempotent_transaction(bank: BankSampah, key: UUID) -> Transaksi | Non
 
 class ActivityHistoryView(GenericAPIView[Any]):
     permission_classes = [IsActivePengelola]
-    pagination_class = StandardPagination
+    pagination_class = ActivityPagination
     serializer_class = TransactionListSerializer
 
     @extend_schema(parameters=ACTIVITY_PARAMETERS, responses=ACTIVITY_RESPONSE)
     def get(self, request: Request) -> Response:
         bank = current_bank(request)
         try:
-            rows = activity_query(bank, request)
+            deposits, payouts = operational_queries(bank, request)
+            rows = activity_rows(deposits, payouts)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         page = self.paginate_queryset(rows)
         assert page is not None  # StandardPagination always returns a page.
-        return self.get_paginated_response(serialize_activity_page(list(page), bank))
+        response = self.get_paginated_response(serialize_activity_page(list(page), bank))
+        response.data["summary"] = operational_summary(deposits, payouts)
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
 
 
 class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
@@ -158,19 +167,20 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
 
     @action(detail=False, methods=["get"], url_path="export")
     def export(self, request: Request) -> HttpResponse:
-        qs = self.get_queryset()
         try:
-            qs = TransactionFilterService.apply_period(qs, request)
+            report = export_operational_report(current_bank(request), request)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
-        if not qs.exists():
+        if report is None:
             return Response({"error": "Tidak ada data pada periode ini"}, status=400)
-        content, filename = export_excel(qs, request)
+        content, filename = report
         response = HttpResponse(
             content,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
         response[CONTENT_DISPOSITION] = f'attachment; filename="{filename}"'
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
         return response
 
     def create(self, request: Request) -> Response:

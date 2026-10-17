@@ -6,6 +6,7 @@ from decimal import Decimal
 from django.utils import timezone
 
 from api.models import BankSampah, DetailTransaksi, JenisSampah, Nasabah, Pencairan, Transaksi, User
+from apps.waste_catalog.api import buat_jenis_sampah
 from tests.regression.helpers import RegressionTestCase
 
 
@@ -196,7 +197,7 @@ class DashboardRegressionTests(RegressionTestCase):
             no_hp="+628987654322",
             email="nasabah.lain@example.com",
         )
-        other_jenis = JenisSampah.objects.create(
+        other_jenis = buat_jenis_sampah(
             bank_sampah=other_bank,
             nomor="PLS-OTHER",
             nama_sampah="Plastik",

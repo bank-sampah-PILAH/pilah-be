@@ -4,14 +4,15 @@ from typing import Any
 from unittest.mock import patch
 
 from django.db import IntegrityError
-from rest_framework.test import APITestCase
+from rest_framework.test import APITransactionTestCase
 
 from api.models import BankSampah, JenisSampah, Nasabah, Transaksi, User
 from apps.ledger.services import TransactionService
 from apps.ledger.views import TransaksiViewSet
+from apps.waste_catalog.api import buat_jenis_sampah
 
 
-class SetoranEdgeCaseTests(APITestCase):
+class SetoranEdgeCaseTests(APITransactionTestCase):
     def setUp(self) -> None:
         self.bank = BankSampah.objects.create(
             nama="Bank Ledger", alamat="Depok", kota="Depok", no_hp_pic="+628123456789"
@@ -30,7 +31,7 @@ class SetoranEdgeCaseTests(APITestCase):
             no_hp="+628111111111",
             alamat="Jl. A",
         )
-        self.jenis = JenisSampah.objects.create(
+        self.jenis = buat_jenis_sampah(
             bank_sampah=self.bank, nomor="PET", nama_sampah="Botol PET", harga_per_kg=Decimal(3000)
         )
         self.client.force_authenticate(self.pengelola)
@@ -43,8 +44,12 @@ class SetoranEdgeCaseTests(APITestCase):
         return self.client.post("/api/v1/transaksi", self.payload, format="json", **headers)
 
     def test_waste_type_without_a_price_cannot_be_deposited(self) -> None:
-        self.jenis.harga_per_kg = Decimal(0)
-        self.jenis.save()
+        # Sejak PIL-304 harga tidak bisa 0 (dicek database); "belum ada harga"
+        # berarti jenis belum punya versi harga yang berlaku.
+        tanpa_harga = JenisSampah.objects.create(
+            bank_sampah=self.bank, nomor="KRT", nama_sampah="Kardus"
+        )
+        self.payload["items"] = [{"jenis_sampah_id": str(tanpa_harga.id), "berat": "2.000"}]
 
         response = self._post()
 
