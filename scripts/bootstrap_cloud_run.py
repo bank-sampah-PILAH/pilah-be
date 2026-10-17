@@ -80,45 +80,55 @@ def bootstrap_cloud_run() -> None:
     container = {
         key: source[key] for key in ("image", "env", "resources", "volumeMounts") if key in source
     }
-    container.update(
-        command=[
-            "setpriv",
-            "--reuid=appuser",
-            "--regid=appuser",
-            "--init-groups",
-            "python",
-        ],
-        args=["manage.py", "bootstrap_superadmins"],
-    )
+    container["command"] = [
+        "setpriv",
+        "--reuid=appuser",
+        "--regid=appuser",
+        "--init-groups",
+        "python",
+    ]
     spec = {key: runtime[key] for key in ("serviceAccountName", "volumes") if key in runtime}
     spec.update(containers=[container], maxRetries=0, timeoutSeconds="300")
-    job_name = f"{service_name}-bootstrap-superadmins"
-    job = {
-        "apiVersion": "run.googleapis.com/v1",
-        "kind": "Job",
-        "metadata": {"name": job_name},
-        "spec": {
-            "template": {
-                "metadata": {"annotations": annotations},
-                "spec": {
-                    "taskCount": 1,
-                    "parallelism": 1,
-                    "template": {"spec": spec},
-                },
-            }
-        },
-    }
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as manifest:
-        json.dump(job, manifest)
-        manifest.flush()
+    commands = (
+        ("bootstrap-superadmins", ["manage.py", "bootstrap_superadmins"]),
+        (
+            "seed-play-demo-accounts-dry-run",
+            ["manage.py", "seed_play_demo_accounts", "--dry-run"],
+        ),
+        (
+            "seed-play-demo-accounts",
+            ["manage.py", "seed_play_demo_accounts", "--confirm-production"],
+        ),
+    )
+    for suffix, args in commands:
+        job_name = f"{service_name}-{suffix}"
+        container["args"] = args
+        job = {
+            "apiVersion": "run.googleapis.com/v1",
+            "kind": "Job",
+            "metadata": {"name": job_name},
+            "spec": {
+                "template": {
+                    "metadata": {"annotations": annotations},
+                    "spec": {
+                        "taskCount": 1,
+                        "parallelism": 1,
+                        "template": {"spec": spec},
+                    },
+                }
+            },
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as manifest:
+            json.dump(job, manifest)
+            manifest.flush()
+            subprocess.run(
+                ["gcloud", "run", "jobs", "replace", manifest.name, *flags, "--quiet"],
+                check=True,
+            )
         subprocess.run(
-            ["gcloud", "run", "jobs", "replace", manifest.name, *flags, "--quiet"],
+            ["gcloud", "run", "jobs", "execute", job_name, *flags, "--wait", "--quiet"],
             check=True,
         )
-    subprocess.run(
-        ["gcloud", "run", "jobs", "execute", job_name, *flags, "--wait", "--quiet"],
-        check=True,
-    )
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ class DeploymentWorkflowTests(SimpleTestCase):
         self.assertNotIn("if", seed)
         self.assertFalse((ROOT / ".github/workflows/seed-staging-data.yml").exists())
 
-    def test_production_validates_before_deploy_and_bootstraps_after_success(self) -> None:
+    def test_production_validates_before_deploy_and_seeds_after_success(self) -> None:
         workflow = yaml.safe_load((ROOT / ".github/workflows/deploy-cloud-run.yml").read_text())
         # PyYAML's YAML 1.1 parser treats the Actions 'on' key as boolean True.
         self.assertEqual(workflow[True]["push"]["branches"], ["main"])
@@ -39,7 +39,8 @@ class DeploymentWorkflowTests(SimpleTestCase):
             names.index("Authenticate to Google Cloud"),
         )
         self.assertLess(
-            names.index("Deploy Cloud Run"), names.index("Bootstrap production Superadmins")
+            names.index("Deploy Cloud Run"),
+            names.index("Bootstrap Superadmins and seed production demo accounts"),
         )
         deploy = steps[names.index("Deploy Cloud Run")]["run"]
         self.assertIn("CORS_ALLOW_ALL_ORIGINS=false", deploy)
@@ -52,7 +53,7 @@ class DeploymentWorkflowTests(SimpleTestCase):
             workflow["env"]["PILAH_REVIEW_SUPERADMIN_EMAILS"],
             "${{ vars.PILAH_REVIEW_SUPERADMIN_EMAILS }}",
         )
-        bootstrap = steps[names.index("Bootstrap production Superadmins")]
+        bootstrap = steps[names.index("Bootstrap Superadmins and seed production demo accounts")]
         self.assertEqual(bootstrap["run"], "python3 scripts/bootstrap_cloud_run.py")
         self.assertNotIn("continue-on-error", bootstrap)
         self.assertNotIn("if", bootstrap)

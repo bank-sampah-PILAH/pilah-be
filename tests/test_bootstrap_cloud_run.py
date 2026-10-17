@@ -136,6 +136,7 @@ class BootstrapCloudRunTests(SimpleTestCase):
             "PILAH_SUPERADMIN_EMAILS": "admin@example.com",
         }
         commands: list[list[str]] = []
+        jobs: list[tuple[str, list[str]]] = []
         replace_options: dict[str, object] = {}
 
         def gcloud(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -163,7 +164,7 @@ class BootstrapCloudRunTests(SimpleTestCase):
                     container["command"],
                     ["setpriv", "--reuid=appuser", "--regid=appuser", "--init-groups", "python"],
                 )
-                self.assertEqual(container["args"], ["manage.py", "bootstrap_superadmins"])
+                jobs.append((job["metadata"]["name"], container["args"]))
                 # Cloud Run v1 ExecutionTemplate owns SQL/VPC/secret annotations;
                 # TaskTemplate only accepts spec (provider discovery schema).
                 self.assertEqual(
@@ -175,8 +176,25 @@ class BootstrapCloudRunTests(SimpleTestCase):
 
         with patch.dict(os.environ, env, clear=True), patch("subprocess.run", side_effect=gcloud):
             bootstrap_cloud_run()
-        self.assertEqual([cmd[3] for cmd in commands], ["describe", "replace", "execute"])
-        self.assertIn("--wait", commands[-1])
+        self.assertEqual(
+            [cmd[3] for cmd in commands],
+            ["describe", "replace", "execute", "replace", "execute", "replace", "execute"],
+        )
+        self.assertEqual(
+            jobs,
+            [
+                ("pilah-be-bootstrap-superadmins", ["manage.py", "bootstrap_superadmins"]),
+                (
+                    "pilah-be-seed-play-demo-accounts-dry-run",
+                    ["manage.py", "seed_play_demo_accounts", "--dry-run"],
+                ),
+                (
+                    "pilah-be-seed-play-demo-accounts",
+                    ["manage.py", "seed_play_demo_accounts", "--confirm-production"],
+                ),
+            ],
+        )
+        self.assertTrue(all("--wait" in cmd for cmd in commands if cmd[3] == "execute"))
         self.assertNotIn("capture_output", replace_options)
         self.assertTrue(all("never-print-me" not in " ".join(cmd) for cmd in commands))
 

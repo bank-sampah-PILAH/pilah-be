@@ -294,13 +294,15 @@ app; browser fallback does not forward their query token. See [Cloud Run](CLOUD_
 for first-deploy URL ordering and IAM, and [Fly staging](FLY_STAGING.md) for its
 configured origin.
 
-Production deployment on `main` automatically runs `bootstrap_superadmins` in
-a Cloud Run Job with the service's image, DB environment and runtime identity.
-It creates only missing allowlisted Superadmins (Google login, no usable
-password); existing profiles/passwords remain unchanged. Role conflicts and
-missing/invalid allowlists fail deployment. It never seeds banks or demo data.
-Manual Cloud Run deployment uses the same bootstrap. Neither cloud provisioning
-nor OAuth Console configuration is performed by this code delivery itself.
+Production deployment on `main` automatically runs `bootstrap_superadmins` and
+the production demo seed in Cloud Run Jobs with the service's image, DB
+environment and runtime identity. The seed runs a dry-run first and applies
+only if that succeeds. It creates only missing global allowlisted Superadmins
+(Google login, no usable password); existing profiles/passwords remain
+unchanged. Role conflicts and missing/invalid allowlists fail deployment.
+Manual Cloud Run deployment uses the same bootstrap and seed. Neither cloud
+provisioning nor OAuth Console configuration is performed by this code delivery
+itself.
 
 ## Production Google demo accounts
 
@@ -309,12 +311,11 @@ four demo email addresses. It does not create Google mailboxes or store Google
 IDs, passwords, or tokens. PILAH must control each mailbox so its owner can sign
 in with Google's verified login.
 
-Before running the command, add `pilah.superadmin@gmail.com` to the production
+Before deployment, add `pilah.superadmin@gmail.com` to the production
 `PILAH_REVIEW_SUPERADMIN_EMAILS` setting and remove it from
 `PILAH_SUPERADMIN_EMAILS`. The review account must not overlap the global
-Superadmin list. From an authorized production task using the deployed
-application image and production database, preview and then explicitly apply
-the seed:
+Superadmin list. Every production deployment previews the seed and then applies
+it using the deployed application image and production database:
 
 ```bash
 python manage.py seed_play_demo_accounts --dry-run
@@ -334,9 +335,9 @@ The command uses stable IDs and only upserts its own rows. Re-running it
 preserves Google identities, unrelated tenant data, and any approval decision
 on the synthetic review bank. It refreshes the two schedule dates to 7 and 14
 days from the run date, updates the seeded catalog and transaction snapshots,
-and recalculates saldo from all setoran and pencairan ledger rows. It is not
-part of deployment or application startup; do not point a local database client
-at production to run it.
+and recalculates saldo from all setoran and pencairan ledger rows. It runs only
+as a post-deployment Cloud Run Job, never during application startup; do not
+point a local database client at production to run it.
 
 Bank Sampah organizations can be `mandiri`, `induk`, or `unit`. A unit must
 belong to an induk organization. A Nasabah user can have one membership per
