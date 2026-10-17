@@ -44,3 +44,13 @@ module = [
     "PIL.*",
 ]
 ignore_missing_imports = true
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["test_*.py"]
+
+[tool.mutmut]
+source_paths = ["apps"]
+only_mutate = ["apps/ledger/services.py"]
+also_copy = ["api", "config", "shared_kernel", "manage.py"]
+pytest_add_cli_args_test_selection = ["apps/ledger", "apps/reporting", "tests/test_api.py"]
+pytest_add_cli_args = ["-p", "no:cacheprovider"]

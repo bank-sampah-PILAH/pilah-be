@@ -197,6 +197,86 @@ class PencairanEditTests(APITestCase):
         detail = self.client.get(f"/api/v1/pencairan/{pencairan['id']}")
         self.assertTrue(detail.data["diperbarui"])
 
+    def test_keterangan_tetap_bila_tidak_disebut_dan_lama_tersimpan_di_riwayat(self) -> None:
+        pencairan = self._catat(keterangan="Diambil pagi")
+
+        response = self._edit(pencairan["id"], {"metode": "transfer", "alasan": "Salah metode"})
+
+        self.assertEqual(response.data["keterangan"], "Diambil pagi")
+        riwayat = self.client.get(f"/api/v1/pencairan/{pencairan['id']}/riwayat")
+        self.assertEqual(riwayat.data["revisi"][0]["keterangan"], "Diambil pagi")
+
+    def test_keterangan_kosong_tetap_kosong_saat_metode_diubah(self) -> None:
+        pencairan = self._catat()
+
+        response = self._edit(pencairan["id"], {"metode": "transfer", "alasan": "Salah metode"})
+
+        self.assertEqual(response.data["keterangan"], "")
+
+    def _catat_berpotongan(self, potongan: str) -> Pencairan:
+        return Pencairan.objects.create(
+            nasabah=self.nasabah,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.user,
+            tanggal=timezone.now() - timedelta(hours=1),
+            nominal=Decimal(200000),
+            potongan=Decimal(potongan),
+            metode="tunai",
+            saldo_sebelum=Decimal(465600),
+            saldo_sesudah=Decimal(265600),
+        )
+
+    def test_pencairan_berpotongan_satu_rupiah_tetap_terkunci_nominalnya(self) -> None:
+        pencairan = self._catat_berpotongan("1")
+
+        response = self._edit(str(pencairan.id), {"nominal": "150000", "alasan": "Salah ketik"})
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertEqual(
+            response.data["errors"]["nominal"],
+            ["Pencairan berpotongan hanya boleh diubah metode dan keterangannya"],
+        )
+
+    def test_pencairan_berpotongan_menerima_selisih_tanggal_di_bawah_satu_detik(self) -> None:
+        pencairan = self._catat_berpotongan("1")
+        tanggal = (pencairan.tanggal + timedelta(milliseconds=500)).isoformat()
+
+        response = self._edit(
+            str(pencairan.id), {"metode": "transfer", "tanggal": tanggal, "alasan": "Salah metode"}
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        pencairan.refresh_from_db()
+        self.assertEqual(pencairan.metode, "transfer")
+        self.assertEqual(PencairanRevisi.objects.get().tanggal, pencairan.tanggal)
+
+    def test_pencairan_berpotongan_menolak_selisih_tanggal_satu_detik_atau_lebih(self) -> None:
+        pencairan = self._catat_berpotongan("5000")
+
+        for selisih in (timedelta(seconds=1), timedelta(milliseconds=1500)):
+            with self.subTest(selisih=selisih):
+                response = self._edit(
+                    str(pencairan.id),
+                    {"tanggal": (pencairan.tanggal + selisih).isoformat(), "alasan": "Salah"},
+                )
+
+                self.assertEqual(response.status_code, 422, response.data)
+                self.assertIn("tanggal", response.data["errors"])
+
+    def test_pencairan_tanpa_potongan_mengubah_tanggal_walau_selisihnya_di_bawah_satu_detik(
+        self,
+    ) -> None:
+        pencairan = self._catat_berpotongan("0")
+        tanggal = pencairan.tanggal + timedelta(milliseconds=500)
+
+        response = self._edit(
+            str(pencairan.id), {"tanggal": tanggal.isoformat(), "alasan": "Koreksi"}
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        pencairan.refresh_from_db()
+        self.assertEqual(pencairan.tanggal, tanggal)
+
     def test_edit_requires_alasan(self) -> None:
         pencairan = self._catat()
 

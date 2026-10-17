@@ -4,6 +4,7 @@ from decimal import Decimal
 from io import BytesIO, StringIO
 from typing import Any, ClassVar, cast
 from unittest.mock import Mock, patch
+from uuid import UUID
 
 from django.conf import settings
 from django.contrib import admin
@@ -42,6 +43,7 @@ from api.models import (
     User,
 )
 from apps.bank_sampah.serializers import BankSampahApprovalListSerializer
+from apps.ledger.views import _find_idempotent_transaction
 from apps.nasabah.keanggotaan import sinkronkan_dari_akun
 from apps.nasabah.services import NasabahApprovalService
 
@@ -4484,8 +4486,68 @@ class IdempotensiSetoranTests(SetoranTestBase):
         )
 
         self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.data, {"error": "Idempotency-Key sudah digunakan untuk data setoran berbeda"}
+        )
         self.assertEqual(Transaksi.objects.count(), 1)
         self.assertEqual(self._saldo(), "3333.00")
+
+    def _setor_lengkap(self, body: dict[str, Any]) -> Any:
+        return self.client.post(
+            "/api/v1/transaksi",
+            {"nasabah_id": str(self.nasabah.id), "items": self._items(), **body},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=self.KEY,
+        )
+
+    def test_key_sama_dengan_nasabah_berbeda_ditolak(self) -> None:
+        lain = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0002",
+            nama="Siti Rahma",
+            email="siti@example.com",
+            no_hp="+628123456782",
+            alamat="Jl. Melati",
+        )
+        self._setor_dengan_key(self._items(), self.KEY)
+
+        response = self._setor_lengkap({"nasabah_id": str(lain.id)})
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(Transaksi.objects.count(), 1)
+
+    def test_key_sama_dengan_berat_berbeda_ditolak(self) -> None:
+        self._setor_dengan_key(self._items(), self.KEY)
+
+        response = self._setor_lengkap(
+            {"items": [{"jenis_sampah_id": str(self.jenis.id), "berat": "2.000"}]}
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(Transaksi.objects.count(), 1)
+
+    def test_key_sama_dengan_catatan_berbeda_ditolak(self) -> None:
+        self._setor_lengkap({"catatan": "Titip tetangga"})
+
+        berbeda = self._setor_lengkap({"catatan": "Titip saudara"})
+        tanpa = self._setor_lengkap({})
+        sama = self._setor_lengkap({"catatan": "Titip tetangga"})
+
+        self.assertEqual(berbeda.status_code, 409)
+        self.assertEqual(tanpa.status_code, 409)
+        self.assertEqual(sama.status_code, 200)
+        self.assertEqual(Transaksi.objects.count(), 1)
+
+    def test_key_dipakai_walau_bank_sudah_punya_setoran_tanpa_key(self) -> None:
+        self._setor(self._items())
+
+        pertama = self._setor_dengan_key(self._items(), self.KEY)
+        ulang = self._setor_dengan_key(self._items(), self.KEY)
+
+        self.assertEqual(pertama.status_code, 201)
+        self.assertEqual(ulang.status_code, 200)
+        self.assertEqual(ulang.data["id"], pertama.data["id"])
+        self.assertEqual(Transaksi.objects.count(), 2)
 
     def test_key_yang_sama_boleh_dipakai_di_bank_berbeda(self) -> None:
         self._setor_dengan_key(self._items(), self.KEY)
@@ -4557,6 +4619,14 @@ class IdempotensiSetoranTests(SetoranTestBase):
                 response = self._setor_dengan_key(self._items(), key)
                 self.assertEqual(response.status_code, 400)
 
+    def test_key_tidak_valid_dijawab_400_dengan_pesan_yang_jelas(self) -> None:
+        for key in ("bukan-uuid", "00000000-0000-1000-8000-000000000001"):
+            with self.subTest(key=key):
+                response = self._setor_dengan_key(self._items(), key)
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.data, {"error": "Idempotency-Key harus berupa UUID v4"})
+
     def test_validasi_gagal_tidak_menghabiskan_key(self) -> None:
         invalid = self._setor_dengan_key(
             [{"jenis_sampah_id": str(self.jenis.id), "berat": "0"}], self.KEY
@@ -4581,6 +4651,26 @@ class IdempotensiSetoranTests(SetoranTestBase):
         self.assertEqual(ulang.status_code, 200)
         self.assertEqual(ulang.data["id"], pertama.data["id"])
         self.assertEqual(Transaksi.objects.count(), 1)
+
+    def test_integrity_error_mencari_ulang_dengan_bank_dan_key_yang_sama(self) -> None:
+        pertama = self._setor_dengan_key(self._items(), self.KEY)
+        panggilan: list[tuple[Any, Any]] = []
+
+        def cari(bank: Any, key: Any) -> Any:
+            panggilan.append((bank, key))
+            return None if len(panggilan) == 1 else _find_idempotent_transaction(bank, key)
+
+        with (
+            patch("apps.ledger.views._find_idempotent_transaction", side_effect=cari),
+            patch(
+                "apps.ledger.services.TransactionService.create_setoran", side_effect=IntegrityError
+            ),
+        ):
+            ulang = self._setor_dengan_key(self._items(), self.KEY)
+
+        self.assertEqual(ulang.status_code, 200)
+        self.assertEqual(ulang.data["id"], pertama.data["id"])
+        self.assertEqual(panggilan, [(self.bank, UUID(self.KEY))] * 2)
 
 
 class KalkulasiSetoranTests(SetoranFixture):
@@ -4856,6 +4946,54 @@ class PencairanAPITests(APITransactionTestCase):
         self.assertEqual(response.data["dicatat_oleh_nama"], "Ibu Sari")
         saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
         self.assertEqual(saldo.data["total_saldo"], "265600.00")
+
+    def test_pencairan_sebesar_seluruh_saldo_diterima(self) -> None:
+        response = self.client.post(
+            "/api/v1/pencairan",
+            {"nasabah_id": str(self.nasabah.id), "nominal": "465600", "metode": "tunai"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["saldo_sesudah"], "0.00")
+
+    def test_pencairan_tanpa_keterangan_menyimpan_teks_kosong(self) -> None:
+        self.client.post(
+            "/api/v1/pencairan",
+            {"nasabah_id": str(self.nasabah.id), "nominal": "1000", "metode": "tunai"},
+            format="json",
+        )
+
+        self.assertEqual(Pencairan.objects.get().keterangan, "")
+
+    def test_aktivitas_nasabah_lain_tidak_membatasi_tanggal_pencairan(self) -> None:
+        lain = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0002",
+            nama="Budi Lain",
+            no_hp="+628123456780",
+            alamat="Jl. Melati",
+        )
+        Transaksi.objects.create(
+            nasabah=lain,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.user,
+            tanggal=timezone.now(),
+            total_nilai=Decimal(1000),
+        )
+
+        response = self.client.post(
+            "/api/v1/pencairan",
+            {
+                "nasabah_id": str(self.nasabah.id),
+                "nominal": "1000",
+                "metode": "tunai",
+                "tanggal": (timezone.now() - timedelta(days=1)).isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
 
     def test_pencairan_above_saldo_is_rejected(self) -> None:
         response = self.client.post(

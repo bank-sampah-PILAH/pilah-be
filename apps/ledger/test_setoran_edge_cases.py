@@ -34,7 +34,7 @@ class SetoranEdgeCaseTests(APITransactionTestCase):
             bank_sampah=self.bank, nomor="PET", nama_sampah="Botol PET", harga_per_kg=Decimal(3000)
         )
         self.client.force_authenticate(self.pengelola)
-        self.payload = {
+        self.payload: dict[str, Any] = {
             "nasabah_id": str(self.nasabah.id),
             "items": [{"jenis_sampah_id": str(self.jenis.id), "berat": "2.000"}],
         }
@@ -49,7 +49,46 @@ class SetoranEdgeCaseTests(APITransactionTestCase):
         response = self._post()
 
         self.assertEqual(response.status_code, 422)  # type: ignore[attr-defined]
-        self.assertIn("Harga jenis sampah belum diatur", str(response.data))  # type: ignore[attr-defined]
+        self.assertEqual(
+            response.data["errors"]["items[0].jenis_sampah_id"],  # type: ignore[attr-defined]
+            ["Harga jenis sampah belum diatur"],
+        )
+        self.assertFalse(Transaksi.objects.exists())
+
+    def test_catatan_disimpan_pada_setoran(self) -> None:
+        self.payload["catatan"] = "Titip tetangga"
+
+        self._post()
+
+        self.assertEqual(Transaksi.objects.get().catatan, "Titip tetangga")
+
+    def test_setoran_tanpa_catatan_menyimpan_teks_kosong(self) -> None:
+        self._post()
+
+        self.assertEqual(Transaksi.objects.get().catatan, "")
+
+    def test_nasabah_tidak_dikenal_ditolak_pada_field_nasabah_id(self) -> None:
+        self.payload["nasabah_id"] = str(uuid.uuid4())
+
+        response = self._post()
+
+        self.assertEqual(response.status_code, 422)  # type: ignore[attr-defined]
+        self.assertEqual(
+            response.data["errors"]["nasabah_id"],  # type: ignore[attr-defined]
+            ["Nasabah tidak ditemukan atau tidak aktif"],
+        )
+        self.assertFalse(Transaksi.objects.exists())
+
+    def test_jenis_sampah_tidak_dikenal_ditolak_pada_item_yang_salah(self) -> None:
+        self.payload["items"].append({"jenis_sampah_id": str(uuid.uuid4()), "berat": "1.000"})
+
+        response = self._post()
+
+        self.assertEqual(response.status_code, 422)  # type: ignore[attr-defined]
+        self.assertEqual(
+            response.data["errors"]["items[1].jenis_sampah_id"],  # type: ignore[attr-defined]
+            ["Jenis sampah tidak ditemukan atau tidak aktif"],
+        )
         self.assertFalse(Transaksi.objects.exists())
 
     def test_idempotency_key_must_be_a_version_four_uuid(self) -> None:
