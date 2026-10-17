@@ -2948,7 +2948,10 @@ class APISpecTests(APITransactionTestCase):
         self.assertNotIn(pending_bank.nama, names)
         self.assertNotIn(induk.nama, names)
         listed = next(item for item in response.data if item["nama"] == unit.nama)
-        self.assertEqual(set(listed.keys()), {"id", "nama", "alamat", "kota", "foto_logo"})
+        self.assertEqual(
+            set(listed.keys()),
+            {"id", "nama", "alamat", "kota", "latitude", "longitude", "foto_logo"},
+        )
 
     def test_nasabah_self_registration_creates_membership(self) -> None:
         customer = User.objects.create_user(
