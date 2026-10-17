@@ -8,12 +8,15 @@ from django.core.management.base import CommandError
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
-
 from django.test import override_settings
 
-from api.management.commands.seed_play_demo_accounts import DEMO_NASABAH_EMAIL
+from api.management.commands.seed_play_demo_accounts import (
+    DEMO_NASABAH_EMAIL,
+    WASTE_TYPE_IDS,
+)
 from api.models import (
     BankSampah,
+    DetailTransaksi,
     JadwalKegiatan,
     JenisSampah,
     Nasabah,
@@ -21,6 +24,7 @@ from api.models import (
     Transaksi,
     User,
 )
+from apps.bank_sampah.constants import REVIEW_BANK_ID
 
 SUPERADMIN_EMAIL = "pilah.superadmin@gmail.com"
 PRODUCTION_SETTINGS = {
@@ -54,6 +58,9 @@ class SeedPlayDemoAccountsTests(TestCase):
         self.assertFalse(User.objects.exists())
         self.assertFalse(BankSampah.objects.exists())
         self.assertFalse(Nasabah.objects.exists())
+        self.assertFalse(JenisSampah.objects.exists())
+        self.assertFalse(Transaksi.objects.exists())
+        self.assertFalse(JadwalKegiatan.objects.exists())
         self.assertFalse(Saldo.objects.exists())
 
     def test_debug_mode_is_rejected_even_with_production_runtime(self) -> None:
@@ -87,6 +94,10 @@ class SeedPlayDemoAccountsTests(TestCase):
         demo_bank_before = BankSampah.objects.filter(pk=demo_bank.pk).values().get()
         demo_member_before = Nasabah.objects.filter(email=DEMO_NASABAH_EMAIL).values().get()
         demo_saldo_before = Saldo.objects.filter(nasabah__email=DEMO_NASABAH_EMAIL).values().get()
+        review_bank = BankSampah.objects.get(pk=REVIEW_BANK_ID)
+        review_bank.status = BankSampah.Status.ACTIVE
+        review_bank.is_active = True
+        review_bank.save(update_fields=["status", "is_active", "updated_at"])
         call_command("seed_play_demo_accounts", confirm_production=True, stdout=StringIO())
 
         bank = BankSampah.objects.get(nama="Bank Sampah PILAH Demo")
@@ -106,6 +117,8 @@ class SeedPlayDemoAccountsTests(TestCase):
         self.assertIsNone(nasabah_user.bank_sampah)
         self.assertEqual(superadmin.role, User.Role.SUPERADMIN)
         self.assertIsNone(superadmin.bank_sampah)
+        self.assertFalse(superadmin.is_staff)
+        self.assertFalse(superadmin.is_superuser)
         for user in (owner, pengurus, nasabah_user, superadmin):
             self.assertFalse(user.has_usable_password())
             self.assertIsNone(user.google_id)
@@ -129,6 +142,46 @@ class SeedPlayDemoAccountsTests(TestCase):
             Nasabah.objects.filter(pk=membership.pk).values().get(), demo_member_before
         )
         self.assertEqual(Saldo.objects.filter(nasabah=membership).values().get(), demo_saldo_before)
+        self.assertEqual(BankSampah.objects.get(pk=REVIEW_BANK_ID).status, BankSampah.Status.ACTIVE)
+        self.assertEqual(Transaksi.objects.filter(nasabah=membership).count(), 3)
+        self.assertEqual(DetailTransaksi.objects.filter(transaksi__nasabah=membership).count(), 4)
+        self.assertEqual(JadwalKegiatan.objects.filter(bank_sampah=bank).count(), 2)
+
+    def test_reserved_waste_type_id_collision_preserves_unrelated_data(self) -> None:
+        other_bank = BankSampah.objects.create(nama="Unrelated Bank", no_hp_pic="")
+        other_type = JenisSampah.objects.create(
+            id=WASTE_TYPE_IDS[0],
+            bank_sampah=other_bank,
+            nomor="OTHER-01",
+            nama_sampah="Unrelated Type",
+            harga_per_kg=Decimal("123"),
+        )
+        bank_before = BankSampah.objects.filter(pk=other_bank.pk).values().get()
+        type_before = JenisSampah.objects.filter(pk=other_type.pk).values().get()
+
+        with self.assertRaisesRegex(CommandError, "waste type identity"):
+            call_command("seed_play_demo_accounts", dry_run=True, stdout=StringIO())
+
+        self.assertEqual(BankSampah.objects.filter(pk=other_bank.pk).values().get(), bank_before)
+        self.assertEqual(JenisSampah.objects.filter(pk=other_type.pk).values().get(), type_before)
+        self.assertEqual(BankSampah.objects.count(), 1)
+        self.assertFalse(User.objects.exists())
+        self.assertFalse(Nasabah.objects.exists())
+
+    def test_reserved_review_bank_id_collision_fails_before_writing_accounts(self) -> None:
+        other_bank = BankSampah.objects.create(
+            id=REVIEW_BANK_ID,
+            nama="Unrelated Bank",
+            no_hp_pic="",
+        )
+        before = BankSampah.objects.filter(pk=other_bank.pk).values().get()
+
+        with self.assertRaisesRegex(CommandError, "review bank identity"):
+            call_command("seed_play_demo_accounts", dry_run=True, stdout=StringIO())
+
+        self.assertEqual(BankSampah.objects.filter(pk=other_bank.pk).values().get(), before)
+        self.assertEqual(BankSampah.objects.count(), 1)
+        self.assertFalse(User.objects.exists())
 
     def test_existing_target_with_conflicting_role_fails_without_partial_writes(self) -> None:
         User.objects.create_user(
@@ -227,23 +280,37 @@ class SeedPlayDemoAccountsTests(TestCase):
         self.assertFalse(User.objects.exists())
         self.assertFalse(BankSampah.objects.exists())
         self.assertFalse(Nasabah.objects.exists())
+        self.assertFalse(JenisSampah.objects.exists())
+        self.assertFalse(Transaksi.objects.exists())
+        self.assertFalse(JadwalKegiatan.objects.exists())
 
-    def test_existing_bootstrapped_superadmin_is_not_rewritten(self) -> None:
+    def test_existing_review_superadmin_loses_django_admin_access(self) -> None:
         superadmin = User.objects.create_user(
             email=SUPERADMIN_EMAIL,
             nama="SuperAdmin PILAH",
             role=User.Role.SUPERADMIN,
             is_profile_complete=True,
+            is_staff=True,
+            is_superuser=True,
         )
-        before = User.objects.filter(pk=superadmin.pk).values().get()
 
         call_command("seed_play_demo_accounts", confirm_production=True, stdout=StringIO())
 
-        self.assertEqual(User.objects.filter(pk=superadmin.pk).values().get(), before)
+        superadmin.refresh_from_db()
+        self.assertFalse(superadmin.is_staff)
+        self.assertFalse(superadmin.is_superuser)
 
     def test_superadmin_must_be_in_review_allowlist(self) -> None:
         with override_settings(PILAH_REVIEW_SUPERADMIN_EMAILS=()):
             with self.assertRaisesRegex(CommandError, "PILAH_REVIEW_SUPERADMIN_EMAILS"):
+                call_command("seed_play_demo_accounts", dry_run=True, stdout=StringIO())
+
+        self.assertFalse(User.objects.exists())
+        self.assertFalse(BankSampah.objects.exists())
+
+    def test_review_superadmin_must_not_also_be_in_global_allowlist(self) -> None:
+        with override_settings(PILAH_SUPERADMIN_EMAILS=(SUPERADMIN_EMAIL,)):
+            with self.assertRaisesRegex(CommandError, "must not be in PILAH_SUPERADMIN_EMAILS"):
                 call_command("seed_play_demo_accounts", dry_run=True, stdout=StringIO())
 
         self.assertFalse(User.objects.exists())
