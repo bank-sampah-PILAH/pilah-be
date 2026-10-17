@@ -21,7 +21,10 @@ class SuperadminRegressionTests(RegressionTestCase):
     def _pending_bank(self, nama: str, *, bank_id: UUID | None = None) -> BankSampah:
         bank = BankSampah(
             id=bank_id,
-            nama=nama, alamat="Jl. Panjang Sekali No. 1", kota="Depok", no_hp_pic="+628100000001"
+            nama=nama,
+            alamat="Jl. Panjang Sekali No. 1",
+            kota="Depok",
+            no_hp_pic="+628100000001",
         )
         bank.status = BankSampah.Status.PENDING
         bank.save()
