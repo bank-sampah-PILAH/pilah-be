@@ -14,15 +14,29 @@ class PengumumanNasabahListSerializer(serializers.ModelSerializer[Pengumuman]):
     """Nasabah-facing row: no staff audit fields, carries the read flag.
 
     The view annotates _dibaca / _dibaca_pada per row; the fallbacks below
-    cover direct (un-annotated) serializer use.
+    cover direct (un-annotated) serializer use. bank_sampah fields come from
+    the views' select_related, so no extra query per row.
     """
 
     dibaca = serializers.SerializerMethodField()
     dibaca_pada = serializers.SerializerMethodField()
+    bank_sampah_nama = serializers.CharField(source="bank_sampah.nama", read_only=True)
+    bank_sampah_kota = serializers.CharField(source="bank_sampah.kota", read_only=True)
+    bank_sampah_alamat = serializers.CharField(source="bank_sampah.alamat", read_only=True)
 
     class Meta:
         model = Pengumuman
-        fields = ["id", "judul", "isi", "terbit_pada", "dibaca", "dibaca_pada"]
+        fields = [
+            "id",
+            "judul",
+            "isi",
+            "terbit_pada",
+            "bank_sampah_nama",
+            "bank_sampah_kota",
+            "bank_sampah_alamat",
+            "dibaca",
+            "dibaca_pada",
+        ]
         read_only_fields = fields
 
     def get_dibaca(self, obj: Pengumuman) -> bool:

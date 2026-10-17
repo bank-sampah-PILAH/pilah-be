@@ -164,7 +164,11 @@ class NasabahPengumumanListView(generics.ListAPIView[Pengumuman]):
     pagination_class = StandardPagination
 
     def get_queryset(self) -> QuerySet[Pengumuman]:
-        return _aktif_untuk(self.request).annotate(**_dibaca_annotations(_user(self.request)))
+        return (
+            _aktif_untuk(self.request)
+            .select_related("bank_sampah")
+            .annotate(**_dibaca_annotations(_user(self.request)))
+        )
 
 
 class NasabahPengumumanDetailView(generics.RetrieveAPIView[Pengumuman]):
@@ -175,7 +179,9 @@ class NasabahPengumumanDetailView(generics.RetrieveAPIView[Pengumuman]):
         # Other-bank, expired, and withdrawn announcements are all simply
         # absent from the scoped aktif queryset — one 404 path for all.
         return get_object_or_404(
-            _aktif_untuk(self.request).annotate(**_dibaca_annotations(_user(self.request))),
+            _aktif_untuk(self.request)
+            .select_related("bank_sampah")
+            .annotate(**_dibaca_annotations(_user(self.request))),
             pk=self.kwargs["pk"],
         )
 
