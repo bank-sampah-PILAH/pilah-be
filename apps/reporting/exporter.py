@@ -13,6 +13,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.worksheet import Worksheet
 
 from api.models import DetailTransaksi, Pencairan, Transaksi
+from apps.reporting.money import sum_full_rupiah
 from apps.reporting.operational import OperationalSummary, operational_summary
 from shared_kernel.kalkulasi import bulatkan_rupiah
 
@@ -66,22 +67,23 @@ def _fill_summary_export_sheet(ws: Worksheet, queryset: QuerySet[Transaksi]) -> 
     rows = (
         DetailTransaksi.objects.filter(transaksi__in=queryset)
         .values("kategori_snapshot", "nama_sampah_snapshot", "harga_snapshot")
-        .annotate(total_kg=Sum("berat"))
+        .annotate(total_kg=Sum("berat"), total_nilai=sum_full_rupiah("subtotal"))
         .order_by("kategori_snapshot", "nama_sampah_snapshot")
     )
-    current_row = 2
+    grand_total = Decimal(0)
     for row in rows:
+        total = bulatkan_rupiah(row["total_nilai"])
+        grand_total += total
         ws.append(
             [
                 _excel_text(row["kategori_snapshot"]),
                 _excel_text(row["nama_sampah_snapshot"]),
-                float(row["harga_snapshot"]),
-                float(row["total_kg"]),
-                f"=C{current_row}*D{current_row}",
+                row["harga_snapshot"],
+                row["total_kg"],
+                total,
             ]
         )
-        current_row += 1
-    ws.append(["", "", "", "TOTAL", f"=SUM(E2:E{current_row - 1})" if current_row > 2 else 0])
+    ws.append(["", "", "", "TOTAL", grand_total])
     for column in ["A", "B", "C", "D", "E"]:
         ws.column_dimensions[column].width = 22
 

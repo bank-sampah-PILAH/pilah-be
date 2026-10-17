@@ -16,7 +16,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from api.models import BankSampah, DraftPencairan, DraftPencairanItem, Pencairan, Transaksi, User
-from apps.ledger.activity import activity_query, serialize_activity_page
+from apps.ledger.activity import activity_rows, serialize_activity_page
 from apps.ledger.schema import ACTIVITY_PARAMETERS, ACTIVITY_RESPONSE, ActivityPagination
 from apps.ledger.serializers import (
     DraftBatchSerializer,
@@ -111,8 +111,8 @@ class ActivityHistoryView(GenericAPIView[Any]):
     def get(self, request: Request) -> Response:
         bank = current_bank(request)
         try:
-            rows = activity_query(bank, request)
             deposits, payouts = operational_queries(bank, request)
+            rows = activity_rows(deposits, payouts, request.query_params.get("tipe", "semua"))
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         page = self.paginate_queryset(rows)

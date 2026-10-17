@@ -66,6 +66,13 @@ def activity_query(
 ) -> QuerySet[Any]:
     deposits, payouts = activity_sources(bank, request, member)
     kind = request.GET.get("tipe", "semua")
+    return activity_rows(deposits, payouts, kind)
+
+
+def activity_rows(
+    deposits: QuerySet[Transaksi], payouts: QuerySet[Pencairan], kind: str
+) -> QuerySet[Any]:
+    """Build feed rows from already authorized and filtered ledger sources."""
     fields = ("id", "tanggal", "created_at", "tipe_aktivitas")
     deposit_rows = (
         deposits.order_by()

@@ -72,7 +72,7 @@ class ReviewRegressionTests(OperationalReportFixture):
         with patch.object(
             TransactionFilterService, "apply_period", wraps=TransactionFilterService.apply_period
         ) as apply_period:
-            response = self.client.get(self.feed_url, {**self.params, "page_size": 1})
+            response = self.client.get(self.feed_url, {**self.params, "page_size": "1"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["count"], 3)
         self.assertEqual(response.data["summary"]["jumlah_transaksi"], 3)

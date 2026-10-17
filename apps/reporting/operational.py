@@ -2,12 +2,12 @@
 
 from typing import TypedDict
 
-from django.db.models import QuerySet, Sum
+from django.db.models import Count, QuerySet, Sum
 from django.http import HttpRequest
 
 from api.models import BankSampah, DetailTransaksi, Pencairan, Transaksi
 from apps.ledger.api import activity_sources
-from shared_kernel.kalkulasi import bulatkan_rupiah
+from apps.reporting.money import sum_full_rupiah
 
 
 class OperationalSummary(TypedDict):
@@ -27,20 +27,17 @@ def operational_queries(
 def operational_summary(
     deposits: QuerySet[Transaksi], payouts: QuerySet[Pencairan]
 ) -> OperationalSummary:
-    # Per-event truncation preserves legacy full-Rupiah display rules.
-    total_setoran = sum(
-        int(bulatkan_rupiah(value))
-        for value in deposits.values_list("total_nilai", flat=True).iterator()
-    )
-    total_pencairan = sum(
-        int(bulatkan_rupiah(value))
-        for value in payouts.values_list("nominal", flat=True).iterator()
-    )
+    # Each ledger returns one row regardless of history size. Round per event,
+    # not after summing, to preserve legacy full-Rupiah display rules.
+    deposit_totals = deposits.aggregate(count=Count("id"), total=sum_full_rupiah("total_nilai"))
+    payout_totals = payouts.aggregate(count=Count("id"), total=sum_full_rupiah("nominal"))
+    total_setoran = int(deposit_totals["total"] or 0)
+    total_pencairan = int(payout_totals["total"] or 0)
     weight = DetailTransaksi.objects.filter(transaksi__in=deposits).aggregate(total=Sum("berat"))[
         "total"
     ]
     return {
-        "jumlah_transaksi": deposits.count() + payouts.count(),
+        "jumlah_transaksi": deposit_totals["count"] + payout_totals["count"],
         "total_berat": f"{weight or 0:.3f}",
         "total_setoran": total_setoran,
         "total_pencairan": total_pencairan,
