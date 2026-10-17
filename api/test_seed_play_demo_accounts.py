@@ -20,6 +20,7 @@ from api.models import (
     JadwalKegiatan,
     JenisSampah,
     Nasabah,
+    Pencairan,
     Saldo,
     Transaksi,
     User,
@@ -370,6 +371,8 @@ class SeedPlayDemoAccountsTests(TestCase):
             ],
         )
         self.assertEqual(Saldo.objects.get(nasabah=member).total_saldo, Decimal("21250"))
+        self.assertEqual(Nasabah.objects.filter(bank_sampah=bank).count(), 1)
+        self.assertFalse(Pencairan.objects.filter(nasabah=member).exists())
 
         schedules = list(JadwalKegiatan.objects.filter(bank_sampah=bank).order_by("mulai_pada"))
         self.assertEqual(len(schedules), 2)
@@ -404,6 +407,7 @@ class SeedPlayDemoAccountsTests(TestCase):
         review_owner = User.objects.get(email="pilah.review-owner@example.test")
         self.assertEqual(review_bank.status, BankSampah.Status.PENDING)
         self.assertFalse(review_bank.is_active)
+        self.assertEqual(str(review_owner.pk), "00000000-0000-4000-8000-000000000365")
         self.assertEqual(review_owner.bank_sampah, review_bank)
         self.assertTrue(review_owner.is_primary_pengelola)
         self.assertIsNone(review_owner.google_id)
