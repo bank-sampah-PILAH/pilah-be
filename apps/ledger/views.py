@@ -112,7 +112,7 @@ class ActivityHistoryView(GenericAPIView[Any]):
         bank = current_bank(request)
         try:
             deposits, payouts = operational_queries(bank, request)
-            rows = activity_rows(deposits, payouts, request.query_params.get("tipe", "semua"))
+            rows = activity_rows(deposits, payouts)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         page = self.paginate_queryset(rows)

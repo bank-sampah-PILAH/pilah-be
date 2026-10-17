@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from rest_framework.test import APITransactionTestCase
 
 from api.models import BankSampah, Nasabah, Pencairan, Transaksi, User
+from apps.ledger.services import TransactionFilterService
 
 
 class ActivityHistoryTests(APITransactionTestCase):
@@ -68,6 +69,16 @@ class ActivityHistoryTests(APITransactionTestCase):
         second = self.get(page_size=1, page=2)
         self.assertIsNone(second.data["next"])
         self.assertEqual(second.data["results"][0]["data"]["id"], str(self.setoran.id))
+
+    def test_feed_filters_each_ledger_once_for_rows_and_summary(self) -> None:
+        with patch.object(
+            TransactionFilterService, "apply_period", wraps=TransactionFilterService.apply_period
+        ) as apply_period:
+            response = self.get(page_size=1)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 2)
+        self.assertEqual(response.data["summary"]["jumlah_transaksi"], 2)
+        self.assertEqual(apply_period.call_count, 2)
 
     def test_type_and_custom_range_filter_both_sources(self) -> None:
         self.deposit(self.member, "2026-09-01T12:00:00+07:00")

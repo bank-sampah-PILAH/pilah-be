@@ -2,14 +2,12 @@
 
 from decimal import Decimal
 from io import BytesIO
-from unittest.mock import patch
 
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from openpyxl import load_workbook
 
 from api.models import DetailTransaksi, Pencairan, Transaksi
-from apps.ledger.services import TransactionFilterService
 from apps.reporting.operational import operational_summary
 from apps.reporting.test_operational_report import OperationalReportFixture
 
@@ -67,13 +65,3 @@ class ReviewRegressionTests(OperationalReportFixture):
         self.assertEqual(summary["total_berat"], "3.500")
         self.assertEqual(len(queries), 3)
         self.assertTrue(all("SUM(" in row["sql"].upper() for row in queries))
-
-    def test_feed_filters_each_ledger_once_for_rows_and_summary(self) -> None:
-        with patch.object(
-            TransactionFilterService, "apply_period", wraps=TransactionFilterService.apply_period
-        ) as apply_period:
-            response = self.client.get(self.feed_url, {**self.params, "page_size": "1"})
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["count"], 3)
-        self.assertEqual(response.data["summary"]["jumlah_transaksi"], 3)
-        self.assertEqual(apply_period.call_count, 2)

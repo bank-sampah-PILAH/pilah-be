@@ -65,13 +65,10 @@ def activity_query(
     bank: BankSampah, request: HttpRequest, member: Nasabah | None = None
 ) -> QuerySet[Any]:
     deposits, payouts = activity_sources(bank, request, member)
-    kind = request.GET.get("tipe", "semua")
-    return activity_rows(deposits, payouts, kind)
+    return activity_rows(deposits, payouts)
 
 
-def activity_rows(
-    deposits: QuerySet[Transaksi], payouts: QuerySet[Pencairan], kind: str
-) -> QuerySet[Any]:
+def activity_rows(deposits: QuerySet[Transaksi], payouts: QuerySet[Pencairan]) -> QuerySet[Any]:
     """Build feed rows from already authorized and filtered ledger sources."""
     fields = ("id", "tanggal", "created_at", "tipe_aktivitas")
     deposit_rows = (
@@ -84,12 +81,9 @@ def activity_rows(
         .annotate(tipe_aktivitas=Value("pencairan", output_field=CharField()))
         .values(*fields)
     )
-    if kind == "setoran":
-        rows = deposit_rows
-    elif kind == "pencairan":
-        rows = payout_rows
-    else:
-        rows = deposit_rows.union(payout_rows, all=True)
+    # activity_sources already empties the excluded ledger for type filters.
+    # Reuse that decision instead of parsing or branching on the type again.
+    rows = deposit_rows.union(payout_rows, all=True)
     return cast(QuerySet[Any], rows.order_by("-tanggal", "-created_at", "-tipe_aktivitas", "-id"))
 
 
