@@ -294,6 +294,31 @@ missing/invalid allowlists fail deployment. It never seeds banks or demo data.
 Manual Cloud Run deployment uses the same bootstrap. Neither cloud provisioning
 nor OAuth Console configuration is performed by this code delivery itself.
 
+## Production Google demo accounts
+
+The explicit `seed_play_demo_accounts` command provisions PILAH roles for the
+four demo email addresses. It does not create Google mailboxes or store Google
+IDs, passwords, or tokens. PILAH must control each mailbox so its owner can sign
+in with Google's verified login.
+
+Before running the command, add `pilah.superadmin@gmail.com` to the production
+`PILAH_SUPERADMIN_EMAILS` allowlist. From an authorized production task using
+the deployed application image and production database, preview and then
+explicitly apply the seed:
+
+```bash
+python manage.py seed_play_demo_accounts --dry-run
+python manage.py seed_play_demo_accounts --confirm-production
+```
+
+The command fails outside production, when Django debug mode is enabled, when
+the Superadmin email is not allowlisted, or when an existing account or bank
+conflicts with the demo identities. It creates one active synthetic bank, a
+primary Pengelola, a non-primary Pengurus, an approved Nasabah membership with a
+zero balance, and the allowlisted Superadmin. Re-running it preserves existing
+Google identities and balances. It is not part of deployment or application
+startup; do not point a local database client at production to run it.
+
 Bank Sampah organizations can be `mandiri`, `induk`, or `unit`. A unit must
 belong to an induk organization. A Nasabah user can have one membership per
 bank and can belong to multiple banks.
