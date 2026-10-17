@@ -185,9 +185,9 @@ class Command(BaseCommand):
     @staticmethod
     def _existing_review_owner() -> User | None:
         matches = list(
-            User.objects.select_for_update()
-            .filter(Q(pk=REVIEW_OWNER_ID) | Q(email__iexact=REVIEW_OWNER_EMAIL))
-            .distinct()[:2]
+            User.objects.select_for_update().filter(
+                Q(pk=REVIEW_OWNER_ID) | Q(email__iexact=REVIEW_OWNER_EMAIL)
+            )[:2]
         )
         if len(matches) > 1:
             raise CommandError("Production review owner identity conflicts with existing data")
