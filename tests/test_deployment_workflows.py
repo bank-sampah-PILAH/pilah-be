@@ -28,7 +28,7 @@ class DeploymentWorkflowTests(SimpleTestCase):
         self.assertNotIn("if", seed)
         self.assertFalse((ROOT / ".github/workflows/seed-staging-data.yml").exists())
 
-    def test_production_validates_before_deploy_and_bootstraps_after_success(self) -> None:
+    def test_production_validates_before_deploy_and_seeds_after_success(self) -> None:
         workflow = yaml.safe_load((ROOT / ".github/workflows/deploy-cloud-run.yml").read_text())
         # PyYAML's YAML 1.1 parser treats the Actions 'on' key as boolean True.
         self.assertEqual(workflow[True]["push"]["branches"], ["main"])
@@ -39,7 +39,8 @@ class DeploymentWorkflowTests(SimpleTestCase):
             names.index("Authenticate to Google Cloud"),
         )
         self.assertLess(
-            names.index("Deploy Cloud Run"), names.index("Bootstrap production Superadmins")
+            names.index("Deploy Cloud Run"),
+            names.index("Bootstrap Superadmins and seed production demo accounts"),
         )
         deploy = steps[names.index("Deploy Cloud Run")]["run"]
         self.assertIn("CORS_ALLOW_ALL_ORIGINS=false", deploy)
@@ -47,7 +48,12 @@ class DeploymentWorkflowTests(SimpleTestCase):
         self.assertIn("CSRF_TRUSTED_ORIGINS=${PILAH_WEB_ORIGIN}", deploy)
         self.assertIn("PILAH_ENVIRONMENT=production", deploy)
         self.assertIn("PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false", deploy)
-        bootstrap = steps[names.index("Bootstrap production Superadmins")]
+        self.assertIn("PILAH_REVIEW_SUPERADMIN_EMAILS=${PILAH_REVIEW_SUPERADMIN_EMAILS}", deploy)
+        self.assertEqual(
+            workflow["env"]["PILAH_REVIEW_SUPERADMIN_EMAILS"],
+            "${{ vars.PILAH_REVIEW_SUPERADMIN_EMAILS }}",
+        )
+        bootstrap = steps[names.index("Bootstrap Superadmins and seed production demo accounts")]
         self.assertEqual(bootstrap["run"], "python3 scripts/bootstrap_cloud_run.py")
         self.assertNotIn("continue-on-error", bootstrap)
         self.assertNotIn("if", bootstrap)
@@ -78,6 +84,25 @@ class DeploymentWorkflowTests(SimpleTestCase):
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("PILAH_SUPERADMIN_EMAILS", result.stderr)
                     self.assertFalse(called.exists())
+            result = subprocess.run(
+                ["bash", str(ROOT / "scripts/deploy-cloud-run.sh")],
+                env={
+                    **os.environ,
+                    "PATH": f"{directory}:{os.environ['PATH']}",
+                    "DB_PASSWORD": "placeholder",
+                    "GCS_BUCKET": "placeholder",
+                    "DJANGO_SECRET_KEY": "placeholder",
+                    "PILAH_WEB_ORIGIN": "https://web.run.app",
+                    "PILAH_SUPERADMIN_EMAILS": "admin@example.com",
+                    "PILAH_REVIEW_SUPERADMIN_EMAILS": " Admin@Example.com ",
+                },
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("PILAH_REVIEW_SUPERADMIN_EMAILS", result.stderr)
+            self.assertFalse(called.exists())
 
     def test_manual_deploy_rejects_invalid_origin_before_any_cloud_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
