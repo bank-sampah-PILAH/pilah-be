@@ -5,10 +5,9 @@ from unittest.mock import patch
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
-from django.test import override_settings
 
 from api.management.commands.seed_play_demo_accounts import (
     DEMO_NASABAH_EMAIL,
@@ -127,7 +126,7 @@ class SeedPlayDemoAccountsTests(TestCase):
         membership = Nasabah.objects.get(bank_sampah=bank, user=nasabah_user)
         self.assertTrue(membership.is_active)
         self.assertEqual(membership.status, Nasabah.Status.APPROVED)
-        self.assertEqual(Saldo.objects.get(nasabah=membership).total_saldo, Decimal("21250"))
+        self.assertEqual(Saldo.objects.get(nasabah=membership).total_saldo, Decimal(21250))
         self.assertEqual(BankSampah.objects.count(), 3)
         self.assertEqual(User.objects.count(), 6)
         self.assertEqual(
@@ -155,7 +154,7 @@ class SeedPlayDemoAccountsTests(TestCase):
             bank_sampah=other_bank,
             nomor="OTHER-01",
             nama_sampah="Unrelated Type",
-            harga_per_kg=Decimal("123"),
+            harga_per_kg=Decimal(123),
         )
         bank_before = BankSampah.objects.filter(pk=other_bank.pk).values().get()
         type_before = JenisSampah.objects.filter(pk=other_type.pk).values().get()
@@ -267,7 +266,7 @@ class SeedPlayDemoAccountsTests(TestCase):
 
         membership.refresh_from_db()
         self.assertEqual(membership.user_id, User.objects.get(email=DEMO_NASABAH_EMAIL).pk)
-        self.assertEqual(Saldo.objects.get(nasabah=membership).total_saldo, Decimal("21250"))
+        self.assertEqual(Saldo.objects.get(nasabah=membership).total_saldo, Decimal(21250))
 
     def test_write_failure_rolls_back_the_whole_seed(self) -> None:
         with patch.object(Saldo.objects, "get_or_create", side_effect=RuntimeError("fail")):
@@ -338,9 +337,7 @@ class SeedPlayDemoAccountsTests(TestCase):
         )
 
         transactions = list(
-            Transaksi.objects.filter(nasabah=member)
-            .order_by("tanggal")
-            .prefetch_related("items")
+            Transaksi.objects.filter(nasabah=member).order_by("tanggal").prefetch_related("items")
         )
         self.assertEqual(
             [row.total_nilai for row in transactions],
@@ -363,14 +360,22 @@ class SeedPlayDemoAccountsTests(TestCase):
             snapshots,
             [
                 [
-                    ("Plastik PET", "plastik", Decimal("3500.00"), Decimal("2.500"), Decimal("8750")),
-                    ("Kardus", "kertas", Decimal("2000.00"), Decimal("1.000"), Decimal("2000")),
+                    ("Plastik PET", "plastik", Decimal("3500.00"), Decimal("2.500"), Decimal(8750)),
+                    ("Kardus", "kertas", Decimal("2000.00"), Decimal("1.000"), Decimal(2000)),
                 ],
-                [("Botol Kaca", "kaca", Decimal("1000.00"), Decimal("3.000"), Decimal("3000"))],
-                [("Kaleng Aluminium", "logam", Decimal("5000.00"), Decimal("1.500"), Decimal("7500"))],
+                [("Botol Kaca", "kaca", Decimal("1000.00"), Decimal("3.000"), Decimal(3000))],
+                [
+                    (
+                        "Kaleng Aluminium",
+                        "logam",
+                        Decimal("5000.00"),
+                        Decimal("1.500"),
+                        Decimal(7500),
+                    )
+                ],
             ],
         )
-        self.assertEqual(Saldo.objects.get(nasabah=member).total_saldo, Decimal("21250"))
+        self.assertEqual(Saldo.objects.get(nasabah=member).total_saldo, Decimal(21250))
         self.assertEqual(Nasabah.objects.filter(bank_sampah=bank).count(), 1)
         self.assertFalse(Pencairan.objects.filter(nasabah=member).exists())
 
