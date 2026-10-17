@@ -10,10 +10,10 @@ from django.utils import timezone
 
 from api.models import BankSampah, Nasabah, Saldo, Transaksi, User
 from apps.waste_catalog.api import buat_jenis_sampah
-from tests.regression.helpers import RegressionTestCase, gateway_env, twilio_env
+from tests.regression.helpers import RegressionTransactionTestCase, gateway_env, twilio_env
 
 
-class TransaksiRegressionTests(RegressionTestCase):
+class TransaksiRegressionTests(RegressionTransactionTestCase):
     def test_create_positive_contract(self) -> None:
         nasabah = self.make_nasabah()
         jenis_id = self.make_jenis()
@@ -59,10 +59,9 @@ class TransaksiRegressionTests(RegressionTestCase):
                 response = self.client.post("/api/v1/transaksi", payload, format="json")
                 self.assertGreaterEqual(response.status_code, 400)
 
-    def test_unknown_periode_is_ignored(self) -> None:
-        # Unknown periode values fall through unfiltered (200), only a
-        # dateless custom range is rejected.
-        self.assertEqual(self.client.get("/api/v1/transaksi?periode=bogus").status_code, 200)
+    def test_unknown_periode_is_rejected(self) -> None:
+        # Unknown values must not silently expose all-time history.
+        self.assertEqual(self.client.get("/api/v1/transaksi?periode=bogus").status_code, 422)
         self.assertGreaterEqual(
             self.client.get("/api/v1/transaksi?periode=custom").status_code, 400
         )

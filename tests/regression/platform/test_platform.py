@@ -6,7 +6,7 @@ from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.signing import TimestampSigner
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework import serializers
 
 from api.models import BankSampah, User
@@ -20,10 +20,17 @@ class PlatformRouteTests(RegressionTestCase):
         self.client.credentials()
         self.assertEqual(self.client.get("/healthz").status_code, 200)
 
-    def test_schema_and_docs_reachable(self) -> None:
+    @override_settings(DEBUG=True)
+    def test_schema_and_docs_reachable_in_debug(self) -> None:
         self.client.credentials()
         self.assertEqual(self.client.get("/api/schema/").status_code, 200)
         self.assertEqual(self.client.get("/api/docs/").status_code, 200)
+
+    @override_settings(DEBUG=False)
+    def test_schema_and_docs_hidden_outside_debug(self) -> None:
+        self.client.credentials()
+        self.assertEqual(self.client.get("/api/schema/").status_code, 404)
+        self.assertEqual(self.client.get("/api/docs/").status_code, 404)
 
     def test_activity_media_bad_and_missing_tokens_404(self) -> None:
         self.client.credentials()
