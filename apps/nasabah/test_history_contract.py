@@ -6,7 +6,8 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from api.models import BankSampah, DetailTransaksi, JenisSampah, Nasabah, Transaksi, User
+from api.models import BankSampah, DetailTransaksi, Nasabah, Transaksi, User
+from apps.waste_catalog.api import buat_jenis_sampah
 
 
 class NasabahHistoryContractTests(APITestCase):
@@ -93,7 +94,7 @@ class NasabahHistoryContractTests(APITestCase):
             total_nilai="5000.00",
             catatan="Setoran rutin",
         )
-        kind = JenisSampah.objects.create(
+        kind = buat_jenis_sampah(
             bank_sampah=self.bank,
             nomor="PLS-001",
             nama_sampah="Plastik PET",
@@ -115,7 +116,7 @@ class NasabahHistoryContractTests(APITestCase):
 
         transaction.total_nilai = "7500.00"
         transaction.save(update_fields=["total_nilai"])
-        second_kind = JenisSampah.objects.create(
+        second_kind = buat_jenis_sampah(
             bank_sampah=self.bank,
             nomor="PLS-002",
             nama_sampah="Karton",
