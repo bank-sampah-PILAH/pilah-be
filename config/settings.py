@@ -252,6 +252,15 @@ PILAH_SUPERADMIN_EMAILS = tuple(
     for email in os.getenv("PILAH_SUPERADMIN_EMAILS", "").split(",")
     if email.strip()
 )
+PILAH_REVIEW_SUPERADMIN_EMAILS = tuple(
+    email.strip().lower()
+    for email in os.getenv("PILAH_REVIEW_SUPERADMIN_EMAILS", "").split(",")
+    if email.strip()
+)
+if set(PILAH_SUPERADMIN_EMAILS).intersection(PILAH_REVIEW_SUPERADMIN_EMAILS):
+    raise ImproperlyConfigured(
+        "PILAH_REVIEW_SUPERADMIN_EMAILS must not overlap PILAH_SUPERADMIN_EMAILS"
+    )
 if not DEBUG and not PILAH_SUPERADMIN_EMAILS:
     logging.getLogger(__name__).warning(
         "PILAH_SUPERADMIN_EMAILS is empty; all Superadmin logins will be rejected"
