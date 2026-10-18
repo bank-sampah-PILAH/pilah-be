@@ -13,8 +13,8 @@ from rest_framework.test import APIClient
 from api.management.commands.seed_play_demo_accounts import (
     ACCOUNTS,
     DEMO_BANK_ID,
-    DEMO_NASABAH_ID,
     DEMO_NASABAH_EMAIL,
+    DEMO_NASABAH_ID,
     DEMO_NASABAH_NUMBER,
     DEMO_PENGELOLA_EMAIL,
     DETAIL_IDS,
