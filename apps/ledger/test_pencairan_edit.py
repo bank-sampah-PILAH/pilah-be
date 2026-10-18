@@ -22,6 +22,7 @@ from api.models import (
     Transaksi,
     User,
 )
+from apps.ledger.pencairan_testing import catat_pencairan
 from apps.ledger.services import BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI
 from apps.waste_catalog.api import buat_jenis_sampah
 
@@ -53,14 +54,16 @@ class PencairanEditTests(APITestCase):
         refresh = RefreshToken.for_user(self.user)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
-    def _catat(self, nominal: str = "200000", **extra: Any) -> dict[str, Any]:
-        response = self.client.post(
-            "/api/v1/pencairan",
-            {"nasabah_id": str(self.nasabah.id), "nominal": nominal, "metode": "tunai", **extra},
-            format="json",
+    def _catat(
+        self, nominal: str = "200000", *, tanggal: str | None = None, keterangan: str = ""
+    ) -> dict[str, Any]:
+        return catat_pencairan(
+            self.user,
+            self.nasabah,
+            nominal,
+            tanggal=parse_datetime(tanggal) if tanggal else None,
+            keterangan=keterangan,
         )
-        self.assertEqual(response.status_code, 201, response.data)
-        return dict(response.data)
 
     def _edit(self, pencairan_id: str, payload: dict[str, Any]) -> Response:
         return self.client.patch(f"/api/v1/pencairan/{pencairan_id}", payload, format="json")
