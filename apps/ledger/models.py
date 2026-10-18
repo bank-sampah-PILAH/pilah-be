@@ -81,6 +81,10 @@ class DetailTransaksi(models.Model):
     nama_sampah_snapshot = models.CharField(max_length=50)
     kategori_snapshot = models.CharField(max_length=20)
     harga_snapshot = models.DecimalField(max_digits=11, decimal_places=2)
+    # Satuan dibekukan bersama harganya (PIL-305). Mengubah satuan sebuah jenis
+    # tidak boleh menulis ulang struk lama, sama seperti harga pada BR-03.
+    # Default "kg" benar untuk baris lama: saat itu semua jenis memang per kg.
+    satuan_snapshot = models.CharField(max_length=20, default="kg")
     berat = models.DecimalField(max_digits=10, decimal_places=3)
     subtotal = models.DecimalField(max_digits=14, decimal_places=2)
 

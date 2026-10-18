@@ -104,6 +104,7 @@ class TransactionService:
                 nama_sampah_snapshot=jenis.nama_sampah,
                 kategori_snapshot=jenis.kategori,
                 harga_snapshot=harga,
+                satuan_snapshot=jenis.satuan,
                 berat=berat,
                 subtotal=subtotal,
             )
