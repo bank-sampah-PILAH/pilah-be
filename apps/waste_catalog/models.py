@@ -13,6 +13,13 @@ class JenisSampah(models.Model):
         ORGANIK = "organik", "Organik"
         ANORGANIK = "anorganik", "Anorganik"
 
+    class Satuan(models.TextChoices):
+        KG = "kg", "Kilogram"
+        PCS = "pcs", "Pcs"
+        LITER = "liter", "Liter"
+        KARUNG = "karung", "Karung"
+        IKAT = "ikat", "Ikat"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     bank_sampah = models.ForeignKey(
         "api.BankSampah", on_delete=models.CASCADE, related_name="jenis_sampah"
@@ -21,6 +28,9 @@ class JenisSampah(models.Model):
     nama_sampah = models.CharField(max_length=50)
     kategori = models.CharField(max_length=20, choices=Kategori.choices, default=Kategori.PLASTIK)
     deskripsi = models.TextField(blank=True)
+    # Satuan yang dipakai menimbang jenis ini (PIL-305). Default kg supaya baris
+    # lama, yang memang selalu per kg, terisi benar tanpa migrasi data.
+    satuan = models.CharField(max_length=20, choices=Satuan.choices, default=Satuan.KG)
     # Harga tidak disimpan di sini: satu-satunya sumber harga adalah
     # HargaSampah, dibaca lewat apps.waste_catalog.api.harga_berlaku.
     is_active = models.BooleanField(default=True)

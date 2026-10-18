@@ -14,7 +14,11 @@ SATUAN_HARGA = "kg"
 
 
 class JenisSampahSerializer(serializers.ModelSerializer[Model]):
-    satuan = serializers.SerializerMethodField()
+    # Dicocokkan dengan daftar yang dikenal, bukan teks bebas: nilai di luar
+    # daftar ditolak di server (OWASP A03), sama seperti FilterJenisSampahSerializer.
+    satuan = serializers.ChoiceField(
+        choices=JenisSampah.Satuan.choices, default=JenisSampah.Satuan.KG
+    )
     kode = serializers.CharField(source="nomor", required=True, max_length=20)
     # Bukan kolom model: harga masuk sebagai versi pertama (create) atau versi
     # baru (PUT dari aplikasi lama), dan keluar sebagai harga yang berlaku.
@@ -35,7 +39,7 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
             "is_active",
             "updated_at",
         ]
-        read_only_fields = ["id", "satuan", "is_active", "updated_at"]
+        read_only_fields = ["id", "is_active", "updated_at"]
 
     def validate_kode(self, value: Any) -> Any:
         value = value.strip()
@@ -61,9 +65,6 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
         if self.instance is None and "harga_per_kg" not in attrs:
             raise serializers.ValidationError({"harga_per_kg": ["Harga wajib diisi"]})
         return attrs
-
-    def get_satuan(self, obj: Any) -> Any:
-        return SATUAN_HARGA
 
     def to_representation(self, instance: Any) -> Any:
         data = super().to_representation(instance)
