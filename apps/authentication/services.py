@@ -12,7 +12,11 @@ from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.models import BankSampah, Nasabah, NasabahApprovalLog, Saldo, User
-from shared_kernel.permissions import is_app_superadmin_allowlisted, superadmin_allowlist
+from shared_kernel.permissions import (
+    email_verification_exempt_allowlist,
+    is_app_superadmin_allowlisted,
+    superadmin_allowlist,
+)
 
 REGISTRATION_TOKEN_MAX_AGE = 600
 REGISTRATION_TOKEN_SALT = "pilah-google-registration"
@@ -104,6 +108,14 @@ class AuthService:
             "Email Superadmin tidak terdaftar pada whitelist",
             code="superadmin_not_allowlisted",
             status_code=403,
+        )
+
+    @staticmethod
+    def _invalid_credentials() -> AuthServiceError:
+        return AuthServiceError(
+            "Email atau kata sandi tidak valid",
+            code="invalid_credentials",
+            status_code=401,
         )
 
     @staticmethod
@@ -235,6 +247,27 @@ class AuthService:
         AuthService._sync_nasabah_prefill(user)
 
         return AuthService._session_response(user, is_new_user=is_new_user)
+
+    @staticmethod
+    def login_with_password(email: str, password: str) -> dict[str, Any]:
+        email = email.strip().lower()
+        try:
+            user = AuthService._user_for_email(email)
+        except AuthServiceError as exc:
+            raise AuthService._invalid_credentials() from exc
+
+        if user is None:
+            User().set_password(password)
+            raise AuthService._invalid_credentials()
+        if not user.check_password(password) or not user.is_active:
+            raise AuthService._invalid_credentials()
+        if not user.email_verified and email not in email_verification_exempt_allowlist():
+            raise AuthService._invalid_credentials()
+        try:
+            AuthService._enforce_superadmin_allowlist(user, email)
+        except AuthServiceError as exc:
+            raise AuthService._invalid_credentials() from exc
+        return AuthService._session_response(user, is_new_user=False)
 
     @staticmethod
     def _session_response(user: User, *, is_new_user: bool) -> dict[str, Any]:

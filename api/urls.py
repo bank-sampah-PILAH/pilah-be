@@ -11,6 +11,7 @@ from apps.authentication.views import (
     GoogleOAuthStartView,
     GoogleRegistrationView,
     LogoutView,
+    PasswordLoginView,
     RefreshTokenView,
 )
 from apps.bank_sampah.views import (
@@ -80,6 +81,7 @@ urlpatterns = [
     ),
     path("nasabah/me/profil", NasabahProfileView.as_view(), name="nasabah-own-profile"),
     path("auth/google", GoogleAuthView.as_view(), name="auth-google"),
+    path("auth/login", PasswordLoginView.as_view(), name="auth-login"),
     path("auth/google/register", GoogleRegistrationView.as_view(), name="auth-google-register"),
     path("auth/google/start", GoogleOAuthStartView.as_view(), name="auth-google-start"),
     path("auth/google/callback", GoogleOAuthCallbackView.as_view(), name="auth-google-callback"),

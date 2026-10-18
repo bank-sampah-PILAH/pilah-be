@@ -18,6 +18,7 @@ from apps.authentication.serializers import (
     GoogleAuthSerializer,
     GoogleRegistrationSerializer,
     LogoutSerializer,
+    PasswordLoginSerializer,
     RefreshTokenSerializer,
     UserProfileSerializer,
 )
@@ -49,6 +50,23 @@ class GoogleAuthView(APIView):
             return Response({"error": str(exc), "code": exc.code}, status=exc.status_code)
         except Exception:
             return Response({"error": "ID Token invalid atau expired"}, status=401)
+
+
+class PasswordLoginView(APIView):
+    permission_classes = [AllowAny]
+    serializer_class = PasswordLoginSerializer
+
+    def post(self, request: Request) -> Response:
+        serializer = PasswordLoginSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({"errors": serializer.errors}, status=422)
+        try:
+            payload = AuthService.login_with_password(
+                serializer.validated_data["email"], serializer.validated_data["password"]
+            )
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
+        return Response(payload)
 
 
 class GoogleOAuthStartView(APIView):
