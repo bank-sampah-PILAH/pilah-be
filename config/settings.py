@@ -128,6 +128,16 @@ DATABASES = {
     }
 }
 
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    },
+    "auth_rate_limit": {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "auth_rate_limit_cache",
+    },
+}
+
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
@@ -205,7 +215,10 @@ REST_FRAMEWORK = {
     # Scoped rates: keys are the throttle scope of the views declaring one.
     # statement_pdf = the riwayat statement render (CPU-heavy; see
     # apps.nasabah.home.NasabahHistoryExportPdfView).
-    "DEFAULT_THROTTLE_RATES": {"statement_pdf": "10/min"},
+    # Cloud Run appends the client and two proxy addresses to XFF; this count
+    # makes DRF select the client while ignoring any caller-supplied prefix.
+    "NUM_PROXIES": 3,
+    "DEFAULT_THROTTLE_RATES": {"statement_pdf": "10/min", "password_login": "5/min"},
 }
 
 SPECTACULAR_SETTINGS = {
@@ -257,6 +270,12 @@ PILAH_REVIEW_SUPERADMIN_EMAILS = tuple(
     for email in os.getenv("PILAH_REVIEW_SUPERADMIN_EMAILS", "").split(",")
     if email.strip()
 )
+PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS = tuple(
+    email.strip().lower()
+    for email in os.getenv("PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS", "").split(",")
+    if email.strip()
+)
+PILAH_REVIEW_ACCOUNT_PASSWORD = os.getenv("PILAH_REVIEW_ACCOUNT_PASSWORD", "")
 if set(PILAH_SUPERADMIN_EMAILS).intersection(PILAH_REVIEW_SUPERADMIN_EMAILS):
     raise ImproperlyConfigured(
         "PILAH_REVIEW_SUPERADMIN_EMAILS must not overlap PILAH_SUPERADMIN_EMAILS"

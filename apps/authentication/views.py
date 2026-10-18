@@ -3,12 +3,14 @@ from typing import Any
 
 import requests
 from django.conf import settings
+from django.core.cache import caches
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.http import HttpResponse, HttpResponseRedirect
 from django.utils.http import urlencode
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -18,6 +20,7 @@ from apps.authentication.serializers import (
     GoogleAuthSerializer,
     GoogleRegistrationSerializer,
     LogoutSerializer,
+    PasswordLoginSerializer,
     RefreshTokenSerializer,
     UserProfileSerializer,
 )
@@ -49,6 +52,30 @@ class GoogleAuthView(APIView):
             return Response({"error": str(exc), "code": exc.code}, status=exc.status_code)
         except Exception:
             return Response({"error": "ID Token invalid atau expired"}, status=401)
+
+
+class PasswordLoginThrottle(ScopedRateThrottle):
+    # Login guessing limits must be shared across autoscaled Cloud Run instances.
+    cache = caches["auth_rate_limit"]
+
+
+class PasswordLoginView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [PasswordLoginThrottle]
+    throttle_scope = "password_login"
+    serializer_class = PasswordLoginSerializer
+
+    def post(self, request: Request) -> Response:
+        serializer = PasswordLoginSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({"errors": serializer.errors}, status=422)
+        try:
+            payload = AuthService.login_with_password(
+                serializer.validated_data["email"], serializer.validated_data["password"]
+            )
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
+        return Response(payload)
 
 
 class GoogleOAuthStartView(APIView):

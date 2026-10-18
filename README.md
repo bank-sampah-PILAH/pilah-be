@@ -160,7 +160,8 @@ PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false
 PILAH_PUBLIC_APP_URL=https://pilah.example.com
 PILAH_WEB_ORIGIN=https://web.example.com
 PILAH_SUPERADMIN_EMAILS=admin@example.com,another-admin@example.com
-PILAH_REVIEW_SUPERADMIN_EMAILS=pilah.superadmin@gmail.com
+PILAH_REVIEW_SUPERADMIN_EMAILS=pilah.superadmin@pilah.com
+PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS=pilah.pengelola@pilah.com,pilah.pengurus@pilah.com,pilah.nasabah@pilah.com,pilah.superadmin@pilah.com
 ```
 
 `CORS_ALLOWED_ORIGINS` is a comma-separated list of browser origins (scheme,
@@ -171,8 +172,11 @@ host, and optional port; no path). For web Google login, set backend
 Set `PILAH_SUPERADMIN_EMAILS` on Fly and as a GitHub repository variable for
 Cloud Run. It is the authoritative comma-separated list of Superadmin Google
 accounts. The deploy workflow stops before deployment if the repository
-variable is empty. Set `PILAH_REVIEW_SUPERADMIN_EMAILS` as a separate GitHub
-repository variable to enable review-only accounts on production Cloud Run.
+variable is empty. Set `PILAH_REVIEW_SUPERADMIN_EMAILS` and
+`PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS` as separate GitHub repository
+variables. The first grants app-only Superadmin access; the second lists the
+password review accounts whose login does not require Google email verification.
+It does not grant Superadmin access.
 
 `PILAH_REVIEW_SUPERADMIN_EMAILS` grants app-only Superadmin access to the
 synthetic review approval flow. These users never receive Django staff or
@@ -304,25 +308,38 @@ Manual Cloud Run deployment uses the same bootstrap and seed. Neither cloud
 provisioning nor OAuth Console configuration is performed by this code delivery
 itself.
 
-## Production Google demo accounts
+## Production password review accounts
 
-The explicit `seed_play_demo_accounts` command provisions PILAH roles for these
-Google accounts:
+The `seed_play_demo_accounts` command provisions PILAH roles for these existing
+password-login identities:
 
-- Pengelola: `traymachi@gmail.com`
-- Pengurus: `pilah.pengurus@gmail.com`
-- Nasabah: `pilah.nasabah@gmail.com`
-- Review Superadmin: `pilah.superadmin@gmail.com`
+- Pengelola: `pilah.pengelola@pilah.com`
+- Pengurus: `pilah.pengurus@pilah.com`
+- Nasabah: `pilah.nasabah@pilah.com`
+- Review Superadmin: `pilah.superadmin@pilah.com`
 
-It does not create Google mailboxes or store Google IDs, passwords, or tokens.
-PILAH must control each mailbox so its owner can sign in with Google's verified
-login.
+These addresses are login identifiers; the seed does not create mailboxes or
+support signup, email delivery, or password reset. The four accounts use the
+same password from the Secret Manager secret `PILAH_REVIEW_ACCOUNT_PASSWORD`.
+Cloud Run receives it through a Secret Manager reference, and the seed stores
+only Django password hashes. Do not put the password in source control, GitHub
+variables, or deployment command arguments. Use your organization's secure
+credential-sharing process when providing review access.
 
-Before deployment, add `pilah.superadmin@gmail.com` to the production
-`PILAH_REVIEW_SUPERADMIN_EMAILS` setting and remove it from
-`PILAH_SUPERADMIN_EMAILS`. The review account must not overlap the global
-Superadmin list. Every production deployment previews the seed and then applies
-it using the deployed application image and production database:
+Before deployment, set the GitHub repository variable
+`PILAH_REVIEW_SUPERADMIN_EMAILS` to include
+`pilah.superadmin@pilah.com`, and remove it from `PILAH_SUPERADMIN_EMAILS`.
+Set `PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS` to all four addresses above.
+The review Superadmin must not overlap the global Superadmin list. The Cloud
+Run runtime service account needs `roles/secretmanager.secretAccessor` on the
+password secret. The production workflow validates the lists, deploys the
+service with the secret reference, then runs the seed's dry-run and apply steps
+using the deployed image and production database. The container entrypoint
+applies database migrations before the post-deploy seed job runs.
+
+The commands can also be used by an authorized production operator. The Secret
+Manager reference and its runtime service account access must be configured;
+the dry-run requires the secret to be available too:
 
 ```bash
 python manage.py seed_play_demo_accounts --dry-run
@@ -330,21 +347,29 @@ python manage.py seed_play_demo_accounts --confirm-production
 ```
 
 The command fails outside production, when Django debug mode is enabled, when
-the Superadmin email is not in the review-only list, or when a seeded identity
-conflicts with existing data. It creates one active synthetic bank with a
-primary Pengelola, a non-primary Pengurus, and one approved Nasabah; four active
-waste types; three historical setoran; two published schedules; and a separate
-synthetic pending bank owned by a non-login `.example.test` account. The fresh
-Nasabah balance is derived from the transaction ledger and is Rp21.250, with no
-payout history or extra Nasabah roster.
+the review Superadmin email is not in the review-only list, any review email is
+missing from the verification exemption list, the shared password is absent, or
+a seeded identity conflicts with existing data. An unambiguous identity owned
+by the previous seed is migrated in place: its user ID, role, bank relationship,
+membership, and synthetic history are preserved while the email and password
+are updated and the old Google subject binding is cleared. Unrelated or
+ambiguous rows make the command stop before writing.
 
-The command uses stable IDs and only upserts its own rows. Re-running it
-preserves Google identities, unrelated tenant data, and any approval decision
-on the synthetic review bank. It refreshes the two schedule dates to 7 and 14
-days from the run date, updates the seeded catalog and transaction snapshots,
-and recalculates saldo from all setoran and pencairan ledger rows. It runs only
-as a post-deployment Cloud Run Job, never during application startup; do not
-point a local database client at production to run it.
+The seed creates one active synthetic bank with a primary Pengelola, a
+non-primary Pengurus, and one approved Nasabah; four active waste types; three
+historical setoran; two published schedules; and a separate synthetic pending
+bank owned by a non-login `.example.test` account. The fresh Nasabah balance is
+derived from the transaction ledger and is Rp21.250, with no payout history or
+extra Nasabah roster. The review Superadmin remains app-only and synthetic-only,
+without Django staff or superuser access.
+
+The command uses stable IDs and only changes its seeded rows. Re-running it
+preserves unrelated tenant data and any approval decision on the synthetic
+review bank. It refreshes the two schedule dates to 7 and 14 days from the run
+date, updates the seeded catalog and transaction snapshots, and recalculates
+saldo from all setoran and pencairan ledger rows. It runs only as a
+post-deployment Cloud Run Job, never during application startup; do not point a
+local database client at production to run it.
 
 Bank Sampah organizations can be `mandiri`, `induk`, or `unit`. A unit must
 belong to an induk organization. A Nasabah user can have one membership per

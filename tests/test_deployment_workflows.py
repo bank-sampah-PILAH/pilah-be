@@ -35,7 +35,7 @@ class DeploymentWorkflowTests(SimpleTestCase):
         steps = workflow["jobs"]["deploy"]["steps"]
         names = [step.get("name", "") for step in steps]
         self.assertLess(
-            names.index("Validate production origin and Superadmin allowlist"),
+            names.index("Validate production origin and auth allowlists"),
             names.index("Authenticate to Google Cloud"),
         )
         self.assertLess(
@@ -58,6 +58,34 @@ class DeploymentWorkflowTests(SimpleTestCase):
         self.assertNotIn("continue-on-error", bootstrap)
         self.assertNotIn("if", bootstrap)
 
+    def test_review_seed_secret_and_email_exemptions_are_wired_to_cloud_run(self) -> None:
+        workflow = yaml.safe_load((ROOT / ".github/workflows/deploy-cloud-run.yml").read_text())
+        deploy = workflow["jobs"]["deploy"]["steps"]
+        deploy_command = deploy[
+            next(i for i, step in enumerate(deploy) if step.get("name") == "Deploy Cloud Run")
+        ]["run"]
+
+        self.assertEqual(
+            workflow["env"]["PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS"],
+            "${{ vars.PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS }}",
+        )
+        self.assertIn(
+            "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS=${PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS}",
+            deploy_command,
+        )
+        self.assertIn(
+            '--set-secrets "PILAH_REVIEW_ACCOUNT_PASSWORD=PILAH_REVIEW_ACCOUNT_PASSWORD:latest"',
+            deploy_command,
+        )
+        self.assertNotIn("PILAH_REVIEW_ACCOUNT_PASSWORD:", workflow["env"])
+
+        manual_script = (ROOT / "scripts/deploy-cloud-run.sh").read_text()
+        self.assertIn("PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS", manual_script)
+        self.assertIn(
+            '--set-secrets="PILAH_REVIEW_ACCOUNT_PASSWORD=PILAH_REVIEW_ACCOUNT_PASSWORD:latest"',
+            manual_script,
+        )
+
     def test_manual_deploy_rejects_invalid_allowlist_before_any_cloud_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fake_gcloud = Path(directory) / "gcloud"
@@ -76,6 +104,15 @@ class DeploymentWorkflowTests(SimpleTestCase):
                             "DJANGO_SECRET_KEY": "placeholder",
                             "PILAH_WEB_ORIGIN": "https://web.run.app",
                             "PILAH_SUPERADMIN_EMAILS": email,
+                            "PILAH_REVIEW_SUPERADMIN_EMAILS": "pilah.superadmin@pilah.com",
+                            "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS": ",".join(
+                                (
+                                    "pilah.pengelola@pilah.com",
+                                    "pilah.pengurus@pilah.com",
+                                    "pilah.nasabah@pilah.com",
+                                    "pilah.superadmin@pilah.com",
+                                )
+                            ),
                         },
                         capture_output=True,
                         text=True,
@@ -95,6 +132,14 @@ class DeploymentWorkflowTests(SimpleTestCase):
                     "PILAH_WEB_ORIGIN": "https://web.run.app",
                     "PILAH_SUPERADMIN_EMAILS": "admin@example.com",
                     "PILAH_REVIEW_SUPERADMIN_EMAILS": " Admin@Example.com ",
+                    "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS": ",".join(
+                        (
+                            "pilah.pengelola@pilah.com",
+                            "pilah.pengurus@pilah.com",
+                            "pilah.nasabah@pilah.com",
+                            "pilah.superadmin@pilah.com",
+                        )
+                    ),
                 },
                 capture_output=True,
                 text=True,
@@ -117,6 +162,15 @@ class DeploymentWorkflowTests(SimpleTestCase):
                 "GCS_BUCKET": "placeholder",
                 "DJANGO_SECRET_KEY": "placeholder",
                 "PILAH_SUPERADMIN_EMAILS": "admin@example.com",
+                "PILAH_REVIEW_SUPERADMIN_EMAILS": "pilah.superadmin@pilah.com",
+                "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS": ",".join(
+                    (
+                        "pilah.pengelola@pilah.com",
+                        "pilah.pengurus@pilah.com",
+                        "pilah.nasabah@pilah.com",
+                        "pilah.superadmin@pilah.com",
+                    )
+                ),
                 "PILAH_WEB_ORIGIN": "https://web.run.app/path",
             }
             result = subprocess.run(

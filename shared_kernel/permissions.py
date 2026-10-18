@@ -112,6 +112,12 @@ def review_superadmin_allowlist() -> frozenset[str]:
     return frozenset(str(v).strip().lower() for v in values if str(v).strip())
 
 
+def email_verification_exempt_allowlist() -> frozenset[str]:
+    configured = getattr(settings, "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS", ())
+    values = configured.split(",") if isinstance(configured, str) else configured
+    return frozenset(str(v).strip().lower() for v in values if str(v).strip())
+
+
 def is_review_superadmin(email: str) -> bool:
     normalized = email.strip().lower()
     return normalized in review_superadmin_allowlist() and normalized not in superadmin_allowlist()
