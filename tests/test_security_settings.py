@@ -128,6 +128,7 @@ class SecuritySettingsTests(SimpleTestCase):
         overrides = {
             "DJANGO_DEBUG": "false",
             "DJANGO_SECRET_KEY": "test-secret-key",
+            "PILAH_ALLOW_FAKE_GOOGLE_TOKEN": "false",
             "PILAH_SUPERADMIN_EMAILS": "Global@example.com",
             "PILAH_REVIEW_SUPERADMIN_EMAILS": " global@EXAMPLE.com ",
         }
