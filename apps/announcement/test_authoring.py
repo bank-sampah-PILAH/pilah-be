@@ -88,6 +88,15 @@ class PengumumanAuthoringTests(APITestCase):
         self.assertIn("terbit_pada", response.data["errors"])
         self.assertFalse(Pengumuman.objects.filter(judul="Pengumuman").exists())
 
+    def test_list_accepts_each_known_status_filter(self) -> None:
+        _draft(self.bank, self.pengelola, "Masih draft")
+        self.client.post(URL, {"judul": "Pengumuman", "isi": "Isi."}, format="json")
+
+        for status in ("draft", "terjadwal", "terbit", "kedaluwarsa", "ditarik"):
+            with self.subTest(status=status):
+                response = self.client.get(URL, {"status": status})
+                self.assertEqual(response.status_code, 200)
+
     def test_delete_only_allows_draft(self) -> None:
         created = self.client.post(URL, {"judul": "Pengumuman", "isi": "Isi."}, format="json")
         pengumuman_id = created.data["id"]
@@ -95,6 +104,43 @@ class PengumumanAuthoringTests(APITestCase):
         deleted = self.client.delete(f"{URL}/{pengumuman_id}")
         self.assertEqual(deleted.status_code, 204)
         self.assertFalse(Pengumuman.objects.filter(pk=pengumuman_id).exists())
+
+    def test_deleting_a_published_announcement_is_rejected(self) -> None:
+        created = self.client.post(URL, {"judul": "Pengumuman", "isi": "Isi."}, format="json")
+        pengumuman_id = created.data["id"]
+        self.client.post(f"{URL}/{pengumuman_id}/terbitkan", {}, format="json")
+
+        deleted = self.client.delete(f"{URL}/{pengumuman_id}")
+
+        self.assertEqual(deleted.status_code, 400)
+        self.assertIn("error", deleted.data)
+        self.assertTrue(Pengumuman.objects.filter(pk=pengumuman_id).exists())
+
+    def test_creating_a_draft_with_a_past_publish_time_is_rejected(self) -> None:
+        lampau = (timezone.now() - timedelta(hours=1)).isoformat()
+
+        response = self.client.post(
+            URL,
+            {"judul": "Pengumuman", "isi": "Isi.", "terbit_pada": lampau},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("terbit_pada", response.data["errors"])
+
+    def test_creating_a_draft_with_expiry_in_the_past_is_rejected(self) -> None:
+        # A draft cannot carry terbit_pada (schedule belongs to terbitkan), so
+        # the expiry check runs against now.
+        lampau = (timezone.now() - timedelta(hours=1)).isoformat()
+
+        response = self.client.post(
+            URL,
+            {"judul": "Pengumuman", "isi": "Isi.", "masa_berlaku_hingga": lampau},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("masa_berlaku_hingga", response.data["errors"])
 
 
 class PengumumanDerivedStatusTests(APITestCase):
