@@ -5,6 +5,7 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
+from unittest.mock import patch
 
 from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase
@@ -122,3 +123,17 @@ class SecuritySettingsTests(SimpleTestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("PILAH_REVIEW_SUPERADMIN_EMAILS", result.stderr)
+
+    def test_superadmin_allowlist_overlap_fails_during_settings_load(self) -> None:
+        overrides = {
+            "DJANGO_DEBUG": "false",
+            "DJANGO_SECRET_KEY": "test-secret-key",
+            "PILAH_SUPERADMIN_EMAILS": "Global@example.com",
+            "PILAH_REVIEW_SUPERADMIN_EMAILS": " global@EXAMPLE.com ",
+        }
+        try:
+            with patch.dict(os.environ, overrides):
+                with self.assertRaisesRegex(ImproperlyConfigured, "must not overlap"):
+                    importlib.reload(settings_module)
+        finally:
+            importlib.reload(settings_module)

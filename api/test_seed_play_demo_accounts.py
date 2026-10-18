@@ -2,6 +2,7 @@ from datetime import time, timedelta
 from decimal import Decimal
 from io import StringIO
 from unittest.mock import patch
+from uuid import uuid4
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -11,9 +12,19 @@ from rest_framework.test import APIClient
 
 from api.management.commands.seed_play_demo_accounts import (
     ACCOUNTS,
+    DEMO_BANK_ID,
     DEMO_NASABAH_EMAIL,
+    DEMO_NASABAH_NUMBER,
     DEMO_PENGELOLA_EMAIL,
+    DETAIL_IDS,
+    REVIEW_OWNER_EMAIL,
+    REVIEW_OWNER_ID,
+    SCHEDULE_IDS,
+    TRANSACTION_IDS,
+    WASTE_TYPE_FIXTURES,
     WASTE_TYPE_IDS,
+    Command,
+    _seed_price,
 )
 from api.models import (
     BankSampah,
@@ -454,3 +465,264 @@ class SeedPlayDemoAccountsTests(TestCase):
         self.assertEqual(user.no_hp, "+628123456789")
         self.assertTrue(user.check_password("keep-existing-password"))
         self.assertTrue(user.is_primary_pengelola)
+
+    def test_rejects_ambiguous_case_insensitive_demo_users(self) -> None:
+        User.objects.create_user(
+            email=DEMO_PENGELOLA_EMAIL,
+            nama="Pengelola 1",
+            role=User.Role.PENGELOLA,
+        )
+        User.objects.create_user(
+            email=DEMO_PENGELOLA_EMAIL.upper(),
+            nama="Pengelola 2",
+            role=User.Role.PENGELOLA,
+        )
+
+        with self.assertRaisesRegex(CommandError, "multiple users"):
+            Command._existing_user(DEMO_PENGELOLA_EMAIL, User.Role.PENGELOLA)
+
+    def test_existing_demo_role_accounts_cannot_belong_to_another_bank(self) -> None:
+        other_bank = BankSampah.objects.create(nama="Unrelated bank", no_hp_pic="")
+        cases = (
+            ("review-superadmin@example.com", User.Role.SUPERADMIN, "bank assignment"),
+            ("review-nasabah@example.com", User.Role.NASABAH, "bank assignment"),
+            ("other-pengelola@example.com", User.Role.PENGELOLA, "another bank"),
+        )
+        for email, role, message in cases:
+            with self.subTest(role=role):
+                User.objects.create_user(
+                    email=email,
+                    nama="Existing account",
+                    role=role,
+                    bank_sampah=other_bank,
+                )
+                with self.assertRaisesRegex(CommandError, message):
+                    Command._existing_user(email, role)
+
+    def test_review_owner_identity_conflicts_are_rejected(self) -> None:
+        User.objects.create_user(
+            id=REVIEW_OWNER_ID,
+            email="identity-match@example.test",
+            nama="Conflicting owner",
+            role=User.Role.PENGELOLA,
+        )
+        User.objects.create_user(
+            email=REVIEW_OWNER_EMAIL,
+            nama="Conflicting owner",
+            role=User.Role.PENGELOLA,
+        )
+
+        with self.assertRaisesRegex(CommandError, "review owner identity"):
+            Command._existing_review_owner()
+
+    def test_review_owner_with_reserved_email_and_wrong_role_is_rejected(self) -> None:
+        User.objects.create_user(
+            id=REVIEW_OWNER_ID,
+            email=REVIEW_OWNER_EMAIL,
+            nama="Conflicting owner",
+            role=User.Role.NASABAH,
+        )
+
+        with self.assertRaisesRegex(CommandError, "review owner identity"):
+            Command._existing_review_owner()
+
+    def test_reserved_waste_number_collision_is_rejected(self) -> None:
+        bank = BankSampah.objects.create(id=DEMO_BANK_ID, nama="Demo", no_hp_pic="")
+        JenisSampah.objects.create(
+            bank_sampah=bank,
+            nomor=WASTE_TYPE_FIXTURES[0][0],
+            nama_sampah="Unrelated type",
+        )
+
+        with self.assertRaisesRegex(CommandError, "waste type number"):
+            Command._validate_waste_type_rows()
+
+    def test_reserved_transaction_identity_collision_is_rejected(self) -> None:
+        bank = BankSampah.objects.create(nama="Unrelated bank", no_hp_pic="")
+        pengurus = User.objects.create_user(email="other-pengelola@example.test", nama="Pengurus")
+        member = Nasabah.objects.create(
+            bank_sampah=bank,
+            nomor="OTHER-0001",
+            nama="Other member",
+            alamat="Depok",
+            no_hp="",
+            email="other-member@example.test",
+        )
+        Transaksi.objects.create(
+            id=TRANSACTION_IDS[0],
+            bank_sampah=bank,
+            nasabah=member,
+            dicatat_oleh=pengurus,
+        )
+
+        with self.assertRaisesRegex(CommandError, "transaction identity"):
+            Command._validate_transaction_rows()
+
+    def test_reserved_transaction_detail_identity_collision_is_rejected(self) -> None:
+        bank = BankSampah.objects.create(nama="Unrelated bank", no_hp_pic="")
+        pengurus = User.objects.create_user(email="other-pengelola@example.test", nama="Pengurus")
+        member = Nasabah.objects.create(
+            bank_sampah=bank,
+            nomor="OTHER-0001",
+            nama="Other member",
+            alamat="Depok",
+            no_hp="",
+            email="other-member@example.test",
+        )
+        jenis = JenisSampah.objects.create(
+            bank_sampah=bank,
+            nomor="OTHER-01",
+            nama_sampah="Other type",
+        )
+        transaksi = Transaksi.objects.create(
+            bank_sampah=bank,
+            nasabah=member,
+            dicatat_oleh=pengurus,
+        )
+        DetailTransaksi.objects.create(
+            id=DETAIL_IDS[0],
+            transaksi=transaksi,
+            jenis_sampah=jenis,
+            nama_sampah_snapshot=jenis.nama_sampah,
+            kategori_snapshot=jenis.kategori,
+            harga_snapshot=Decimal(1),
+            berat=Decimal(1),
+            subtotal=Decimal(1),
+        )
+
+        with self.assertRaisesRegex(CommandError, "transaction detail identity"):
+            Command._validate_transaction_rows()
+
+    def test_reserved_schedule_identity_collision_is_rejected(self) -> None:
+        bank = BankSampah.objects.create(nama="Unrelated bank", no_hp_pic="")
+        pengurus = User.objects.create_user(email="other-pengelola@example.test", nama="Pengurus")
+        starts_at = timezone.now() + timedelta(days=1)
+        JadwalKegiatan.objects.create(
+            id=SCHEDULE_IDS[0],
+            bank_sampah=bank,
+            dibuat_oleh=pengurus,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=starts_at,
+            selesai_pada=starts_at + timedelta(hours=1),
+            lokasi="Balai Warga",
+        )
+
+        with self.assertRaisesRegex(CommandError, "schedule identity"):
+            Command._validate_schedule_rows()
+
+    def test_existing_membership_conflicts_are_rejected(self) -> None:
+        expected_user = User(id=uuid4(), email=DEMO_NASABAH_EMAIL, nama="Demo Nasabah")
+        other_user_id = uuid4()
+        cases = (
+            ({"user_id": other_user_id}, expected_user, "another account"),
+            ({"user_id": other_user_id}, None, "another account"),
+            ({"user_id": expected_user.pk, "email": "wrong@example.test"}, expected_user, "email"),
+            ({"nomor": "WRONG-0001"}, None, "member number"),
+            ({"is_active": False}, None, "inactive or unapproved"),
+        )
+        for fields, user, message in cases:
+            with self.subTest(message=message):
+                membership_values = {
+                    "bank_sampah_id": DEMO_BANK_ID,
+                    "user_id": None,
+                    "nomor": DEMO_NASABAH_NUMBER,
+                    "email": DEMO_NASABAH_EMAIL,
+                    "is_active": True,
+                    "status": Nasabah.Status.APPROVED,
+                    **fields,
+                }
+                membership = Nasabah(**membership_values)
+                with self.assertRaisesRegex(CommandError, message):
+                    Command._validate_membership_identity(membership, user)
+
+    def test_membership_email_matching_multiple_rows_is_rejected(self) -> None:
+        for suffix in ("one", "two"):
+            bank = BankSampah.objects.create(nama=f"Bank {suffix}", no_hp_pic="")
+            Nasabah.objects.create(
+                bank_sampah=bank,
+                nomor=f"{suffix}-0001",
+                nama="Duplicate email member",
+                alamat="Depok",
+                no_hp="",
+                email=DEMO_NASABAH_EMAIL,
+            )
+
+        with self.assertRaisesRegex(CommandError, "multiple memberships"):
+            Command._existing_membership(None)
+
+    def test_nasabah_user_linked_to_another_bank_is_rejected(self) -> None:
+        bank = BankSampah.objects.create(nama="Unrelated bank", no_hp_pic="")
+        user = User.objects.create_user(
+            email=DEMO_NASABAH_EMAIL,
+            nama="Demo Nasabah",
+            role=User.Role.NASABAH,
+        )
+        Nasabah.objects.create(
+            user=user,
+            bank_sampah=bank,
+            nomor="OTHER-0001",
+            nama="Other member",
+            alamat="Depok",
+            no_hp="",
+            email="other-member@example.test",
+        )
+
+        with self.assertRaisesRegex(CommandError, "already belongs to another bank"):
+            Command._validate_membership_ownership(None, user)
+
+    def test_duplicate_demo_member_number_is_rejected(self) -> None:
+        bank = BankSampah.objects.create(id=DEMO_BANK_ID, nama="Demo", no_hp_pic="")
+        Nasabah.objects.create(
+            bank_sampah=bank,
+            nomor=DEMO_NASABAH_NUMBER,
+            nama="Unrelated member",
+            alamat="Depok",
+            no_hp="",
+            email="other-member@example.test",
+        )
+
+        with self.assertRaisesRegex(CommandError, "number is already used"):
+            Command._validate_membership_number(None)
+
+    def test_existing_nasabah_profile_fields_are_completed(self) -> None:
+        bank = BankSampah.objects.create(nama="Unrelated bank", no_hp_pic="")
+        user = User.objects.create_user(
+            email=DEMO_NASABAH_EMAIL,
+            nama="",
+            role=User.Role.NASABAH,
+            alamat="",
+        )
+
+        Command._ensure_user(
+            user,
+            email=DEMO_NASABAH_EMAIL,
+            display_name="Demo Nasabah PILAH",
+            role=User.Role.NASABAH,
+            bank=bank,
+            primary=False,
+        )
+
+        user.refresh_from_db()
+        self.assertEqual(user.nama, "Demo Nasabah PILAH")
+        self.assertEqual(user.alamat, "Alamat demo untuk akun nasabah PILAH")
+        self.assertTrue(user.is_profile_complete)
+
+    def test_failed_seed_price_aborts_with_clear_error(self) -> None:
+        jenis = JenisSampah(id=WASTE_TYPE_IDS[0])
+        with (
+            patch(
+                "api.management.commands.seed_play_demo_accounts.harga_berlaku", return_value=None
+            ),
+            self.assertRaisesRegex(CommandError, "has no active price"),
+        ):
+            _seed_price(jenis, timezone.now())
+
+    def test_missing_created_nasabah_account_rolls_back_seed(self) -> None:
+        with (
+            patch.object(Command, "_ensure_user", return_value=None),
+            self.assertRaisesRegex(CommandError, "accounts could not be created"),
+        ):
+            call_command("seed_play_demo_accounts", confirm_production=True, stdout=StringIO())
+
+        self.assertFalse(BankSampah.objects.exists())
+        self.assertFalse(User.objects.exists())

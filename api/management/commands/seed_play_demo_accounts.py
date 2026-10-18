@@ -309,7 +309,16 @@ class Command(BaseCommand):
         if len(matches) > 1:
             raise CommandError("Production demo nasabah email matches multiple memberships")
         membership = matches[0] if matches else None
-        if membership is not None and membership.bank_sampah_id != DEMO_BANK_ID:
+        Command._validate_membership_identity(membership, user)
+        Command._validate_membership_ownership(membership, user)
+        Command._validate_membership_number(membership)
+        return membership
+
+    @staticmethod
+    def _validate_membership_identity(membership: Nasabah | None, user: User | None) -> None:
+        if membership is None:
+            return
+        if membership.bank_sampah_id != DEMO_BANK_ID:
             raise CommandError("Production demo nasabah email is already used by another bank")
         if (
             membership is not None
@@ -319,14 +328,15 @@ class Command(BaseCommand):
             raise CommandError("Production demo nasabah membership belongs to another account")
         if membership is not None and user is None and membership.user_id is not None:
             raise CommandError("Production demo nasabah membership belongs to another account")
-        if membership is not None and membership.email.lower() != DEMO_NASABAH_EMAIL:
+        if membership.email.lower() != DEMO_NASABAH_EMAIL:
             raise CommandError("Production demo nasabah account has a conflicting membership email")
-        if membership is not None and membership.nomor != DEMO_NASABAH_NUMBER:
+        if membership.nomor != DEMO_NASABAH_NUMBER:
             raise CommandError("Production demo nasabah account has a conflicting member number")
-        if membership is not None and (
-            not membership.is_active or membership.status != Nasabah.Status.APPROVED
-        ):
+        if not membership.is_active or membership.status != Nasabah.Status.APPROVED:
             raise CommandError("Production demo nasabah membership is inactive or unapproved")
+
+    @staticmethod
+    def _validate_membership_ownership(membership: Nasabah | None, user: User | None) -> None:
         if (
             user is not None
             and Nasabah.objects.select_for_update()
@@ -340,6 +350,9 @@ class Command(BaseCommand):
             and Nasabah.objects.select_for_update().filter(pk=DEMO_NASABAH_ID).exists()
         ):
             raise CommandError("Production demo nasabah identity conflicts with existing data")
+
+    @staticmethod
+    def _validate_membership_number(membership: Nasabah | None) -> None:
         number_matches = Nasabah.objects.select_for_update().filter(
             bank_sampah_id=DEMO_BANK_ID,
             nomor=DEMO_NASABAH_NUMBER,
@@ -348,7 +361,6 @@ class Command(BaseCommand):
             number_matches = number_matches.exclude(pk=membership.pk)
         if number_matches.exists():
             raise CommandError("Production demo nasabah number is already used")
-        return membership
 
     @staticmethod
     def _create_bank() -> BankSampah:
@@ -388,29 +400,64 @@ class Command(BaseCommand):
         user_id: UUID | None = None,
     ) -> User:
         if user is None:
-            if user_id is not None:
-                user = User(
-                    id=user_id,
-                    email=email,
-                    nama=display_name,
-                    role=role,
-                    is_profile_complete=True,
-                    bank_sampah=bank if role == User.Role.PENGELOLA else None,
-                    is_primary_pengelola=primary,
-                )
-                user.set_unusable_password()
-                user.save()
-                return user
-            return User.objects.create_user(
+            return Command._create_user(
+                email=email,
+                display_name=display_name,
+                role=role,
+                bank=bank,
+                primary=primary,
+                user_id=user_id,
+            )
+        return Command._update_user(
+            user,
+            display_name=display_name,
+            role=role,
+            bank=bank,
+            primary=primary,
+        )
+
+    @staticmethod
+    def _create_user(
+        *,
+        email: str,
+        display_name: str,
+        role: str,
+        bank: BankSampah,
+        primary: bool,
+        user_id: UUID | None,
+    ) -> User:
+        if user_id is not None:
+            user = User(
+                id=user_id,
                 email=email,
                 nama=display_name,
                 role=role,
                 is_profile_complete=True,
                 bank_sampah=bank if role == User.Role.PENGELOLA else None,
                 is_primary_pengelola=primary,
-                **({"alamat": DEMO_NASABAH_ADDRESS} if role == User.Role.NASABAH else {}),
             )
+            user.set_unusable_password()
+            user.save()
+            return user
+        return User.objects.create_user(
+            email=email,
+            nama=display_name,
+            role=role,
+            is_profile_complete=True,
+            bank_sampah=bank if role == User.Role.PENGELOLA else None,
+            is_primary_pengelola=primary,
+            **({"alamat": DEMO_NASABAH_ADDRESS} if role == User.Role.NASABAH else {}),
+        )
 
+    @staticmethod
+    def _update_user(
+        user: User,
+        *,
+        display_name: str,
+        role: str,
+        bank: BankSampah,
+        primary: bool,
+    ) -> User:
         target_bank = bank if role == User.Role.PENGELOLA else None
         fields = []
         if user.bank_sampah_id != (target_bank.pk if target_bank else None):
