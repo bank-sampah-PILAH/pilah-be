@@ -869,6 +869,29 @@ class SeedPlayDemoAccountsTests(TestCase):
         with self.assertRaisesRegex(CommandError, "multiple memberships"):
             Command._existing_membership(None)
 
+    def test_existing_membership_with_unexpected_id_is_rejected(self) -> None:
+        bank = BankSampah.objects.create(id=DEMO_BANK_ID, nama="Demo", no_hp_pic="")
+        user = User.objects.create_user(
+            email=DEMO_NASABAH_EMAIL,
+            nama="Demo Nasabah",
+            role=User.Role.NASABAH,
+        )
+        Nasabah.objects.create(
+            id=uuid4(),
+            user=user,
+            bank_sampah=bank,
+            nomor=DEMO_NASABAH_NUMBER,
+            nama=user.nama,
+            alamat="Depok",
+            no_hp="",
+            email=DEMO_NASABAH_EMAIL,
+            is_active=True,
+            status=Nasabah.Status.APPROVED,
+        )
+
+        with self.assertRaisesRegex(CommandError, "identity conflicts with existing data"):
+            Command._existing_membership(user)
+
     def test_nasabah_user_linked_to_another_bank_is_rejected(self) -> None:
         bank = BankSampah.objects.create(nama="Unrelated bank", no_hp_pic="")
         user = User.objects.create_user(
@@ -925,6 +948,21 @@ class SeedPlayDemoAccountsTests(TestCase):
         self.assertEqual(user.nama, "Demo Nasabah PILAH")
         self.assertEqual(user.alamat, "Alamat demo untuk akun nasabah PILAH")
         self.assertTrue(user.is_profile_complete)
+
+    def test_create_user_with_explicit_id_sets_password(self) -> None:
+        bank = BankSampah.objects.create(nama="Demo", no_hp_pic="")
+
+        user = Command._create_user(
+            email="explicit-id@example.test",
+            display_name="Review Owner",
+            role=User.Role.PENGELOLA,
+            bank=bank,
+            primary=True,
+            user_id=uuid4(),
+            password=TEST_REVIEW_ACCOUNT_PASSWORD,
+        )
+
+        self.assertTrue(user.check_password(TEST_REVIEW_ACCOUNT_PASSWORD))
 
     def test_failed_seed_price_aborts_with_clear_error(self) -> None:
         jenis = JenisSampah(id=WASTE_TYPE_IDS[0])

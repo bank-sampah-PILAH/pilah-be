@@ -3,6 +3,7 @@ from typing import Any
 
 import requests
 from django.conf import settings
+from django.core.cache import caches
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.http import HttpResponse, HttpResponseRedirect
 from django.utils.http import urlencode
@@ -53,9 +54,14 @@ class GoogleAuthView(APIView):
             return Response({"error": "ID Token invalid atau expired"}, status=401)
 
 
+class PasswordLoginThrottle(ScopedRateThrottle):
+    # Login guessing limits must be shared across autoscaled Cloud Run instances.
+    cache = caches["auth_rate_limit"]
+
+
 class PasswordLoginView(APIView):
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [PasswordLoginThrottle]
     throttle_scope = "password_login"
     serializer_class = PasswordLoginSerializer
 

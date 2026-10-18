@@ -2,17 +2,19 @@
 
 from unittest.mock import patch
 
-from django.core.cache import cache
+from django.core.cache import caches
 
 from api.models import BankSampah, User
+from apps.authentication.views import PasswordLoginThrottle
 from tests.regression.helpers import RegressionTestCase
 
 
 class AuthRegressionTests(RegressionTestCase):
     def setUp(self) -> None:
         super().setUp()
-        cache.clear()
-        self.addCleanup(cache.clear)
+        rate_limit_cache = caches["auth_rate_limit"]
+        rate_limit_cache.clear()
+        self.addCleanup(rate_limit_cache.clear)
 
     def test_password_login_rejects_malformed_credentials(self) -> None:
         self.client.credentials()
@@ -58,8 +60,8 @@ class AuthRegressionTests(RegressionTestCase):
 
     def test_password_login_is_rate_limited(self) -> None:
         self.client.credentials()
-        cache.clear()
-        self.addCleanup(cache.clear)
+        rate_limit_cache = caches["auth_rate_limit"]
+        self.assertIs(PasswordLoginThrottle.cache, rate_limit_cache)
         payload = {"email": "sari@example.com", "password": "password"}
 
         with patch(
