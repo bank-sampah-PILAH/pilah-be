@@ -42,6 +42,7 @@ from api.models import (
     User,
 )
 from apps.bank_sampah.serializers import BankSampahApprovalListSerializer
+from apps.ledger.pencairan_testing import catat_pencairan
 from apps.nasabah.keanggotaan import sinkronkan_dari_akun
 from apps.nasabah.services import NasabahApprovalService
 from apps.waste_catalog.api import buat_jenis_sampah
@@ -4836,136 +4837,26 @@ class PencairanAPITests(APITransactionTestCase):
         refresh = RefreshToken.for_user(self.user)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
-    def test_pencairan_reduces_saldo_once(self) -> None:
+    def _catat(self, nasabah: Nasabah, nominal: str, **extra: Any) -> dict[str, Any]:
+        return catat_pencairan(self.user, nasabah, nominal, **extra)
+
+    def test_single_nasabah_pencairan_route_is_removed(self) -> None:
         response = self.client.post(
             "/api/v1/pencairan",
-            {
-                "nasabah_id": str(self.nasabah.id),
-                "nominal": "200000",
-                "metode": "tunai",
-                "keterangan": "Diambil pagi",
-            },
+            {"nasabah_id": str(self.nasabah.id), "nominal": "200000", "metode": "tunai"},
             format="json",
         )
 
-        self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(response.data["nominal"], "200000.00")
-        self.assertEqual(response.data["saldo_sebelum"], "465600.00")
-        self.assertEqual(response.data["saldo_sesudah"], "265600.00")
-        self.assertEqual(response.data["dicatat_oleh_nama"], "Ibu Sari")
-        saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
-        self.assertEqual(saldo.data["total_saldo"], "265600.00")
-
-    def test_pencairan_above_saldo_is_rejected(self) -> None:
-        response = self.client.post(
-            "/api/v1/pencairan",
-            {
-                "nasabah_id": str(self.nasabah.id),
-                "nominal": "465601",
-                "metode": "tunai",
-            },
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 422, response.data)
-        self.assertEqual(response.data["errors"]["nominal"], ["Saldo nasabah tidak mencukupi"])
+        self.assertEqual(response.status_code, 405, response.data)
         saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
         self.assertEqual(saldo.data["total_saldo"], "465600.00")
-        self.assertEqual(Pencairan.objects.count(), 0)
-
-    def test_pencairan_rejects_invalid_nominal_metode_and_future_tanggal(self) -> None:
-        cases: list[tuple[str, dict[str, Any], str]] = [
-            ("nominal", {"nominal": "0", "metode": "tunai"}, "Nominal harus lebih dari nol"),
-            ("nominal", {"nominal": "-1000", "metode": "tunai"}, "Nominal harus lebih dari nol"),
-            (
-                "nominal",
-                {"nominal": "1000.50", "metode": "tunai"},
-                "Nominal harus dalam rupiah bulat tanpa desimal",
-            ),
-            (
-                "tanggal",
-                {
-                    "nominal": "1000",
-                    "metode": "tunai",
-                    "tanggal": (timezone.now() + timedelta(days=1)).isoformat(),
-                },
-                "Tanggal pencairan tidak boleh di masa depan",
-            ),
-        ]
-        for field, payload, message in cases:
-            with self.subTest(field=field, payload=payload):
-                response = self.client.post(
-                    "/api/v1/pencairan",
-                    {"nasabah_id": str(self.nasabah.id), **payload},
-                    format="json",
-                )
-
-                self.assertEqual(response.status_code, 422, response.data)
-                self.assertEqual(response.data["errors"][field], [message])
-
-        invalid_metode = self.client.post(
-            "/api/v1/pencairan",
-            {"nasabah_id": str(self.nasabah.id), "nominal": "1000", "metode": "qris"},
-            format="json",
-        )
-        self.assertEqual(invalid_metode.status_code, 422, invalid_metode.data)
-        self.assertIn("metode", invalid_metode.data["errors"])
-        self.assertEqual(Pencairan.objects.count(), 0)
-
-    def test_pencairan_is_scoped_to_own_active_nasabah(self) -> None:
-        other_bank = BankSampah.objects.create(
-            nama="Bank Sampah Lain",
-            alamat="Bogor",
-            kota="Bogor",
-            no_hp_pic="+628129999999",
-            status=BankSampah.Status.ACTIVE,
-        )
-        other_nasabah = Nasabah.objects.create(
-            bank_sampah=other_bank,
-            nomor="NAS-0001",
-            nama="Nasabah Lain",
-            no_hp="+628129999999",
-            alamat="Jl. Kenanga No. 1",
-            email="nasabah-lain@example.test",
-        )
-        Saldo.objects.create(nasabah=other_nasabah, total_saldo=Decimal("100000.00"))
-        inactive_nasabah = Nasabah.objects.create(
-            bank_sampah=self.bank,
-            nomor="NAS-0002",
-            nama="Nasabah Nonaktif",
-            no_hp="+628127777777",
-            email="inactive@example.com",
-            alamat="Jl. Dahlia No. 5",
-            is_active=False,
-        )
-        Saldo.objects.create(nasabah=inactive_nasabah, total_saldo=Decimal("50000.00"))
-
-        for label, nasabah in (("other bank", other_nasabah), ("inactive", inactive_nasabah)):
-            with self.subTest(nasabah=label):
-                response = self.client.post(
-                    "/api/v1/pencairan",
-                    {"nasabah_id": str(nasabah.id), "nominal": "10000", "metode": "tunai"},
-                    format="json",
-                )
-
-                self.assertEqual(response.status_code, 422, response.data)
-                self.assertEqual(
-                    response.data["errors"]["nasabah_id"],
-                    ["Nasabah tidak ditemukan atau tidak aktif"],
-                )
-        self.assertEqual(Pencairan.objects.count(), 0)
 
     def test_pencairan_detail_is_scoped_to_bank_sampah(self) -> None:
-        created = self.client.post(
-            "/api/v1/pencairan",
-            {"nasabah_id": str(self.nasabah.id), "nominal": "50000", "metode": "transfer"},
-            format="json",
-        )
-        self.assertEqual(created.status_code, 201, created.data)
+        created = self._catat(self.nasabah, "50000")
 
-        detail = self.client.get(f"/api/v1/pencairan/{created.data['id']}")
+        detail = self.client.get(f"/api/v1/pencairan/{created['id']}")
         self.assertEqual(detail.status_code, 200, detail.data)
-        self.assertEqual(detail.data["metode"], "transfer")
+        self.assertEqual(detail.data["metode"], "tunai")
         self.assertEqual(detail.data["status"], "tercatat")
 
         outsider_bank = BankSampah.objects.create(
@@ -4984,9 +4875,7 @@ class PencairanAPITests(APITransactionTestCase):
         self.client.credentials(
             HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(outsider).access_token}"
         )
-        self.assertEqual(
-            self.client.get(f"/api/v1/pencairan/{created.data['id']}").status_code, 404
-        )
+        self.assertEqual(self.client.get(f"/api/v1/pencairan/{created['id']}").status_code, 404)
 
         superadmin = User.objects.create_user(
             email="admin@example.com", nama="Admin", role=User.Role.SUPERADMIN
@@ -4994,10 +4883,11 @@ class PencairanAPITests(APITransactionTestCase):
         self.client.credentials(
             HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(superadmin).access_token}"
         )
-        self.assertEqual(self.client.post("/api/v1/pencairan", {}, format="json").status_code, 403)
+        url = f"/api/v1/pencairan/{created['id']}"
+        self.assertEqual(self.client.get(url).status_code, 403)
 
         self.client.credentials()
-        self.assertEqual(self.client.post("/api/v1/pencairan", {}, format="json").status_code, 401)
+        self.assertEqual(self.client.get(url).status_code, 401)
 
     def test_saldo_setelah_transaksi_accounts_for_pencairan(self) -> None:
         Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))
@@ -5018,12 +4908,7 @@ class PencairanAPITests(APITransactionTestCase):
         )
         self.assertEqual(first.status_code, 201, first.data)
 
-        pencairan = self.client.post(
-            "/api/v1/pencairan",
-            {"nasabah_id": str(self.nasabah.id), "nominal": "60000", "metode": "tunai"},
-            format="json",
-        )
-        self.assertEqual(pencairan.status_code, 201, pencairan.data)
+        self._catat(self.nasabah, "60000")
 
         second = self.client.post(
             "/api/v1/transaksi",
@@ -5053,12 +4938,7 @@ class PencairanAPITests(APITransactionTestCase):
         )
         Saldo.objects.create(nasabah=other_nasabah, total_saldo=Decimal("90000.00"))
         for nasabah, nominal in ((self.nasabah, "20000"), (other_nasabah, "30000")):
-            created = self.client.post(
-                "/api/v1/pencairan",
-                {"nasabah_id": str(nasabah.id), "nominal": nominal, "metode": "tunai"},
-                format="json",
-            )
-            self.assertEqual(created.status_code, 201, created.data)
+            self._catat(nasabah, nominal)
 
         listed = self.client.get("/api/v1/pencairan")
         self.assertEqual(listed.status_code, 200, listed.data)
@@ -5086,12 +4966,7 @@ class PencairanAPITests(APITransactionTestCase):
             format="json",
         )
         self.assertEqual(first.status_code, 201, first.data)
-        pencairan = self.client.post(
-            "/api/v1/pencairan",
-            {"nasabah_id": str(self.nasabah.id), "nominal": "60000", "metode": "tunai"},
-            format="json",
-        )
-        self.assertEqual(pencairan.status_code, 201, pencairan.data)
+        self._catat(self.nasabah, "60000")
         second = self.client.post(
             "/api/v1/transaksi",
             {"nasabah_id": str(self.nasabah.id), "items": [item]},
@@ -5108,26 +4983,6 @@ class PencairanAPITests(APITransactionTestCase):
             if sheet.cell(row, 11).value == "setoran"
         ]
         self.assertEqual(saldo_column, [140000, 100000])
-
-    def test_pencairan_requires_approved_membership(self) -> None:
-        for status_value in (Nasabah.Status.PENDING, Nasabah.Status.REJECTED):
-            with self.subTest(status=status_value):
-                Nasabah.objects.filter(id=self.nasabah.id).update(status=status_value)
-
-                response = self.client.post(
-                    "/api/v1/pencairan",
-                    {"nasabah_id": str(self.nasabah.id), "nominal": "10000", "metode": "tunai"},
-                    format="json",
-                )
-
-                self.assertEqual(response.status_code, 422, response.data)
-                self.assertEqual(
-                    response.data["errors"]["nasabah_id"],
-                    ["Nasabah tidak ditemukan atau tidak aktif"],
-                )
-        saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
-        self.assertEqual(saldo.data["total_saldo"], "465600.00")
-        self.assertEqual(Pencairan.objects.count(), 0)
 
     def test_same_instant_pencairan_is_ordered_after_setoran(self) -> None:
         Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))
@@ -5148,17 +5003,7 @@ class PencairanAPITests(APITransactionTestCase):
         )
         self.assertEqual(setoran.status_code, 201, setoran.data)
         same_instant = Transaksi.objects.get(id=setoran.data["id"]).tanggal
-        pencairan = self.client.post(
-            "/api/v1/pencairan",
-            {
-                "nasabah_id": str(self.nasabah.id),
-                "nominal": "40000",
-                "metode": "tunai",
-                "tanggal": same_instant.isoformat(),
-            },
-            format="json",
-        )
-        self.assertEqual(pencairan.status_code, 201, pencairan.data)
+        self._catat(self.nasabah, "40000", tanggal=same_instant)
 
         detail = self.client.get(f"/api/v1/transaksi/{setoran.data['id']}")
         self.assertEqual(detail.data["saldo_setelah_transaksi"], Decimal("100000.00"))
@@ -5172,15 +5017,10 @@ class PencairanAPITests(APITransactionTestCase):
     def test_pencairan_drops_legacy_sen_from_saldo(self) -> None:
         Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("10000.50"))
 
-        response = self.client.post(
-            "/api/v1/pencairan",
-            {"nasabah_id": str(self.nasabah.id), "nominal": "5000", "metode": "tunai"},
-            format="json",
-        )
+        pencairan = self._catat(self.nasabah, "5000")
 
-        self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(response.data["saldo_sebelum"], "10000.50")
-        self.assertEqual(response.data["saldo_sesudah"], "5000.00")
+        self.assertEqual(pencairan["saldo_sebelum"], "10000.50")
+        self.assertEqual(pencairan["saldo_sesudah"], "5000.00")
         saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
         self.assertEqual(saldo.data["total_saldo"], "5000.00")
 
@@ -5194,18 +5034,8 @@ class PencairanAPITests(APITransactionTestCase):
             alamat="Jl. Melati No. 2",
         )
         Saldo.objects.create(nasabah=tetangga, total_saldo=Decimal("90000.00"))
-        milik_sendiri = self.client.post(
-            "/api/v1/pencairan",
-            {"nasabah_id": str(self.nasabah.id), "nominal": "20000", "metode": "tunai"},
-            format="json",
-        )
-        self.assertEqual(milik_sendiri.status_code, 201, milik_sendiri.data)
-        milik_tetangga = self.client.post(
-            "/api/v1/pencairan",
-            {"nasabah_id": str(tetangga.id), "nominal": "30000", "metode": "tunai"},
-            format="json",
-        )
-        self.assertEqual(milik_tetangga.status_code, 201, milik_tetangga.data)
+        milik_sendiri = self._catat(self.nasabah, "20000")
+        milik_tetangga = self._catat(tetangga, "30000")
         akun_nasabah = User.objects.create_user(
             email="ahmad@example.com", nama="Ahmad Ridwan", role=User.Role.NASABAH
         )
@@ -5217,92 +5047,13 @@ class PencairanAPITests(APITransactionTestCase):
 
         listed = self.client.get("/api/v1/pencairan")
         self.assertEqual(listed.status_code, 200, listed.data)
-        self.assertEqual([row["id"] for row in listed.data["results"]], [milik_sendiri.data["id"]])
-        detail = self.client.get(f"/api/v1/pencairan/{milik_sendiri.data['id']}")
+        self.assertEqual([row["id"] for row in listed.data["results"]], [milik_sendiri["id"]])
+        detail = self.client.get(f"/api/v1/pencairan/{milik_sendiri['id']}")
         self.assertEqual(detail.status_code, 200, detail.data)
         self.assertEqual(detail.data["nominal"], "20000.00")
         self.assertEqual(
-            self.client.get(f"/api/v1/pencairan/{milik_tetangga.data['id']}").status_code, 404
+            self.client.get(f"/api/v1/pencairan/{milik_tetangga['id']}").status_code, 404
         )
-
-    def test_nasabah_cannot_record_pencairan(self) -> None:
-        akun_nasabah = User.objects.create_user(
-            email="ahmad@example.com", nama="Ahmad Ridwan", role=User.Role.NASABAH
-        )
-        self.nasabah.user = akun_nasabah
-        self.nasabah.save()
-        self.client.credentials(
-            HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(akun_nasabah).access_token}"
-        )
-
-        response = self.client.post(
-            "/api/v1/pencairan",
-            {"nasabah_id": str(self.nasabah.id), "nominal": "10000", "metode": "tunai"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 403, response.data)
-        self.assertEqual(Pencairan.objects.count(), 0)
-        self.assertEqual(Saldo.objects.get(nasabah=self.nasabah).total_saldo, Decimal(465600))
-
-    def test_pencairan_cannot_predate_latest_nasabah_activity(self) -> None:
-        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))
-        jenis = buat_jenis_sampah(
-            bank_sampah=self.bank,
-            nomor="PLS-001",
-            nama_sampah="Plastik PET",
-            kategori=JenisSampah.Kategori.PLASTIK,
-            harga_per_kg=Decimal("100000.00"),
-        )
-        setoran = self.client.post(
-            "/api/v1/transaksi",
-            {
-                "nasabah_id": str(self.nasabah.id),
-                "items": [{"jenis_sampah_id": str(jenis.id), "berat": "1.000"}],
-            },
-            format="json",
-        )
-        self.assertEqual(setoran.status_code, 201, setoran.data)
-        setoran_tanggal = Transaksi.objects.get(id=setoran.data["id"]).tanggal
-        message = "Tanggal pencairan tidak boleh sebelum transaksi terakhir nasabah"
-
-        # The saldo only exists because of the setoran, so it cannot fund a payout before it.
-        before_setoran = self.client.post(
-            "/api/v1/pencairan",
-            {
-                "nasabah_id": str(self.nasabah.id),
-                "nominal": "100000",
-                "metode": "tunai",
-                "tanggal": (setoran_tanggal - timedelta(hours=1)).isoformat(),
-            },
-            format="json",
-        )
-        self.assertEqual(before_setoran.status_code, 422, before_setoran.data)
-        self.assertEqual(before_setoran.data["errors"]["tanggal"], [message])
-
-        recorded = self.client.post(
-            "/api/v1/pencairan",
-            {"nasabah_id": str(self.nasabah.id), "nominal": "40000", "metode": "tunai"},
-            format="json",
-        )
-        self.assertEqual(recorded.status_code, 201, recorded.data)
-        recorded_tanggal = Pencairan.objects.get(id=recorded.data["id"]).tanggal
-        before_pencairan = self.client.post(
-            "/api/v1/pencairan",
-            {
-                "nasabah_id": str(self.nasabah.id),
-                "nominal": "10000",
-                "metode": "tunai",
-                "tanggal": (recorded_tanggal - timedelta(minutes=1)).isoformat(),
-            },
-            format="json",
-        )
-        self.assertEqual(before_pencairan.status_code, 422, before_pencairan.data)
-        self.assertEqual(before_pencairan.data["errors"]["tanggal"], [message])
-
-        self.assertEqual(Pencairan.objects.count(), 1)
-        saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
-        self.assertEqual(saldo.data["total_saldo"], "60000.00")
 
     def test_history_saldo_matches_saldo_after_pencairan_drops_sen(self) -> None:
         Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal("0.00"))
@@ -5320,14 +5071,9 @@ class PencairanAPITests(APITransactionTestCase):
             format="json",
         )
         self.assertEqual(first.status_code, 201, first.data)
-        pencairan = self.client.post(
-            "/api/v1/pencairan",
-            {"nasabah_id": str(self.nasabah.id), "nominal": "3000", "metode": "tunai"},
-            format="json",
-        )
-        self.assertEqual(pencairan.status_code, 201, pencairan.data)
+        pencairan = self._catat(self.nasabah, "3000")
         # Rp 5.000,50 - Rp 3.000 keeps whole rupiah only: the 50 sen leave the saldo.
-        self.assertEqual(pencairan.data["saldo_sesudah"], "2000.00")
+        self.assertEqual(pencairan["saldo_sesudah"], "2000.00")
         second = self.client.post(
             "/api/v1/transaksi",
             {"nasabah_id": str(self.nasabah.id), "items": [item]},

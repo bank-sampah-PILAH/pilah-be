@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
-from django.db.models import Exists, F, Max, Model, OuterRef, Q, QuerySet, Subquery, Sum
+from django.db.models import Exists, F, Model, OuterRef, Q, QuerySet, Subquery, Sum
 from django.db.models.functions import Coalesce
 from django.http import HttpRequest
 from django.utils import timezone
@@ -123,44 +123,6 @@ BATAS_MUNDUR_TANGGAL_PENCAIRAN_HARI = 7
 
 
 class PencairanService:
-    @staticmethod
-    @transaction.atomic
-    def create_pencairan(user: User, payload: Mapping[str, Any]) -> Pencairan:
-        bank = user.bank_sampah
-        assert bank is not None  # ponytail: views gate on IsActivePengelola
-        nasabah = get_locked_nasabah(bank, payload["nasabah_id"])
-        if not nasabah:
-            raise serializers.ValidationError({"nasabah_id": [_NASABAH_TIDAK_AKTIF]})
-
-        tanggal = payload.get("tanggal") or timezone.now()
-        # The balance check below reads the current saldo, which is only the saldo
-        # at `tanggal` when nothing was recorded after it.
-        aktivitas = [
-            model.objects.filter(bank_sampah=bank, nasabah=nasabah).aggregate(
-                terakhir=Max("tanggal")
-            )["terakhir"]
-            for model in (Transaksi, Pencairan)
-        ]
-        terakhir = max((value for value in aktivitas if value), default=None)
-        if terakhir and tanggal < terakhir:
-            raise serializers.ValidationError(
-                {"tanggal": ["Tanggal pencairan tidak boleh sebelum transaksi terakhir nasabah"]}
-            )
-
-        saldo, _ = Saldo.objects.select_for_update().get_or_create(nasabah=nasabah)
-        nominal = payload["nominal"]
-        if nominal > saldo.total_saldo:
-            raise serializers.ValidationError({"nominal": [_SALDO_KURANG]})
-        return PencairanService.realisasi(
-            user=user,
-            nasabah=nasabah,
-            saldo=saldo,
-            nominal=nominal,
-            metode=payload["metode"],
-            tanggal=tanggal,
-            keterangan=payload.get("keterangan") or "",
-        )
-
     @staticmethod
     def realisasi(
         *,

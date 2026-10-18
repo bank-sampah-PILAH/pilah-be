@@ -182,22 +182,6 @@ def _validate_nominal_pencairan(value: Decimal) -> Decimal:
     return value
 
 
-class PencairanCreateSerializer(serializers.Serializer[Any]):
-    nasabah_id = serializers.UUIDField(required=True)
-    nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=True)
-    metode = serializers.ChoiceField(choices=Pencairan.Metode.choices, required=True)
-    tanggal = serializers.DateTimeField(required=False)
-    keterangan = serializers.CharField(
-        required=False, allow_blank=True, allow_null=True, max_length=255
-    )
-
-    def validate_nominal(self, value: Decimal) -> Decimal:
-        return _validate_nominal_pencairan(value)
-
-    def validate_tanggal(self, value: datetime) -> datetime:
-        return _validate_tanggal_pencairan(value)
-
-
 class PencairanEditSerializer(serializers.Serializer[Any]):
     nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
     metode = serializers.ChoiceField(choices=Pencairan.Metode.choices, required=False)

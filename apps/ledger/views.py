@@ -27,7 +27,6 @@ from apps.ledger.serializers import (
     DraftPencairanListSerializer,
     DraftPencairanSerializer,
     DraftPencairanUpdateSerializer,
-    PencairanCreateSerializer,
     PencairanDetailSerializer,
     PencairanEditSerializer,
     PencairanRevisiSerializer,
@@ -241,7 +240,7 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
     serializer_class = PencairanDetailSerializer
 
     def get_permissions(self) -> list[BasePermission]:
-        # Recording stays pengurus-only; nasabah may read their own riwayat.
+        # Edits stay pengurus-only; nasabah may read their own riwayat.
         if self.action in ("list", "retrieve"):
             return [IsActivePengelolaOrNasabah()]
         return [IsActivePengelola()]
@@ -270,12 +269,6 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         # Pagination is configured globally (PAGE_SIZE), so a page always exists.
         page = self.paginate_queryset(qs)
         return self.get_paginated_response(PencairanDetailSerializer(page, many=True).data)
-
-    def create(self, request: Request) -> Response:
-        serializer = PencairanCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        pencairan = PencairanService.create_pencairan(_user(request), serializer.validated_data)
-        return Response(PencairanDetailSerializer(pencairan).data, status=status.HTTP_201_CREATED)
 
     def retrieve(self, request: Request, pk: str | None = None) -> Response:
         return Response(PencairanDetailSerializer(self.get_object()).data)
