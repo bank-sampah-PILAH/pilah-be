@@ -67,6 +67,16 @@ class SetoranSatuanSnapshotTests(APITestCase):
         self.assertEqual(response.status_code, 201, response.data)
         return DetailTransaksi.objects.get(transaksi_id=response.data["id"])
 
+    def test_detail_transaksi_mengembalikan_satuan_yang_dibekukan(self) -> None:
+        self.jenis.satuan = "liter"
+        self.jenis.save(update_fields=["satuan"])
+        item = self._setor("2.000")
+
+        detail = self.client.get(f"/api/v1/transaksi/{item.transaksi_id}")
+
+        self.assertEqual(detail.status_code, 200, detail.data)
+        self.assertEqual(detail.data["items"][0]["satuan_snapshot"], "liter")
+
     def test_satuan_tersalin_ke_detail_saat_setoran_dicatat(self) -> None:
         self.jenis.satuan = "karung"
         self.jenis.save(update_fields=["satuan"])
