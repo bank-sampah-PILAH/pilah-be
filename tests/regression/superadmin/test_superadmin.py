@@ -107,6 +107,39 @@ class SuperadminRegressionTests(RegressionTestCase):
     @override_settings(
         PILAH_SUPERADMIN_EMAILS=(),
         PILAH_REVIEW_SUPERADMIN_EMAILS=(REVIEW_SUPERADMIN_EMAIL,),
+        PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS=(REVIEW_SUPERADMIN_EMAIL,),
+    )
+    def test_review_superadmin_password_login_stays_within_synthetic_scope(self) -> None:
+        reviewer = User.objects.create_user(
+            email=REVIEW_SUPERADMIN_EMAIL,
+            nama="Review Superadmin",
+            role=User.Role.SUPERADMIN,
+            is_profile_complete=True,
+        )
+        reviewer.set_password("review-password")
+        reviewer.save(update_fields=["password"])
+        self._pending_bank("Synthetic Review Bank", bank_id=REVIEW_BANK_ID)
+        self._pending_bank("Unrelated Real Bank")
+
+        login = self.client.post(
+            "/api/v1/auth/login",
+            {"email": REVIEW_SUPERADMIN_EMAIL, "password": "review-password"},
+            format="json",
+        )
+
+        self.assertEqual(login.status_code, 200, getattr(login, "data", None))
+        self.assertEqual(login.data["user"]["role"], User.Role.SUPERADMIN)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access_token']}")
+        queue = self.client.get("/api/v1/superadmin/bank-sampah?status=pending")
+        reviewer.refresh_from_db()
+        self.assertFalse(reviewer.is_staff)
+        self.assertFalse(reviewer.is_superuser)
+        self.assertEqual(queue.status_code, 200, queue.data)
+        self.assertEqual([row["id"] for row in queue.data["results"]], [str(REVIEW_BANK_ID)])
+
+    @override_settings(
+        PILAH_SUPERADMIN_EMAILS=(),
+        PILAH_REVIEW_SUPERADMIN_EMAILS=(REVIEW_SUPERADMIN_EMAIL,),
     )
     def test_review_superadmin_can_reject_only_the_pending_review_bank(self) -> None:
         reviewer = User.objects.create_user(

@@ -80,6 +80,87 @@ class AuthRegressionTests(RegressionTestCase):
         self.client.credentials()
         self.assertGreaterEqual(self.client.post("/api/v1/auth/google", {}).status_code, 400)
 
+    def test_password_login_returns_the_google_session_contract(self) -> None:
+        self.client.credentials()
+        self.user.set_password("correct-password")
+        self.user.email_verified = True
+        self.user.save(update_fields=["password", "email_verified"])
+
+        response = self.client.post(
+            "/api/v1/auth/login",
+            {"email": " SARI@EXAMPLE.COM ", "password": "correct-password"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, getattr(response, "data", None))
+        self.assertEqual(
+            set(response.data),
+            {
+                "access_token",
+                "refresh_token",
+                "token_type",
+                "expires_in",
+                "user",
+                "next_step",
+                "is_new_user",
+            },
+        )
+        self.assertEqual(response.data["user"]["role"], User.Role.PENGELOLA)
+        self.assertEqual(response.data["next_step"], "dashboard")
+        self.assertFalse(response.data["is_new_user"])
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access_token']}")
+        self.assertEqual(self.client.get("/api/v1/auth/me").status_code, 200)
+        refresh = self.client.post(
+            "/api/v1/auth/refresh",
+            {"refresh_token": response.data["refresh_token"]},
+            format="json",
+        )
+        self.assertEqual(refresh.status_code, 200, refresh.data)
+
+    def test_password_login_returns_the_same_error_for_invalid_credentials(self) -> None:
+        self.client.credentials()
+        self.user.set_password("correct-password")
+        self.user.email_verified = True
+        self.user.save(update_fields=["password", "email_verified"])
+        inactive = self.make_user("inactive@example.com", User.Role.PENGELOLA, self.bank)
+        inactive.set_password("correct-password")
+        inactive.is_active = False
+        inactive.save(update_fields=["password", "is_active"])
+        expected = {
+            "error": "Email atau kata sandi tidak valid",
+            "code": "invalid_credentials",
+        }
+
+        for email, password in (
+            ("missing@example.com", "correct-password"),
+            (self.user.email, "wrong-password"),
+            (inactive.email, "correct-password"),
+        ):
+            with self.subTest(email=email):
+                response = self.client.post(
+                    "/api/v1/auth/login",
+                    {"email": email, "password": password},
+                    format="json",
+                )
+                self.assertEqual(response.status_code, 401, getattr(response, "data", None))
+                self.assertEqual(response.data, expected)
+
+    def test_password_login_requires_verified_email_unless_explicitly_exempt(self) -> None:
+        self.client.credentials()
+        self.user.set_password("correct-password")
+        self.user.email_verified = False
+        self.user.save(update_fields=["password", "email_verified"])
+        payload = {"email": self.user.email, "password": "correct-password"}
+
+        with self.settings(PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS=()):
+            denied = self.client.post("/api/v1/auth/login", payload, format="json")
+        self.assertEqual(denied.status_code, 401, getattr(denied, "data", None))
+        self.assertEqual(denied.data["code"], "invalid_credentials")
+
+        with self.settings(PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS=" SARI@EXAMPLE.COM "):
+            allowed = self.client.post("/api/v1/auth/login", payload, format="json")
+        self.assertEqual(allowed.status_code, 200, getattr(allowed, "data", None))
+
     def test_non_pengelola_roles_denied_on_pengelola_endpoints(self) -> None:
         paths = [
             "/api/v1/dashboard/stats",
