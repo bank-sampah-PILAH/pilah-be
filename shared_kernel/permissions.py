@@ -106,6 +106,22 @@ def superadmin_allowlist() -> frozenset[str]:
     return frozenset(str(v).strip().lower() for v in values if str(v).strip())
 
 
+def review_superadmin_allowlist() -> frozenset[str]:
+    configured = getattr(settings, "PILAH_REVIEW_SUPERADMIN_EMAILS", ())
+    values = configured.split(",") if isinstance(configured, str) else configured
+    return frozenset(str(v).strip().lower() for v in values if str(v).strip())
+
+
+def is_review_superadmin(email: str) -> bool:
+    normalized = email.strip().lower()
+    return normalized in review_superadmin_allowlist() and normalized not in superadmin_allowlist()
+
+
+def is_app_superadmin_allowlisted(email: str) -> bool:
+    normalized = email.strip().lower()
+    return normalized in superadmin_allowlist() | review_superadmin_allowlist()
+
+
 class IsSuperAdmin(BasePermission):
     message = "Endpoint ini hanya untuk superadmin"
 
@@ -113,7 +129,7 @@ class IsSuperAdmin(BasePermission):
         user = request.user
         if not user.is_authenticated or user.role != User.Role.SUPERADMIN:
             return False
-        return user.email.strip().lower() in superadmin_allowlist()
+        return is_app_superadmin_allowlisted(user.email)
 
 
 class IsActiveNasabah(BasePermission):
