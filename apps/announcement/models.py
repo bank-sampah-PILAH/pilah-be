@@ -13,6 +13,8 @@ from django.utils import timezone
 
 from shared_kernel.models import TimestampedModel
 
+_USER_API = "api.User"
+
 
 class Pengumuman(TimestampedModel):
     class Status(models.TextChoices):
@@ -32,17 +34,17 @@ class Pengumuman(TimestampedModel):
     terbit_pada = models.DateTimeField(null=True, blank=True)
     masa_berlaku_hingga = models.DateTimeField(null=True, blank=True)
     dibuat_oleh = models.ForeignKey(
-        "api.User", on_delete=models.PROTECT, related_name="pengumuman_dibuat"
+        _USER_API, on_delete=models.PROTECT, related_name="pengumuman_dibuat"
     )
     diterbitkan_oleh = models.ForeignKey(
-        "api.User",
+        _USER_API,
         on_delete=models.PROTECT,
         related_name="pengumuman_diterbitkan",
         null=True,
         blank=True,
     )
     ditarik_oleh = models.ForeignKey(
-        "api.User",
+        _USER_API,
         on_delete=models.PROTECT,
         related_name="pengumuman_ditarik",
         null=True,
@@ -93,7 +95,7 @@ class PengumumanDibaca(TimestampedModel):
     """Per-user read receipt (PIL-244). Unique per (pengumuman, user)."""
 
     pengumuman = models.ForeignKey(Pengumuman, on_delete=models.CASCADE, related_name="dibaca_rows")
-    user = models.ForeignKey("api.User", on_delete=models.PROTECT, related_name="pengumuman_dibaca")
+    user = models.ForeignKey(_USER_API, on_delete=models.PROTECT, related_name="pengumuman_dibaca")
     dibaca_pada = models.DateTimeField(default=timezone.now)
 
     class Meta:
