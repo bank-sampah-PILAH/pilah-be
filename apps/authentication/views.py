@@ -9,6 +9,7 @@ from django.utils.http import urlencode
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -54,6 +55,8 @@ class GoogleAuthView(APIView):
 
 class PasswordLoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "password_login"
     serializer_class = PasswordLoginSerializer
 
     def post(self, request: Request) -> Response:

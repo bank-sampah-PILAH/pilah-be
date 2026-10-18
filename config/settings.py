@@ -205,7 +205,7 @@ REST_FRAMEWORK = {
     # Scoped rates: keys are the throttle scope of the views declaring one.
     # statement_pdf = the riwayat statement render (CPU-heavy; see
     # apps.nasabah.home.NasabahHistoryExportPdfView).
-    "DEFAULT_THROTTLE_RATES": {"statement_pdf": "10/min"},
+    "DEFAULT_THROTTLE_RATES": {"statement_pdf": "10/min", "password_login": "5/min"},
 }
 
 SPECTACULAR_SETTINGS = {

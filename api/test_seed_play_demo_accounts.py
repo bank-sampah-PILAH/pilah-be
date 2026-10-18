@@ -18,6 +18,7 @@ from api.management.commands.seed_play_demo_accounts import (
     DEMO_NASABAH_NUMBER,
     DEMO_PENGELOLA_EMAIL,
     DETAIL_IDS,
+    LEGACY_ACCOUNT_EMAILS,
     REVIEW_OWNER_EMAIL,
     REVIEW_OWNER_ID,
     SCHEDULE_IDS,
@@ -93,6 +94,14 @@ class SeedPlayDemoAccountsTests(TestCase):
             PILAH_REVIEW_ACCOUNT_PASSWORD="",
         ):
             with self.assertRaisesRegex(CommandError, "PILAH_REVIEW_ACCOUNT_PASSWORD"):
+                call_command("seed_play_demo_accounts", dry_run=True, stdout=StringIO())
+
+        self.assertFalse(User.objects.exists())
+        self.assertFalse(BankSampah.objects.exists())
+
+    def test_weak_review_password_fails_before_writing(self) -> None:
+        with override_settings(PILAH_REVIEW_ACCOUNT_PASSWORD="x"):
+            with self.assertRaisesRegex(CommandError, "password"):
                 call_command("seed_play_demo_accounts", dry_run=True, stdout=StringIO())
 
         self.assertFalse(User.objects.exists())
@@ -280,6 +289,29 @@ class SeedPlayDemoAccountsTests(TestCase):
         superadmin = User.objects.get(email=SUPERADMIN_EMAIL)
         self.assertFalse(superadmin.is_staff)
         self.assertFalse(superadmin.is_superuser)
+
+    def test_legacy_nasabah_with_unowned_membership_is_rejected(self) -> None:
+        bank = BankSampah.objects.create(nama="Demo bank", no_hp_pic="")
+        legacy_email = LEGACY_ACCOUNT_EMAILS[DEMO_NASABAH_EMAIL]
+        user = User.objects.create_user(
+            email=legacy_email,
+            nama="Demo Nasabah PILAH",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        Nasabah.objects.create(
+            id=uuid4(),
+            user=user,
+            bank_sampah=bank,
+            nomor="LEGACY-0001",
+            nama=user.nama,
+            alamat="Alamat demo untuk akun nasabah PILAH",
+            no_hp="",
+            email=legacy_email,
+        )
+
+        with self.assertRaisesRegex(CommandError, "identity conflict"):
+            Command._validate_legacy_seed_user(DEMO_NASABAH_EMAIL, user, User.Role.NASABAH)
 
     def test_legacy_and_target_email_collision_fails_before_writing(self) -> None:
         bank = BankSampah.objects.create(

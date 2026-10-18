@@ -1,10 +1,78 @@
 """Identity contracts: login, refresh, logout, me, and access gating."""
 
+from unittest.mock import patch
+
+from django.core.cache import cache
+
 from api.models import BankSampah, User
 from tests.regression.helpers import RegressionTestCase
 
 
 class AuthRegressionTests(RegressionTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def test_password_login_rejects_malformed_credentials(self) -> None:
+        self.client.credentials()
+
+        response = self.client.post(
+            "/api/v1/auth/login", {"email": "not-an-email", "password": "x"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("errors", response.data)
+
+    def test_password_login_hides_ambiguous_email_matches(self) -> None:
+        User.objects.create_user(email="duplicate@example.com", nama="First")
+        User.objects.create_user(email="Duplicate@example.com", nama="Second")
+
+        response = self.client.post(
+            "/api/v1/auth/login",
+            {"email": "duplicate@example.com", "password": "any-password"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.data["code"], "invalid_credentials")
+
+    def test_password_login_rejects_unallowlisted_superadmin(self) -> None:
+        User.objects.create_user(
+            email="blocked-admin@example.com",
+            nama="Blocked Admin",
+            role=User.Role.SUPERADMIN,
+            is_profile_complete=True,
+            email_verified=True,
+            password="correct-password",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/login",
+            {"email": "blocked-admin@example.com", "password": "correct-password"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.data["code"], "invalid_credentials")
+
+    def test_password_login_is_rate_limited(self) -> None:
+        self.client.credentials()
+        cache.clear()
+        self.addCleanup(cache.clear)
+        payload = {"email": "sari@example.com", "password": "password"}
+
+        with patch(
+            "apps.authentication.views.AuthService.login_with_password", return_value={}
+        ) as login:
+            responses = [
+                self.client.post("/api/v1/auth/login", payload, format="json") for _ in range(6)
+            ]
+
+        self.assertEqual([response.status_code for response in responses], [200] * 5 + [429])
+        self.assertEqual(login.call_count, 5)
+        login.assert_called_with("sari@example.com", "password")
+
     def test_protected_endpoints_require_auth(self) -> None:
         self.client.credentials()
         paths = [

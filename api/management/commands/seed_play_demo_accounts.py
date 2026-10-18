@@ -4,6 +4,8 @@ from decimal import Decimal
 from uuid import UUID
 
 from django.conf import settings
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.db.models import F, Q, Sum
@@ -184,8 +186,15 @@ class Command(BaseCommand):
                 "All production review account emails must be in "
                 "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS"
             )
-        if not getattr(settings, "PILAH_REVIEW_ACCOUNT_PASSWORD", "").strip():
+        password = getattr(settings, "PILAH_REVIEW_ACCOUNT_PASSWORD", "")
+        if not password.strip():
             raise CommandError("PILAH_REVIEW_ACCOUNT_PASSWORD must be provided by Secret Manager")
+        try:
+            validate_password(password)
+        except ValidationError as exc:
+            raise CommandError(
+                "PILAH_REVIEW_ACCOUNT_PASSWORD must meet the configured password requirements"
+            ) from exc
 
     @staticmethod
     def _existing_bank() -> BankSampah | None:
@@ -561,9 +570,7 @@ class Command(BaseCommand):
         if not user.nama:
             user.nama = display_name
             fields.append("nama")
-        if role == User.Role.SUPERADMIN and (user.is_staff or user.is_superuser):
-            user.is_staff = False
-            user.is_superuser = False
+        if Command._clear_admin_access(user, role):
             fields.extend(("is_staff", "is_superuser"))
         if user.google_id is not None:
             user.google_id = None
@@ -577,6 +584,14 @@ class Command(BaseCommand):
         if fields:
             user.save(update_fields=[*fields, "updated_at"])
         return user
+
+    @staticmethod
+    def _clear_admin_access(user: User, role: str) -> bool:
+        if role != User.Role.SUPERADMIN or not (user.is_staff or user.is_superuser):
+            return False
+        user.is_staff = False
+        user.is_superuser = False
+        return True
 
     @staticmethod
     def _create_membership(bank: BankSampah, user: User) -> Nasabah:
