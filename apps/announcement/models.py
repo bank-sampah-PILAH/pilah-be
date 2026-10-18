@@ -64,15 +64,16 @@ class Pengumuman(TimestampedModel):
         ]
 
     def status_efektif(self) -> str:
-        """Derived display status. terjadwal = not yet due (whether a plain
-        draft with a schedule or published ahead of its publish time)."""
+        """Derived display status. terjadwal = a published announcement that
+        has not reached its publish time; a plain draft is always `draft`,
+        because a schedule may only exist after the terbitkan action."""
         if self.status == self.Status.DITARIK:
             return "ditarik"
+        if self.status == self.Status.DRAFT:
+            return "draft"
         now = timezone.now()
         if self.terbit_pada is not None and self.terbit_pada > now:
             return "terjadwal"
-        if self.status == self.Status.DRAFT:
-            return "draft"
         if self.masa_berlaku_hingga is not None and now >= self.masa_berlaku_hingga:
             return "kedaluwarsa"
         return "terbit"
