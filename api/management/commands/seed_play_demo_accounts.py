@@ -185,9 +185,7 @@ class Command(BaseCommand):
                 "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS"
             )
         if not getattr(settings, "PILAH_REVIEW_ACCOUNT_PASSWORD", "").strip():
-            raise CommandError(
-                "PILAH_REVIEW_ACCOUNT_PASSWORD must be provided by Secret Manager"
-            )
+            raise CommandError("PILAH_REVIEW_ACCOUNT_PASSWORD must be provided by Secret Manager")
 
     @staticmethod
     def _existing_bank() -> BankSampah | None:

@@ -43,35 +43,30 @@ def validate_configuration() -> None:
     emails = [email.strip() for email in os.environ.get("PILAH_SUPERADMIN_EMAILS", "").split(",")]
     # Conservative ASCII dot-atoms/DNS labels accepted by Django validate_email,
     # bounded by User.email's storage length; this preflight has no Django dependency.
-    if not all(
-        len(email) <= 254
-        and EMAIL_PATTERN.fullmatch(email)
-        for email in emails
-    ):
+    if not all(len(email) <= 254 and EMAIL_PATTERN.fullmatch(email) for email in emails):
         raise ValueError("PILAH_SUPERADMIN_EMAILS must contain valid email addresses")
     review_email_values = [
         email.strip()
         for email in os.environ.get("PILAH_REVIEW_SUPERADMIN_EMAILS", "").split(",")
         if email.strip()
     ]
-    if not all(len(email) <= 254 and EMAIL_PATTERN.fullmatch(email) for email in review_email_values):
+    if not all(
+        len(email) <= 254 and EMAIL_PATTERN.fullmatch(email) for email in review_email_values
+    ):
         raise ValueError("PILAH_REVIEW_SUPERADMIN_EMAILS must contain valid email addresses")
     review_emails = {email.lower() for email in review_email_values}
     if {email.lower() for email in emails} & review_emails:
         raise ValueError("PILAH_REVIEW_SUPERADMIN_EMAILS must not overlap PILAH_SUPERADMIN_EMAILS")
     if REVIEW_SUPERADMIN_EMAIL not in review_emails:
-        raise ValueError(
-            "PILAH_REVIEW_SUPERADMIN_EMAILS must include pilah.superadmin@pilah.com"
-        )
+        raise ValueError("PILAH_REVIEW_SUPERADMIN_EMAILS must include pilah.superadmin@pilah.com")
     exemption_values = [
         email.strip()
         for email in os.environ.get("PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS", "").split(",")
         if email.strip()
     ]
-    if (
-        not all(len(email) <= 254 and EMAIL_PATTERN.fullmatch(email) for email in exemption_values)
-        or not REVIEW_ACCOUNT_EMAILS.issubset({email.lower() for email in exemption_values})
-    ):
+    if not all(
+        len(email) <= 254 and EMAIL_PATTERN.fullmatch(email) for email in exemption_values
+    ) or not REVIEW_ACCOUNT_EMAILS.issubset({email.lower() for email in exemption_values}):
         raise ValueError(
             "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS must contain all four production "
             "review account addresses"
@@ -81,18 +76,14 @@ def validate_configuration() -> None:
 def validate_review_password_secret(env: list[dict[str, Any]]) -> None:
     values = [item for item in env if item.get("name") == "PILAH_REVIEW_ACCOUNT_PASSWORD"]
     if len(values) != 1:
-        raise ValueError(
-            "Cloud Run must provide PILAH_REVIEW_ACCOUNT_PASSWORD from Secret Manager"
-        )
+        raise ValueError("Cloud Run must provide PILAH_REVIEW_ACCOUNT_PASSWORD from Secret Manager")
     secret = values[0].get("valueFrom", {}).get("secretKeyRef", {})
     if (
         values[0].get("value") is not None
         or secret.get("name") != "PILAH_REVIEW_ACCOUNT_PASSWORD"
         or not secret.get("key")
     ):
-        raise ValueError(
-            "Cloud Run must provide PILAH_REVIEW_ACCOUNT_PASSWORD from Secret Manager"
-        )
+        raise ValueError("Cloud Run must provide PILAH_REVIEW_ACCOUNT_PASSWORD from Secret Manager")
 
 
 def bootstrap_cloud_run() -> None:

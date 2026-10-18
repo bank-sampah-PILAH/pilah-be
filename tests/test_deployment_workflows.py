@@ -61,7 +61,9 @@ class DeploymentWorkflowTests(SimpleTestCase):
     def test_review_seed_secret_and_email_exemptions_are_wired_to_cloud_run(self) -> None:
         workflow = yaml.safe_load((ROOT / ".github/workflows/deploy-cloud-run.yml").read_text())
         deploy = workflow["jobs"]["deploy"]["steps"]
-        deploy_command = deploy[next(i for i, step in enumerate(deploy) if step.get("name") == "Deploy Cloud Run")]["run"]
+        deploy_command = deploy[
+            next(i for i, step in enumerate(deploy) if step.get("name") == "Deploy Cloud Run")
+        ]["run"]
 
         self.assertEqual(
             workflow["env"]["PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS"],

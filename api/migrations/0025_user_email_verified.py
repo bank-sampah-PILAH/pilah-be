@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('api', '0024_merge_harga_sampah_draft_pencairan'),
+        ("api", "0024_merge_harga_sampah_draft_pencairan"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='user',
-            name='email_verified',
+            model_name="user",
+            name="email_verified",
             field=models.BooleanField(default=False),
         ),
     ]
