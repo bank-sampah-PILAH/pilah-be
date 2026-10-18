@@ -63,6 +63,11 @@ class HargaSampah(models.Model):
     bank_sampah = models.ForeignKey(
         "api.BankSampah", on_delete=models.PROTECT, related_name="harga_sampah"
     )
+    # Nama warisan: kolom ini lebih tua daripada satuan per jenis (PIL-305).
+    # Artinya "harga per satuan jenis itu"; satuannya dibaca dari
+    # JenisSampah.satuan, dan untuk transaksi dari DetailTransaksi.satuan_snapshot.
+    # Namanya dipertahankan karena ikut menjadi nama field di seluruh payload
+    # klien; menggantinya akan merusak aplikasi yang sudah terpasang.
     harga_per_kg = models.DecimalField(max_digits=11, decimal_places=2)
     berlaku_mulai = models.DateTimeField()
     # Jejak audit perubahan harga (BR-11): siapa dan kapan.

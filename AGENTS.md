@@ -89,6 +89,27 @@
 - Nilai setoran lama tidak berubah karena harga yang dipakai tersalin ke
   `DetailTransaksi.harga_snapshot`.
 
+## Aturan satuan jenis sampah
+
+- Satuan hidup di `JenisSampah.satuan`, dipilih dari `JenisSampah.Satuan`
+  (`kg`, `pcs`, `liter`, `karung`, `ikat`), bukan dipatok di serializer.
+  Nilai di luar daftar ditolak 422; payload tanpa `satuan` tetap `kg` supaya
+  aplikasi yang sudah terpasang tidak rusak.
+- `HargaSampah.harga_per_kg` **tetap** bernama demikian, di kolom maupun di
+  payload, meski satuannya kini bisa bukan kg. Namanya warisan dan berarti
+  "harga per satuan jenis itu"; satuannya dibaca dari `JenisSampah.satuan`.
+  Mengganti namanya akan merusak seluruh payload klien, jadi jangan.
+- Satuan ikut dibekukan ke `DetailTransaksi.satuan_snapshot` saat setoran
+  dicatat, seperti harga pada BR-03. Mengubah satuan sebuah jenis tidak boleh
+  menulis ulang struk lama. Baca satuan riwayat dari snapshot, bukan dari
+  jenisnya.
+- Jenis sampah tidak pernah dihapus. `DELETE` dijawab 409 dengan arahan
+  menonaktifkan, tanpa syarat; basis data menjaganya terpisah lewat `PROTECT`
+  pada `DetailTransaksi` dan `HargaSampah`.
+- Total berat yang menjumlahkan `Sum("berat")` lintas jenis belum sadar
+  satuan, jadi angkanya mencampur kg dengan pcs. Lihat catatan tindak lanjut
+  PIL-305; jangan anggap total itu sudah benar.
+
 ## Aturan input setoran
 
 - Berat boleh desimal hingga 3 angka di belakang koma dan harus lebih dari
