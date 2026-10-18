@@ -23,7 +23,9 @@ guess a URL hash or configure a custom domain.
    --project <project> --format='value(status.url)'`.
 2. Set the backend repository variable `PILAH_WEB_ORIGIN` to that exact HTTPS
    origin, without a path or trailing slash. Also configure the production
-   repository variable `PILAH_SUPERADMIN_EMAILS` with real authorized accounts.
+   repository variables `PILAH_SUPERADMIN_EMAILS` with global admins and
+   `PILAH_REVIEW_SUPERADMIN_EMAILS` with review-only accounts. Keep the lists
+   separate; overlapping addresses fail application startup.
    Missing/invalid origin or allowlist stops deployment before cloud mutations.
 3. Deploy the backend with its existing GCP/DB/storage/OAuth secrets and vars.
    CORS and CSRF explicitly allow `PILAH_WEB_ORIGIN`, never all origins.
@@ -109,6 +111,7 @@ export DJANGO_SECRET_KEY='change-this-django-secret'
 export PILAH_PUBLIC_APP_URL=''
 export PILAH_WEB_ORIGIN='https://<actual-dashboard-provider-url>'
 export PILAH_SUPERADMIN_EMAILS='admin@example.com'
+export PILAH_REVIEW_SUPERADMIN_EMAILS='review@example.com'
 export GOOGLE_CLIENT_ID=''
 export WHATSAPP_GATEWAY_URL=''
 export WHATSAPP_GATEWAY_TOKEN=''

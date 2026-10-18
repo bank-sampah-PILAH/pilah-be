@@ -196,6 +196,31 @@ class SuperadminWhitelistTests(APITestCase):
         self.assertEqual(response.data["next_step"], "superadmin_dashboard")
 
     @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
+    @override_settings(
+        PILAH_SUPERADMIN_EMAILS=(),
+        PILAH_REVIEW_SUPERADMIN_EMAILS=("reviewer@example.com",),
+    )
+    def test_review_allowlist_provisions_superadmin_without_django_admin_access(
+        self, verify: Mock
+    ) -> None:
+        verify.return_value = {
+            **GOOGLE_PROFILE,
+            "sub": "google-reviewer",
+            "email": "REVIEWER@example.com",
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/google", {"id_token": "signed-google-token"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["user"]["role"], User.Role.SUPERADMIN)
+        user = User.objects.get(email="reviewer@example.com")
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
+        self.assertFalse(AllowlistedSuperadminBackend().user_can_authenticate(user))
+
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     @override_settings(PILAH_SUPERADMIN_EMAILS=("admin@example.com",))
     def test_unverified_google_email_cannot_use_the_allowlist(self, verify: Mock) -> None:
         verify.return_value = {
