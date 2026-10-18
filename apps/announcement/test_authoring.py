@@ -79,7 +79,9 @@ class PengumumanAuthoringTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 422, response.data)
-        self.assertIn("masa_berlaku_hingga", response.data["errors"])
+        # A draft carrying terbit_pada is rejected before the expiry rule
+        # can report; both belong to the terbitkan step now.
+        self.assertIn("terbit_pada", response.data["errors"])
 
     def test_created_draft_is_not_visible_via_aktif(self) -> None:
         created = self.client.post(URL, {"judul": "Pengumuman", "isi": "Isi."}, format="json")
