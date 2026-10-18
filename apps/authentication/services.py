@@ -12,7 +12,7 @@ from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.models import BankSampah, Nasabah, NasabahApprovalLog, Saldo, User
-from shared_kernel.permissions import superadmin_allowlist
+from shared_kernel.permissions import is_app_superadmin_allowlisted, superadmin_allowlist
 
 REGISTRATION_TOKEN_MAX_AGE = 600
 REGISTRATION_TOKEN_SALT = "pilah-google-registration"
@@ -63,8 +63,9 @@ class AuthService:
         user = AuthService._user_for_email(email)
         created = False
         if user is None:
-            is_allowlisted = superadmin_allowlist().__contains__(email.lower().strip())
+            is_allowlisted = is_app_superadmin_allowlisted(email)
             registered_role = User.Role.SUPERADMIN if is_allowlisted else role
+            has_django_admin_access = AuthService.is_superadmin_allowlisted(email)
             try:
                 with transaction.atomic():
                     user = User.objects.create_user(
@@ -73,8 +74,8 @@ class AuthService:
                         nama=name,
                         role=registered_role,
                         is_profile_complete=is_allowlisted,
-                        is_staff=is_allowlisted,
-                        is_superuser=is_allowlisted,
+                        is_staff=has_django_admin_access,
+                        is_superuser=has_django_admin_access,
                     )
                     created = True
             except IntegrityError:
@@ -109,7 +110,8 @@ class AuthService:
     def _enforce_superadmin_allowlist(user: User, email: str) -> None:
         if user.role != User.Role.SUPERADMIN:
             return
-        if not AuthService._sync_superadmin_admin_flags(user, email):
+        AuthService._sync_superadmin_admin_flags(user, email)
+        if not is_app_superadmin_allowlisted(email):
             raise AuthService._superadmin_not_allowlisted()
 
     @staticmethod
@@ -178,6 +180,7 @@ class AuthService:
     ) -> tuple[User, bool]:
         if role == User.Role.SUPERADMIN and not is_allowlisted:
             raise AuthService._superadmin_not_allowlisted()
+        has_django_admin_access = AuthService.is_superadmin_allowlisted(email)
         try:
             with transaction.atomic():
                 return (
@@ -187,8 +190,8 @@ class AuthService:
                         nama=name,
                         role=role,
                         is_profile_complete=role == User.Role.SUPERADMIN,
-                        is_staff=role == User.Role.SUPERADMIN,
-                        is_superuser=role == User.Role.SUPERADMIN,
+                        is_staff=has_django_admin_access,
+                        is_superuser=has_django_admin_access,
                     ),
                     True,
                 )
@@ -210,7 +213,7 @@ class AuthService:
         dev_role = profile.get("_pilah_dev_role")
         user = AuthService._user_for_email(email)
         nasabah = Nasabah.objects.filter(email__iexact=email, is_active=True).first()
-        is_allowlisted = AuthService.is_superadmin_allowlisted(email)
+        is_allowlisted = is_app_superadmin_allowlisted(email)
 
         if user is None and nasabah is None and not is_allowlisted and dev_role is None:
             return AuthService._registration_response(profile, email, google_id, name)
