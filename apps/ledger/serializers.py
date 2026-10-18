@@ -133,6 +133,7 @@ class DetailTransaksiSerializer(serializers.ModelSerializer[Model]):
             "jenis_sampah_id",
             "nama_sampah_snapshot",
             "harga_snapshot",
+            "satuan_snapshot",
             "berat",
             "subtotal",
         ]
