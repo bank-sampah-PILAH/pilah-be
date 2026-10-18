@@ -50,9 +50,12 @@ def _annotate_status_efektif(queryset: QuerySet[Pengumuman]) -> QuerySet[Pengumu
     now = timezone.now()
     return queryset.annotate(
         _status_efektif=Case(
+            # A draft is always draft: a schedule may only exist after the
+            # terbitkan action, so terbit_pada on a draft cannot make it
+            # terjadwal (review finding PIL-243).
+            When(status=Pengumuman.Status.DRAFT, then=Value("draft")),
             When(status=Pengumuman.Status.DITARIK, then=Value("ditarik")),
             When(terbit_pada__gt=now, then=Value("terjadwal")),
-            When(status=Pengumuman.Status.DRAFT, then=Value("draft")),
             When(
                 masa_berlaku_hingga__isnull=False,
                 masa_berlaku_hingga__lte=now,

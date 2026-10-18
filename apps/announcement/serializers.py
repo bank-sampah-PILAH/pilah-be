@@ -109,20 +109,23 @@ class PengumumanSerializer(serializers.ModelSerializer[Model]):
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         instance = cast(Pengumuman | None, self.instance)
         now = timezone.now()
-        terbit_pada = attrs.get("terbit_pada", getattr(instance, "terbit_pada", None))
+        # A schedule may only be set by the terbitkan action: reject any
+        # terbit_pada a draft would carry (new or edited), so a draft can
+        # never sit labeled terjadwal without ever publishing it (review
+        # finding PIL-243).
+        is_draft = instance is None or instance.status == Pengumuman.Status.DRAFT
+        if (
+            is_draft
+            and attrs.get("terbit_pada", getattr(instance, "terbit_pada", None)) is not None
+        ):
+            raise serializers.ValidationError(
+                {"terbit_pada": "Jadwal hanya boleh diatur lewat terbitkan"}
+            )
         masa_berlaku = attrs.get(
             "masa_berlaku_hingga", getattr(instance, "masa_berlaku_hingga", None)
         )
-        # A draft's publish time is a schedule; it must still be in the future
-        # (otherwise the announcement would be effectively terbit without a
-        # publisher stamp). Nulling terbit_pada (cancel schedule) is allowed.
-        # Published rows are not editable anyway — the transition guard in the
-        # viewset rejects them — so the future rule does not apply there.
-        is_draft_like = instance is None or instance.status == Pengumuman.Status.DRAFT
-        if terbit_pada is not None and is_draft_like and terbit_pada <= now:
-            raise serializers.ValidationError({"terbit_pada": "Waktu terbit harus di masa datang"})
         if masa_berlaku is not None:
-            terkait = terbit_pada if terbit_pada is not None else now
+            terkait = attrs.get("terbit_pada", getattr(instance, "terbit_pada", None)) or now
             if masa_berlaku <= terkait:
                 raise serializers.ValidationError(
                     {"masa_berlaku_hingga": "Masa berlaku harus setelah waktu terbit"}
