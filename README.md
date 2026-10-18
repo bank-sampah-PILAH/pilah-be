@@ -160,6 +160,7 @@ PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false
 PILAH_PUBLIC_APP_URL=https://pilah.example.com
 PILAH_WEB_ORIGIN=https://web.example.com
 PILAH_SUPERADMIN_EMAILS=admin@example.com,another-admin@example.com
+PILAH_REVIEW_SUPERADMIN_EMAILS=pilah.superadmin@gmail.com
 ```
 
 `CORS_ALLOWED_ORIGINS` is a comma-separated list of browser origins (scheme,
@@ -170,7 +171,14 @@ host, and optional port; no path). For web Google login, set backend
 Set `PILAH_SUPERADMIN_EMAILS` on Fly and as a GitHub repository variable for
 Cloud Run. It is the authoritative comma-separated list of Superadmin Google
 accounts. The deploy workflow stops before deployment if the repository
-variable is empty.
+variable is empty. Set `PILAH_REVIEW_SUPERADMIN_EMAILS` as a separate GitHub
+repository variable to enable review-only accounts on production Cloud Run.
+
+`PILAH_REVIEW_SUPERADMIN_EMAILS` grants app-only Superadmin access to the
+synthetic review approval flow. These users never receive Django staff or
+superuser access, and their bank approval API is limited to the synthetic
+pending review bank. Keep this list separate from `PILAH_SUPERADMIN_EMAILS`;
+startup fails if the normalized email lists overlap.
 
 WhatsApp gateway variables:
 
@@ -286,13 +294,57 @@ app; browser fallback does not forward their query token. See [Cloud Run](CLOUD_
 for first-deploy URL ordering and IAM, and [Fly staging](FLY_STAGING.md) for its
 configured origin.
 
-Production deployment on `main` automatically runs `bootstrap_superadmins` in
-a Cloud Run Job with the service's image, DB environment and runtime identity.
-It creates only missing allowlisted Superadmins (Google login, no usable
-password); existing profiles/passwords remain unchanged. Role conflicts and
-missing/invalid allowlists fail deployment. It never seeds banks or demo data.
-Manual Cloud Run deployment uses the same bootstrap. Neither cloud provisioning
-nor OAuth Console configuration is performed by this code delivery itself.
+Production deployment on `main` automatically runs `bootstrap_superadmins` and
+the production demo seed in Cloud Run Jobs with the service's image, DB
+environment and runtime identity. The seed runs a dry-run first and applies
+only if that succeeds. It creates only missing global allowlisted Superadmins
+(Google login, no usable password); existing profiles/passwords remain
+unchanged. Role conflicts and missing/invalid allowlists fail deployment.
+Manual Cloud Run deployment uses the same bootstrap and seed. Neither cloud
+provisioning nor OAuth Console configuration is performed by this code delivery
+itself.
+
+## Production Google demo accounts
+
+The explicit `seed_play_demo_accounts` command provisions PILAH roles for these
+Google accounts:
+
+- Pengelola: `traymachi@gmail.com`
+- Pengurus: `pilah.pengurus@gmail.com`
+- Nasabah: `pilah.nasabah@gmail.com`
+- Review Superadmin: `pilah.superadmin@gmail.com`
+
+It does not create Google mailboxes or store Google IDs, passwords, or tokens.
+PILAH must control each mailbox so its owner can sign in with Google's verified
+login.
+
+Before deployment, add `pilah.superadmin@gmail.com` to the production
+`PILAH_REVIEW_SUPERADMIN_EMAILS` setting and remove it from
+`PILAH_SUPERADMIN_EMAILS`. The review account must not overlap the global
+Superadmin list. Every production deployment previews the seed and then applies
+it using the deployed application image and production database:
+
+```bash
+python manage.py seed_play_demo_accounts --dry-run
+python manage.py seed_play_demo_accounts --confirm-production
+```
+
+The command fails outside production, when Django debug mode is enabled, when
+the Superadmin email is not in the review-only list, or when a seeded identity
+conflicts with existing data. It creates one active synthetic bank with a
+primary Pengelola, a non-primary Pengurus, and one approved Nasabah; four active
+waste types; three historical setoran; two published schedules; and a separate
+synthetic pending bank owned by a non-login `.example.test` account. The fresh
+Nasabah balance is derived from the transaction ledger and is Rp21.250, with no
+payout history or extra Nasabah roster.
+
+The command uses stable IDs and only upserts its own rows. Re-running it
+preserves Google identities, unrelated tenant data, and any approval decision
+on the synthetic review bank. It refreshes the two schedule dates to 7 and 14
+days from the run date, updates the seeded catalog and transaction snapshots,
+and recalculates saldo from all setoran and pencairan ledger rows. It runs only
+as a post-deployment Cloud Run Job, never during application startup; do not
+point a local database client at production to run it.
 
 Bank Sampah organizations can be `mandiri`, `induk`, or `unit`. A unit must
 belong to an induk organization. A Nasabah user can have one membership per
