@@ -439,7 +439,6 @@ Pencairan:
 
 - `GET /api/v1/pencairan`
 - `GET /api/v1/pencairan?nasabah_id=:id&periode=:periode&search=:nama`
-- `POST /api/v1/pencairan`
 - `GET /api/v1/pencairan/:id`
 - `PATCH /api/v1/pencairan/:id`
 - `GET /api/v1/pencairan/:id/riwayat`
@@ -472,34 +471,16 @@ SuperAdmin:
 
 ## Pencairan
 
-Pengurus record a payout for a nasabah. There is no payment gateway: the API
-only records what was paid out and lowers the saldo once, atomically.
+Pencairan rows are created only by confirming a draft (see [Draft
+pencairan](#draft-pencairan)); there is no endpoint that records a payout for a
+single nasabah, so `POST /api/v1/pencairan` returns 405.
 
-```http
-POST /api/v1/pencairan
-{
-  "nasabah_id": "uuid",
-  "nominal": "200000",
-  "metode": "tunai",
-  "tanggal": "2026-09-20T10:15:00+07:00",
-  "keterangan": "Diambil pagi"
-}
-```
-
-| Field | Rule |
-| --- | --- |
-| `nasabah_id` | Required. Active nasabah of the pengurus' own bank sampah. |
-| `nominal` | Required. Greater than zero, whole rupiah, not above the saldo. |
-| `metode` | Required. `tunai` or `transfer`. |
-| `tanggal` | Optional, defaults to now. Cannot be in the future, or earlier than the nasabah's latest setoran or pencairan. |
-| `keterangan` | Optional, max 255 characters. |
-
-The response carries `status` (`tercatat`) plus the `saldo_sebelum` and
+A pencairan carries `status` (`tercatat`) plus the `saldo_sebelum` and
 `saldo_sesudah` snapshots taken when the payout was recorded. `saldo_sesudah`
 is rounded down to whole rupiah, and saldo history (`saldo_setelah_transaksi`,
 export) debits `saldo_sebelum - saldo_sesudah`, so it matches the stored saldo.
 
-Only pengurus record pencairan. `GET /api/v1/pencairan` and
+Only pengurus edit pencairan. `GET /api/v1/pencairan` and
 `GET /api/v1/pencairan/:id` also accept nasabah accounts, which see only the
 pencairan on their own memberships. Django admin shows pencairan read-only.
 
