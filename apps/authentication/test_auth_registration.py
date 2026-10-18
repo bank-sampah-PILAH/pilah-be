@@ -70,6 +70,7 @@ class GoogleRegistrationTests(APITestCase):
             role=User.Role.NASABAH,
             is_profile_complete=True,
         )
+        self.assertFalse(user.email_verified)
         verify.return_value = {**GOOGLE_PROFILE, "role": User.Role.SUPERADMIN}
 
         response = self.client.post(
@@ -81,6 +82,7 @@ class GoogleRegistrationTests(APITestCase):
         self.assertEqual(response.data["user"]["role"], User.Role.NASABAH)
         user.refresh_from_db()
         self.assertEqual(user.role, User.Role.NASABAH)
+        self.assertTrue(user.email_verified)
 
     def test_registration_rejects_invalid_tampered_and_expired_tokens(self) -> None:
         invalid_role = self.client.post(
