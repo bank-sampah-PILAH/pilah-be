@@ -23,3 +23,11 @@ class SatuanJenisSampahTests(HargaApiTestCase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["satuan"], "pcs")
         self.assertEqual(JenisSampah.objects.get(id=response.data["id"]).satuan, "pcs")
+
+    def test_riwayat_harga_memakai_satuan_jenisnya_bukan_kg(self) -> None:
+        jenis = self.buat(satuan="karung").data
+
+        riwayat = self.client.get(f"/api/v1/jenis-sampah/{jenis['id']}/harga")
+
+        self.assertEqual(riwayat.status_code, 200, riwayat.data)
+        self.assertEqual({baris["satuan"] for baris in riwayat.data["results"]}, {"karung"})
