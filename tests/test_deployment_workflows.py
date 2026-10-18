@@ -35,7 +35,7 @@ class DeploymentWorkflowTests(SimpleTestCase):
         steps = workflow["jobs"]["deploy"]["steps"]
         names = [step.get("name", "") for step in steps]
         self.assertLess(
-            names.index("Validate production origin and Superadmin allowlist"),
+            names.index("Validate production origin and auth allowlists"),
             names.index("Authenticate to Google Cloud"),
         )
         self.assertLess(
@@ -72,7 +72,7 @@ class DeploymentWorkflowTests(SimpleTestCase):
             deploy_command,
         )
         self.assertIn(
-            "--set-secrets PILAH_REVIEW_ACCOUNT_PASSWORD=PILAH_REVIEW_ACCOUNT_PASSWORD:latest",
+            '--set-secrets "PILAH_REVIEW_ACCOUNT_PASSWORD=PILAH_REVIEW_ACCOUNT_PASSWORD:latest"',
             deploy_command,
         )
         self.assertNotIn("PILAH_REVIEW_ACCOUNT_PASSWORD:", workflow["env"])
@@ -80,7 +80,7 @@ class DeploymentWorkflowTests(SimpleTestCase):
         manual_script = (ROOT / "scripts/deploy-cloud-run.sh").read_text()
         self.assertIn("PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS", manual_script)
         self.assertIn(
-            "--set-secrets=PILAH_REVIEW_ACCOUNT_PASSWORD=PILAH_REVIEW_ACCOUNT_PASSWORD:latest",
+            '--set-secrets="PILAH_REVIEW_ACCOUNT_PASSWORD=PILAH_REVIEW_ACCOUNT_PASSWORD:latest"',
             manual_script,
         )
 

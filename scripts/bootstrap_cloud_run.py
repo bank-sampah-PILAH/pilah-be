@@ -12,6 +12,21 @@ import sys
 import tempfile
 from typing import Any
 
+EMAIL_PATTERN = re.compile(
+    r"[A-Za-z0-9_%+-]+(?:\.[A-Za-z0-9_%+-]+)*@"
+    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+    r"[A-Za-z]{2,63}"
+)
+REVIEW_ACCOUNT_EMAILS = frozenset(
+    {
+        "pilah.pengelola@pilah.com",
+        "pilah.pengurus@pilah.com",
+        "pilah.nasabah@pilah.com",
+        "pilah.superadmin@pilah.com",
+    }
+)
+REVIEW_SUPERADMIN_EMAIL = "pilah.superadmin@pilah.com"
+
 
 def validate_configuration() -> None:
     origin = os.environ.get("PILAH_WEB_ORIGIN", "")
@@ -30,22 +45,54 @@ def validate_configuration() -> None:
     # bounded by User.email's storage length; this preflight has no Django dependency.
     if not all(
         len(email) <= 254
-        and re.fullmatch(
-            r"[A-Za-z0-9_%+-]+(?:\.[A-Za-z0-9_%+-]+)*@"
-            r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
-            r"[A-Za-z]{2,63}",
-            email,
-        )
+        and EMAIL_PATTERN.fullmatch(email)
         for email in emails
     ):
         raise ValueError("PILAH_SUPERADMIN_EMAILS must contain valid email addresses")
-    review_emails = {
-        email.strip().lower()
+    review_email_values = [
+        email.strip()
         for email in os.environ.get("PILAH_REVIEW_SUPERADMIN_EMAILS", "").split(",")
         if email.strip()
-    }
+    ]
+    if not all(len(email) <= 254 and EMAIL_PATTERN.fullmatch(email) for email in review_email_values):
+        raise ValueError("PILAH_REVIEW_SUPERADMIN_EMAILS must contain valid email addresses")
+    review_emails = {email.lower() for email in review_email_values}
     if {email.lower() for email in emails} & review_emails:
         raise ValueError("PILAH_REVIEW_SUPERADMIN_EMAILS must not overlap PILAH_SUPERADMIN_EMAILS")
+    if REVIEW_SUPERADMIN_EMAIL not in review_emails:
+        raise ValueError(
+            "PILAH_REVIEW_SUPERADMIN_EMAILS must include pilah.superadmin@pilah.com"
+        )
+    exemption_values = [
+        email.strip()
+        for email in os.environ.get("PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS", "").split(",")
+        if email.strip()
+    ]
+    if (
+        not all(len(email) <= 254 and EMAIL_PATTERN.fullmatch(email) for email in exemption_values)
+        or not REVIEW_ACCOUNT_EMAILS.issubset({email.lower() for email in exemption_values})
+    ):
+        raise ValueError(
+            "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS must contain all four production "
+            "review account addresses"
+        )
+
+
+def validate_review_password_secret(env: list[dict[str, Any]]) -> None:
+    values = [item for item in env if item.get("name") == "PILAH_REVIEW_ACCOUNT_PASSWORD"]
+    if len(values) != 1:
+        raise ValueError(
+            "Cloud Run must provide PILAH_REVIEW_ACCOUNT_PASSWORD from Secret Manager"
+        )
+    secret = values[0].get("valueFrom", {}).get("secretKeyRef", {})
+    if (
+        values[0].get("value") is not None
+        or secret.get("name") != "PILAH_REVIEW_ACCOUNT_PASSWORD"
+        or not secret.get("key")
+    ):
+        raise ValueError(
+            "Cloud Run must provide PILAH_REVIEW_ACCOUNT_PASSWORD from Secret Manager"
+        )
 
 
 def bootstrap_cloud_run() -> None:
@@ -62,6 +109,7 @@ def bootstrap_cloud_run() -> None:
     template = service["spec"]["template"]
     runtime = template["spec"]
     source = runtime["containers"][0]
+    validate_review_password_secret(source.get("env", []))
     env = {item["name"]: item.get("value") for item in source.get("env", [])}
     if env.get("PILAH_ENVIRONMENT") != "production":
         raise ValueError("Bootstrap requires the deployed production runtime")
