@@ -129,6 +129,9 @@ class AuthService:
         if not user.google_id:
             user.google_id = google_id
             updates.append("google_id")
+        if not user.email_verified:
+            user.email_verified = True
+            updates.append("email_verified")
         if not user.nama:
             user.nama = name
             updates.append("nama")
