@@ -4,15 +4,24 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('api', '0024_merge_harga_sampah_draft_pencairan'),
+        ("api", "0024_merge_harga_sampah_draft_pencairan"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='jenissampah',
-            name='satuan',
-            field=models.CharField(choices=[('kg', 'Kilogram'), ('pcs', 'Pcs'), ('liter', 'Liter'), ('karung', 'Karung'), ('ikat', 'Ikat')], default='kg', max_length=20),
+            model_name="jenissampah",
+            name="satuan",
+            field=models.CharField(
+                choices=[
+                    ("kg", "Kilogram"),
+                    ("pcs", "Pcs"),
+                    ("liter", "Liter"),
+                    ("karung", "Karung"),
+                    ("ikat", "Ikat"),
+                ],
+                default="kg",
+                max_length=20,
+            ),
         ),
     ]

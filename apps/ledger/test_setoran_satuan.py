@@ -49,7 +49,7 @@ class SetoranSatuanSnapshotTests(APITestCase):
         HargaSampah.objects.create(
             jenis_sampah=self.jenis,
             bank_sampah=self.bank,
-            harga_per_kg=Decimal("4000"),
+            harga_per_kg=Decimal(4000),
             berlaku_mulai=timezone.now() - timedelta(days=1),
         )
         refresh = RefreshToken.for_user(self.user)

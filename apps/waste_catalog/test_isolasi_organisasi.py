@@ -30,7 +30,7 @@ class IsolasiJenisSampahAntarBankTests(APITestCase):
         HargaSampah.objects.create(
             jenis_sampah=self.jenis_bank_lain,
             bank_sampah=self.bank_lain,
-            harga_per_kg=Decimal("4000"),
+            harga_per_kg=Decimal(4000),
             berlaku_mulai=timezone.now(),
         )
 
