@@ -26,7 +26,7 @@ from shared_kernel.scoping import current_bank, current_user
 class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
     permission_classes = [IsActivePengelola]
     serializer_class = JenisSampahSerializer
-    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+    http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
 
     def get_queryset(self) -> QuerySet[JenisSampah]:
         qs = JenisSampah.objects.filter(bank_sampah=current_bank(self.request)).prefetch_related(
@@ -88,6 +88,22 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
         jenis = serializer.save()
         if harga_baru is not None and harga_baru != harga_lama:
             catat_harga(jenis, harga_baru, sekarang, current_user(self.request))
+
+    def destroy(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        """Jenis sampah tidak pernah dihapus, hanya dinonaktifkan.
+
+        DELETE diterima rutenya supaya jawabannya bisa menjelaskan jalan yang
+        benar, bukan 405 tanpa arahan. Penolakannya tidak bersyarat: aturannya
+        berlaku untuk jenis yang sudah dipakai transaksi maupun yang belum,
+        sehingga tidak ada celah yang diam-diam menjadi hapus sungguhan.
+        Basis data menjaganya terpisah lewat PROTECT pada DetailTransaksi dan
+        HargaSampah.
+        """
+        self.get_object()
+        return Response(
+            {"errors": {"detail": ["Jenis sampah tidak dapat dihapus, nonaktifkan saja"]}},
+            status=status.HTTP_409_CONFLICT,
+        )
 
     @action(detail=True, methods=["patch"], url_path="status")
     def set_status(self, request: Request, pk: str | None = None) -> Response:
