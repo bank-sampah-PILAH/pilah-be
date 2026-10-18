@@ -9,6 +9,7 @@ from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from api.models import BankSampah, Nasabah, Pengumuman, PengumumanDibaca, User
+from apps.announcement.serializers import PengumumanBerandaSerializer
 
 LIST_URL = "/api/v1/nasabah/me/pengumuman"
 
@@ -115,6 +116,13 @@ class NasabahPengumumanListTests(APITestCase):
         response = self.client.get(LIST_URL)
 
         self.assertEqual(response.status_code, 403)
+
+    def test_beranda_serializer_falls_back_to_unread_without_annotation(self) -> None:
+        pengumuman = _terbit(self.bank, self.pengelola, "Aktif")
+
+        data = PengumumanBerandaSerializer(pengumuman).data
+
+        self.assertFalse(data["dibaca"])
 
 
 class NasabahPengumumanDetailTests(APITestCase):
