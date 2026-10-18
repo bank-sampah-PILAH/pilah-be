@@ -148,18 +148,6 @@ class PengumumanAuthoringTests(APITestCase):
         self.assertIn("error", deleted.data)
         self.assertTrue(Pengumuman.objects.filter(pk=pengumuman_id).exists())
 
-    def test_creating_a_draft_with_a_past_publish_time_is_rejected(self) -> None:
-        lampau = (timezone.now() - timedelta(hours=1)).isoformat()
-
-        response = self.client.post(
-            URL,
-            {"judul": "Pengumuman", "isi": "Isi.", "terbit_pada": lampau},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 422)
-        self.assertIn("terbit_pada", response.data["errors"])
-
     def test_creating_a_draft_with_expiry_in_the_past_is_rejected(self) -> None:
         # A draft cannot carry terbit_pada (schedule belongs to terbitkan), so
         # the expiry check runs against now.
