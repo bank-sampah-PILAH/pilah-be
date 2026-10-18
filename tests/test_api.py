@@ -4856,6 +4856,17 @@ class PencairanAPITests(APITransactionTestCase):
         saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
         self.assertEqual(saldo.data["total_saldo"], "265600.00")
 
+    def test_single_nasabah_pencairan_route_is_removed(self) -> None:
+        response = self.client.post(
+            "/api/v1/pencairan",
+            {"nasabah_id": str(self.nasabah.id), "nominal": "200000", "metode": "tunai"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 405, response.data)
+        saldo = self.client.get(f"/api/v1/nasabah/{self.nasabah.id}/saldo")
+        self.assertEqual(saldo.data["total_saldo"], "465600.00")
+
     def test_pencairan_above_saldo_is_rejected(self) -> None:
         response = self.client.post(
             "/api/v1/pencairan",
