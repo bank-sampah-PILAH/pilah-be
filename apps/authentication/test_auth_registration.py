@@ -61,6 +61,7 @@ class GoogleRegistrationTests(APITestCase):
                 self.assertEqual(response.data["next_step"], "complete_profile")
                 user = User.objects.get(email=profile["email"])
                 self.assertFalse(user.is_profile_complete)
+                self.assertTrue(user.email_verified)
 
     @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     def test_existing_account_logs_in_with_its_stored_role(self, verify: Mock) -> None:
