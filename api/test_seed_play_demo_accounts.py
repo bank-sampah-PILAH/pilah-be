@@ -13,6 +13,7 @@ from rest_framework.test import APIClient
 from api.management.commands.seed_play_demo_accounts import (
     ACCOUNTS,
     DEMO_BANK_ID,
+    DEMO_NASABAH_ID,
     DEMO_NASABAH_EMAIL,
     DEMO_NASABAH_NUMBER,
     DEMO_PENGELOLA_EMAIL,
@@ -273,7 +274,7 @@ class SeedPlayDemoAccountsTests(TestCase):
             self.assertTrue(user.check_password(TEST_REVIEW_ACCOUNT_PASSWORD))
             self.assertFalse(User.objects.filter(email=legacy[key].email).exists())
         membership.refresh_from_db()
-        self.assertEqual(membership.pk, "00000000-0000-4000-8000-000000000363")
+        self.assertEqual(membership.pk, DEMO_NASABAH_ID)
         self.assertEqual(membership.user_id, identities["nasabah"])
         self.assertEqual(membership.email, "pilah.nasabah@pilah.com")
         superadmin = User.objects.get(email=SUPERADMIN_EMAIL)

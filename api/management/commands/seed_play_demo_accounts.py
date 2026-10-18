@@ -25,7 +25,11 @@ from apps.bank_sampah.constants import REVIEW_BANK_ID
 from apps.waste_catalog.api import harga_berlaku
 from apps.waste_catalog.services import catat_harga
 from shared_kernel.kalkulasi import hitung_subtotal, total_setoran
-from shared_kernel.permissions import review_superadmin_allowlist, superadmin_allowlist
+from shared_kernel.permissions import (
+    email_verification_exempt_allowlist,
+    review_superadmin_allowlist,
+    superadmin_allowlist,
+)
 
 DEMO_BANK_ID = UUID("00000000-0000-4000-8000-000000000362")
 DEMO_NASABAH_ID = UUID("00000000-0000-4000-8000-000000000363")
@@ -41,9 +45,16 @@ SCHEDULE_IDS = tuple(UUID(f"00000000-0000-4000-8000-000000000{value}") for value
 DEMO_BANK_NAME = "Bank Sampah PILAH Demo"
 REVIEW_BANK_NAME = "Bank Sampah PILAH Review Pending"
 DEMO_NASABAH_NUMBER = "DEMO-0001"
-DEMO_PENGELOLA_EMAIL = "traymachi@gmail.com"
-DEMO_NASABAH_EMAIL = "pilah.nasabah@gmail.com"
-SUPERADMIN_EMAIL = "pilah.superadmin@gmail.com"
+DEMO_PENGELOLA_EMAIL = "pilah.pengelola@pilah.com"
+DEMO_PENGURUS_EMAIL = "pilah.pengurus@pilah.com"
+DEMO_NASABAH_EMAIL = "pilah.nasabah@pilah.com"
+SUPERADMIN_EMAIL = "pilah.superadmin@pilah.com"
+LEGACY_ACCOUNT_EMAILS = {
+    DEMO_PENGELOLA_EMAIL: "traymachi@gmail.com",
+    DEMO_PENGURUS_EMAIL: "pilah.pengurus@gmail.com",
+    DEMO_NASABAH_EMAIL: "pilah.nasabah@gmail.com",
+    SUPERADMIN_EMAIL: "pilah.superadmin@gmail.com",
+}
 REVIEW_OWNER_EMAIL = "pilah.review-owner@example.test"
 DEMO_NASABAH_ADDRESS = "Alamat demo untuk akun nasabah PILAH"
 SEED_HARGA_SEJAK_HARI = 400
@@ -75,14 +86,14 @@ WASTE_TYPE_FIXTURES = (
 
 ACCOUNTS = {
     "owner": (DEMO_PENGELOLA_EMAIL, "Demo Pengelola PILAH", User.Role.PENGELOLA),
-    "pengurus": ("pilah.pengurus@gmail.com", "Demo Pengurus PILAH", User.Role.PENGELOLA),
+    "pengurus": (DEMO_PENGURUS_EMAIL, "Demo Pengurus PILAH", User.Role.PENGELOLA),
     "nasabah": (DEMO_NASABAH_EMAIL, "Demo Nasabah PILAH", User.Role.NASABAH),
     "superadmin": (SUPERADMIN_EMAIL, "SuperAdmin PILAH", User.Role.SUPERADMIN),
 }
 
 
 class Command(BaseCommand):
-    help = "Create the explicit production Google demo accounts and their minimal sample data."
+    help = "Create the explicit production password review accounts and their minimal sample data."
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument("--dry-run", action="store_true")
@@ -106,7 +117,7 @@ class Command(BaseCommand):
             if dry_run:
                 self.stdout.write(
                     "Dry run: validated production target; would ensure one demo bank, "
-                    "4 Google accounts, an approved nasabah membership, synthetic catalog, "
+                    "4 password accounts, an approved nasabah membership, synthetic catalog, "
                     "setoran history, published schedules, and a pending review bank."
                 )
                 return
@@ -121,6 +132,7 @@ class Command(BaseCommand):
                     role=role,
                     bank=bank,
                     primary=name == "owner",
+                    password=settings.PILAH_REVIEW_ACCOUNT_PASSWORD,
                 )
             self._ensure_user(
                 review_owner,
@@ -137,29 +149,45 @@ class Command(BaseCommand):
             if nasabah_user is None or pengurus is None:
                 raise CommandError("Production demo accounts could not be created")
             membership = membership or self._create_membership(bank, nasabah_user)
+            membership_fields = []
             if membership.user_id is None:
                 membership.user = nasabah_user
-                membership.save(update_fields=["user", "updated_at"])
+                membership_fields.append("user")
+            if membership.email != DEMO_NASABAH_EMAIL:
+                membership.email = DEMO_NASABAH_EMAIL
+                membership_fields.append("email")
+            if membership_fields:
+                membership.save(update_fields=[*membership_fields, "updated_at"])
 
             waste_types = self._ensure_waste_types(bank)
             self._ensure_transactions(bank, pengurus, membership, waste_types)
             self._ensure_schedules(bank, pengurus)
             self._recalculate_balance(membership)
 
-        self.stdout.write(self.style.SUCCESS("Production Google demo accounts are ready."))
+        self.stdout.write(self.style.SUCCESS("Production password review accounts are ready."))
 
     @staticmethod
     def _validate_runtime(dry_run: bool, confirmed: bool) -> None:
         if settings.PILAH_ENVIRONMENT != "production" or settings.DEBUG:
             raise CommandError("Demo accounts can only be seeded in production with DEBUG=false")
         if SUPERADMIN_EMAIL in superadmin_allowlist():
-            raise CommandError("pilah.superadmin@gmail.com must not be in PILAH_SUPERADMIN_EMAILS")
+            raise CommandError("pilah.superadmin@pilah.com must not be in PILAH_SUPERADMIN_EMAILS")
         if SUPERADMIN_EMAIL not in review_superadmin_allowlist():
             raise CommandError(
-                "pilah.superadmin@gmail.com must be in PILAH_REVIEW_SUPERADMIN_EMAILS"
+                "pilah.superadmin@pilah.com must be in PILAH_REVIEW_SUPERADMIN_EMAILS"
             )
         if not dry_run and not confirmed:
             raise CommandError("Pass --confirm-production before writing production demo data")
+        required_exemptions = {email for email, _name, _role in ACCOUNTS.values()}
+        if not required_exemptions.issubset(email_verification_exempt_allowlist()):
+            raise CommandError(
+                "All production review account emails must be in "
+                "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS"
+            )
+        if not getattr(settings, "PILAH_REVIEW_ACCOUNT_PASSWORD", "").strip():
+            raise CommandError(
+                "PILAH_REVIEW_ACCOUNT_PASSWORD must be provided by Secret Manager"
+            )
 
     @staticmethod
     def _existing_bank() -> BankSampah | None:
@@ -279,9 +307,16 @@ class Command(BaseCommand):
 
     @staticmethod
     def _existing_user(email: str, role: str) -> User | None:
-        matches = list(User.objects.select_for_update().filter(email__iexact=email)[:2])
+        normalized_email = email.strip().lower()
+        legacy_email = LEGACY_ACCOUNT_EMAILS.get(normalized_email)
+        query = Q(email__iexact=normalized_email)
+        if legacy_email:
+            query |= Q(email__iexact=legacy_email)
+        matches = list(User.objects.select_for_update().filter(query).order_by("pk")[:2])
         if len(matches) > 1:
-            raise CommandError(f"Production demo account conflict: {email} matches multiple users")
+            raise CommandError(
+                f"Production demo account identity conflict for {email}: multiple users"
+            )
         if not matches:
             return None
 
@@ -298,11 +333,47 @@ class Command(BaseCommand):
                 raise CommandError(f"Production demo account conflict for {email}: bank assignment")
         elif user.bank_sampah_id not in (None, DEMO_BANK_ID):
             raise CommandError(f"Production demo account conflict for {email}: another bank")
+        if legacy_email and user.email.strip().lower() == legacy_email:
+            Command._validate_legacy_seed_user(normalized_email, user, role)
         return user
 
     @staticmethod
+    def _validate_legacy_seed_user(email: str, user: User, role: str) -> None:
+        expected_name = next(
+            display_name
+            for target_email, display_name, _account_role in ACCOUNTS.values()
+            if target_email == email
+        )
+        expected_primary = email == DEMO_PENGELOLA_EMAIL
+        expected_bank_id = DEMO_BANK_ID if role == User.Role.PENGELOLA else None
+        if (
+            user.email != LEGACY_ACCOUNT_EMAILS[email]
+            or user.nama != expected_name
+            or not user.is_profile_complete
+            or user.bank_sampah_id != expected_bank_id
+            or user.is_primary_pengelola != expected_primary
+        ):
+            raise CommandError(
+                f"Production demo account identity conflict for {email}: "
+                "legacy account is not owned by the previous seed"
+            )
+        if role == User.Role.NASABAH:
+            memberships = list(
+                Nasabah.objects.select_for_update()
+                .filter(Q(user_id=user.pk) | Q(email__iexact=LEGACY_ACCOUNT_EMAILS[email]))
+                .order_by("pk")[:2]
+            )
+            if len(memberships) != 1 or memberships[0].pk != DEMO_NASABAH_ID:
+                raise CommandError(
+                    f"Production demo account identity conflict for {email}: "
+                    "legacy membership is not owned by the previous seed"
+                )
+
+    @staticmethod
     def _existing_membership(user: User | None) -> Nasabah | None:
-        query = Q(email__iexact=DEMO_NASABAH_EMAIL)
+        query = Q(email__iexact=DEMO_NASABAH_EMAIL) | Q(
+            email__iexact=LEGACY_ACCOUNT_EMAILS[DEMO_NASABAH_EMAIL]
+        )
         if user is not None:
             query |= Q(user=user)
         matches = list(Nasabah.objects.select_for_update().filter(query).order_by("pk")[:2])
@@ -310,6 +381,8 @@ class Command(BaseCommand):
             raise CommandError("Production demo nasabah email matches multiple memberships")
         membership = matches[0] if matches else None
         Command._validate_membership_identity(membership, user)
+        if membership is not None and membership.pk != DEMO_NASABAH_ID:
+            raise CommandError("Production demo nasabah identity conflicts with existing data")
         Command._validate_membership_ownership(membership, user)
         Command._validate_membership_number(membership)
         return membership
@@ -328,7 +401,11 @@ class Command(BaseCommand):
             raise CommandError("Production demo nasabah membership belongs to another account")
         if membership is not None and user is None and membership.user_id is not None:
             raise CommandError("Production demo nasabah membership belongs to another account")
-        if membership.email.lower() != DEMO_NASABAH_EMAIL:
+        valid_emails = {
+            DEMO_NASABAH_EMAIL,
+            LEGACY_ACCOUNT_EMAILS[DEMO_NASABAH_EMAIL],
+        }
+        if membership.email.strip().lower() not in valid_emails:
             raise CommandError("Production demo nasabah account has a conflicting membership email")
         if membership.nomor != DEMO_NASABAH_NUMBER:
             raise CommandError("Production demo nasabah account has a conflicting member number")
@@ -398,6 +475,7 @@ class Command(BaseCommand):
         bank: BankSampah,
         primary: bool,
         user_id: UUID | None = None,
+        password: str | None = None,
     ) -> User:
         if user is None:
             return Command._create_user(
@@ -407,13 +485,16 @@ class Command(BaseCommand):
                 bank=bank,
                 primary=primary,
                 user_id=user_id,
+                password=password,
             )
         return Command._update_user(
             user,
+            email=email,
             display_name=display_name,
             role=role,
             bank=bank,
             primary=primary,
+            password=password,
         )
 
     @staticmethod
@@ -425,6 +506,7 @@ class Command(BaseCommand):
         bank: BankSampah,
         primary: bool,
         user_id: UUID | None,
+        password: str | None,
     ) -> User:
         if user_id is not None:
             user = User(
@@ -436,7 +518,10 @@ class Command(BaseCommand):
                 bank_sampah=bank if role == User.Role.PENGELOLA else None,
                 is_primary_pengelola=primary,
             )
-            user.set_unusable_password()
+            if password is None:
+                user.set_unusable_password()
+            else:
+                user.set_password(password)
             user.save()
             return user
         return User.objects.create_user(
@@ -446,6 +531,7 @@ class Command(BaseCommand):
             is_profile_complete=True,
             bank_sampah=bank if role == User.Role.PENGELOLA else None,
             is_primary_pengelola=primary,
+            password=password,
             **({"alamat": DEMO_NASABAH_ADDRESS} if role == User.Role.NASABAH else {}),
         )
 
@@ -453,10 +539,12 @@ class Command(BaseCommand):
     def _update_user(
         user: User,
         *,
+        email: str,
         display_name: str,
         role: str,
         bank: BankSampah,
         primary: bool,
+        password: str | None,
     ) -> User:
         target_bank = bank if role == User.Role.PENGELOLA else None
         fields = []
@@ -469,6 +557,9 @@ class Command(BaseCommand):
         if not user.is_profile_complete:
             user.is_profile_complete = True
             fields.append("is_profile_complete")
+        if user.email != email:
+            user.email = email
+            fields.append("email")
         if not user.nama:
             user.nama = display_name
             fields.append("nama")
@@ -476,6 +567,12 @@ class Command(BaseCommand):
             user.is_staff = False
             user.is_superuser = False
             fields.extend(("is_staff", "is_superuser"))
+        if user.google_id is not None:
+            user.google_id = None
+            fields.append("google_id")
+        if password is not None and not user.check_password(password):
+            user.set_password(password)
+            fields.append("password")
         if role == User.Role.NASABAH and not user.alamat:
             user.alamat = DEMO_NASABAH_ADDRESS
             fields.append("alamat")

@@ -262,6 +262,7 @@ PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS = tuple(
     for email in os.getenv("PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS", "").split(",")
     if email.strip()
 )
+PILAH_REVIEW_ACCOUNT_PASSWORD = os.getenv("PILAH_REVIEW_ACCOUNT_PASSWORD", "")
 if set(PILAH_SUPERADMIN_EMAILS).intersection(PILAH_REVIEW_SUPERADMIN_EMAILS):
     raise ImproperlyConfigured(
         "PILAH_REVIEW_SUPERADMIN_EMAILS must not overlap PILAH_SUPERADMIN_EMAILS"
