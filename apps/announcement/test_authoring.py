@@ -103,6 +103,21 @@ class PengumumanAuthoringTests(APITestCase):
         self.assertEqual(response.status_code, 422)
         self.assertIn("status", response.data["errors"])
 
+    def test_create_rejects_terbit_pada_a_draft_cannot_carry_a_schedule(self) -> None:
+        response = self.client.post(
+            URL,
+            {
+                "judul": "Pengumuman",
+                "isi": "Isi.",
+                "terbit_pada": (timezone.now() + timedelta(hours=2)).isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertIn("terbit_pada", response.data["errors"])
+        self.assertFalse(Pengumuman.objects.filter(judul="Pengumuman").exists())
+
     def test_delete_only_allows_draft(self) -> None:
         created = self.client.post(URL, {"judul": "Pengumuman", "isi": "Isi."}, format="json")
         pengumuman_id = created.data["id"]
@@ -255,6 +270,19 @@ class PengumumanDerivedStatusTests(APITestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["status"], "draft")
         self.assertIsNone(response.data["terbit_pada"])
+
+    def test_draft_is_never_labeled_terjadwal(self) -> None:
+        # A draft whose stored terbit_pada is in the future (legacy rows)
+        # still reports draft — the schedule belongs to terbitkan only.
+        lampau = _draft(self.bank, self.pengelola, "Jadwal lama")
+        Pengumuman.objects.filter(pk=lampau.pk).update(
+            terbit_pada=timezone.now() + timedelta(hours=2)
+        )
+
+        response = self.client.get(f"{URL}/{lampau.pk}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "draft")
 
 
 class PengumumanAccessTests(APITestCase):
