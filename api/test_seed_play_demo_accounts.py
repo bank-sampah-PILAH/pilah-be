@@ -77,7 +77,7 @@ class SeedPlayDemoAccountsTests(TestCase):
         call_command("seed_play_demo_accounts", dry_run=True, stdout=output)
 
         self.assertIn("Dry run", output.getvalue())
-        self.assertIn("4 Google accounts", output.getvalue())
+        self.assertIn("4 password accounts", output.getvalue())
         self.assertFalse(User.objects.exists())
         self.assertFalse(BankSampah.objects.exists())
         self.assertFalse(Nasabah.objects.exists())
@@ -92,6 +92,14 @@ class SeedPlayDemoAccountsTests(TestCase):
             PILAH_REVIEW_ACCOUNT_PASSWORD="",
         ):
             with self.assertRaisesRegex(CommandError, "PILAH_REVIEW_ACCOUNT_PASSWORD"):
+                call_command("seed_play_demo_accounts", dry_run=True, stdout=StringIO())
+
+        self.assertFalse(User.objects.exists())
+        self.assertFalse(BankSampah.objects.exists())
+
+    def test_review_accounts_must_be_exempt_from_email_verification(self) -> None:
+        with override_settings(PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS=(SUPERADMIN_EMAIL,)):
+            with self.assertRaisesRegex(CommandError, "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS"):
                 call_command("seed_play_demo_accounts", dry_run=True, stdout=StringIO())
 
         self.assertFalse(User.objects.exists())
@@ -310,6 +318,34 @@ class SeedPlayDemoAccountsTests(TestCase):
         self.assertEqual(list(User.objects.order_by("pk").values()), users_before)
         self.assertEqual(legacy_owner.email, "traymachi@gmail.com")
         self.assertEqual(target_owner.email, "pilah.pengelola@pilah.com")
+        self.assertEqual(BankSampah.objects.count(), 1)
+
+    def test_unowned_legacy_account_is_not_migrated(self) -> None:
+        bank = BankSampah.objects.create(
+            id=DEMO_BANK_ID,
+            nama="Bank Sampah PILAH Demo",
+            alamat="Alamat data demo PILAH",
+            kota="Depok",
+            no_hp_pic="",
+            jenis_organisasi=BankSampah.OrganizationType.MANDIRI,
+            status=BankSampah.Status.ACTIVE,
+            is_active=True,
+        )
+        unrelated = User.objects.create_user(
+            email="traymachi@gmail.com",
+            nama="Unrelated person",
+            role=User.Role.PENGELOLA,
+            bank_sampah=bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+            google_id="unrelated-subject",
+        )
+        user_before = User.objects.filter(pk=unrelated.pk).values().get()
+
+        with self.assertRaisesRegex(CommandError, "not owned by the previous seed"):
+            call_command("seed_play_demo_accounts", dry_run=True, stdout=StringIO())
+
+        self.assertEqual(User.objects.filter(pk=unrelated.pk).values().get(), user_before)
         self.assertEqual(BankSampah.objects.count(), 1)
 
     def test_reserved_waste_type_id_collision_preserves_unrelated_data(self) -> None:
@@ -596,7 +632,7 @@ class SeedPlayDemoAccountsTests(TestCase):
         self.assertIsNone(review_owner.google_id)
         self.assertFalse(review_owner.has_usable_password())
 
-    def test_existing_matching_google_identity_is_preserved(self) -> None:
+    def test_existing_seed_account_uses_password_and_clears_google_binding(self) -> None:
         user = User.objects.create_user(
             email=DEMO_PENGELOLA_EMAIL,
             password="keep-existing-password",
@@ -609,10 +645,10 @@ class SeedPlayDemoAccountsTests(TestCase):
         call_command("seed_play_demo_accounts", confirm_production=True, stdout=StringIO())
 
         user.refresh_from_db()
-        self.assertEqual(user.google_id, "google-account-id")
+        self.assertIsNone(user.google_id)
         self.assertEqual(user.nama, "Google Profile Name")
         self.assertEqual(user.no_hp, "+628123456789")
-        self.assertTrue(user.check_password("keep-existing-password"))
+        self.assertTrue(user.check_password(TEST_REVIEW_ACCOUNT_PASSWORD))
         self.assertTrue(user.is_primary_pengelola)
 
     def test_rejects_ambiguous_case_insensitive_demo_users(self) -> None:
