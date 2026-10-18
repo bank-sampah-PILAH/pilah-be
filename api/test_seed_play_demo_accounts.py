@@ -40,12 +40,21 @@ from api.models import (
 )
 from apps.bank_sampah.constants import REVIEW_BANK_ID
 
-SUPERADMIN_EMAIL = "pilah.superadmin@gmail.com"
+SUPERADMIN_EMAIL = "pilah.superadmin@pilah.com"
+TEST_REVIEW_ACCOUNT_PASSWORD = "unit-test-only-password"
+REVIEW_ACCOUNT_EMAILS = (
+    "pilah.pengelola@pilah.com",
+    "pilah.pengurus@pilah.com",
+    "pilah.nasabah@pilah.com",
+    SUPERADMIN_EMAIL,
+)
 PRODUCTION_SETTINGS = {
     "DEBUG": False,
     "PILAH_ENVIRONMENT": "production",
     "PILAH_SUPERADMIN_EMAILS": (),
     "PILAH_REVIEW_SUPERADMIN_EMAILS": (SUPERADMIN_EMAIL,),
+    "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS": REVIEW_ACCOUNT_EMAILS,
+    "PILAH_REVIEW_ACCOUNT_PASSWORD": TEST_REVIEW_ACCOUNT_PASSWORD,
 }
 
 
@@ -77,6 +86,17 @@ class SeedPlayDemoAccountsTests(TestCase):
         self.assertFalse(JadwalKegiatan.objects.exists())
         self.assertFalse(Saldo.objects.exists())
 
+    def test_missing_review_password_fails_before_writing(self) -> None:
+        with override_settings(
+            PILAH_REVIEW_SUPERADMIN_EMAILS=(SUPERADMIN_EMAIL, "pilah.superadmin@gmail.com"),
+            PILAH_REVIEW_ACCOUNT_PASSWORD="",
+        ):
+            with self.assertRaisesRegex(CommandError, "PILAH_REVIEW_ACCOUNT_PASSWORD"):
+                call_command("seed_play_demo_accounts", dry_run=True, stdout=StringIO())
+
+        self.assertFalse(User.objects.exists())
+        self.assertFalse(BankSampah.objects.exists())
+
     def test_debug_mode_is_rejected_even_with_production_runtime(self) -> None:
         with override_settings(DEBUG=True):
             with self.assertRaisesRegex(CommandError, "production"):
@@ -100,7 +120,13 @@ class SeedPlayDemoAccountsTests(TestCase):
         other_bank_before = BankSampah.objects.filter(pk=other_bank.pk).values().get()
         unrelated_before = User.objects.filter(pk=unrelated.pk).values().get()
 
-        call_command("seed_play_demo_accounts", confirm_production=True, stdout=StringIO())
+        with override_settings(
+            PILAH_REVIEW_SUPERADMIN_EMAILS=(SUPERADMIN_EMAIL, "pilah.superadmin@gmail.com")
+        ):
+            call_command("seed_play_demo_accounts", confirm_production=True, stdout=StringIO())
+        self.assertEqual(
+            {email for email, _name, _role in ACCOUNTS.values()}, set(REVIEW_ACCOUNT_EMAILS)
+        )
         demo_account_emails = [account[0] for account in ACCOUNTS.values()]
         demo_users_before = list(
             User.objects.filter(email__in=demo_account_emails).order_by("email").values()
@@ -117,8 +143,8 @@ class SeedPlayDemoAccountsTests(TestCase):
 
         bank = BankSampah.objects.get(nama="Bank Sampah PILAH Demo")
         owner = User.objects.get(email=DEMO_PENGELOLA_EMAIL)
-        pengurus = User.objects.get(email="pilah.pengurus@gmail.com")
-        nasabah_user = User.objects.get(email="pilah.nasabah@gmail.com")
+        pengurus = User.objects.get(email="pilah.pengurus@pilah.com")
+        nasabah_user = User.objects.get(email="pilah.nasabah@pilah.com")
         superadmin = User.objects.get(email=SUPERADMIN_EMAIL)
 
         self.assertEqual(owner.role, User.Role.PENGELOLA)
@@ -135,7 +161,8 @@ class SeedPlayDemoAccountsTests(TestCase):
         self.assertFalse(superadmin.is_staff)
         self.assertFalse(superadmin.is_superuser)
         for user in (owner, pengurus, nasabah_user, superadmin):
-            self.assertFalse(user.has_usable_password())
+            self.assertTrue(user.has_usable_password())
+            self.assertTrue(user.check_password(TEST_REVIEW_ACCOUNT_PASSWORD))
             self.assertIsNone(user.google_id)
 
         membership = Nasabah.objects.get(bank_sampah=bank, user=nasabah_user)
@@ -162,6 +189,128 @@ class SeedPlayDemoAccountsTests(TestCase):
         self.assertEqual(DetailTransaksi.objects.filter(transaksi__nasabah=membership).count(), 4)
         self.assertEqual(HargaSampah.objects.filter(jenis_sampah__bank_sampah=bank).count(), 4)
         self.assertEqual(JadwalKegiatan.objects.filter(bank_sampah=bank).count(), 2)
+
+    def test_migrates_prior_seed_accounts_in_place_and_clears_google_bindings(self) -> None:
+        bank = BankSampah.objects.create(
+            id=DEMO_BANK_ID,
+            nama="Bank Sampah PILAH Demo",
+            alamat="Alamat data demo PILAH",
+            kota="Depok",
+            no_hp_pic="",
+            jenis_organisasi=BankSampah.OrganizationType.MANDIRI,
+            status=BankSampah.Status.ACTIVE,
+            is_active=True,
+        )
+        legacy = {
+            "owner": User.objects.create_user(
+                email="traymachi@gmail.com",
+                nama="Demo Pengelola PILAH",
+                role=User.Role.PENGELOLA,
+                bank_sampah=bank,
+                is_profile_complete=True,
+                is_primary_pengelola=True,
+                google_id="legacy-owner-subject",
+            ),
+            "pengurus": User.objects.create_user(
+                email="pilah.pengurus@gmail.com",
+                nama="Demo Pengurus PILAH",
+                role=User.Role.PENGELOLA,
+                bank_sampah=bank,
+                is_profile_complete=True,
+                google_id="legacy-pengurus-subject",
+            ),
+            "nasabah": User.objects.create_user(
+                email="pilah.nasabah@gmail.com",
+                nama="Demo Nasabah PILAH",
+                role=User.Role.NASABAH,
+                is_profile_complete=True,
+                alamat="Alamat demo untuk akun nasabah PILAH",
+                google_id="legacy-nasabah-subject",
+            ),
+            "superadmin": User.objects.create_user(
+                email="pilah.superadmin@gmail.com",
+                nama="SuperAdmin PILAH",
+                role=User.Role.SUPERADMIN,
+                is_profile_complete=True,
+                is_staff=True,
+                is_superuser=True,
+                google_id="legacy-superadmin-subject",
+            ),
+        }
+        membership = Nasabah.objects.create(
+            id="00000000-0000-4000-8000-000000000363",
+            user=legacy["nasabah"],
+            bank_sampah=bank,
+            nomor=DEMO_NASABAH_NUMBER,
+            nama="Demo Nasabah PILAH",
+            alamat="Alamat demo untuk akun nasabah PILAH",
+            no_hp="",
+            email="pilah.nasabah@gmail.com",
+            is_active=True,
+            status=Nasabah.Status.APPROVED,
+        )
+        identities = {key: user.pk for key, user in legacy.items()}
+
+        with override_settings(
+            PILAH_REVIEW_SUPERADMIN_EMAILS=(SUPERADMIN_EMAIL, "pilah.superadmin@gmail.com")
+        ):
+            call_command("seed_play_demo_accounts", confirm_production=True, stdout=StringIO())
+
+        for key, email in zip(
+            ("owner", "pengurus", "nasabah", "superadmin"), REVIEW_ACCOUNT_EMAILS, strict=True
+        ):
+            user = User.objects.get(email=email)
+            self.assertEqual(user.pk, identities[key])
+            self.assertIsNone(user.google_id)
+            self.assertTrue(user.check_password(TEST_REVIEW_ACCOUNT_PASSWORD))
+            self.assertFalse(User.objects.filter(email=legacy[key].email).exists())
+        membership.refresh_from_db()
+        self.assertEqual(membership.pk, "00000000-0000-4000-8000-000000000363")
+        self.assertEqual(membership.user_id, identities["nasabah"])
+        self.assertEqual(membership.email, "pilah.nasabah@pilah.com")
+        superadmin = User.objects.get(email=SUPERADMIN_EMAIL)
+        self.assertFalse(superadmin.is_staff)
+        self.assertFalse(superadmin.is_superuser)
+
+    def test_legacy_and_target_email_collision_fails_before_writing(self) -> None:
+        bank = BankSampah.objects.create(
+            id=DEMO_BANK_ID,
+            nama="Bank Sampah PILAH Demo",
+            alamat="Alamat data demo PILAH",
+            kota="Depok",
+            no_hp_pic="",
+            jenis_organisasi=BankSampah.OrganizationType.MANDIRI,
+            status=BankSampah.Status.ACTIVE,
+            is_active=True,
+        )
+        legacy_owner = User.objects.create_user(
+            email="traymachi@gmail.com",
+            nama="Demo Pengelola PILAH",
+            role=User.Role.PENGELOLA,
+            bank_sampah=bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        target_owner = User.objects.create_user(
+            email="pilah.pengelola@pilah.com",
+            nama="Other Pengelola",
+            role=User.Role.PENGELOLA,
+            bank_sampah=bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        users_before = list(User.objects.order_by("pk").values())
+
+        with self.assertRaisesRegex(CommandError, "identity conflict"):
+            with override_settings(
+                PILAH_REVIEW_SUPERADMIN_EMAILS=(SUPERADMIN_EMAIL, "pilah.superadmin@gmail.com")
+            ):
+                call_command("seed_play_demo_accounts", confirm_production=True, stdout=StringIO())
+
+        self.assertEqual(list(User.objects.order_by("pk").values()), users_before)
+        self.assertEqual(legacy_owner.email, "traymachi@gmail.com")
+        self.assertEqual(target_owner.email, "pilah.pengelola@pilah.com")
+        self.assertEqual(BankSampah.objects.count(), 1)
 
     def test_reserved_waste_type_id_collision_preserves_unrelated_data(self) -> None:
         other_bank = BankSampah.objects.create(nama="Unrelated Bank", no_hp_pic="")
