@@ -222,7 +222,7 @@ class SeedPlayDemoAccountsTests(TestCase):
         legacy = {
             "owner": User.objects.create_user(
                 email="traymachi@gmail.com",
-                nama="Demo Pengelola PILAH",
+                nama="Google Profile Name",
                 role=User.Role.PENGELOLA,
                 bank_sampah=bank,
                 is_profile_complete=True,
@@ -282,6 +282,7 @@ class SeedPlayDemoAccountsTests(TestCase):
             self.assertIsNone(user.google_id)
             self.assertTrue(user.check_password(TEST_REVIEW_ACCOUNT_PASSWORD))
             self.assertFalse(User.objects.filter(email=legacy[key].email).exists())
+        self.assertEqual(User.objects.get(email=DEMO_PENGELOLA_EMAIL).nama, "Google Profile Name")
         membership.refresh_from_db()
         self.assertEqual(membership.pk, DEMO_NASABAH_ID)
         self.assertEqual(membership.user_id, identities["nasabah"])
@@ -353,7 +354,7 @@ class SeedPlayDemoAccountsTests(TestCase):
         self.assertEqual(target_owner.email, "pilah.pengelola@pilah.com")
         self.assertEqual(BankSampah.objects.count(), 1)
 
-    def test_unowned_legacy_account_is_not_migrated(self) -> None:
+    def test_legacy_owner_without_seed_primary_flag_is_not_migrated(self) -> None:
         bank = BankSampah.objects.create(
             id=DEMO_BANK_ID,
             nama="Bank Sampah PILAH Demo",
@@ -370,7 +371,7 @@ class SeedPlayDemoAccountsTests(TestCase):
             role=User.Role.PENGELOLA,
             bank_sampah=bank,
             is_profile_complete=True,
-            is_primary_pengelola=True,
+            is_primary_pengelola=False,
             google_id="unrelated-subject",
         )
         user_before = User.objects.filter(pk=unrelated.pk).values().get()

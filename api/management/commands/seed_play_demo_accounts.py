@@ -346,16 +346,10 @@ class Command(BaseCommand):
 
     @staticmethod
     def _validate_legacy_seed_user(email: str, user: User, role: str) -> None:
-        expected_name = next(
-            display_name
-            for target_email, display_name, _account_role in ACCOUNTS.values()
-            if target_email == email
-        )
         expected_primary = email == DEMO_PENGELOLA_EMAIL
         expected_bank_id = DEMO_BANK_ID if role == User.Role.PENGELOLA else None
         if (
             user.email != LEGACY_ACCOUNT_EMAILS[email]
-            or user.nama != expected_name
             or not user.is_profile_complete
             or user.bank_sampah_id != expected_bank_id
             or user.is_primary_pengelola != expected_primary
