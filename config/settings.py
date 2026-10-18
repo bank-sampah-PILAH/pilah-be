@@ -215,6 +215,9 @@ REST_FRAMEWORK = {
     # Scoped rates: keys are the throttle scope of the views declaring one.
     # statement_pdf = the riwayat statement render (CPU-heavy; see
     # apps.nasabah.home.NasabahHistoryExportPdfView).
+    # Cloud Run appends the client and two proxy addresses to XFF; this count
+    # makes DRF select the client while ignoring any caller-supplied prefix.
+    "NUM_PROXIES": 3,
     "DEFAULT_THROTTLE_RATES": {"statement_pdf": "10/min", "password_login": "5/min"},
 }
 

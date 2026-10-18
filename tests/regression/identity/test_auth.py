@@ -75,6 +75,34 @@ class AuthRegressionTests(RegressionTestCase):
         self.assertEqual(login.call_count, 5)
         login.assert_called_with("sari@example.com", "password")
 
+    def test_password_login_throttle_ignores_untrusted_forwarded_prefix(self) -> None:
+        self.client.credentials()
+        payload = {"email": "sari@example.com", "password": "password"}
+        forwarded_for = [
+            f"{spoofed}, 198.51.100.23, 35.191.0.1, 35.191.0.2"
+            for spoofed in (
+                "192.0.2.1",
+                "192.0.2.2",
+                "192.0.2.3",
+                "192.0.2.4",
+                "192.0.2.5",
+                "192.0.2.6",
+            )
+        ]
+
+        with patch("apps.authentication.views.AuthService.login_with_password", return_value={}):
+            responses = [
+                self.client.post(
+                    "/api/v1/auth/login",
+                    payload,
+                    format="json",
+                    HTTP_X_FORWARDED_FOR=header,
+                )
+                for header in forwarded_for
+            ]
+
+        self.assertEqual([response.status_code for response in responses], [200] * 5 + [429])
+
     def test_protected_endpoints_require_auth(self) -> None:
         self.client.credentials()
         paths = [
