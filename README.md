@@ -306,10 +306,17 @@ itself.
 
 ## Production Google demo accounts
 
-The explicit `seed_play_demo_accounts` command provisions PILAH roles for the
-four demo email addresses. It does not create Google mailboxes or store Google
-IDs, passwords, or tokens. PILAH must control each mailbox so its owner can sign
-in with Google's verified login.
+The explicit `seed_play_demo_accounts` command provisions PILAH roles for these
+Google accounts:
+
+- Pengelola: `traymachi@gmail.com`
+- Pengurus: `pilah.pengurus@gmail.com`
+- Nasabah: `pilah.nasabah@gmail.com`
+- Review Superadmin: `pilah.superadmin@gmail.com`
+
+It does not create Google mailboxes or store Google IDs, passwords, or tokens.
+PILAH must control each mailbox so its owner can sign in with Google's verified
+login.
 
 Before deployment, add `pilah.superadmin@gmail.com` to the production
 `PILAH_REVIEW_SUPERADMIN_EMAILS` setting and remove it from

@@ -41,6 +41,7 @@ SCHEDULE_IDS = tuple(UUID(f"00000000-0000-4000-8000-000000000{value}") for value
 DEMO_BANK_NAME = "Bank Sampah PILAH Demo"
 REVIEW_BANK_NAME = "Bank Sampah PILAH Review Pending"
 DEMO_NASABAH_NUMBER = "DEMO-0001"
+DEMO_PENGELOLA_EMAIL = "traymachi@gmail.com"
 DEMO_NASABAH_EMAIL = "pilah.nasabah@gmail.com"
 SUPERADMIN_EMAIL = "pilah.superadmin@gmail.com"
 REVIEW_OWNER_EMAIL = "pilah.review-owner@example.test"
@@ -73,7 +74,7 @@ WASTE_TYPE_FIXTURES = (
 )
 
 ACCOUNTS = {
-    "owner": ("pilah.pengelola@gmail.com", "Demo Pengelola PILAH", User.Role.PENGELOLA),
+    "owner": (DEMO_PENGELOLA_EMAIL, "Demo Pengelola PILAH", User.Role.PENGELOLA),
     "pengurus": ("pilah.pengurus@gmail.com", "Demo Pengurus PILAH", User.Role.PENGELOLA),
     "nasabah": (DEMO_NASABAH_EMAIL, "Demo Nasabah PILAH", User.Role.NASABAH),
     "superadmin": (SUPERADMIN_EMAIL, "SuperAdmin PILAH", User.Role.SUPERADMIN),

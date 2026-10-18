@@ -10,7 +10,9 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from api.management.commands.seed_play_demo_accounts import (
+    ACCOUNTS,
     DEMO_NASABAH_EMAIL,
+    DEMO_PENGELOLA_EMAIL,
     WASTE_TYPE_IDS,
 )
 from api.models import (
@@ -88,8 +90,9 @@ class SeedPlayDemoAccountsTests(TestCase):
         unrelated_before = User.objects.filter(pk=unrelated.pk).values().get()
 
         call_command("seed_play_demo_accounts", confirm_production=True, stdout=StringIO())
+        demo_account_emails = [account[0] for account in ACCOUNTS.values()]
         demo_users_before = list(
-            User.objects.filter(email__startswith="pilah.").order_by("email").values()
+            User.objects.filter(email__in=demo_account_emails).order_by("email").values()
         )
         demo_bank = BankSampah.objects.get(nama="Bank Sampah PILAH Demo")
         demo_bank_before = BankSampah.objects.filter(pk=demo_bank.pk).values().get()
@@ -102,7 +105,7 @@ class SeedPlayDemoAccountsTests(TestCase):
         call_command("seed_play_demo_accounts", confirm_production=True, stdout=StringIO())
 
         bank = BankSampah.objects.get(nama="Bank Sampah PILAH Demo")
-        owner = User.objects.get(email="pilah.pengelola@gmail.com")
+        owner = User.objects.get(email=DEMO_PENGELOLA_EMAIL)
         pengurus = User.objects.get(email="pilah.pengurus@gmail.com")
         nasabah_user = User.objects.get(email="pilah.nasabah@gmail.com")
         superadmin = User.objects.get(email=SUPERADMIN_EMAIL)
@@ -135,7 +138,7 @@ class SeedPlayDemoAccountsTests(TestCase):
         )
         self.assertEqual(User.objects.filter(pk=unrelated.pk).values().get(), unrelated_before)
         self.assertEqual(
-            list(User.objects.filter(email__startswith="pilah.").order_by("email").values()),
+            list(User.objects.filter(email__in=demo_account_emails).order_by("email").values()),
             demo_users_before,
         )
         self.assertEqual(BankSampah.objects.filter(pk=bank.pk).values().get(), demo_bank_before)
@@ -186,7 +189,7 @@ class SeedPlayDemoAccountsTests(TestCase):
 
     def test_existing_target_with_conflicting_role_fails_without_partial_writes(self) -> None:
         User.objects.create_user(
-            email="pilah.pengelola@gmail.com",
+            email=DEMO_PENGELOLA_EMAIL,
             nama="Existing Nasabah",
             role=User.Role.NASABAH,
         )
@@ -435,7 +438,7 @@ class SeedPlayDemoAccountsTests(TestCase):
 
     def test_existing_matching_google_identity_is_preserved(self) -> None:
         user = User.objects.create_user(
-            email="pilah.pengelola@gmail.com",
+            email=DEMO_PENGELOLA_EMAIL,
             password="keep-existing-password",
             google_id="google-account-id",
             nama="Google Profile Name",
