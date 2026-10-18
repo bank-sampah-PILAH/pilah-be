@@ -24,6 +24,15 @@ class SatuanJenisSampahTests(HargaApiTestCase):
         self.assertEqual(response.data["satuan"], "pcs")
         self.assertEqual(JenisSampah.objects.get(id=response.data["id"]).satuan, "pcs")
 
+    def test_hapus_jenis_ditolak_dengan_saran_menonaktifkan(self) -> None:
+        jenis = self.buat().data
+
+        response = self.client.delete(f"/api/v1/jenis-sampah/{jenis['id']}")
+
+        self.assertEqual(response.status_code, 409, response.data)
+        self.assertIn("nonaktifkan", str(response.data).lower())
+        self.assertTrue(JenisSampah.objects.filter(id=jenis["id"]).exists())
+
     def test_riwayat_harga_memakai_satuan_jenisnya_bukan_kg(self) -> None:
         jenis = self.buat(satuan="karung").data
 
