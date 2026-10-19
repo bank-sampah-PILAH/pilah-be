@@ -119,6 +119,7 @@ deploying, and the seed validates the environment and account identities
 before changing the database. Reruns reuse the same four accounts and password.
 The seed stops if the E2E bank is inactive or an existing reviewer membership
 is inactive or unapproved, leaving those tester decisions unchanged.
+Additional Nasabah memberships in other banks are preserved on reseeding.
 The reviewer Superadmin gets a separate synthetic pending bank in its restricted
 approval queue. Reruns preserve approval or rejection decisions for that bank.
 

@@ -197,7 +197,10 @@ class Command(BaseCommand):
     def _ensure_nasabah_membership(bank: BankSampah, user: User) -> None:
         matches = list(
             Nasabah.objects.select_for_update()
-            .filter(Q(pk=REVIEW_NASABAH_ID) | Q(user=user) | Q(email__iexact=REVIEW_NASABAH_EMAIL))
+            .filter(
+                Q(pk=REVIEW_NASABAH_ID)
+                | (Q(bank_sampah=bank) & (Q(user=user) | Q(email__iexact=REVIEW_NASABAH_EMAIL)))
+            )
             .order_by("pk")[:2]
         )
         if len(matches) > 1:

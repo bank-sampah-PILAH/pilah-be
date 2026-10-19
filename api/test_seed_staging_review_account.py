@@ -417,7 +417,55 @@ class SeedStagingReviewAccountTests(TestCase):
             User.objects.get(email="pilah.nasabah@pilah.com").pk,
         )
 
-    def test_seed_rejects_duplicate_reviewer_memberships(self) -> None:
+    def test_seed_preserves_memberships_registered_with_other_banks(self) -> None:
+        call_command("seed_staging_review_account", confirm=CONFIRMATION)
+        user = User.objects.get(email=REVIEW_NASABAH_EMAIL)
+        other_bank = BankSampah.objects.create(
+            nama="Other Bank",
+            no_hp_pic="+628222222222",
+            status=BankSampah.Status.ACTIVE,
+            is_active=True,
+        )
+        client = APIClient()
+        client.force_authenticate(user)
+        response = client.post(
+            "/api/v1/onboarding/nasabah",
+            {"bank_sampah_id": str(other_bank.pk)},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        membership = user.keanggotaan_nasabah.get(bank_sampah=other_bank)
+        self.assertEqual(membership.status, Nasabah.Status.PENDING)
+
+        for status, active, expected_status in (
+            (Nasabah.Status.PENDING, True, 403),
+            (Nasabah.Status.APPROVED, True, 200),
+            (Nasabah.Status.REJECTED, False, 403),
+        ):
+            with self.subTest(status=status, active=active):
+                membership.status = status
+                membership.is_active = active
+                membership.save(update_fields=["status", "is_active"])
+
+                call_command("seed_staging_review_account", confirm=CONFIRMATION)
+
+                membership.refresh_from_db()
+                self.assertEqual((membership.status, membership.is_active), (status, active))
+                self.assertEqual(user.keanggotaan_nasabah.count(), 2)
+                self.assertEqual(
+                    client.get(
+                        "/api/v1/nasabah/me/beranda", {"keanggotaan_id": str(membership.pk)}
+                    ).status_code,
+                    expected_status,
+                )
+                self.assertEqual(
+                    client.get(
+                        "/api/v1/nasabah/me/beranda", {"keanggotaan_id": str(REVIEW_NASABAH_ID)}
+                    ).status_code,
+                    200,
+                )
+
+    def test_seed_rejects_ambiguous_reviewer_memberships_in_the_fixture_bank(self) -> None:
         bank = BankSampah.objects.get(pk=ACTIVE_BANK_ID)
         Nasabah.objects.create(
             id=REVIEW_NASABAH_ID,
@@ -428,19 +476,13 @@ class SeedStagingReviewAccountTests(TestCase):
             no_hp=REVIEW_NASABAH_PHONE,
             email="pilah.nasabah@pilah.com",
         )
-        other_bank = BankSampah.objects.create(
-            nama="Other Bank",
-            no_hp_pic="+628222222222",
-            status=BankSampah.Status.ACTIVE,
-            is_active=True,
-        )
         Nasabah.objects.create(
-            bank_sampah=other_bank,
+            bank_sampah=bank,
             nomor="OTHER-REVIEW",
             nama="Other reviewer member",
             alamat="Other address",
             no_hp="+628222222223",
-            email="pilah.nasabah@pilah.com",
+            email=REVIEW_NASABAH_EMAIL.upper(),
         )
 
         with self.assertRaisesMessage(CommandError, "membership identity conflicts"):
