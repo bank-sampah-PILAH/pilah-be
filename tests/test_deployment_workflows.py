@@ -18,6 +18,9 @@ class DeploymentWorkflowTests(SimpleTestCase):
         self.assertIn("refs/heads/staging", deploy["if"])
         steps = deploy["steps"]
         names = [step.get("name", "") for step in steps]
+        self.assertLess(
+            names.index("Verify staging reviewer secrets"), names.index("Deploy verified commit")
+        )
         self.assertLess(names.index("Deploy verified commit"), names.index("Smoke check /healthz"))
         self.assertLess(
             names.index("Smoke check /healthz"), names.index("Seed verified staging deployment")
@@ -26,6 +29,13 @@ class DeploymentWorkflowTests(SimpleTestCase):
         self.assertEqual(seed["run"], "python3 scripts/seed_staging.py")
         self.assertNotIn("continue-on-error", seed)
         self.assertNotIn("if", seed)
+        preflight = steps[names.index("Verify staging reviewer secrets")]
+        for secret in (
+            "PILAH_REVIEW_ACCOUNT_PASSWORD",
+            "PILAH_REVIEW_SUPERADMIN_EMAILS",
+            "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS",
+        ):
+            self.assertIn(secret, preflight["run"])
         self.assertFalse((ROOT / ".github/workflows/seed-staging-data.yml").exists())
 
     def test_production_validates_before_deploy_and_seeds_after_success(self) -> None:

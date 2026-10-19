@@ -231,6 +231,18 @@ jobs:
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
+      - name: Verify staging reviewer secrets
+        run: |
+          secrets="$(flyctl secrets list --app pilah-be-staging --json)"
+          for name in PILAH_REVIEW_ACCOUNT_PASSWORD PILAH_REVIEW_SUPERADMIN_EMAILS PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS; do
+            if ! jq -e --arg name "$name" 'any(.[]; .name == $name)' <<< "$secrets" >/dev/null; then
+              echo "::error::Required Fly secret $name is missing from pilah-be-staging"
+              exit 1
+            fi
+          done
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
       - name: Deploy verified commit
         run: flyctl deploy --local-only
         env:

@@ -96,6 +96,38 @@ For local SQLite or Docker Postgres, run migrations followed by
 `python manage.py seed_testing_data`; local execution requires `DJANGO_DEBUG=true`.
 Production runtime markers always forbid fixture seeding.
 
+The staging deploy also creates the four production password reviewer accounts
+after the E2E fixtures: `pilah.pengelola@pilah.com`,
+`pilah.pengurus@pilah.com`, `pilah.nasabah@pilah.com`, and
+`pilah.superadmin@pilah.com`. The Pengelola accounts use the E2E bank, and the
+Pengelola reviewer has primary owner permissions while Pengurus remains a team
+member. The Nasabah account has an approved membership there. Before merging a
+change that adds or updates this seed, configure these Fly secrets on
+`pilah-be-staging`:
+
+```text
+PILAH_REVIEW_SUPERADMIN_EMAILS includes pilah.superadmin@pilah.com only
+PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS includes all four reviewer accounts
+PILAH_REVIEW_ACCOUNT_PASSWORD matches the production reviewer password
+```
+
+Keep `pilah.superadmin@pilah.com` out of `PILAH_SUPERADMIN_EMAILS`. Preserve
+any other addresses already present in these allowlists. Set the password
+through the approved secure secret channel; never put it in GitHub variables,
+source code, or this document. Staging CI checks all three secret names before
+deploying, and the seed validates the environment and account identities
+before changing the database. Reruns reuse the same four accounts and password.
+The seed stops if the E2E bank is inactive or an existing reviewer membership
+is inactive or unapproved, leaving those tester decisions unchanged.
+Additional Nasabah memberships in other banks are preserved on reseeding.
+The reviewer Superadmin gets a separate synthetic pending bank in its restricted
+approval queue. Reruns preserve approval or rejection decisions for that bank.
+
+Reusing the production reviewer password is an explicit operator choice. Anyone
+who obtains it from staging can also sign in to the production reviewer accounts.
+Restrict staging secret and SSH access, and rotate the reviewer password in both
+environments together if it is exposed.
+
 ## Operations
 
 ```bash
