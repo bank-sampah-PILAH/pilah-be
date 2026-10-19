@@ -99,8 +99,9 @@ Production runtime markers always forbid fixture seeding.
 The staging deploy also creates the four production password reviewer accounts
 after the E2E fixtures: `pilah.pengelola@pilah.com`,
 `pilah.pengurus@pilah.com`, `pilah.nasabah@pilah.com`, and
-`pilah.superadmin@pilah.com`. Before merging a change that adds or updates
-this seed, configure these Fly secrets on `pilah-be-staging`:
+`pilah.superadmin@pilah.com`. The Pengelola accounts use the E2E bank, and the
+Nasabah account has an approved membership there. Before merging a change that
+adds or updates this seed, configure these Fly secrets on `pilah-be-staging`:
 
 ```text
 PILAH_REVIEW_SUPERADMIN_EMAILS includes pilah.superadmin@pilah.com only
