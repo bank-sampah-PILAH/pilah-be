@@ -10,6 +10,7 @@ from django.db.models import Q
 
 from api.management.commands.seed_testing_data import ACTIVE_BANK_ID
 from api.models import BankSampah, Nasabah, User
+from apps.bank_sampah.constants import REVIEW_BANK_ID
 from shared_kernel.permissions import (
     email_verification_exempt_allowlist,
     review_superadmin_allowlist,
@@ -30,6 +31,7 @@ REVIEW_NASABAH_ID = UUID("00000000-0000-4000-8000-000000000800")
 REVIEW_NASABAH_NUMBER = "NAS-REVIEWER"
 REVIEW_NASABAH_PHONE = "+6285550000800"
 REVIEW_NASABAH_ADDRESS = "Alamat demo untuk akun nasabah PILAH"
+REVIEW_BANK_NAME = "Bank Sampah PILAH Review Pending"
 
 
 class Command(BaseCommand):
@@ -44,6 +46,7 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             bank = self._review_bank()
+            self._ensure_review_bank()
             for email, name, role in REVIEW_ACCOUNTS:
                 user = self._existing_user(email, role, bank)
                 if user is None:
@@ -140,6 +143,30 @@ class Command(BaseCommand):
         if bank is None or not bank.is_active or bank.status != BankSampah.Status.ACTIVE:
             raise CommandError("An active staging E2E bank is required before reviewer accounts")
         return bank
+
+    @staticmethod
+    def _ensure_review_bank() -> None:
+        bank = BankSampah.objects.select_for_update().filter(pk=REVIEW_BANK_ID).first()
+        if bank is None:
+            BankSampah.objects.create(
+                id=REVIEW_BANK_ID,
+                nama=REVIEW_BANK_NAME,
+                alamat="Alamat sintetis untuk peninjauan PILAH",
+                kota="Depok",
+                no_hp_pic="",
+                jenis_organisasi=BankSampah.OrganizationType.MANDIRI,
+                status=BankSampah.Status.PENDING,
+                is_active=False,
+            )
+            return
+        if (
+            bank.nama != REVIEW_BANK_NAME
+            or bank.jenis_organisasi != BankSampah.OrganizationType.MANDIRI
+            or bank.parent_id is not None
+            or bank.status not in BankSampah.Status.values
+            or bank.is_active != (bank.status == BankSampah.Status.ACTIVE)
+        ):
+            raise CommandError("Staging review bank identity conflicts with existing data")
 
     @staticmethod
     def _existing_user(email: str, role: str, bank: BankSampah) -> User | None:

@@ -119,6 +119,8 @@ deploying, and the seed validates the environment and account identities
 before changing the database. Reruns reuse the same four accounts and password.
 The seed stops if the E2E bank is inactive or an existing reviewer membership
 is inactive or unapproved, leaving those tester decisions unchanged.
+The reviewer Superadmin gets a separate synthetic pending bank in its restricted
+approval queue. Reruns preserve approval or rejection decisions for that bank.
 
 Reusing the production reviewer password is an explicit operator choice. Anyone
 who obtains it from staging can also sign in to the production reviewer accounts.

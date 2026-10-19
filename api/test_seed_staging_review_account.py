@@ -6,6 +6,7 @@ from rest_framework.test import APIClient
 from api.management.commands.seed_staging_review_account import (
     CONFIRMATION,
     REVIEW_ACCOUNTS,
+    REVIEW_BANK_NAME,
     REVIEW_NASABAH_ADDRESS,
     REVIEW_NASABAH_EMAIL,
     REVIEW_NASABAH_ID,
@@ -13,8 +14,9 @@ from api.management.commands.seed_staging_review_account import (
     REVIEW_NASABAH_PHONE,
     REVIEW_PENGELOLA_EMAIL,
 )
-from api.management.commands.seed_testing_data import ACTIVE_BANK_ID
+from api.management.commands.seed_testing_data import ACTIVE_BANK_ID, PENDING_BANK_ID
 from api.models import BankSampah, Nasabah, User
+from apps.bank_sampah.constants import REVIEW_BANK_ID
 
 REVIEWER_EMAIL = "pilah.superadmin@pilah.com"
 REVIEWER_EMAILS = tuple(email for email, _name, _role in REVIEW_ACCOUNTS)
@@ -191,6 +193,80 @@ class SeedStagingReviewAccountTests(TestCase):
         self.assertTrue(pengurus.is_primary_pengelola)
         self.assertTrue(pengurus.check_password("old-password"))
         self.assertFalse(User.objects.filter(email=REVIEW_PENGELOLA_EMAIL).exists())
+
+    def test_superadmin_can_approve_only_the_review_scoped_pending_bank(self) -> None:
+        other_bank = BankSampah.objects.create(
+            id=PENDING_BANK_ID,
+            nama="Other pending E2E bank",
+            no_hp_pic="",
+            status=BankSampah.Status.PENDING,
+            is_active=False,
+        )
+        call_command("seed_staging_review_account", confirm=CONFIRMATION)
+        client = APIClient()
+        client.force_authenticate(User.objects.get(email=REVIEWER_EMAIL))
+
+        queue = client.get("/api/v1/superadmin/bank-sampah")
+        self.assertEqual(queue.status_code, 200)
+        self.assertEqual([row["id"] for row in queue.data["results"]], [str(REVIEW_BANK_ID)])
+        self.assertEqual(
+            client.post(f"/api/v1/superadmin/bank-sampah/{other_bank.pk}/approve").status_code,
+            404,
+        )
+        self.assertEqual(
+            client.post(f"/api/v1/superadmin/bank-sampah/{REVIEW_BANK_ID}/approve").status_code,
+            200,
+        )
+
+        call_command("seed_staging_review_account", confirm=CONFIRMATION)
+
+        bank = BankSampah.objects.get(pk=REVIEW_BANK_ID)
+        self.assertEqual(bank.status, BankSampah.Status.ACTIVE)
+        self.assertTrue(bank.is_active)
+        self.assertEqual(bank.approval_logs.count(), 1)
+        self.assertEqual(client.get("/api/v1/superadmin/bank-sampah").data["count"], 0)
+        other_bank.refresh_from_db()
+        self.assertEqual(other_bank.status, BankSampah.Status.PENDING)
+
+    def test_superadmin_can_reject_the_review_bank_without_reseed_resetting_it(self) -> None:
+        call_command("seed_staging_review_account", confirm=CONFIRMATION)
+        client = APIClient()
+        client.force_authenticate(User.objects.get(email=REVIEWER_EMAIL))
+        response = client.post(
+            f"/api/v1/superadmin/bank-sampah/{REVIEW_BANK_ID}/reject",
+            {"catatan": "Review rejection"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        call_command("seed_staging_review_account", confirm=CONFIRMATION)
+
+        bank = BankSampah.objects.get(pk=REVIEW_BANK_ID)
+        self.assertEqual(bank.status, BankSampah.Status.REJECTED)
+        self.assertFalse(bank.is_active)
+        self.assertEqual(bank.approval_logs.count(), 1)
+        self.assertEqual(client.get("/api/v1/superadmin/bank-sampah").data["count"], 0)
+
+    def test_seed_rejects_conflicting_review_bank_without_creating_accounts(self) -> None:
+        for name, status, active in (
+            ("Unrelated bank", BankSampah.Status.PENDING, False),
+            (REVIEW_BANK_NAME, BankSampah.Status.ACTIVE, False),
+            (REVIEW_BANK_NAME, "invalid-status", False),
+        ):
+            with self.subTest(name=name, status=status, active=active):
+                bank = BankSampah.objects.create(
+                    id=REVIEW_BANK_ID,
+                    nama=name,
+                    no_hp_pic="",
+                    status=status,
+                    is_active=active,
+                )
+                with self.assertRaisesMessage(CommandError, "review bank identity conflicts"):
+                    call_command("seed_staging_review_account", confirm=CONFIRMATION)
+                self.assertFalse(User.objects.filter(email__in=REVIEWER_EMAILS).exists())
+                bank.refresh_from_db()
+                self.assertEqual((bank.nama, bank.status, bank.is_active), (name, status, active))
+                bank.delete()
 
     def test_seed_repairs_existing_nasabah_profile(self) -> None:
         email, name, role = REVIEW_ACCOUNTS[2]
