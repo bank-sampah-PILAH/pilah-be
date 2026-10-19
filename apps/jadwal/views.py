@@ -4,6 +4,7 @@ A schedule may serve activities beyond setoran and pencairan, so it is not
 tied to the ledger context.
 """
 
+from datetime import date
 from typing import Any
 
 from django.db import transaction
@@ -44,6 +45,36 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
         )
         return [permission() for permission in permission_classes]
 
+    def _filter_by_dates(self, queryset: QuerySet[JadwalKegiatan]) -> QuerySet[JadwalKegiatan]:
+        """Filter by `date` (one day) and/or `date_from` / `date_to` (inclusive range)."""
+        params = self.request.query_params
+        parsed: dict[str, date] = {}
+        for name in ("date", "date_from", "date_to"):
+            value = params.get(name)
+            if not isinstance(value, str) or not value:
+                continue
+            day = parse_date(value)
+            if day is None:
+                raise serializers.ValidationError(
+                    {name: "Gunakan tanggal dengan format YYYY-MM-DD"}
+                )
+            parsed[name] = day
+        if (
+            "date_from" in parsed
+            and "date_to" in parsed
+            and parsed["date_to"] < parsed["date_from"]
+        ):
+            raise serializers.ValidationError(
+                {"date_to": "date_to harus sama dengan atau setelah date_from"}
+            )
+        if "date" in parsed:
+            queryset = queryset.filter(mulai_pada__date=parsed["date"])
+        if "date_from" in parsed:
+            queryset = queryset.filter(mulai_pada__date__gte=parsed["date_from"])
+        if "date_to" in parsed:
+            queryset = queryset.filter(mulai_pada__date__lte=parsed["date_to"])
+        return queryset.order_by("mulai_pada", "pk")
+
     def get_queryset(self) -> QuerySet[JadwalKegiatan]:
         user = _user(self.request)
         queryset = JadwalKegiatan.objects.select_related("bank_sampah", "dibuat_oleh")
@@ -81,15 +112,7 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
                 .annotate(_peringatan_jadwal_bertumpuk=Exists(overlapping_schedules))
             )
         if self.action == "list":
-            date_value = self.request.query_params.get("date")
-            if isinstance(date_value, str) and date_value:
-                date = parse_date(date_value)
-                if date is None:
-                    raise serializers.ValidationError(
-                        {"date": "Gunakan tanggal dengan format YYYY-MM-DD"}
-                    )
-                queryset = queryset.filter(mulai_pada__date=date)
-            queryset = queryset.order_by("mulai_pada", "pk")
+            queryset = self._filter_by_dates(queryset)
         if self.action in {"update", "partial_update"}:
             queryset = queryset.select_for_update()
         return queryset
