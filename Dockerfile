@@ -23,6 +23,7 @@ FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    HOME="/app" \
     PATH="/opt/venv/bin:$PATH"
 
 # libpq5 for psycopg; curl for the container HEALTHCHECK probe. System pip is
@@ -47,7 +48,8 @@ RUN chmod +x /app/docker/entrypoint.sh \
     && mkdir -p /app/staticfiles /app/media \
     && chown -R appuser:appuser /app
 
-USER appuser
+# The entrypoint fixes ownership on mounted volumes, then drops to appuser.
+USER root
 
 EXPOSE 8080
 

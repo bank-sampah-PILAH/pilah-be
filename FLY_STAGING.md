@@ -1,0 +1,144 @@
+# Fly.io Staging
+
+Pushes to `staging` deploy the verified backend commit to `pilah-be-staging`.
+CI then requires `/healthz` to succeed and initializes the E2E fixture only if
+its known rows are absent. Later deploys preserve tester edits to existing
+fixture rows. Seed failure fails deployment; no separate dispatch is needed.
+Staging runs are serialized so deploy and seed are not interrupted by a newer
+push. No reset or deletion runs in the deployment pipeline.
+
+The API runs in Singapore, connects to Neon over TLS, and stores uploaded
+media on the single `media_data` Fly volume. Only logo files are public local
+media; activity proofs use short-lived signed URLs for Superadmins.
+
+## Domains and Google OAuth
+
+- Dashboard (separate mobile-repository Fly app): `https://pilah-web-staging.fly.dev`
+- Backend API base: `https://pilah-be-staging.fly.dev/api/v1/`
+- Backend health check: `https://pilah-be-staging.fly.dev/healthz`
+
+`fly.toml` explicitly allows only the staging dashboard browser origin with
+`CORS_ALLOW_ALL_ORIGINS=false` and adds it to `CSRF_TRUSTED_ORIGINS`.
+Remove any older Fly secret overriding `CORS_ALLOWED_ORIGINS` with another
+value, or set it to exactly `https://pilah-web-staging.fly.dev`.
+No custom domain or wildcard browser allowlist is required.
+
+Set backend `GOOGLE_CLIENT_ID` to the same Web OAuth client ID used as
+`GOOGLE_SERVER_CLIENT_ID` by the frontend. Add
+`https://pilah-web-staging.fly.dev` to that client's **Authorized JavaScript
+origins**, and add staging test accounts to the consent screen's test-user
+list. If using the backend callback flow, register this redirect URI:
+
+```text
+https://pilah-be-staging.fly.dev/api/v1/auth/google/callback
+```
+
+`PILAH_PUBLIC_APP_URL` is the invite-link base, not the CORS origin or frontend
+API base; it remains `https://pilah-be-staging.fly.dev` in `fly.toml` so Android
+App Links continue to open the app. New `/invite/<token>` links redirect in the
+browser to the Flutter hash path `/#/invite/<token>` on `PILAH_WEB_ORIGIN`
+(`https://pilah-web-staging.fly.dev`). Older `/invite?token=...` links remain
+supported by the native app; browser fallback does not forward their query token.
+This origin is configured in `fly.toml`; never construct the redirect destination
+from the request host. Keep
+`PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false` and `DJANGO_DEBUG=false`; web hosting does
+not enable demo login.
+
+## Required Secrets and Seed Variables
+
+Set Django and Neon values directly on Fly using the individual connection
+fields; never commit a connection string:
+
+```bash
+flyctl secrets set --app pilah-be-staging \
+  DJANGO_SECRET_KEY='change-me' \
+  DB_NAME='neondb' \
+  DB_USER='neondb_owner' \
+  DB_PASSWORD='change-me' \
+  DB_HOST='ep-example.ap-southeast-1.aws.neon.tech' \
+  GOOGLE_CLIENT_ID='your-web-oauth-client-id' \
+  PILAH_SUPERADMIN_EMAILS='superadmin@example.com'
+```
+
+Set Google callback and WhatsApp/Twilio secrets as needed. The Fly runtime
+allowlist is authoritative for Superadmin login/API access and must include
+the configured fixture Superadmin. Non-debug fixture seeding fails unless
+`PILAH_ENVIRONMENT=staging` (set in `fly.toml`), the confirmation is provided,
+and that Superadmin is allowlisted.
+
+GitHub's `staging` environment needs an app-scoped `FLY_API_TOKEN` and these
+non-secret variables before the next staging push:
+
+```text
+PILAH_SEED_PENGURUS_EMAIL
+PILAH_SEED_CUSTOMER_EMAIL
+PILAH_SEED_CUSTOMER_TWO_EMAIL
+PILAH_SEED_SUPERADMIN_EMAIL
+PILAH_SEED_PENDING_PENGURUS_EMAIL
+PILAH_SEED_INDUK_EMAIL
+```
+
+`PILAH_SEED_INDUK_EMAIL` defaults to `induk.demo@example.com`. The old
+`PILAH_SEED_OPERATOR_EMAIL` and `PILAH_SEED_PENDING_OPERATOR_EMAIL` remain
+fallbacks, with Pengurus values taking precedence. Use real Google test
+accounts and include Induk's chosen address on the consent screen too.
+Missing/invalid required addresses fail the deploy job. Seed arguments are
+validated and passed as data rather than interpolated into a shell script.
+
+The command updates deterministic active Pengelola/Induk banks and pending
+approval fixtures, customers, balances, waste types and transaction history;
+it never flushes or removes unrelated data. The automatic deploy uses
+`--if-missing`, so existing fixture rows (including tester edits) are left
+alone. To intentionally restore fixture defaults, run the confirmed staging
+command without `--if-missing`; do not use fixture identities for permanent
+data.
+For local SQLite or Docker Postgres, run migrations followed by
+`python manage.py seed_testing_data`; local execution requires `DJANGO_DEBUG=true`.
+Production runtime markers always forbid fixture seeding.
+
+The staging deploy also creates the four production password reviewer accounts
+after the E2E fixtures: `pilah.pengelola@pilah.com`,
+`pilah.pengurus@pilah.com`, `pilah.nasabah@pilah.com`, and
+`pilah.superadmin@pilah.com`. The Pengelola accounts use the E2E bank, and the
+Pengelola reviewer has primary owner permissions while Pengurus remains a team
+member. The Nasabah account has an approved membership there. Before merging a
+change that adds or updates this seed, configure these Fly secrets on
+`pilah-be-staging`:
+
+```text
+PILAH_REVIEW_SUPERADMIN_EMAILS includes pilah.superadmin@pilah.com only
+PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS includes all four reviewer accounts
+PILAH_REVIEW_ACCOUNT_PASSWORD matches the production reviewer password
+```
+
+Keep `pilah.superadmin@pilah.com` out of `PILAH_SUPERADMIN_EMAILS`. Preserve
+any other addresses already present in these allowlists. Set the password
+through the approved secure secret channel; never put it in GitHub variables,
+source code, or this document. Staging CI checks all three secret names before
+deploying, and the seed validates the environment and account identities
+before changing the database. Reruns reuse the same four accounts and password.
+The seed stops if the E2E bank is inactive or an existing reviewer membership
+is inactive or unapproved, leaving those tester decisions unchanged.
+Additional Nasabah memberships in other banks are preserved on reseeding.
+The reviewer Superadmin gets a separate synthetic pending bank in its restricted
+approval queue. Reruns preserve approval or rejection decisions for that bank.
+
+Reusing the production reviewer password is an explicit operator choice. Anyone
+who obtains it from staging can also sign in to the production reviewer accounts.
+Restrict staging secret and SSH access, and rotate the reviewer password in both
+environments together if it is exposed.
+
+## Operations
+
+```bash
+flyctl status --app pilah-be-staging
+flyctl checks list --app pilah-be-staging
+flyctl logs --app pilah-be-staging
+```
+
+Migrations and static collection run from `docker/entrypoint.sh` before
+Gunicorn starts. The volume limits this staging app to one machine; move
+media to object storage before scaling beyond one machine or region.
+After deploying, verify genuine Google sign-in from the dashboard as Pengurus,
+Pengurus Induk and Superadmin. This change does not itself deploy or configure
+cloud resources or Google Console settings.

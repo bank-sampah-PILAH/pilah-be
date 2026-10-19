@@ -1,0 +1,746 @@
+import os
+from argparse import ArgumentParser
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from decimal import Decimal
+from uuid import UUID
+
+from django.conf import settings
+from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
+from django.db.models import F, Sum
+from django.utils import timezone
+
+from api.models import (
+    BankSampah,
+    BankSampahApprovalLog,
+    DetailTransaksi,
+    HargaSampah,
+    JenisSampah,
+    Nasabah,
+    Pencairan,
+    Saldo,
+    Transaksi,
+    User,
+)
+from apps.notification.api import DEFAULT_WA_TEMPLATE
+from apps.waste_catalog.api import harga_berlaku
+from apps.waste_catalog.services import catat_harga
+from shared_kernel.permissions import superadmin_allowlist
+
+CONFIRMATION = "SEED-PILAH-STAGING-DATA"
+
+ACTIVE_BANK_ID = UUID("00000000-0000-4000-8000-000000000001")
+PENDING_BANK_ID = UUID("00000000-0000-4000-8000-000000000002")
+INDUK_BANK_ID = UUID("00000000-0000-4000-8000-000000000003")
+PENGURUS_ID = UUID("00000000-0000-4000-8000-000000000011")
+PENDING_PENGURUS_ID = UUID("00000000-0000-4000-8000-000000000012")
+SUPERADMIN_ID = UUID("00000000-0000-4000-8000-000000000013")
+INDUK_PENGELOLA_ID = UUID("00000000-0000-4000-8000-000000000014")
+CUSTOMER_ONE_USER_ID = UUID("00000000-0000-4000-8000-000000000021")
+CUSTOMER_TWO_USER_ID = UUID("00000000-0000-4000-8000-000000000022")
+CUSTOMER_ONE_ID = UUID("00000000-0000-4000-8000-000000000031")
+CUSTOMER_TWO_ID = UUID("00000000-0000-4000-8000-000000000032")
+
+JENIS_PLASTIK_ID = UUID("00000000-0000-4000-8000-000000000041")
+JENIS_KARDUS_ID = UUID("00000000-0000-4000-8000-000000000042")
+JENIS_KACA_ID = UUID("00000000-0000-4000-8000-000000000043")
+JENIS_LOGAM_ID = UUID("00000000-0000-4000-8000-000000000044")
+
+TRANSACTION_ONE_ID = UUID("00000000-0000-4000-8000-000000000051")
+TRANSACTION_TWO_ID = UUID("00000000-0000-4000-8000-000000000052")
+TRANSACTION_THREE_ID = UUID("00000000-0000-4000-8000-000000000053")
+DETAIL_ONE_ID = UUID("00000000-0000-4000-8000-000000000061")
+DETAIL_TWO_ID = UUID("00000000-0000-4000-8000-000000000062")
+DETAIL_THREE_ID = UUID("00000000-0000-4000-8000-000000000063")
+DETAIL_FOUR_ID = UUID("00000000-0000-4000-8000-000000000064")
+APPROVAL_LOG_ID = UUID("00000000-0000-4000-8000-000000000071")
+HISTORY_TRANSACTION_ID_BASE = UUID("00000000-0000-4000-8000-000000000100")
+HISTORY_DETAIL_ID_BASE = UUID("00000000-0000-4000-8000-000000000300")
+HISTORY_PAYOUT_ID_BASE = UUID("00000000-0000-4000-8000-000000000500")
+DUMMY_CUSTOMER_ID_BASE = UUID("00000000-0000-4000-8000-000000000700")
+HISTORY_ROWS_PER_CUSTOMER = 110
+# Riwayat setoran seed mundur sampai 365 hari; harga awal harus lebih tua.
+SEED_HARGA_SEJAK_HARI = 400
+DUMMY_CUSTOMER_COUNT = 60
+
+
+@dataclass(frozen=True)
+class SeedIdentities:
+    pengurus_email: str
+    customer_email: str
+    customer_two_email: str
+    superadmin_email: str
+    pending_pengurus_email: str
+    induk_email: str
+
+
+class Command(BaseCommand):
+    help = "Create or update deterministic local/staging data for end-to-end testing."
+
+    def add_arguments(self, parser: ArgumentParser) -> None:
+        parser.add_argument("--environment", choices=("local", "staging"), default="local")
+        parser.add_argument("--confirm")
+        parser.add_argument("--if-missing", action="store_true")
+        parser.add_argument(
+            "--pengurus-email",
+            "--operator-email",
+            dest="pengurus_email",
+            default=(
+                os.getenv("PILAH_SEED_PENGURUS_EMAIL")
+                or os.getenv("PILAH_SEED_OPERATOR_EMAIL")
+                or "pengurus.demo@example.com"
+            ),
+        )
+        parser.add_argument(
+            "--customer-email",
+            default=os.getenv("PILAH_SEED_CUSTOMER_EMAIL", "customer.demo@example.com"),
+        )
+        parser.add_argument(
+            "--customer-two-email",
+            default=os.getenv("PILAH_SEED_CUSTOMER_TWO_EMAIL", "customer.two.demo@example.com"),
+        )
+        parser.add_argument(
+            "--superadmin-email",
+            default=os.getenv("PILAH_SEED_SUPERADMIN_EMAIL", "superadmin.demo@example.com"),
+        )
+        parser.add_argument(
+            "--pending-pengurus-email",
+            "--pending-operator-email",
+            dest="pending_pengurus_email",
+            default=(
+                os.getenv("PILAH_SEED_PENDING_PENGURUS_EMAIL")
+                or os.getenv("PILAH_SEED_PENDING_OPERATOR_EMAIL")
+                or "pending.pengurus.demo@example.com"
+            ),
+        )
+        parser.add_argument(
+            "--induk-email",
+            default=os.getenv("PILAH_SEED_INDUK_EMAIL", "induk.demo@example.com"),
+        )
+
+    def handle(self, *args: object, **options: object) -> None:
+        environment = str(options["environment"])
+        confirmation = str(options.get("confirm") or "")
+        if settings.PILAH_ENVIRONMENT == "production":
+            raise CommandError("Testing data is forbidden in production")
+        if environment == "local" and not settings.DEBUG:
+            raise CommandError("Local testing data requires DJANGO_DEBUG=true")
+        if not settings.DEBUG and settings.PILAH_ENVIRONMENT != "staging":
+            raise CommandError("Testing data requires PILAH_ENVIRONMENT=staging outside debug")
+        if environment == "staging" and confirmation != CONFIRMATION:
+            raise CommandError(f"Pass --confirm={CONFIRMATION} to seed staging data")
+
+        identities = SeedIdentities(
+            pengurus_email=self._normalize_email(options["pengurus_email"]),
+            customer_email=self._normalize_email(options["customer_email"]),
+            customer_two_email=self._normalize_email(options["customer_two_email"]),
+            superadmin_email=self._normalize_email(options["superadmin_email"]),
+            pending_pengurus_email=self._normalize_email(options["pending_pengurus_email"]),
+            induk_email=self._normalize_email(options["induk_email"]),
+        )
+
+        if not settings.DEBUG and identities.superadmin_email.lower() not in superadmin_allowlist():
+            raise CommandError("Seed Superadmin must be in PILAH_SUPERADMIN_EMAILS")
+
+        if bool(options.get("if_missing")) and self._has_seeded_data():
+            self.stdout.write(self.style.SUCCESS("Existing fixture rows found; skipping reseed."))
+            return
+
+        with transaction.atomic():
+            self._seed(identities)
+
+        self.stdout.write(self.style.SUCCESS(f"Seeded testing data for {environment} environment"))
+        customer_count = 2 + DUMMY_CUSTOMER_COUNT
+        history_count = HISTORY_ROWS_PER_CUSTOMER * 2
+        self.stdout.write(
+            "Fixture includes 3 banks, 6 users, "
+            f"{customer_count} customers, 4 waste types, "
+            f"{3 + history_count} setoran, {history_count} pencairan, "
+            "and recalculated balances."
+        )
+
+    @staticmethod
+    def _has_seeded_data() -> bool:
+        return (
+            BankSampah.objects.filter(
+                pk__in=(ACTIVE_BANK_ID, PENDING_BANK_ID, INDUK_BANK_ID)
+            ).exists()
+            or User.objects.filter(
+                pk__in=(
+                    PENGURUS_ID,
+                    PENDING_PENGURUS_ID,
+                    SUPERADMIN_ID,
+                    INDUK_PENGELOLA_ID,
+                    CUSTOMER_ONE_USER_ID,
+                    CUSTOMER_TWO_USER_ID,
+                )
+            ).exists()
+            or Nasabah.objects.filter(pk__in=(CUSTOMER_ONE_ID, CUSTOMER_TWO_ID)).exists()
+        )
+
+    @staticmethod
+    def _normalize_email(value: object) -> str:
+        email = User.objects.normalize_email(str(value).strip())
+        if not email or "@" not in email:
+            raise CommandError(f"Invalid seed email: {value}")
+        return email
+
+    def _seed(self, identities: SeedIdentities) -> None:
+        now = timezone.now()
+        active_bank = BankSampah.objects.update_or_create(
+            pk=ACTIVE_BANK_ID,
+            defaults={
+                "nama": "Bank Sampah PILAH E2E",
+                "alamat": "Jl. E2E No. 1",
+                "kota": "Depok",
+                "no_hp_pic": "+628111111111",
+                "jenis_organisasi": BankSampah.OrganizationType.MANDIRI,
+                "parent": None,
+                "status": BankSampah.Status.ACTIVE,
+                "is_active": True,
+                "wa_template": DEFAULT_WA_TEMPLATE,
+                "invite_token": "SEED-PILAH-E2E-INVITE",
+                "invite_token_expires": now + timedelta(days=7),
+            },
+        )[0]
+        pending_bank = BankSampah.objects.update_or_create(
+            pk=PENDING_BANK_ID,
+            defaults={
+                "nama": "Bank Sampah PILAH E2E Pending",
+                "alamat": "Jl. E2E No. 2",
+                "kota": "Depok",
+                "no_hp_pic": "+628222222222",
+                "jenis_organisasi": BankSampah.OrganizationType.MANDIRI,
+                "parent": None,
+                "status": BankSampah.Status.PENDING,
+                "is_active": False,
+                "wa_template": DEFAULT_WA_TEMPLATE,
+                "invite_token": "",
+                "invite_token_expires": None,
+            },
+        )[0]
+        induk_bank = BankSampah.objects.update_or_create(
+            pk=INDUK_BANK_ID,
+            defaults={
+                "nama": "Bank Sampah Induk PILAH E2E",
+                "alamat": "Jl. E2E Induk No. 1",
+                "kota": "Depok",
+                "no_hp_pic": "+628222222223",
+                "jenis_organisasi": BankSampah.OrganizationType.INDUK,
+                "parent": None,
+                "status": BankSampah.Status.ACTIVE,
+                "is_active": True,
+                "wa_template": DEFAULT_WA_TEMPLATE,
+                "invite_token": "",
+                "invite_token_expires": None,
+            },
+        )[0]
+
+        pengurus = self._upsert_user(
+            user_id=PENGURUS_ID,
+            email=identities.pengurus_email,
+            name="Pengurus PILAH E2E",
+            role=User.Role.PENGELOLA,
+            bank=active_bank,
+            is_primary=True,
+        )
+        self._upsert_user(
+            user_id=PENDING_PENGURUS_ID,
+            email=identities.pending_pengurus_email,
+            name="Pengurus Pending PILAH E2E",
+            role=User.Role.PENGELOLA,
+            bank=pending_bank,
+            is_primary=True,
+        )
+        self._upsert_user(
+            user_id=INDUK_PENGELOLA_ID,
+            email=identities.induk_email,
+            name="Pengelola Induk PILAH E2E",
+            role=User.Role.PENGELOLA_INDUK,
+            bank=induk_bank,
+            is_primary=True,
+        )
+        superadmin = self._upsert_user(
+            user_id=SUPERADMIN_ID,
+            email=identities.superadmin_email,
+            name="Superadmin PILAH E2E",
+            role=User.Role.SUPERADMIN,
+            bank=None,
+            is_primary=False,
+            is_staff=True,
+            is_superuser=True,
+        )
+        BankSampahApprovalLog.objects.update_or_create(
+            pk=APPROVAL_LOG_ID,
+            defaults={
+                "bank_sampah": active_bank,
+                "superadmin": superadmin,
+                "status": BankSampahApprovalLog.Status.APPROVED,
+                "catatan": "Fixture approval untuk pengujian E2E",
+            },
+        )
+        customer_one_user = self._upsert_user(
+            user_id=CUSTOMER_ONE_USER_ID,
+            email=identities.customer_email,
+            name="Nasabah PILAH E2E",
+            role=User.Role.NASABAH,
+            bank=None,
+            is_primary=False,
+            no_hp="+628333333331",
+            alamat="Jl. Mawar E2E No. 1",
+            jenis_kelamin=User.Gender.MALE,
+            tanggal_lahir=date(1990, 1, 1),
+        )
+        customer_two_user = self._upsert_user(
+            user_id=CUSTOMER_TWO_USER_ID,
+            email=identities.customer_two_email,
+            name="Nasabah Kedua PILAH E2E",
+            role=User.Role.NASABAH,
+            bank=None,
+            is_primary=False,
+            no_hp="+628333333332",
+            alamat="Jl. Melati E2E No. 2",
+            jenis_kelamin=User.Gender.FEMALE,
+            tanggal_lahir=date(1992, 2, 2),
+        )
+
+        customer_one = self._upsert_customer(
+            customer_id=CUSTOMER_ONE_ID,
+            user=customer_one_user,
+            bank=active_bank,
+            number="NAS-0001",
+            name="Nasabah PILAH E2E",
+            gender=Nasabah.Gender.MALE,
+            birth_date=date(1990, 1, 1),
+            phone="+628333333331",
+            address="Jl. Mawar E2E No. 1",
+        )
+        customer_two = self._upsert_customer(
+            customer_id=CUSTOMER_TWO_ID,
+            user=customer_two_user,
+            bank=active_bank,
+            number="NAS-0002",
+            name="Nasabah Kedua PILAH E2E",
+            gender=Nasabah.Gender.FEMALE,
+            birth_date=date(1992, 2, 2),
+            phone="+628333333332",
+            address="Jl. Melati E2E No. 2",
+        )
+
+        jenis_plastik = self._upsert_waste_type(
+            JENIS_PLASTIK_ID,
+            active_bank,
+            "JS-0001",
+            "Plastik PET",
+            JenisSampah.Kategori.PLASTIK,
+            "Botol plastik bening",
+            Decimal("3500.00"),
+        )
+        jenis_kardus = self._upsert_waste_type(
+            JENIS_KARDUS_ID,
+            active_bank,
+            "JS-0002",
+            "Kardus",
+            JenisSampah.Kategori.KERTAS,
+            "Kardus dan kertas tebal",
+            Decimal("2000.00"),
+        )
+        jenis_kaca = self._upsert_waste_type(
+            JENIS_KACA_ID,
+            active_bank,
+            "JS-0003",
+            "Botol Kaca",
+            JenisSampah.Kategori.KACA,
+            "Botol kaca bersih",
+            Decimal("1000.00"),
+        )
+        jenis_logam = self._upsert_waste_type(
+            JENIS_LOGAM_ID,
+            active_bank,
+            "JS-0004",
+            "Kaleng Aluminium",
+            JenisSampah.Kategori.LOGAM,
+            "Kaleng aluminium",
+            Decimal("5000.00"),
+        )
+
+        self._upsert_transaction(
+            transaction_id=TRANSACTION_ONE_ID,
+            detail_ids=(DETAIL_ONE_ID, DETAIL_TWO_ID),
+            bank=active_bank,
+            pengurus=pengurus,
+            customer=customer_one,
+            transaction_time=now - timedelta(days=3),
+            note="Setoran E2E pertama",
+            items=(
+                (jenis_plastik, Decimal("2.500")),
+                (jenis_kardus, Decimal("1.000")),
+            ),
+        )
+        self._upsert_transaction(
+            transaction_id=TRANSACTION_TWO_ID,
+            detail_ids=(DETAIL_THREE_ID,),
+            bank=active_bank,
+            pengurus=pengurus,
+            customer=customer_one,
+            transaction_time=now - timedelta(days=1),
+            note="Setoran E2E kedua",
+            items=((jenis_kaca, Decimal("3.000")),),
+        )
+        self._upsert_transaction(
+            transaction_id=TRANSACTION_THREE_ID,
+            detail_ids=(DETAIL_FOUR_ID,),
+            bank=active_bank,
+            pengurus=pengurus,
+            customer=customer_two,
+            transaction_time=now - timedelta(hours=4),
+            note="Setoran E2E nasabah kedua",
+            items=((jenis_logam, Decimal("1.500")),),
+        )
+
+        self._seed_extended_data(
+            bank=active_bank,
+            pengurus=pengurus,
+            customers=(customer_one, customer_two),
+            waste_types=(jenis_plastik, jenis_kardus, jenis_kaca, jenis_logam),
+            now=now,
+        )
+
+        for customer in (customer_one, customer_two):
+            setoran = Transaksi.objects.filter(nasabah=customer).aggregate(
+                total=Sum("total_nilai")
+            )["total"] or Decimal("0.00")
+            pencairan = Pencairan.objects.filter(nasabah=customer).aggregate(
+                total=Sum(F("saldo_sebelum") - F("saldo_sesudah"))
+            )["total"] or Decimal("0.00")
+            Saldo.objects.update_or_create(
+                nasabah=customer, defaults={"total_saldo": setoran - pencairan}
+            )
+
+    def _seed_extended_data(
+        self,
+        *,
+        bank: BankSampah,
+        pengurus: User,
+        customers: tuple[Nasabah, ...],
+        waste_types: tuple[JenisSampah, ...],
+        now: datetime,
+    ) -> None:
+        today = timezone.localdate()
+        for index in range(DUMMY_CUSTOMER_COUNT):
+            number = index + 1
+            status, is_active = (
+                (Nasabah.Status.APPROVED, True),
+                (Nasabah.Status.APPROVED, False),
+                (Nasabah.Status.PENDING, True),
+            )[index % 3]
+            Nasabah.objects.update_or_create(
+                pk=UUID(int=DUMMY_CUSTOMER_ID_BASE.int + index),
+                defaults={
+                    "user": None,
+                    "bank_sampah": bank,
+                    "nomor": f"NAS-DEMO-{number:04d}",
+                    "nama": f"Nasabah Demo {number:04d}",
+                    "jenis_kelamin": (
+                        Nasabah.Gender.MALE if index % 2 == 0 else Nasabah.Gender.FEMALE
+                    ),
+                    "tanggal_lahir": date(1970 + index % 30, 1 + index % 12, 1 + index % 27),
+                    "alamat": f"Jl. Demo No. {number}",
+                    "no_hp": f"+628155{number:07d}",
+                    "email": f"nasabah.demo.{number:04d}@example.test",
+                    "tanggal_daftar": today - timedelta(days=index),
+                    "is_active": is_active,
+                    "status": status,
+                },
+            )
+
+        for customer_index, customer in enumerate(customers):
+            running_balance = Decimal("0.00")
+            customer_offset = customer_index * HISTORY_ROWS_PER_CUSTOMER
+            for row_index in range(HISTORY_ROWS_PER_CUSTOMER):
+                jenis = waste_types[row_index % len(waste_types)]
+                weight = Decimal(1 + row_index % 5)
+                transaction_time = (
+                    now
+                    - timedelta(days=365)
+                    + timedelta(days=358 * row_index // (HISTORY_ROWS_PER_CUSTOMER - 1))
+                )
+                total = self._upsert_transaction(
+                    transaction_id=UUID(
+                        int=HISTORY_TRANSACTION_ID_BASE.int + customer_offset + row_index
+                    ),
+                    detail_ids=(
+                        UUID(int=HISTORY_DETAIL_ID_BASE.int + customer_offset + row_index),
+                    ),
+                    bank=bank,
+                    pengurus=pengurus,
+                    customer=customer,
+                    transaction_time=transaction_time,
+                    note=f"Setoran historis {row_index + 1:03d}",
+                    items=((jenis, weight),),
+                )
+
+                nominal = (total / 2).quantize(Decimal(1))
+                saldo_sebelum = running_balance + total
+                saldo_sesudah = saldo_sebelum - nominal
+                metode = Pencairan.Metode.TUNAI if row_index % 2 == 0 else Pencairan.Metode.TRANSFER
+                keterangan = f"Pencairan historis {row_index + 1:03d}"
+                defaults = {
+                    "nasabah": customer,
+                    "bank_sampah": bank,
+                    "dicatat_oleh": pengurus,
+                    "tanggal": transaction_time,
+                    "nominal": nominal,
+                    "metode": metode,
+                    "keterangan": keterangan,
+                    "saldo_sebelum": saldo_sebelum,
+                    "saldo_sesudah": saldo_sesudah,
+                }
+                pencairan, created = Pencairan.objects.get_or_create(
+                    pk=UUID(int=HISTORY_PAYOUT_ID_BASE.int + customer_offset + row_index),
+                    defaults=defaults,
+                )
+                if not created:
+                    # Preserve the original event time on reruns, like setoran rows.
+                    pencairan.nasabah = customer
+                    pencairan.bank_sampah = bank
+                    pencairan.dicatat_oleh = pengurus
+                    pencairan.nominal = nominal
+                    pencairan.metode = metode
+                    pencairan.keterangan = keterangan
+                    pencairan.saldo_sebelum = saldo_sebelum
+                    pencairan.saldo_sesudah = saldo_sesudah
+                    pencairan.save()
+                running_balance = saldo_sesudah
+
+    @staticmethod
+    def _upsert_user(
+        *,
+        user_id: UUID,
+        email: str,
+        name: str,
+        role: str,
+        bank: BankSampah | None,
+        is_primary: bool,
+        is_staff: bool = False,
+        is_superuser: bool = False,
+        no_hp: str = "",
+        alamat: str = "",
+        jenis_kelamin: str = "",
+        tanggal_lahir: date | None = None,
+    ) -> User:
+        user = User.objects.filter(pk=user_id).first()
+        if user is None:
+            user = User.objects.filter(email=email).first()
+            if user is None:
+                user = User(
+                    pk=user_id,
+                    email=email,
+                    nama=name,
+                    role=role,
+                    is_profile_complete=True,
+                    bank_sampah=bank,
+                    is_primary_pengelola=is_primary,
+                    is_active=True,
+                    is_staff=is_staff,
+                    is_superuser=is_superuser,
+                )
+            else:
+                same_fixture = (
+                    user.nama == name
+                    and user.role == role
+                    and user.bank_sampah_id == (bank.pk if bank else None)
+                    and user.is_primary_pengelola == is_primary
+                    and user.is_staff == is_staff
+                    and user.is_superuser == is_superuser
+                )
+                bare_account = (
+                    not user.is_profile_complete
+                    and user.bank_sampah_id is None
+                    and not user.keanggotaan_nasabah.exists()
+                    and not user.is_staff
+                    and not user.is_superuser
+                )
+                if not same_fixture and not bare_account:
+                    raise CommandError(
+                        f"Seed email {email} belongs to an existing non-fixture account"
+                    )
+        user.email = email
+        user.nama = name
+        user.role = role
+        user.is_profile_complete = True
+        user.bank_sampah = bank
+        user.is_primary_pengelola = is_primary
+        user.is_active = True
+        user.is_staff = is_staff
+        user.is_superuser = is_superuser
+        # A nasabah account's own profile mirrors the Nasabah record it's
+        # linked to below — a blank no_hp/alamat here despite
+        # is_profile_complete=True doesn't match any state the real login
+        # flow produces, and register_nasabah's alamat guard would reject
+        # this account outright if it ever tried to self-register.
+        user.no_hp = no_hp
+        user.alamat = alamat
+        user.jenis_kelamin = jenis_kelamin
+        user.tanggal_lahir = tanggal_lahir
+        user.save(
+            update_fields=[
+                "email",
+                "nama",
+                "role",
+                "is_profile_complete",
+                "bank_sampah",
+                "is_primary_pengelola",
+                "is_active",
+                "is_staff",
+                "is_superuser",
+                "no_hp",
+                "alamat",
+                "jenis_kelamin",
+                "tanggal_lahir",
+                "updated_at",
+            ]
+        )
+        return user
+
+    @staticmethod
+    def _upsert_customer(
+        *,
+        customer_id: UUID,
+        user: User,
+        bank: BankSampah,
+        number: str,
+        name: str,
+        gender: str,
+        birth_date: date,
+        phone: str,
+        address: str,
+    ) -> Nasabah:
+        customer, _ = Nasabah.objects.update_or_create(
+            pk=customer_id,
+            defaults={
+                "user": user,
+                "bank_sampah": bank,
+                "nomor": number,
+                "nama": name,
+                "jenis_kelamin": gender,
+                "tanggal_lahir": birth_date,
+                "alamat": address,
+                "no_hp": phone,
+                "email": user.email,
+                "is_active": True,
+                "status": Nasabah.Status.APPROVED,
+            },
+        )
+        return customer
+
+    @staticmethod
+    def _upsert_waste_type(
+        type_id: UUID,
+        bank: BankSampah,
+        number: str,
+        name: str,
+        category: str,
+        description: str,
+        price: Decimal,
+    ) -> JenisSampah:
+        jenis, _ = JenisSampah.objects.update_or_create(
+            pk=type_id,
+            defaults={
+                "bank_sampah": bank,
+                "nomor": number,
+                "nama_sampah": name,
+                "kategori": category,
+                "deskripsi": description,
+                "is_active": True,
+            },
+        )
+        if not HargaSampah.objects.filter(jenis_sampah=jenis).exists():
+            # Berlaku sebelum riwayat setoran seed yang paling tua, agar harga
+            # setiap setoran seed sama dengan harga yang berlaku saat itu.
+            catat_harga(
+                jenis,
+                price,
+                timezone.now() - timedelta(days=SEED_HARGA_SEJAK_HARI),
+                oleh=None,
+            )
+        return jenis
+
+    @staticmethod
+    def _upsert_transaction(
+        *,
+        transaction_id: UUID,
+        detail_ids: tuple[UUID, ...],
+        bank: BankSampah,
+        pengurus: User,
+        customer: Nasabah,
+        transaction_time: datetime,
+        note: str,
+        items: tuple[tuple[JenisSampah, Decimal], ...],
+    ) -> Decimal:
+        # Harga yang berlaku pada tanggal setoran (BR-03), bukan hari ini. Saat
+        # seed diulang, tanggal yang tersimpan tetap dipakai.
+        tanggal = (
+            Transaksi.objects.filter(pk=transaction_id).values_list("tanggal", flat=True).first()
+            or transaction_time
+        )
+        harga = {jenis.pk: _harga_seed(jenis, tanggal) for jenis, _ in items}
+        total = sum(
+            (harga[jenis.pk] * weight for jenis, weight in items),
+            Decimal("0.00"),
+        ).quantize(Decimal("0.01"))
+        transaksi, created = Transaksi.objects.get_or_create(
+            pk=transaction_id,
+            defaults={
+                "nasabah": customer,
+                "bank_sampah": bank,
+                "dicatat_oleh": pengurus,
+                "tanggal": transaction_time,
+                "total_nilai": total,
+                "tipe": Transaksi.Tipe.SETORAN,
+                "catatan": note,
+                "status_wa": Transaksi.StatusWA.BELUM_DIKIRIM,
+            },
+        )
+        if not created:
+            transaksi.nasabah = customer
+            transaksi.bank_sampah = bank
+            transaksi.dicatat_oleh = pengurus
+            transaksi.total_nilai = total
+            transaksi.tipe = Transaksi.Tipe.SETORAN
+            transaksi.catatan = note
+            transaksi.status_wa = Transaksi.StatusWA.BELUM_DIKIRIM
+            transaksi.save(
+                update_fields=[
+                    "nasabah",
+                    "bank_sampah",
+                    "dicatat_oleh",
+                    "total_nilai",
+                    "tipe",
+                    "catatan",
+                    "status_wa",
+                    "updated_at",
+                ]
+            )
+        for detail_id, (jenis, weight) in zip(detail_ids, items, strict=True):
+            subtotal = (harga[jenis.pk] * weight).quantize(Decimal("0.01"))
+            DetailTransaksi.objects.update_or_create(
+                pk=detail_id,
+                defaults={
+                    "transaksi": transaksi,
+                    "jenis_sampah": jenis,
+                    "nama_sampah_snapshot": jenis.nama_sampah,
+                    "kategori_snapshot": jenis.kategori,
+                    "harga_snapshot": harga[jenis.pk],
+                    "berat": weight,
+                    "subtotal": subtotal,
+                },
+            )
+        return total
+
+
+def _harga_seed(jenis: JenisSampah, pada: datetime) -> Decimal:
+    harga = harga_berlaku(jenis, pada)
+    assert harga is not None  # ponytail: _upsert_waste_type always leaves a version
+    return harga
