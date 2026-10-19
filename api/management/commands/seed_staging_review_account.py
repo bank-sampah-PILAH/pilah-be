@@ -17,13 +17,15 @@ from shared_kernel.permissions import (
 )
 
 CONFIRMATION = "SEED-PILAH-STAGING-REVIEW-ACCOUNT"
-REVIEW_ACCOUNTS = (
-    ("pilah.pengelola@pilah.com", "Demo Pengelola PILAH", User.Role.PENGELOLA),
-    ("pilah.pengurus@pilah.com", "Demo Pengurus PILAH", User.Role.PENGELOLA),
-    ("pilah.nasabah@pilah.com", "Demo Nasabah PILAH", User.Role.NASABAH),
-    ("pilah.superadmin@pilah.com", "SuperAdmin PILAH", User.Role.SUPERADMIN),
-)
+REVIEW_PENGELOLA_EMAIL = "pilah.pengelola@pilah.com"
+REVIEW_NASABAH_EMAIL = "pilah.nasabah@pilah.com"
 REVIEW_SUPERADMIN_EMAIL = "pilah.superadmin@pilah.com"
+REVIEW_ACCOUNTS = (
+    (REVIEW_PENGELOLA_EMAIL, "Demo Pengelola PILAH", User.Role.PENGELOLA),
+    ("pilah.pengurus@pilah.com", "Demo Pengurus PILAH", User.Role.PENGELOLA),
+    (REVIEW_NASABAH_EMAIL, "Demo Nasabah PILAH", User.Role.NASABAH),
+    (REVIEW_SUPERADMIN_EMAIL, "SuperAdmin PILAH", User.Role.SUPERADMIN),
+)
 REVIEW_NASABAH_ID = UUID("00000000-0000-4000-8000-000000000800")
 REVIEW_NASABAH_NUMBER = "NAS-REVIEWER"
 REVIEW_NASABAH_PHONE = "+6285550000800"
@@ -45,58 +47,60 @@ class Command(BaseCommand):
             for email, name, role in REVIEW_ACCOUNTS:
                 user = self._existing_user(email, role, bank)
                 if user is None:
-                    user = User.objects.create_user(
-                        email=email,
-                        nama=name,
-                        role=role,
-                        is_profile_complete=True,
-                        password=password,
-                        **(
-                            {
-                                "bank_sampah": bank,
-                                "is_primary_pengelola": False,
-                            }
-                            if role == User.Role.PENGELOLA
-                            else {}
-                        ),
-                        **(
-                            {
-                                "no_hp": REVIEW_NASABAH_PHONE,
-                                "alamat": REVIEW_NASABAH_ADDRESS,
-                            }
-                            if role == User.Role.NASABAH
-                            else {}
-                        ),
-                    )
+                    user = self._create_user(email, name, role, bank, password)
                 else:
-                    fields: list[str] = []
-                    if user.bank_sampah_id is None and role == User.Role.PENGELOLA:
-                        user.bank_sampah = bank
-                        fields.extend(("bank_sampah", "is_primary_pengelola"))
-                    if user.email != email:
-                        user.email = email
-                        fields.append("email")
-                    if not user.nama:
-                        user.nama = name
-                        fields.append("nama")
-                    if not user.is_profile_complete:
-                        user.is_profile_complete = True
-                        fields.append("is_profile_complete")
-                    if role == User.Role.NASABAH and not user.no_hp:
-                        user.no_hp = REVIEW_NASABAH_PHONE
-                        fields.append("no_hp")
-                    if role == User.Role.NASABAH and not user.alamat:
-                        user.alamat = REVIEW_NASABAH_ADDRESS
-                        fields.append("alamat")
-                    if not user.check_password(password):
-                        user.set_password(password)
-                        fields.append("password")
-                    if fields:
-                        user.save(update_fields=[*fields, "updated_at"])
+                    self._update_user(user, email, name, role, bank, password)
                 if role == User.Role.NASABAH:
                     self._ensure_nasabah_membership(bank, user)
 
         self.stdout.write(self.style.SUCCESS("Staging reviewer accounts are ready."))
+
+    @staticmethod
+    def _create_user(email: str, name: str, role: str, bank: BankSampah, password: str) -> User:
+        return User.objects.create_user(
+            email=email,
+            nama=name,
+            role=role,
+            is_profile_complete=True,
+            password=password,
+            bank_sampah=bank if role == User.Role.PENGELOLA else None,
+            is_primary_pengelola=email == REVIEW_PENGELOLA_EMAIL,
+            no_hp=REVIEW_NASABAH_PHONE if role == User.Role.NASABAH else "",
+            alamat=REVIEW_NASABAH_ADDRESS if role == User.Role.NASABAH else "",
+        )
+
+    @staticmethod
+    def _update_user(
+        user: User, email: str, name: str, role: str, bank: BankSampah, password: str
+    ) -> None:
+        fields: list[str] = []
+        if user.bank_sampah_id is None and role == User.Role.PENGELOLA:
+            user.bank_sampah = bank
+            fields.append("bank_sampah")
+        primary = email == REVIEW_PENGELOLA_EMAIL
+        if user.is_primary_pengelola != primary:
+            user.is_primary_pengelola = primary
+            fields.append("is_primary_pengelola")
+        if user.email != email:
+            user.email = email
+            fields.append("email")
+        if not user.nama:
+            user.nama = name
+            fields.append("nama")
+        if not user.is_profile_complete:
+            user.is_profile_complete = True
+            fields.append("is_profile_complete")
+        if role == User.Role.NASABAH and not user.no_hp:
+            user.no_hp = REVIEW_NASABAH_PHONE
+            fields.append("no_hp")
+        if role == User.Role.NASABAH and not user.alamat:
+            user.alamat = REVIEW_NASABAH_ADDRESS
+            fields.append("alamat")
+        if not user.check_password(password):
+            user.set_password(password)
+            fields.append("password")
+        if fields:
+            user.save(update_fields=[*fields, "updated_at"])
 
     @staticmethod
     def _validate_runtime(confirmation: str) -> None:
@@ -133,8 +137,8 @@ class Command(BaseCommand):
     @staticmethod
     def _review_bank() -> BankSampah:
         bank = BankSampah.objects.select_for_update().filter(pk=ACTIVE_BANK_ID).first()
-        if bank is None:
-            raise CommandError("The staging E2E bank is required before reviewer accounts")
+        if bank is None or not bank.is_active or bank.status != BankSampah.Status.ACTIVE:
+            raise CommandError("An active staging E2E bank is required before reviewer accounts")
         return bank
 
     @staticmethod
@@ -153,7 +157,7 @@ class Command(BaseCommand):
             user.role != role
             or not user.is_active
             or user.bank_sampah_id not in (None, expected_bank_id)
-            or user.is_primary_pengelola
+            or (user.is_primary_pengelola and email != REVIEW_PENGELOLA_EMAIL)
             or (role != User.Role.NASABAH and user.keanggotaan_nasabah.exists())
             or user.google_id is not None
             or user.is_staff
@@ -166,9 +170,7 @@ class Command(BaseCommand):
     def _ensure_nasabah_membership(bank: BankSampah, user: User) -> None:
         matches = list(
             Nasabah.objects.select_for_update()
-            .filter(
-                Q(pk=REVIEW_NASABAH_ID) | Q(user=user) | Q(email__iexact="pilah.nasabah@pilah.com")
-            )
+            .filter(Q(pk=REVIEW_NASABAH_ID) | Q(user=user) | Q(email__iexact=REVIEW_NASABAH_EMAIL))
             .order_by("pk")[:2]
         )
         if len(matches) > 1:
@@ -182,7 +184,7 @@ class Command(BaseCommand):
                 nama="Demo Nasabah PILAH",
                 alamat=REVIEW_NASABAH_ADDRESS,
                 no_hp=REVIEW_NASABAH_PHONE,
-                email="pilah.nasabah@pilah.com",
+                email=REVIEW_NASABAH_EMAIL,
                 is_active=True,
                 status=Nasabah.Status.APPROVED,
             )
@@ -193,7 +195,9 @@ class Command(BaseCommand):
             membership.pk != REVIEW_NASABAH_ID
             or membership.bank_sampah_id != bank.pk
             or membership.user_id not in (None, user.pk)
-            or membership.email.lower() != "pilah.nasabah@pilah.com"
+            or membership.email.lower() != REVIEW_NASABAH_EMAIL
+            or not membership.is_active
+            or membership.status != Nasabah.Status.APPROVED
         ):
             raise CommandError("Staging reviewer membership identity conflicts with existing data")
         if membership.user_id is None:

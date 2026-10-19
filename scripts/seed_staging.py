@@ -29,18 +29,19 @@ def seed_staging() -> None:
         "seed_staging_review_account",
         "--confirm=SEED-PILAH-STAGING-REVIEW-ACCOUNT",
     ]
-    subprocess.run(
-        [
-            "flyctl",
-            "ssh",
-            "console",
-            "--app",
-            "pilah-be-staging",
-            "--command",
-            f"{shlex.join(command)} && {shlex.join(review_command)}",
-        ],
-        check=True,
-    )
+    for seed_command in (command, review_command):
+        subprocess.run(
+            [
+                "flyctl",
+                "ssh",
+                "console",
+                "--app",
+                "pilah-be-staging",
+                "--command",
+                shlex.join(seed_command),
+            ],
+            check=True,
+        )
 
 
 if __name__ == "__main__":
