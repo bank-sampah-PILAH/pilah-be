@@ -21,13 +21,23 @@ class SeedStagingPipelineTests(SimpleTestCase):
             seed_staging()
             argv = run.call_args.args[0]
             self.assertEqual(argv[:5], ["flyctl", "ssh", "console", "--app", "pilah-be-staging"])
-            command = shlex.split(argv[argv.index("--command") + 1])
+            commands = argv[argv.index("--command") + 1].split(" && ")
+            command = shlex.split(commands[0])
             self.assertEqual(command[:3], ["python", "/app/manage.py", "seed_testing_data"])
             self.assertIn("--environment=staging", command)
             self.assertIn("--confirm=SEED-PILAH-STAGING-DATA", command)
             self.assertIn("--if-missing", command)
             self.assertIn("--pengurus-email=pengurus@example.com", command)
             self.assertIn("--induk-email=induk.demo@example.com", command)
+            self.assertEqual(
+                shlex.split(commands[1]),
+                [
+                    "python",
+                    "/app/manage.py",
+                    "seed_staging_review_account",
+                    "--confirm=SEED-PILAH-STAGING-REVIEW-ACCOUNT",
+                ],
+            )
             self.assertTrue(run.call_args.kwargs["check"])
 
             for invalid in ("", "x@example.com' ; touch /tmp/pwned #", "$(id)@example.com"):

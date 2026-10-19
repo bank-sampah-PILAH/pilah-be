@@ -96,6 +96,24 @@ For local SQLite or Docker Postgres, run migrations followed by
 `python manage.py seed_testing_data`; local execution requires `DJANGO_DEBUG=true`.
 Production runtime markers always forbid fixture seeding.
 
+The staging deploy also creates the password reviewer Superadmin
+`pilah.superadmin@pilah.com` after the E2E fixtures. Before merging a change
+that adds or updates this seed, configure these Fly secrets on
+`pilah-be-staging`:
+
+```text
+PILAH_REVIEW_SUPERADMIN_EMAILS includes pilah.superadmin@pilah.com
+PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS includes pilah.superadmin@pilah.com
+PILAH_REVIEW_ACCOUNT_PASSWORD matches the production reviewer password
+```
+
+Keep the reviewer address out of `PILAH_SUPERADMIN_EMAILS`. Preserve any other
+addresses already present in these allowlists. Set the password through the
+approved secure secret channel; never put it in GitHub variables, source code,
+or this document. Staging CI checks all three secret names before deploying,
+and the seed validates the environment and account identity before changing
+the database. Reruns reuse the same reviewer account and password.
+
 ## Operations
 
 ```bash
