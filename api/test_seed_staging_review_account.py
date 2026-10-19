@@ -20,7 +20,7 @@ REVIEWER_PASSWORD = "ReviewerLogin-Test-74!"
 )
 class SeedStagingReviewAccountTests(TestCase):
     def test_seed_rejects_invalid_runtime_configuration(self) -> None:
-        invalid_settings = (
+        invalid_settings: tuple[tuple[dict[str, object], str, str], ...] = (
             ({"DEBUG": True}, CONFIRMATION, "only be seeded in staging"),
             ({}, "incorrect", "Pass --confirm="),
             (
