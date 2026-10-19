@@ -14,11 +14,17 @@ from shared_kernel.permissions import (
 )
 
 CONFIRMATION = "SEED-PILAH-STAGING-REVIEW-ACCOUNT"
+REVIEW_ACCOUNTS = (
+    ("pilah.pengelola@pilah.com", "Demo Pengelola PILAH", User.Role.PENGELOLA),
+    ("pilah.pengurus@pilah.com", "Demo Pengurus PILAH", User.Role.PENGELOLA),
+    ("pilah.nasabah@pilah.com", "Demo Nasabah PILAH", User.Role.NASABAH),
+    ("pilah.superadmin@pilah.com", "SuperAdmin PILAH", User.Role.SUPERADMIN),
+)
 REVIEW_SUPERADMIN_EMAIL = "pilah.superadmin@pilah.com"
 
 
 class Command(BaseCommand):
-    help = "Create the staging password reviewer Superadmin account."
+    help = "Create the staging password reviewer accounts."
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument("--confirm", required=True)
@@ -28,22 +34,24 @@ class Command(BaseCommand):
         password = settings.PILAH_REVIEW_ACCOUNT_PASSWORD
 
         with transaction.atomic():
-            user = self._existing_user()
-            if user is None:
-                User.objects.create_user(
-                    email=REVIEW_SUPERADMIN_EMAIL,
-                    nama="SuperAdmin PILAH",
-                    role=User.Role.SUPERADMIN,
-                    is_profile_complete=True,
-                    password=password,
-                )
-            else:
+            for email, name, role in REVIEW_ACCOUNTS:
+                user = self._existing_user(email, role)
+                if user is None:
+                    User.objects.create_user(
+                        email=email,
+                        nama=name,
+                        role=role,
+                        is_profile_complete=True,
+                        password=password,
+                    )
+                    continue
+
                 fields = []
-                if user.email != REVIEW_SUPERADMIN_EMAIL:
-                    user.email = REVIEW_SUPERADMIN_EMAIL
+                if user.email != email:
+                    user.email = email
                     fields.append("email")
                 if not user.nama:
-                    user.nama = "SuperAdmin PILAH"
+                    user.nama = name
                     fields.append("nama")
                 if not user.is_profile_complete:
                     user.is_profile_complete = True
@@ -54,7 +62,7 @@ class Command(BaseCommand):
                 if fields:
                     user.save(update_fields=[*fields, "updated_at"])
 
-        self.stdout.write(self.style.SUCCESS("Staging reviewer account is ready."))
+        self.stdout.write(self.style.SUCCESS("Staging reviewer accounts are ready."))
 
     @staticmethod
     def _validate_runtime(confirmation: str) -> None:
@@ -71,9 +79,11 @@ class Command(BaseCommand):
             or REVIEW_SUPERADMIN_EMAIL not in review_superadmin_allowlist()
         ):
             raise CommandError("The reviewer email must be in PILAH_REVIEW_SUPERADMIN_EMAILS only")
-        if REVIEW_SUPERADMIN_EMAIL not in email_verification_exempt_allowlist():
+        if not {email for email, _name, _role in REVIEW_ACCOUNTS}.issubset(
+            email_verification_exempt_allowlist()
+        ):
             raise CommandError(
-                "The reviewer email must be in PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS"
+                "All reviewer emails must be in PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS"
             )
 
         password = settings.PILAH_REVIEW_ACCOUNT_PASSWORD
@@ -87,11 +97,9 @@ class Command(BaseCommand):
             ) from exc
 
     @staticmethod
-    def _existing_user() -> User | None:
+    def _existing_user(email: str, role: str) -> User | None:
         matches = list(
-            User.objects.select_for_update()
-            .filter(email__iexact=REVIEW_SUPERADMIN_EMAIL)
-            .order_by("pk")[:2]
+            User.objects.select_for_update().filter(email__iexact=email).order_by("pk")[:2]
         )
         if len(matches) > 1:
             raise CommandError("Staging reviewer account identity conflicts with existing data")
@@ -100,11 +108,12 @@ class Command(BaseCommand):
 
         user = matches[0]
         if (
-            user.role != User.Role.SUPERADMIN
+            user.role != role
             or not user.is_active
             or user.bank_sampah_id is not None
             or user.is_primary_pengelola
             or user.keanggotaan_nasabah.exists()
+            or user.google_id is not None
             or user.is_staff
             or user.is_superuser
         ):
