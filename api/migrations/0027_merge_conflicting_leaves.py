@@ -4,11 +4,9 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('api', '0025_merge_20261018_0020'),
-        ('api', '0026_auth_rate_limit_cache'),
+        ("api", "0025_merge_20261018_0020"),
+        ("api", "0026_auth_rate_limit_cache"),
     ]
 
-    operations = [
-    ]
+    operations = []
