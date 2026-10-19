@@ -1,26 +1,36 @@
 from datetime import datetime, timedelta
 
 from django.utils import timezone
+from rest_framework.response import Response
 from rest_framework.test import APITestCase
 
 from api.models import BankSampah, JadwalKegiatan, User
 
 
-def _pengelola() -> User:
-    bank = BankSampah.objects.create(nama="Bank Rentang", alamat="Depok", kota="Depok")
-    return User.objects.create_user(
-        email="rentang@example.test",
+def _pengelola(
+    nama: str = "Bank Rentang", email: str = "rentang@example.test"
+) -> tuple[BankSampah, User]:
+    bank = BankSampah.objects.create(nama=nama, alamat="Depok", kota="Depok")
+    pengelola = User.objects.create_user(
+        email=email,
         nama="Pengelola",
         bank_sampah=bank,
         is_profile_complete=True,
         is_primary_pengelola=True,
     )
+    return bank, pengelola
 
 
-def _jadwal(pengelola: User, tanggal: str, jam: int = 9, lokasi: str = "Balai") -> JadwalKegiatan:
+def _jadwal(
+    bank: BankSampah,
+    pengelola: User,
+    tanggal: str,
+    jam: int = 9,
+    lokasi: str = "Balai",
+) -> JadwalKegiatan:
     mulai = timezone.make_aware(datetime.fromisoformat(f"{tanggal}T{jam:02d}:00:00"))
     return JadwalKegiatan.objects.create(
-        bank_sampah=pengelola.bank_sampah,
+        bank_sampah=bank,
         dibuat_oleh=pengelola,
         jenis_kegiatan="penimbangan",
         mulai_pada=mulai,
@@ -31,13 +41,13 @@ def _jadwal(pengelola: User, tanggal: str, jam: int = 9, lokasi: str = "Balai") 
 
 class JadwalDateRangeFilterTests(APITestCase):
     def setUp(self) -> None:
-        self.pengelola = _pengelola()
+        self.bank, self.pengelola = _pengelola()
         self.client.force_authenticate(self.pengelola)
         self.url = "/api/v1/jadwal"
         for tanggal in ["2026-10-18", "2026-10-19", "2026-10-23", "2026-10-31", "2026-11-02"]:
-            _jadwal(self.pengelola, tanggal)
+            _jadwal(self.bank, self.pengelola, tanggal)
 
-    def _tanggal(self, response) -> list[str]:
+    def _tanggal(self, response: Response) -> list[str]:
         return [item["mulai_pada"][:10] for item in response.data["results"]]
 
     def test_range_returns_schedules_between_both_dates_inclusive(self) -> None:
@@ -57,7 +67,7 @@ class JadwalDateRangeFilterTests(APITestCase):
         self.assertEqual(self._tanggal(response), ["2026-10-18", "2026-10-19"])
 
     def test_schedules_on_the_same_day_keep_start_time_order(self) -> None:
-        _jadwal(self.pengelola, "2026-10-23", jam=7, lokasi="Pagi")
+        _jadwal(self.bank, self.pengelola, "2026-10-23", jam=7, lokasi="Pagi")
 
         response = self.client.get(self.url, {"date_from": "2026-10-23", "date_to": "2026-10-23"})
 
@@ -89,15 +99,8 @@ class JadwalDateRangeFilterTests(APITestCase):
         self.assertIn("date_to", response.data["errors"])
 
     def test_another_banks_schedules_never_appear(self) -> None:
-        lain = BankSampah.objects.create(nama="Bank Lain", alamat="Bogor", kota="Bogor")
-        orang_lain = User.objects.create_user(
-            email="lain@example.test",
-            nama="Lain",
-            bank_sampah=lain,
-            is_profile_complete=True,
-            is_primary_pengelola=True,
-        )
-        _jadwal(orang_lain, "2026-10-23", lokasi="Bank Lain")
+        bank_lain, orang_lain = _pengelola("Bank Lain", "lain@example.test")
+        _jadwal(bank_lain, orang_lain, "2026-10-23", lokasi="Bank Lain")
 
         response = self.client.get(self.url, {"date_from": "2026-10-23", "date_to": "2026-10-23"})
 
