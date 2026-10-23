@@ -1,5 +1,7 @@
 """Identity contracts: Google OAuth start/callback and real-token verification."""
 
+import json
+from typing import Any
 from unittest.mock import Mock, patch
 
 import requests
@@ -171,7 +173,8 @@ class OAuthPopupEscapingTests(RegressionTestCase):
     def _popup(self, **params: str) -> str:
         self.client.credentials()
         response = self.client.get("/api/v1/auth/google/callback", params)
-        return response.content.decode()
+        body: str = response.content.decode()
+        return body
 
     @staticmethod
     def _blok_pre(body: str) -> str:
@@ -221,3 +224,32 @@ class OAuthPopupEscapingTests(RegressionTestCase):
         self.assertIn("window.location.href", body)
         self.assertEqual(body.count("<script"), 1)
         self.assertEqual(body.count("</script"), 1)
+
+    @staticmethod
+    def _pesan_terparse(body: str) -> Any:
+        """Ambil literal `const message = …;` lalu parse sebagai JSON.
+
+        `\u003c` adalah escape JSON yang sah, jadi parser Python membacanya
+        sama seperti `JSON.parse` di browser. Test ini karena itu memeriksa
+        kontrak yang betul-betul dilihat klien, bukan tiruannya.
+        """
+        awal = body.index("const message = ") + len("const message = ")
+        return json.loads(body[awal : body.index(";\n", awal)])
+
+    def test_payload_wajar_tetap_terkirim_utuh(self) -> None:
+        """Meloloskan nilai tidak boleh mengubah kontrak `postMessage`."""
+        pesan = self._pesan_terparse(self._popup(error="access_denied"))
+        self.assertEqual(pesan["type"], "pilah-google-oauth")
+        self.assertFalse(pesan["ok"])
+        self.assertEqual(pesan["payload"], {"error": "access_denied"})
+
+    def test_payload_berbahaya_tetap_utuh_setelah_diparse(self) -> None:
+        """Meloloskan bukan menyaring: datanya tetap sama persis, yang hilang
+        hanya kemampuannya dieksekusi.
+
+        Kalau perbaikannya memotong atau membuang karakter, pengurus akan
+        membaca pesan galat Google yang sudah berubah — jadi kesamaan string
+        ini sengaja dikunci, bukan sekadar ketiadaan tag.
+        """
+        pesan = self._pesan_terparse(self._popup(error=self.PEMBOBOL))
+        self.assertEqual(pesan["payload"], {"error": self.PEMBOBOL})
