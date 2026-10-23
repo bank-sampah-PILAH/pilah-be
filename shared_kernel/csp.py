@@ -5,12 +5,31 @@ API ini hampir seluruhnya JSON, dan JSON tidak memuat subsumber apa pun, jadi
 masih dilayani adalah soal lain dan diurus terpisah.
 """
 
+import secrets
 from collections.abc import Callable
 
 from django.http import HttpRequest, HttpResponse
 
 KEBIJAKAN_API = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 """Kebijakan untuk respons yang bukan dokumen HTML."""
+
+
+def nonce_baru() -> str:
+    """Nonce acak untuk satu respons.
+
+    Harus tidak bisa diramalkan: nonce yang berulang atau bisa dihitung
+    memberi penyerang cara memberi skripnya sendiri nonce yang sah, yang
+    sama saja dengan ``'unsafe-inline'``.
+    """
+    return secrets.token_urlsafe(16)
+
+
+def kebijakan_halaman_bernonce(nonce: str) -> str:
+    """Kebijakan halaman yang skrip inline-nya diizinkan lewat nonce saja."""
+    return (
+        f"default-src 'none'; script-src 'nonce-{nonce}'; "
+        "frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+    )
 
 
 def _dokumen_html(response: HttpResponse) -> bool:
@@ -30,6 +49,9 @@ class CspMiddleware:
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         response = self.get_response(request)
-        if not _dokumen_html(response):
+        nonce = getattr(response, "csp_nonce", None)
+        if nonce:
+            response.setdefault("Content-Security-Policy", kebijakan_halaman_bernonce(nonce))
+        elif not _dokumen_html(response):
             response.setdefault("Content-Security-Policy", KEBIJAKAN_API)
         return response

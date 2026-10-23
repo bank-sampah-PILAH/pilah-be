@@ -189,7 +189,8 @@ class OAuthPopupEscapingTests(RegressionTestCase):
 
     @staticmethod
     def _blok_skrip(body: str) -> str:
-        awal = body.index("<script>") + len("<script>")
+        """Tag pembukanya membawa atribut nonce, jadi dicari sampai `>`."""
+        awal = body.index(">", body.index("<script")) + 1
         return body[awal : body.index("</script>", awal)]
 
     def test_blok_skrip_tidak_bisa_ditutup_oleh_nilai_error(self) -> None:
