@@ -35,6 +35,20 @@ from shared_kernel.permissions import (
 )
 from shared_kernel.scoping import current_user
 
+# Tiga karakter yang membuat literal JSON berhenti menjadi data begitu
+# ditempelkan ke dalam dokumen HTML. Parser HTML mengakhiri sebuah blok
+# <script> pada "</script>" pertama tanpa peduli bahwa urutan itu ada di
+# dalam string JavaScript, jadi meloloskannya harus terjadi di sisi JSON,
+# bukan di sisi HTML. Peta ini sama dengan yang dipakai
+# django.utils.html.json_script.
+_LOLOS_JSON_DALAM_HTML = {ord("<"): "\\u003C", ord(">"): "\\u003E", ord("&"): "\\u0026"}
+
+
+def _json_untuk_html(nilai: Any) -> str:
+    """Serialisasi ``nilai`` menjadi JSON yang aman ditempel di dalam HTML."""
+    return json.dumps(nilai).translate(_LOLOS_JSON_DALAM_HTML)
+
+
 # Local page a finished OAuth popup redirects to when no `next` URL survives.
 _OAUTH_FALLBACK_PATH = "/api-test/"
 
@@ -153,7 +167,7 @@ class GoogleOAuthCallbackView(APIView):
     def _popup_response(
         ok: bool, payload: Any, next_url: str = _OAUTH_FALLBACK_PATH
     ) -> HttpResponse:
-        message = json.dumps({"type": "pilah-google-oauth", "ok": ok, "payload": payload})
+        message = _json_untuk_html({"type": "pilah-google-oauth", "ok": ok, "payload": payload})
         fallback = escape(json.dumps(payload, indent=2))
         html = f"""<!doctype html>
 <html>
