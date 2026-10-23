@@ -6,7 +6,9 @@ tidak ada header CSP sama sekali, padahal `SecurityMiddleware` sudah memasang
 X-Frame-Options, X-Content-Type-Options, Referrer-Policy dan COOP.
 """
 
-from django.test import override_settings
+import os
+
+from django.test import SimpleTestCase
 
 from tests.regression.helpers import RegressionTestCase
 
@@ -57,17 +59,62 @@ class CspPopupOAuthTests(RegressionTestCase):
         self.assertNotEqual(kebijakan[0], kebijakan[1])
 
 
-class RendererProduksiTests(RegressionTestCase):
+def _debug_saat_setelan_dimuat() -> bool:
+    """Nilai yang benar-benar memilih daftar renderer.
+
+    Bukan `settings.DEBUG`: Django memaksanya `False` selama test berjalan,
+    jadi di dalam test nilai itu tidak pernah mencerminkan konfigurasi yang
+    menyusun `DEFAULT_RENDERER_CLASSES` saat impor.
+    """
+    return os.getenv("DJANGO_DEBUG", "false").lower() == "true"
+
+
+class RendererProduksiTests(SimpleTestCase):
     """API JSON tidak perlu melayani HTML di produksi.
 
     `DEFAULT_RENDERER_CLASSES` tidak pernah diset, jadi bawaan DRF berlaku dan
     `BrowsableAPIRenderer` ikut aktif. Artinya setiap endpoint API membalas
     dokumen HTML begitu klien mengirim `Accept: text/html` — permukaan HTML
-    yang tidak dibutuhkan siapa pun pada API yang hanya dipakai aplikasi.
+    yang tidak dipakai klien Flutter, dan yang memaksa kebijakan CSP jauh
+    lebih longgar untuk seluruh API.
+
+    Test ini salah tiga kali sebelum benar, selalu karena `DEBUG` di dalam
+    test bukan `DEBUG` yang memilih renderer:
+
+    1. `override_settings(DEBUG=False)` — daftar renderer diturunkan saat
+       setelan dimuat dan tidak bisa diubah setelah impor, jadi test LULUS
+       hanya karena lingkungannya memang sudah produksi.
+    2. Membandingkan dengan `settings.DEBUG` dari dalam `RegressionTestCase` —
+       `tests/regression/helpers.py` membungkus kelas dasar itu dengan
+       `override_settings(DEBUG=True)` untuk alur token Google palsu.
+    3. Membandingkan dengan `settings.DEBUG` dari `SimpleTestCase` — runner
+       Django memaksa `DEBUG=False` selama test, apa pun konfigurasinya.
+
+    Yang dipakai sekarang variabel lingkungan yang benar-benar menyusun
+    daftarnya, dan invariannya dikunci pada KEDUA konfigurasi.
     """
 
-    @override_settings(DEBUG=False)
-    def test_endpoint_api_tidak_melayani_html_saat_debug_mati(self) -> None:
-        self.client.credentials()
+    @staticmethod
+    def _nama_renderer() -> list[str]:
+        from rest_framework.settings import api_settings
+
+        return [r.__name__ for r in api_settings.DEFAULT_RENDERER_CLASSES]
+
+    def test_json_selalu_menjadi_renderer_utama(self) -> None:
+        self.assertEqual(self._nama_renderer()[0], "JSONRenderer")
+
+    def test_browsable_renderer_mengikuti_debug(self) -> None:
+        """Satu-satunya alasan sah halaman itu ada adalah kenyamanan lokal."""
+        self.assertEqual(
+            "BrowsableAPIRenderer" in self._nama_renderer(),
+            _debug_saat_setelan_dimuat(),
+            "browsable API harus mengikuti DEBUG: aktif saat pengembangan, tidak ada di produksi",
+        )
+
+    def test_endpoint_api_tidak_melayani_html_di_konfigurasi_produksi(self) -> None:
+        """Konsekuensi yang bisa diamati, diuji ketika konfigurasinya memang
+        konfigurasi produksi — bukan lewat DEBUG palsu."""
+        if _debug_saat_setelan_dimuat():
+            self.skipTest("butuh konfigurasi produksi (DJANGO_DEBUG tidak aktif)")
         response = self.client.get("/api/v1/auth/google/start", HTTP_ACCEPT="text/html")
         self.assertNotIn("text/html", response.get("Content-Type", ""))
