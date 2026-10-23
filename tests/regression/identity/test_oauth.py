@@ -153,3 +153,33 @@ class OAuthRegressionTests(RegressionTestCase):
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(verify.call_args.args[2], "web-client-id")
+
+
+class OAuthPopupEscapingTests(RegressionTestCase):
+    """Halaman popup OAuth menyusun HTML sendiri, jadi setiap nilai yang ikut
+    tercetak harus lolos dari konteksnya.
+
+    ``?error=`` sampai ke halaman tanpa autentikasi apa pun, dan ``json.dumps``
+    tidak meloloskan ``<``, ``>``, maupun ``/``. Nilai itu mendarat di dua
+    tempat dengan aturan lolos yang berbeda: badan ``<pre>`` (konteks HTML) dan
+    blok ``<script>`` (konteks skrip). Masing-masing dikunci terpisah, karena
+    memperbaiki satu tidak memperbaiki yang lain.
+    """
+
+    PEMBOBOL = "</pre><script>alert(document.domain)</script>"
+
+    def _popup(self, **params: str) -> str:
+        self.client.credentials()
+        response = self.client.get("/api/v1/auth/google/callback", params)
+        return response.content.decode()
+
+    @staticmethod
+    def _blok_pre(body: str) -> str:
+        awal = body.index("<pre>") + len("<pre>")
+        return body[awal : body.index("</pre>", awal)]
+
+    def test_blok_pre_tidak_bisa_ditutup_oleh_nilai_error(self) -> None:
+        blok = self._blok_pre(self._popup(error=self.PEMBOBOL))
+        self.assertNotIn("<", blok)
+        self.assertNotIn(">", blok)
+        self.assertIn("&lt;/pre&gt;", blok)
