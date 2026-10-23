@@ -206,7 +206,16 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "api.User"
 AUTHENTICATION_BACKENDS = ("apps.authentication.backends.AllowlistedSuperadminBackend",)
 
+# Browsable API hanya untuk pengembangan. Tanpa ini bawaan DRF menyertakan
+# BrowsableAPIRenderer, sehingga setiap endpoint membalas dokumen HTML begitu
+# klien mengirim `Accept: text/html` — permukaan yang tidak dipakai klien
+# Flutter dan yang memaksa kebijakan CSP jauh lebih longgar untuk seluruh API.
+_RENDERER = ["rest_framework.renderers.JSONRenderer"]
+if DEBUG:
+    _RENDERER.append("rest_framework.renderers.BrowsableAPIRenderer")
+
 REST_FRAMEWORK = {
+    "DEFAULT_RENDERER_CLASSES": tuple(_RENDERER),
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
