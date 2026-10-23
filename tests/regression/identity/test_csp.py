@@ -55,3 +55,19 @@ class CspPopupOAuthTests(RegressionTestCase):
         """Nonce yang bisa diramalkan sama saja dengan 'unsafe-inline'."""
         kebijakan = [self._popup().headers["Content-Security-Policy"] for _ in range(2)]
         self.assertNotEqual(kebijakan[0], kebijakan[1])
+
+
+class RendererProduksiTests(RegressionTestCase):
+    """API JSON tidak perlu melayani HTML di produksi.
+
+    `DEFAULT_RENDERER_CLASSES` tidak pernah diset, jadi bawaan DRF berlaku dan
+    `BrowsableAPIRenderer` ikut aktif. Artinya setiap endpoint API membalas
+    dokumen HTML begitu klien mengirim `Accept: text/html` — permukaan HTML
+    yang tidak dibutuhkan siapa pun pada API yang hanya dipakai aplikasi.
+    """
+
+    @override_settings(DEBUG=False)
+    def test_endpoint_api_tidak_melayani_html_saat_debug_mati(self) -> None:
+        self.client.credentials()
+        response = self.client.get("/api/v1/auth/google/start", HTTP_ACCEPT="text/html")
+        self.assertNotIn("text/html", response.get("Content-Type", ""))
