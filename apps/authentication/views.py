@@ -6,6 +6,7 @@ from django.conf import settings
 from django.core.cache import caches
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.http import HttpResponse, HttpResponseRedirect
+from django.utils.html import escape
 from django.utils.http import urlencode
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
@@ -153,7 +154,7 @@ class GoogleOAuthCallbackView(APIView):
         ok: bool, payload: Any, next_url: str = _OAUTH_FALLBACK_PATH
     ) -> HttpResponse:
         message = json.dumps({"type": "pilah-google-oauth", "ok": ok, "payload": payload})
-        fallback = json.dumps(payload, indent=2)
+        fallback = escape(json.dumps(payload, indent=2))
         html = f"""<!doctype html>
 <html>
 <head><meta charset="utf-8"><title>PILAH Google OAuth</title></head>
