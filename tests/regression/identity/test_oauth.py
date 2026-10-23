@@ -183,3 +183,13 @@ class OAuthPopupEscapingTests(RegressionTestCase):
         self.assertNotIn("<", blok)
         self.assertNotIn(">", blok)
         self.assertIn("&lt;/pre&gt;", blok)
+
+    @staticmethod
+    def _blok_skrip(body: str) -> str:
+        awal = body.index("<script>") + len("<script>")
+        return body[awal : body.index("</script>", awal)]
+
+    def test_blok_skrip_tidak_bisa_ditutup_oleh_nilai_error(self) -> None:
+        blok = self._blok_skrip(self._popup(error=self.PEMBOBOL))
+        self.assertNotIn("</script", blok)
+        self.assertNotIn("<script", blok)
