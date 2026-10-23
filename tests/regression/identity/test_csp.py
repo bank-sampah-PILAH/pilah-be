@@ -7,7 +7,9 @@ X-Frame-Options, X-Content-Type-Options, Referrer-Policy dan COOP.
 """
 
 import os
+from typing import cast
 
+from django.http import HttpResponse
 from django.test import SimpleTestCase
 
 from tests.regression.helpers import RegressionTestCase
@@ -33,9 +35,12 @@ class CspPopupOAuthTests(RegressionTestCase):
     memblokir skripnya sendiri, jadi yang dipakai nonce per respons.
     """
 
-    def _popup(self) -> "object":
+    def _popup(self) -> HttpResponse:
         self.client.credentials()
-        return self.client.get("/api/v1/auth/google/callback", {"error": "access_denied"})
+        return cast(
+            HttpResponse,
+            self.client.get("/api/v1/auth/google/callback", {"error": "access_denied"}),
+        )
 
     def test_kebijakan_mengizinkan_skrip_hanya_lewat_nonce(self) -> None:
         response = self._popup()
@@ -98,7 +103,8 @@ class RendererProduksiTests(SimpleTestCase):
     def _nama_renderer() -> list[str]:
         from rest_framework.settings import api_settings
 
-        return [r.__name__ for r in api_settings.DEFAULT_RENDERER_CLASSES]
+        kelas = list(api_settings.DEFAULT_RENDERER_CLASSES)
+        return [getattr(r, "__name__", str(r)) for r in kelas]
 
     def test_json_selalu_menjadi_renderer_utama(self) -> None:
         self.assertEqual(self._nama_renderer()[0], "JSONRenderer")

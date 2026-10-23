@@ -8,6 +8,7 @@ masih dilayani adalah soal lain dan diurus terpisah.
 import secrets
 from collections.abc import Callable
 
+from django.conf import settings
 from django.http import HttpRequest, HttpResponse
 
 KEBIJAKAN_API = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
@@ -22,6 +23,24 @@ def nonce_baru() -> str:
     sama saja dengan ``'unsafe-inline'``.
     """
     return secrets.token_urlsafe(16)
+
+
+def kebijakan_halaman(izinkan_cdn: bool) -> str:
+    """Kebijakan halaman HTML yang dilayani Django sendiri.
+
+    Admin Django 6 tidak memuat skrip maupun gaya inline, jadi ``'self'``
+    saja sudah cukup dan ``'unsafe-inline'`` tidak perlu muncul sama sekali.
+
+    ``izinkan_cdn`` hanya aktif saat pengembangan: Swagger UI drf-spectacular
+    memuat asetnya dari CDN, dan halaman itu ``debug_only`` sehingga tidak
+    pernah ada di produksi. Produksi tetap ``'self'`` saja.
+    """
+    sumber = "'self' https:" if izinkan_cdn else "'self'"
+    return (
+        f"default-src 'self'; script-src {sumber}; style-src {sumber}; "
+        f"img-src 'self' data:; font-src {sumber} data:; "
+        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    )
 
 
 def kebijakan_halaman_bernonce(nonce: str) -> str:
@@ -52,6 +71,8 @@ class CspMiddleware:
         nonce = getattr(response, "csp_nonce", None)
         if nonce:
             response.setdefault("Content-Security-Policy", kebijakan_halaman_bernonce(nonce))
-        elif not _dokumen_html(response):
+        elif _dokumen_html(response):
+            response.setdefault("Content-Security-Policy", kebijakan_halaman(settings.DEBUG))
+        else:
             response.setdefault("Content-Security-Policy", KEBIJAKAN_API)
         return response
