@@ -118,3 +118,39 @@ class RendererProduksiTests(SimpleTestCase):
             self.skipTest("butuh konfigurasi produksi (DJANGO_DEBUG tidak aktif)")
         response = self.client.get("/api/v1/auth/google/start", HTTP_ACCEPT="text/html")
         self.assertNotIn("text/html", response.get("Content-Type", ""))
+
+
+class CspHalamanDjangoTests(SimpleTestCase):
+    """Halaman HTML yang tersisa di produksi setelah browsable API dimatikan:
+    admin, dan popup OAuth yang punya kebijakannya sendiri.
+
+    Admin Django 6 ternyata bersih dari skrip dan gaya inline — ketiga
+    `<script id="django-admin-…-constants">` pada templatenya semua memakai
+    `src=` dengan atribut `data-*`, bukan JavaScript inline. Jadi halaman ini
+    tidak butuh `'unsafe-inline'` sama sekali, dan kebijakannya diperiksa
+    justru untuk memastikan tidak ada yang menambahkannya nanti.
+    """
+
+    def test_admin_membawa_kebijakan_tanpa_unsafe_inline(self) -> None:
+        response = self.client.get("/admin/login/")
+        self.assertEqual(response.status_code, 200)
+        kebijakan = response.headers.get("Content-Security-Policy", "")
+        self.assertIn("default-src 'self'", kebijakan)
+        self.assertIn("frame-ancestors 'none'", kebijakan)
+        self.assertIn("base-uri 'none'", kebijakan)
+        self.assertIn("form-action 'self'", kebijakan)
+        self.assertNotIn("'unsafe-inline'", kebijakan)
+
+    def test_admin_tidak_memuat_skrip_atau_gaya_inline(self) -> None:
+        """Alasan kebijakan di atas boleh seketat itu, dikunci sebagai fakta.
+
+        Kalau versi Django berikutnya memasukkan kembali skrip inline ke
+        admin, test ini gagal lebih dulu dan menjelaskan sebabnya — alih-alih
+        halaman admin yang rusak tanpa petunjuk di produksi.
+        """
+        import re
+
+        body = self.client.get("/admin/login/").content.decode()
+        self.assertEqual(re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", body), [])
+        self.assertEqual(re.findall(r"<style[^>]*>", body), [])
+        self.assertEqual(re.findall(r'\sstyle="', body), [])
