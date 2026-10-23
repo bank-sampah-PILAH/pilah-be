@@ -83,6 +83,9 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # Terakhir: memilih kebijakan CSP dari tipe konten respons, jadi harus
+    # berjalan setelah view dan renderer menentukannya.
+    "shared_kernel.csp.CspMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
