@@ -117,13 +117,25 @@ class RendererProduksiTests(SimpleTestCase):
             "browsable API harus mengikuti DEBUG: aktif saat pengembangan, tidak ada di produksi",
         )
 
-    def test_endpoint_api_tidak_melayani_html_di_konfigurasi_produksi(self) -> None:
-        """Konsekuensi yang bisa diamati, diuji ketika konfigurasinya memang
-        konfigurasi produksi — bukan lewat DEBUG palsu."""
-        if _debug_saat_setelan_dimuat():
-            self.skipTest("butuh konfigurasi produksi (DJANGO_DEBUG tidak aktif)")
-        response = self.client.get("/api/v1/auth/google/start", HTTP_ACCEPT="text/html")
-        self.assertNotIn("text/html", response.get("Content-Type", ""))
+    # Tidak ada test HTTP "Accept: text/html tidak menghasilkan HTML" di sini,
+    # dan itu keputusan sadar. Tiga cara mencobanya semuanya cacat:
+    #
+    # 1. `skipTest` ketika `DJANGO_DEBUG` aktif — bentuk pertama test ini.
+    #    CI MENJALANKAN SUITE DENGAN `DJANGO_DEBUG: true`, jadi di CI test itu
+    #    selalu dilewati: `OK (skipped=1)`, dan `diff-cover` melaporkan dua
+    #    baris badannya sebagai tidak tercakup. Pemeriksaan yang tidak pernah
+    #    berjalan di tempat yang menjaga `staging` bukan pemeriksaan.
+    # 2. `override_settings(REST_FRAMEWORK=...)` — `api_settings` memang ikut
+    #    dimuat ulang, tetapi `APIView.renderer_classes` adalah atribut kelas
+    #    yang sudah mengikat tuple lamanya saat `rest_framework.views` diimpor.
+    #    Jadi view tetap memakai daftar lama dan browsable API tetap merender.
+    # 3. Membuat view sendiri dengan `renderer_classes` produksi — itu menguji
+    #    negosiasi konten DRF, bukan penyambungan di proyek ini.
+    #
+    # Yang tersisa dan benar-benar berlaku di CI adalah invarian konfigurasi di
+    # atas: dengan `DEBUG` mati, daftarnya hanya JSONRenderer. Bukti
+    # perilakunya ada di curl terhadap server sungguhan, dicatat di
+    # dokumentasi minggu ini, bukan di test yang tidak bisa berjalan di CI.
 
 
 @override_settings(
