@@ -193,3 +193,31 @@ class OAuthPopupEscapingTests(RegressionTestCase):
         blok = self._blok_skrip(self._popup(error=self.PEMBOBOL))
         self.assertNotIn("</script", blok)
         self.assertNotIn("<script", blok)
+
+    def test_next_url_bertanda_tangan_tidak_menambah_elemen_skrip(self) -> None:
+        """`next` hanya diperiksa berawalan "/" sebelum ditandatangani, jadi
+        tanda tangan justru meloloskan markup ke dalam blok skrip callback.
+
+        Nilai ini hanya terbaca pada jalur tukar-token, bukan pada cabang
+        `?error=`, jadi pertukaran tokennya distub di batas HTTP.
+
+        Pemeriksaannya menghitung elemen skrip pada seluruh dokumen, bukan
+        memotong blok pertama. Versi pertama test ini memotong, dan lulus
+        terhadap kode yang masih bocor: pemotong `</script>` justru berhenti
+        pada tag tutup milik penyerang, sehingga `<script>` suntikan berada di
+        luar potongan dan tidak pernah ikut diperiksa.
+        """
+        jahat = "/</script><script>alert(document.domain)</script>"
+        self.assertTrue(jahat.startswith("/"), "harus lolos satu-satunya validasi start")
+        state = TimestampSigner().sign(jahat)
+        token_response = Mock(status_code=400)
+        token_response.json = Mock(return_value={"error": "invalid_grant"})
+        self.client.credentials()
+        with patch("apps.authentication.views.requests.post", return_value=token_response):
+            response = self.client.get(
+                "/api/v1/auth/google/callback", {"code": "abc", "state": state}
+            )
+        body = response.content.decode()
+        self.assertIn("window.location.href", body)
+        self.assertEqual(body.count("<script"), 1)
+        self.assertEqual(body.count("</script"), 1)
