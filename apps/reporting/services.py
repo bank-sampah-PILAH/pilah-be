@@ -7,7 +7,7 @@ from django.db.models import Count, Sum
 from django.db.models.functions import Coalesce, TruncDay, TruncMonth, TruncWeek
 from django.utils import timezone
 
-from api.models import DetailTransaksi, Nasabah, Pencairan, Transaksi, User
+from api.models import DetailTransaksi, Nasabah, Pencairan, Saldo, Transaksi, User
 
 
 class DashboardService:
@@ -27,6 +27,11 @@ class DashboardService:
             total_kg=Coalesce(Sum("berat"), Decimal(0)),
         )
         nilai = transaksi.aggregate(total=Coalesce(Sum("total_nilai"), Decimal(0)))["total"]
+        # Savings are a current liability, including inactive members, not a
+        # monthly flow. Never derive operational cash from deposits or savings.
+        savings = Saldo.objects.filter(nasabah__bank_sampah=bank).aggregate(
+            total=Coalesce(Sum("total_saldo"), Decimal(0)),
+        )["total"]
         return {
             "bank_sampah_nama": bank.nama,
             "pengelola_nama": user.nama,
@@ -37,6 +42,9 @@ class DashboardService:
             "transaksi_bulan_ini": transaksi.count(),
             "total_sampah_kg_bulan_ini": totals["total_kg"],
             "total_nilai_bulan_ini": nilai,
+            "total_saldo_nasabah": str(int(savings)),
+            "kas_operasional": None,
+            "kas_operasional_status": "belum_tersedia",
         }
 
     @staticmethod
