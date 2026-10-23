@@ -8,6 +8,7 @@ from django.db.models.functions import Coalesce, TruncDay, TruncMonth, TruncWeek
 from django.utils import timezone
 
 from api.models import DetailTransaksi, Nasabah, Pencairan, Saldo, Transaksi, User
+from shared_kernel.kalkulasi import bulatkan_rupiah
 
 
 class DashboardService:
@@ -42,7 +43,7 @@ class DashboardService:
             "transaksi_bulan_ini": transaksi.count(),
             "total_sampah_kg_bulan_ini": totals["total_kg"],
             "total_nilai_bulan_ini": nilai,
-            "total_saldo_nasabah": str(int(savings)),
+            "total_saldo_nasabah": str(bulatkan_rupiah(savings)),
             "kas_operasional": None,
             "kas_operasional_status": "belum_tersedia",
         }
