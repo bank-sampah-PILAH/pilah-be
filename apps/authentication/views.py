@@ -180,7 +180,7 @@ class GoogleOAuthCallbackView(APIView):
     window.opener.postMessage(message, window.location.origin);
     window.close();
   }} else {{
-    window.location.href = {json.dumps(next_url)};
+    window.location.href = {_json_untuk_html(next_url)};
   }}
 </script>
 </body>
