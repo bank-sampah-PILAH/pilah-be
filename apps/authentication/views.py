@@ -1,4 +1,3 @@
-import json
 from typing import Any
 
 import requests
@@ -6,7 +5,6 @@ from django.conf import settings
 from django.core.cache import caches
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.http import HttpResponse, HttpResponseRedirect
-from django.utils.html import escape
 from django.utils.http import urlencode
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
@@ -30,24 +28,11 @@ from apps.authentication.services import (
     AuthServiceError,
     OnboardingService,
 )
+from shared_kernel.keluaran_dokumen import LITERAL_SKRIP, TEKS_HTML
 from shared_kernel.permissions import (
     IsRegistrationRole,
 )
 from shared_kernel.scoping import current_user
-
-# Tiga karakter yang membuat literal JSON berhenti menjadi data begitu
-# ditempelkan ke dalam dokumen HTML. Parser HTML mengakhiri sebuah blok
-# <script> pada "</script>" pertama tanpa peduli bahwa urutan itu ada di
-# dalam string JavaScript, jadi meloloskannya harus terjadi di sisi JSON,
-# bukan di sisi HTML. Peta ini sama dengan yang dipakai
-# django.utils.html.json_script.
-_LOLOS_JSON_DALAM_HTML = {ord("<"): "\\u003C", ord(">"): "\\u003E", ord("&"): "\\u0026"}
-
-
-def _json_untuk_html(nilai: Any) -> str:
-    """Serialisasi ``nilai`` menjadi JSON yang aman ditempel di dalam HTML."""
-    return json.dumps(nilai).translate(_LOLOS_JSON_DALAM_HTML)
-
 
 # Local page a finished OAuth popup redirects to when no `next` URL survives.
 _OAUTH_FALLBACK_PATH = "/api-test/"
@@ -167,8 +152,9 @@ class GoogleOAuthCallbackView(APIView):
     def _popup_response(
         ok: bool, payload: Any, next_url: str = _OAUTH_FALLBACK_PATH
     ) -> HttpResponse:
-        message = _json_untuk_html({"type": "pilah-google-oauth", "ok": ok, "payload": payload})
-        fallback = escape(json.dumps(payload, indent=2))
+        isi = {"type": "pilah-google-oauth", "ok": ok, "payload": payload}
+        message = LITERAL_SKRIP.loloskan(isi)
+        fallback = TEKS_HTML.loloskan(payload)
         html = f"""<!doctype html>
 <html>
 <head><meta charset="utf-8"><title>PILAH Google OAuth</title></head>
@@ -180,7 +166,7 @@ class GoogleOAuthCallbackView(APIView):
     window.opener.postMessage(message, window.location.origin);
     window.close();
   }} else {{
-    window.location.href = {_json_untuk_html(next_url)};
+    window.location.href = {LITERAL_SKRIP.loloskan(next_url)};
   }}
 </script>
 </body>
