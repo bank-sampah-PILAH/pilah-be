@@ -10,7 +10,7 @@ import os
 from typing import cast
 
 from django.http import HttpResponse
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 
 from tests.regression.helpers import RegressionTestCase
 
@@ -126,6 +126,19 @@ class RendererProduksiTests(SimpleTestCase):
         self.assertNotIn("text/html", response.get("Content-Type", ""))
 
 
+@override_settings(
+    STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        # Penyimpanan bawaan proyek adalah CompressedManifestStaticFilesStorage,
+        # yang menuntut manifes hasil `collectstatic`. CI tidak menjalankan
+        # `collectstatic` sebelum test, jadi merender halaman admin di sana
+        # gagal dengan "Missing staticfiles manifest entry". Yang diuji di
+        # kelas ini kebijakan CSP-nya, bukan penamaan berkas statis, jadi
+        # penyimpanan non-manifes dipakai supaya `{% static %}` tidak lagi
+        # butuh manifes.
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    }
+)
 class CspHalamanDjangoTests(SimpleTestCase):
     """Halaman HTML yang tersisa di produksi setelah browsable API dimatikan:
     admin, dan popup OAuth yang punya kebijakannya sendiri.
