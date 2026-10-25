@@ -14,6 +14,7 @@ from api.models import (
     Pencairan,
     PencairanRevisi,
     Transaksi,
+    TransaksiRevisi,
 )
 from apps.ledger.services import BalanceService, PencairanService
 from shared_kernel.kalkulasi import bulatkan_rupiah, format_ribuan
@@ -79,9 +80,9 @@ class TransactionItemInputSerializer(serializers.Serializer[Any]):
     )
 
 
-class TransactionCreateSerializer(serializers.Serializer[Any]):
-    nasabah_id = serializers.UUIDField(required=True)
-    items = TransactionItemInputSerializer(many=True, required=True)
+class _SetoranWriteSerializer(serializers.Serializer[Any]):
+    """Rules shared by creating a setoran and correcting one."""
+
     catatan = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     def validate_items(self, value: Any) -> Any:
@@ -138,12 +139,48 @@ class DetailTransaksiSerializer(serializers.ModelSerializer[Model]):
         ]
 
 
+class TransactionCreateSerializer(_SetoranWriteSerializer):
+    nasabah_id = serializers.UUIDField(required=True)
+    items = TransactionItemInputSerializer(many=True, required=True)
+
+
+class TransactionEditSerializer(_SetoranWriteSerializer):
+    items = TransactionItemInputSerializer(many=True, required=False)
+    alasan = serializers.CharField(
+        required=True,
+        max_length=255,
+        error_messages={
+            "required": "Alasan perubahan wajib diisi",
+            "blank": "Alasan perubahan wajib diisi",
+        },
+    )
+
+
+class TransaksiRevisiSerializer(serializers.ModelSerializer[Model]):
+    diubah_oleh = serializers.UUIDField(source="diubah_oleh.id")
+    diubah_oleh_nama = serializers.CharField(source=_DIUBAH_OLEH_NAMA)
+
+    class Meta:
+        model = TransaksiRevisi
+        fields = [
+            "versi",
+            "total_nilai",
+            "catatan",
+            "items",
+            "alasan",
+            "diubah_oleh",
+            "diubah_oleh_nama",
+            "diubah_pada",
+        ]
+
+
 class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
     nasabah_id = serializers.UUIDField(source=_NASABAH_ID)
     nasabah_nama = serializers.CharField(source=_NASABAH_NAMA)
     bank_sampah_id = serializers.UUIDField(source=_BANK_SAMPAH_ID)
     dicatat_oleh = serializers.UUIDField(source=_DICATAT_OLEH_ID)
     items = DetailTransaksiSerializer(many=True)
+    revisi = TransaksiRevisiSerializer(many=True, read_only=True)
     saldo_setelah_transaksi = serializers.SerializerMethodField()
 
     class Meta:
@@ -159,6 +196,7 @@ class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
             "catatan",
             "status_wa",
             "items",
+            "revisi",
             "saldo_setelah_transaksi",
         ]
 

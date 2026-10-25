@@ -32,12 +32,14 @@ from apps.ledger.serializers import (
     PencairanRevisiSerializer,
     TransactionCreateSerializer,
     TransactionDetailSerializer,
+    TransactionEditSerializer,
     TransactionListSerializer,
 )
 from apps.ledger.services import (
     DraftPencairanService,
     DraftTidakBisaDiubah,
     PencairanService,
+    SaldoTidakCukup,
     TransactionFilterService,
     TransactionService,
 )
@@ -130,19 +132,24 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
     def get_serializer_class(
         self,
     ) -> type[
-        TransactionCreateSerializer | TransactionDetailSerializer | TransactionListSerializer
+        TransactionCreateSerializer
+        | TransactionDetailSerializer
+        | TransactionEditSerializer
+        | TransactionListSerializer
     ]:
         if self.action == "create":
             return TransactionCreateSerializer
         if self.action == "retrieve":
             return TransactionDetailSerializer
+        if self.action == "partial_update":
+            return TransactionEditSerializer
         return TransactionListSerializer
 
     def get_queryset(self) -> QuerySet[Transaksi]:
         qs = (
             Transaksi.objects.filter(bank_sampah=current_bank(self.request))
             .select_related("nasabah", "bank_sampah", "dicatat_oleh")
-            .prefetch_related("items")
+            .prefetch_related("items", "revisi__diubah_oleh")
         )
         search = self.request.query_params.get("search", "")
         nasabah_id = self.request.query_params.get("nasabah_id")
@@ -227,6 +234,18 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
     def retrieve(self, request: Request, pk: str | None = None) -> Response:
         transaksi = self.get_object()
         return Response(TransactionDetailSerializer(transaksi).data)
+
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
+        transaksi = self.get_object()
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            TransactionService.edit_setoran(
+                current_user(request), transaksi, serializer.validated_data
+            )
+        except SaldoTidakCukup as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(TransactionDetailSerializer(self.get_queryset().get(pk=transaksi.pk)).data)
 
     @action(detail=True, methods=["post"], url_path="notify-wa")
     def notify_wa(self, request: Request, pk: str | None = None) -> Response:
