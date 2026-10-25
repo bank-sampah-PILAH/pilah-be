@@ -26,6 +26,7 @@ _NASABAH_NAMA = "nasabah.nama"
 _DIBUAT_OLEH_NAMA = "dibuat_oleh.nama"
 _DIUBAH_OLEH_NAMA = "diubah_oleh.nama"
 _BANK_SAMPAH_ID = "bank_sampah.id"
+_ALASAN_WAJIB = "Alasan perubahan wajib diisi"
 _DICATAT_OLEH_ID = "dicatat_oleh.id"
 
 
@@ -150,8 +151,8 @@ class TransactionEditSerializer(_SetoranWriteSerializer):
         required=True,
         max_length=255,
         error_messages={
-            "required": "Alasan perubahan wajib diisi",
-            "blank": "Alasan perubahan wajib diisi",
+            "required": _ALASAN_WAJIB,
+            "blank": _ALASAN_WAJIB,
         },
     )
 
@@ -231,8 +232,8 @@ class PencairanEditSerializer(serializers.Serializer[Any]):
         required=True,
         max_length=255,
         error_messages={
-            "required": "Alasan perubahan wajib diisi",
-            "blank": "Alasan perubahan wajib diisi",
+            "required": _ALASAN_WAJIB,
+            "blank": _ALASAN_WAJIB,
         },
     )
 
