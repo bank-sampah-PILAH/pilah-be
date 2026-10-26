@@ -169,9 +169,9 @@ python tests/load/run.py cleanup --accounts /tmp/pil393-private/accounts.json --
 
 Remove the private manifests and test browser/device sessions after cleanup. Do not
 commit credentials, raw artifacts, local databases, or temporary helper uploads.
-For local validation, set DEBUG=true, PILAH_ENVIRONMENT=local and a disposable DB;
-use the loopback API URL and `--python` pointing at its environment. The fixture
-command supports the same seed/reset/audit/cleanup actions locally.
+For local validation, set DJANGO_DEBUG=true, PILAH_ENVIRONMENT=local and a disposable DB;
+run the harness with that environment's Python interpreter and use the loopback API
+URL. Local fixture actions use the same Python interpreter as the harness.
 
 The representative Pengurus journey includes the real active-customer picker request
 (`status=aktif&page_size=100`) and calendar dates. Dashboard bootstrap requests are

@@ -97,7 +97,6 @@ class LoadRunnerTests(SimpleTestCase):
     def test_local_fixture_uses_safe_argument_vector(self) -> None:
         args = argparse.Namespace(
             base_url="http://localhost:8000/api/v1",
-            python="python3",
             run_id="test-run",
         )
         with patch.object(
@@ -107,8 +106,14 @@ class LoadRunnerTests(SimpleTestCase):
         ) as run:
             self.assertEqual(runner.fixture(args, "cleanup"), {"cleaned": True})
         command = run.call_args.args[0]
-        self.assertEqual(command[:4], ["python3", "manage.py", "load_test_data", "cleanup"])
+        self.assertEqual(
+            command[:4], [runner.sys.executable, "manage.py", "load_test_data", "cleanup"]
+        )
         self.assertIs(run.call_args.kwargs["shell"], False)
+        with patch.object(runner.subprocess, "run") as run:
+            with self.assertRaisesRegex(ValueError, "Unsupported fixture action"):
+                runner.fixture(args, "--help")
+        run.assert_not_called()
 
     def test_trial_plans_match_supported_levels_and_modes(self) -> None:
         args = argparse.Namespace(action="matrix", users=None, probe_role=None)
@@ -139,7 +144,6 @@ class LoadRunnerTests(SimpleTestCase):
                 accounts=root / "accounts.json",
                 probe_role=None,
                 probe_writes=0,
-                k6="k6",
             )
 
             def run_k6(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
@@ -154,11 +158,13 @@ class LoadRunnerTests(SimpleTestCase):
                     runner, "fixture", side_effect=[{"reset": True}, {"integrity_errors": 0}]
                 ) as fixture,
                 patch.object(runner, "snapshot"),
-                patch.object(runner.subprocess, "run", side_effect=run_k6),
+                patch.object(runner.subprocess, "run", side_effect=run_k6) as run,
             ):
                 self.assertTrue(runner.run_trial(args, "realistic", 10, "realistic-10-test"))
 
             self.assertEqual(fixture.call_args_list[1].args[2], 2)
+            self.assertEqual(run.call_args.args[0][0], "k6")
+            self.assertIs(run.call_args.kwargs["shell"], False)
             result = json.loads((args.output / "realistic-10-test" / "result.json").read_text())
             self.assertEqual(result["expected_new_writes"], 2)
             self.assertTrue(result["passed"])

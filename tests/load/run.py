@@ -9,6 +9,7 @@ import re
 import shlex
 import signal
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -18,12 +19,13 @@ from typing import Any
 STAGING = "https://pilah-be-staging.fly.dev/api/v1"
 APP = "pilah-be-staging"
 CONFIRMATION = "PIL-393-STAGING-ONLY"
+FIXTURE_ACTIONS = {"reset": "reset", "audit": "audit", "cleanup": "cleanup"}
 
 
 def target_url(value: str) -> str:
     value = value.rstrip("/")
     if value != STAGING and not re.fullmatch(
-        r"http://(?:127\.0\.0\.1|localhost):\d+/api/v1",  # NOSONAR: loopback-only local development.
+        r"http://(?:127\.0\.0\.1|localhost):\d+/api/v1",  # NOSONAR(S5332)
         value,
     ):
         raise ValueError("Only the exact Fly staging API or loopback API is allowed")
@@ -38,11 +40,10 @@ def validate_run_id(value: str) -> str:
 
 def private_write(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    descriptor = (
-        os.open(  # NOSONAR: only operator-selected local output paths reach this private writer.
-            path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600
-        )
-    )
+    # Paths are selected by the local operator; O_NOFOLLOW protects the final target.
+    descriptor = os.open(
+        path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600
+    )  # NOSONAR(S8707)
     os.fchmod(descriptor, 0o600)
     with os.fdopen(descriptor, "w") as output:
         json.dump(data, output, indent=2)
@@ -50,7 +51,8 @@ def private_write(path: Path, data: dict[str, Any]) -> None:
 
 def authenticate(path: Path, base: str, interval: float = 16) -> None:
     base = target_url(base)
-    manifest = json.loads(path.read_text())  # NOSONAR: operator-selected local credential manifest.
+    # The operator supplies a private local credential manifest.
+    manifest = json.loads(path.read_text())  # NOSONAR(S8707)
     for index, account in enumerate(manifest["accounts"]):
         if account.get("access_token"):
             continue
@@ -80,7 +82,11 @@ def authenticate(path: Path, base: str, interval: float = 16) -> None:
 
 
 def fixture(args: argparse.Namespace, action: str, expected: int | None = None) -> dict[str, Any]:
-    validate_run_id(args.run_id)
+    run_id = validate_run_id(args.run_id)
+    try:
+        action = FIXTURE_ACTIONS[action]
+    except KeyError:
+        raise ValueError("Unsupported fixture action") from None
     base_url = target_url(args.base_url)
     if base_url == STAGING:
         with urllib.request.urlopen(
@@ -94,7 +100,7 @@ def fixture(args: argparse.Namespace, action: str, expected: int | None = None) 
         "load_test_data",
         action,
         "--run-id",
-        args.run_id,
+        run_id,
         "--confirm",
         CONFIRMATION,
     ]
@@ -122,8 +128,8 @@ def fixture(args: argparse.Namespace, action: str, expected: int | None = None) 
             shlex.join(["python", "-c", source, *command[2:]]),
         ]
     else:
-        command[0] = args.python
-    result = subprocess.run(  # NOSONAR: argv is shell-free; Fly's -C string uses shlex.join.
+        command[0] = sys.executable
+    result = subprocess.run(
         command, check=False, capture_output=True, text=True, timeout=180, shell=False
     )
     if result.returncode:
@@ -189,7 +195,8 @@ def run_trial(
     contention: str = "separate",
     smoke_role: str = "pengelola",
 ) -> bool:
-    args.output.mkdir(  # NOSONAR: operator-selected local output.
+    # The runner writes artifacts to the operator-selected output directory.
+    args.output.mkdir(  # NOSONAR(S8707)
         parents=True, exist_ok=True, mode=0o700
     )
     folder = args.output / label
@@ -212,8 +219,9 @@ def run_trial(
     monitor = None
     if args.base_url == STAGING:
         monitor_path = Path(__file__).with_name("monitor.py")
-        monitor_source = monitor_path.read_text()  # NOSONAR: tracked source, quoted for Fly.
-        monitor = subprocess.Popen(
+        monitor_source = monitor_path.read_text()
+        # This checked-in source is shell-quoted before Fly receives it.
+        monitor = subprocess.Popen(  # NOSONAR(S6350)
             [
                 "flyctl",
                 "ssh",
@@ -227,9 +235,9 @@ def run_trial(
             stderr=subprocess.DEVNULL,
             shell=False,
         )
-    result = subprocess.run(  # NOSONAR: selected k6 executable is one argv item; shell is disabled.
+    result = subprocess.run(
         [
-            args.k6,
+            "k6",
             "run",
             "--quiet",
             "--out",
@@ -283,8 +291,6 @@ def _parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     parser.add_argument("--accounts", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--k6", default="k6")
-    parser.add_argument("--python", default="python")
     parser.add_argument("--users", type=int, choices=(10, 20, 30))
     parser.add_argument("--probe-role", choices=("pengelola", "nasabah"))
     parser.add_argument("--probe-writes", type=int, default=0)
