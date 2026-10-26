@@ -41,9 +41,9 @@ def validate_run_id(value: str) -> str:
 def private_write(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     # Paths are selected by the local operator; O_NOFOLLOW protects the final target.
-    descriptor = os.open(
+    descriptor = os.open(  # NOSONAR(S8707)
         path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600
-    )  # NOSONAR(S8707)
+    )
     os.fchmod(descriptor, 0o600)
     with os.fdopen(descriptor, "w") as output:
         json.dump(data, output, indent=2)
@@ -129,7 +129,8 @@ def fixture(args: argparse.Namespace, action: str, expected: int | None = None) 
         ]
     else:
         command[0] = sys.executable
-    result = subprocess.run(
+    # CLI values are regex-restricted/allowlisted; execution uses a shell-free argv.
+    result = subprocess.run(  # NOSONAR(S8705)
         command, check=False, capture_output=True, text=True, timeout=180, shell=False
     )
     if result.returncode:
@@ -221,7 +222,7 @@ def run_trial(
         monitor_path = Path(__file__).with_name("monitor.py")
         monitor_source = monitor_path.read_text()
         # This checked-in source is shell-quoted before Fly receives it.
-        monitor = subprocess.Popen(  # NOSONAR(S6350)
+        monitor = subprocess.Popen(
             [
                 "flyctl",
                 "ssh",
@@ -229,7 +230,7 @@ def run_trial(
                 "--app",
                 APP,
                 "-C",
-                shlex.join(["python", "-u", "-c", monitor_source]),
+                shlex.join(["python", "-u", "-c", monitor_source]),  # NOSONAR(S6350)
             ],
             stdout=telemetry_file,
             stderr=subprocess.DEVNULL,
