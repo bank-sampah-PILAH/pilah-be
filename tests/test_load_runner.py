@@ -165,19 +165,14 @@ class LoadRunnerTests(SimpleTestCase):
 
     def test_monitor_samples_guest_and_database_metrics(self) -> None:
         django = ModuleType("django")
-        setattr(django, "setup", MagicMock())
+        django.setup = MagicMock()  # type: ignore[attr-defined]
         conf = ModuleType("django.conf")
-        setattr(
-            conf,
-            "settings",
-            SimpleNamespace(
-                PILAH_ENVIRONMENT="staging",
-                DATABASES={"default": {"HOST": "branch.neon.tech"}},
-            ),
+        conf.settings = SimpleNamespace(  # type: ignore[attr-defined]
+            PILAH_ENVIRONMENT="staging", DATABASES={"default": {"HOST": "branch.neon.tech"}}
         )
         db = ModuleType("django.db")
         connection = MagicMock()
-        setattr(db, "connection", connection)
+        db.connection = connection  # type: ignore[attr-defined]
         cursor = connection.cursor.return_value.__enter__.return_value
         cursor.fetchone.return_value = (4, 1, 0)
         reads = {"stat": 0}
