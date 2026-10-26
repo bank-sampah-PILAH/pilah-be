@@ -70,3 +70,23 @@ class RoleChangeTests(APITestCase):
                 self.assertEqual(response.data["code"], "role_locked")
                 user.refresh_from_db()
                 self.assertEqual(user.role, previous)
+
+    def test_only_a_registering_account_may_pick_and_only_a_registration_role(self) -> None:
+        anonymous = self.client.patch(URL, {"role": User.Role.NASABAH}, format="json")
+        self.assertEqual(anonymous.status_code, 401, anonymous.data)
+
+        admin = self._fresh(User.Role.SUPERADMIN)
+        self.client.force_authenticate(admin)
+        demoted = self.client.patch(URL, {"role": User.Role.NASABAH}, format="json")
+        self.assertEqual(demoted.status_code, 403, demoted.data)
+
+        user = self._fresh(User.Role.NASABAH)
+        self.client.force_authenticate(user)
+        escalated = self.client.patch(URL, {"role": User.Role.SUPERADMIN}, format="json")
+        self.assertEqual(escalated.status_code, 422, escalated.data)
+        self.assertIn("role", escalated.data["errors"])
+
+        admin.refresh_from_db()
+        user.refresh_from_db()
+        self.assertEqual(admin.role, User.Role.SUPERADMIN)
+        self.assertEqual(user.role, User.Role.NASABAH)
