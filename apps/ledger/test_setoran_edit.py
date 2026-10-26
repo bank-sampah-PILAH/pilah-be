@@ -12,6 +12,7 @@ from rest_framework.test import APITestCase
 
 from api.models import BankSampah, Nasabah, Pencairan, Saldo, Transaksi, User
 from apps.ledger.services import PencairanService
+from apps.waste_catalog.models import HargaSampah
 from apps.waste_catalog.api import buat_jenis_sampah
 
 
@@ -250,3 +251,26 @@ class SetoranEditTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse([q for q in queries if "transaksi_revisi" in q["sql"]])
+
+    def test_detail_lists_the_price_each_jenis_had_on_the_setoran_date(self) -> None:
+        HargaSampah.objects.create(
+            jenis_sampah=self.pet,
+            bank_sampah=self.bank,
+            harga_per_kg=Decimal(5000),
+            berlaku_mulai=timezone.now() + timedelta(minutes=1),
+        )
+
+        detail = self.client.get(f"/api/v1/transaksi/{self.transaksi.id}")
+
+        harga = detail.data["harga_pada_tanggal"]
+        self.assertEqual(Decimal(harga[str(self.pet.id)]), Decimal(3000))
+        self.assertEqual(Decimal(harga[str(self.kardus.id)]), Decimal(1000))
+
+    def test_detail_leaves_out_a_jenis_that_had_no_price_yet(self) -> None:
+        Transaksi.objects.filter(pk=self.transaksi.pk).update(
+            tanggal=self.transaksi.tanggal - timedelta(days=365)
+        )
+
+        detail = self.client.get(f"/api/v1/transaksi/{self.transaksi.id}")
+
+        self.assertEqual(detail.data["harga_pada_tanggal"], {})
