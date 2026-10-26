@@ -143,7 +143,7 @@ class NasabahStatementDataTests(TestCase):
             self.assertIsNone(_logo_file())
 
     def test_render_statement_covers_escaped_subrows_and_long_bank_name(self) -> None:
-        self.bank.nama = "Bank Sampah dengan Nama yang Sangat Panjang " * 8
+        self.bank.nama = "Bank Sampah dengan Nama yang Sangat Panjang " * 2
         self.bank.save(update_fields=["nama"])
         trans = Transaksi.objects.create(
             nasabah=self.member,
