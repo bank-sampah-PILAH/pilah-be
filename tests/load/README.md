@@ -1,6 +1,6 @@
-# PIL-393: staging concurrency checks
+# Staging concurrency checks for PIL-443, PIL-444 and PIL-445
 
-Tracks [PIL-443](https://linear.app/pilah-2/issue/PIL-443) (baseline),
+Subissues: [PIL-443](https://linear.app/pilah-2/issue/PIL-443) (baseline),
 [PIL-444](https://linear.app/pilah-2/issue/PIL-444) (realistic load),
 [PIL-445](https://linear.app/pilah-2/issue/PIL-445) (bursts),
 [PIL-446](https://linear.app/pilah-2/issue/PIL-446) (actual clients), and
