@@ -4,7 +4,7 @@ onboarding has committed anything for that role."""
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import AccessToken
 
-from api.models import User
+from api.models import BankSampah, Nasabah, User
 
 URL = "/api/v1/onboarding/role"
 
@@ -25,3 +25,48 @@ class RoleChangeTests(APITestCase):
         self.assertEqual(AccessToken(response.data["access_token"])["role"], User.Role.NASABAH)
         user.refresh_from_db()
         self.assertEqual(user.role, User.Role.NASABAH)
+
+    def test_the_role_is_kept_once_onboarding_has_committed_anything_for_it(self) -> None:
+        bank = BankSampah.objects.create(
+            nama="Bank Pending",
+            alamat="Depok",
+            no_hp_pic="+628111111111",
+            status=BankSampah.Status.PENDING,
+        )
+        profiled = User.objects.create_user(
+            email="profiled@example.com",
+            nama="Lengkap",
+            role=User.Role.PENGELOLA,
+            is_profile_complete=True,
+        )
+        registered = User.objects.create_user(
+            email="registered@example.com", nama="Daftar", role=User.Role.PENGELOLA
+        )
+        registered.bank_sampah = bank
+        registered.save(update_fields=["bank_sampah"])
+        # Linked on first login to a membership a pengurus entered for this email.
+        member = self._fresh(User.Role.NASABAH)
+        Nasabah.objects.create(
+            user=member,
+            bank_sampah=bank,
+            nomor="NAS-001",
+            nama="Anggota",
+            alamat="Depok",
+            no_hp="+628111111112",
+        )
+
+        for user, role in (
+            (profiled, User.Role.NASABAH),
+            (registered, User.Role.NASABAH),
+            (member, User.Role.PENGELOLA),
+        ):
+            with self.subTest(user=user.email):
+                previous = user.role
+                self.client.force_authenticate(user)
+
+                response = self.client.patch(URL, {"role": role}, format="json")
+
+                self.assertEqual(response.status_code, 409, response.data)
+                self.assertEqual(response.data["code"], "role_locked")
+                user.refresh_from_db()
+                self.assertEqual(user.role, previous)
