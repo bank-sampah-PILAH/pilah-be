@@ -13,7 +13,7 @@ if (![1, 10, 20, 30].includes(users) || !['smoke', 'realistic', 'burst'].include
 }
 if (users === 1 && mode !== 'smoke') throw new Error('One user is only for smoke/baseline');
 if (!/^https:\/\/pilah-be-staging\.fly\.dev\/api\/v1$/.test(base) &&
-    !/^http:\/\/(localhost|127\.0\.0\.1):[0-9]+\/api\/v1$/.test(base)) {
+    !/^http:\/\/(localhost|127\.0\.0\.1):\d+\/api\/v1$/.test(base)) {
   throw new Error('Only the exact staging API or local loopback is allowed');
 }
 if (!manifest.run_id || !manifest.accounts.every(a => a.access_token)) {
@@ -55,9 +55,14 @@ if (mode === 'realistic') {
   thresholds['action_failure{action:login,phase:steady}'] = ['rate<0.01'];
   thresholds['action_samples{action:login,phase:steady}'] = ['count>0'];
 }
-const expectedActions = users > 1 ? ordinaryActions : ordinaryActions.filter(a =>
-  selected[0].role === 'pengelola' ? !a.startsWith('nasabah_h') && a !== 'nasabah_balance' :
-    ['auth_me', 'jadwal', 'nasabah_home', 'nasabah_balance', 'nasabah_history', 'jadwal_calendar'].includes(a));
+let expectedActions = ordinaryActions;
+if (users === 1) {
+  const pengurusSmoke = selected[0].role === 'pengelola';
+  expectedActions = ordinaryActions.filter(action => {
+    if (pengurusSmoke) return !action.startsWith('nasabah_h') && action !== 'nasabah_balance';
+    return ['auth_me', 'jadwal', 'nasabah_home', 'nasabah_balance', 'nasabah_history', 'jadwal_calendar'].includes(action);
+  });
+}
 for (const action of [...expectedActions, ...(selected.some(a => a.role === 'pengelola') ? ['setoran'] : []), ...(burst ? ['recipient_balance', 'idempotency_replay'] : [])]) {
   const limit = ['setoran', 'idempotency_replay'].includes(action) ? 2000 : 1000;
   // Burst cases intentionally exercise only saves, balance checks and Nasabah reads.
@@ -66,16 +71,20 @@ for (const action of [...expectedActions, ...(selected.some(a => a.role === 'pen
   thresholds[`action_failure{action:${action},phase:steady}`] = ['rate<0.01'];
   thresholds[`action_samples{action:${action},phase:steady}`] = ['count>0'];
 }
+let userScenario;
+if (mode === 'realistic') {
+  userScenario = {
+    executor: 'ramping-vus', startVUs: 0,
+    stages: [{ duration: '1m', target: vus }, { duration: '5m', target: vus }],
+    gracefulStop: '30s',
+  };
+} else if (burst) {
+  userScenario = { executor: 'per-vu-iterations', vus, iterations: 1, maxDuration: '90s' };
+} else {
+  userScenario = { executor: 'constant-vus', vus, duration: '1m', gracefulStop: '30s' };
+}
 export const options = {
-  scenarios: {
-    users: mode === 'realistic' ? {
-      executor: 'ramping-vus', startVUs: 0,
-      stages: [{ duration: '1m', target: vus }, { duration: '5m', target: vus }],
-      gracefulStop: '30s',
-    } : burst ? {
-      executor: 'per-vu-iterations', vus, iterations: 1, maxDuration: '90s',
-    } : { executor: 'constant-vus', vus, duration: '1m', gracefulStop: '30s' },
-  },
+  scenarios: { users: userScenario },
   thresholds,
   summaryTrendStats: ['avg', 'med', 'p(95)', 'p(99)', 'max', 'count'],
   systemTags: ['status', 'method', 'name', 'scenario', 'expected_response'],
@@ -108,7 +117,9 @@ function fault(message) {
 function phase() {
   if (mode !== 'realistic') return 'steady';
   const elapsed = Date.now() - exec.scenario.startTime;
-  return elapsed < 60000 ? 'ramp' : elapsed < 360000 ? 'steady' : 'drain';
+  if (elapsed < 60000) return 'ramp';
+  if (elapsed < 360000) return 'steady';
+  return 'drain';
 }
 function request(account, action, path, payload, key) {
   const tags = { action, phase: phase(), role: account.role };
@@ -136,7 +147,7 @@ function rows(body) {
 function list(account, action, path, validate) {
   const body = request(account, action, path).body;
   const values = rows(body);
-  if (!Array.isArray(values) || values.length === 0 || !values.every(validate)) {
+  if (!Array.isArray(values) || values.length === 0 || !values.every(row => validate(row))) {
     fault(`${action}: empty or incorrectly scoped fixture response`);
   }
   return values;
@@ -144,64 +155,76 @@ function list(account, action, path, validate) {
 function pause(min = 3, max = 8) {
   if (mode === 'realistic' || mode === 'smoke') sleep(min + Math.random() * (max - min));
 }
-function uuid() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = Math.floor(Math.random() * 16);
-    return (c === 'x' ? r : (r & 3) | 8).toString(16);
-  });
-}
 let verified = false;
 let lastLogin = 0;
-export default function () {
+let recipientIndex = 0;
+
+function verifyIdentity(account) {
+  const me = request(account, 'auth_me', '/auth/me').body;
+  const user = me.user || me;
+  if (user.id !== account.id || user.role !== account.role || user.bank_sampah_id !== manifest.bank_id) {
+    fault('Account or bank identity differs from manifest');
+  }
+}
+
+function runBurst(account) {
+  const start = exec.scenario.startTime + 15000;
+  const wait = (start - Date.now()) / 1000;
+  if (wait > 0) sleep(wait);
+  if (account.role === 'pengelola') {
+    burstStart.add(Date.now() - start);
+    let recipient = manifest.recipient_ids[50];
+    if (__ENV.CONTENTION !== 'shared') recipient = manifest.recipient_ids[50 + exec.vu.idInTest];
+    save(account, recipient);
+  } else customer(account);
+}
+
+function runPengurus(account) {
+  list(account, 'nasabah_list', '/nasabah?page=1', row => manifest.recipient_ids.includes(row.id));
+  pause();
+  const index = recipientIndex++ % manifest.recipient_ids.length;
+  const query = encodeURIComponent(`Load Nasabah ${String(index).padStart(4, '0')}`);
+  const found = list(account, 'nasabah_search', `/nasabah?search=${query}`,
+    row => row.id === manifest.recipient_ids[index]);
+  pause();
+  const detail = request(account, 'nasabah_detail', `/nasabah/${found[0].id}`).body;
+  if (detail.id !== found[0].id) fault('Incorrect nasabah detail');
+  list(account, 'nasabah_picker', '/nasabah?status=aktif&page_size=100', row => manifest.recipient_ids.includes(row.id));
+  list(account, 'prices', '/jenis-sampah', row => row.id === manifest.jenis_id);
+  pause(15, 30);
+  save(account, found[0].id);
+  pause();
+  list(account, 'jadwal', '/jadwal', row => row.bank_sampah_id === manifest.bank_id || row.lokasi === 'Synthetic load-test location');
+  calendar(account);
+  pause();
+  list(account, 'pengurus_history', '/aktivitas', row => row.tipe === 'setoran' && manifest.recipient_ids.includes(row.data.nasabah_id));
+  measureLogin(account);
+}
+
+function measureLogin(account) {
+  if (mode !== 'realistic' || exec.vu.idInTest !== 1 || Date.now() - lastLogin < 20000) return;
+  const response = http.post(`${base}/auth/login`, JSON.stringify({ email: account.email, password: account.password }),
+    { headers: { 'Content-Type': 'application/json' }, tags: { name: 'login', action: 'login', phase: phase() }, timeout: '15s', redirects: 0 });
+  lastLogin = Date.now();
+  throttles.add(response.status === 429 ? 1 : 0);
+  actionLatency.add(response.timings.duration, { action: 'login', phase: phase() });
+  failures.add(response.status !== 200, { action: 'login', phase: phase() });
+  samples.add(1, { action: 'login', phase: phase() });
+  if (response.status !== 200) exec.test.abort(`Permitted login returned HTTP ${response.status}`);
+}
+
+export default function journey() {
   const account = selected[exec.vu.idInTest - 1];
   if (!account) fault('No independent account assigned to this virtual user');
   integrity.add(0);
   if (!verified) {
-    const me = request(account, 'auth_me', '/auth/me').body;
-    const user = me.user || me;
-    if (user.id !== account.id || user.role !== account.role || user.bank_sampah_id !== manifest.bank_id) {
-      fault('Account or bank identity differs from manifest');
-    }
+    verifyIdentity(account);
     verified = true;
   }
   if (burst) {
-    const start = exec.scenario.startTime + 15000;
-    const wait = (start - Date.now()) / 1000;
-    if (wait > 0) sleep(wait);
-    if (account.role === 'pengelola') {
-      burstStart.add(Date.now() - start);
-      save(account, __ENV.CONTENTION === 'shared' ? manifest.recipient_ids[50] :
-        manifest.recipient_ids[50 + exec.vu.idInTest]);
-    } else customer(account);
+    runBurst(account);
   } else if (account.role === 'pengelola') {
-    list(account, 'nasabah_list', '/nasabah?page=1', r => manifest.recipient_ids.includes(r.id));
-    pause();
-    const index = Math.floor(Math.random() * manifest.recipient_ids.length);
-    const found = list(account, 'nasabah_search', `/nasabah?search=${encodeURIComponent('Load Nasabah ' + String(index).padStart(4, '0'))}`,
-      r => r.id === manifest.recipient_ids[index]);
-    pause();
-    const detail = request(account, 'nasabah_detail', `/nasabah/${found[0].id}`).body;
-    if (detail.id !== found[0].id) fault('Incorrect nasabah detail');
-    list(account, 'nasabah_picker', '/nasabah?status=aktif&page_size=100', r => manifest.recipient_ids.includes(r.id));
-    list(account, 'prices', '/jenis-sampah', r => r.id === manifest.jenis_id);
-    pause(15, 30);
-    save(account, found[0].id);
-    pause();
-    list(account, 'jadwal', '/jadwal', r => r.bank_sampah_id === manifest.bank_id || r.lokasi === 'Synthetic load-test location');
-    calendar(account);
-    pause();
-    list(account, 'pengurus_history', '/aktivitas', r => r.tipe === 'setoran' && manifest.recipient_ids.includes(r.data.nasabah_id));
-    // One existing VU measures permitted login; this does not add an extra user.
-    if (mode === 'realistic' && exec.vu.idInTest === 1 && Date.now() - lastLogin >= 20000) {
-      const r = http.post(`${base}/auth/login`, JSON.stringify({ email: account.email, password: account.password }),
-        { headers: { 'Content-Type': 'application/json' }, tags: { name: 'login', action: 'login', phase: phase() }, timeout: '15s', redirects: 0 });
-      lastLogin = Date.now();
-      throttles.add(r.status === 429 ? 1 : 0);
-      actionLatency.add(r.timings.duration, { action: 'login', phase: phase() });
-      failures.add(r.status !== 200, { action: 'login', phase: phase() });
-      samples.add(1, { action: 'login', phase: phase() });
-      if (r.status !== 200) exec.test.abort(`Permitted login returned HTTP ${r.status}`);
-    }
+    runPengurus(account);
   } else customer(account);
   journeys.add(1, { role: account.role, phase: phase() });
   pause();
@@ -231,7 +254,7 @@ function calendar(account) {
 }
 
 function save(account, recipient) {
-  const key = uuid();
+  const key = crypto.randomUUID();
   const payload = {
     nasabah_id: recipient, catatan: `PIL-393 ${manifest.run_id}`,
     items: [{ jenis_sampah_id: manifest.jenis_id, berat: '1.000' }],

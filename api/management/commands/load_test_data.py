@@ -60,6 +60,17 @@ class Command(BaseCommand):
 
     def handle(self, *args: Any, **options: Any) -> None:
         run_id = options["run_id"]
+        action = options["action"]
+        manifest_path = options["manifest"]
+        self._validate_request(run_id, action, manifest_path, options)
+        with transaction.atomic():
+            result = self._run_action(run_id, action, manifest_path, options)
+        self.stdout.write(json.dumps(result))
+
+    @staticmethod
+    def _validate_request(
+        run_id: str, action: str, manifest_path: Path | None, options: dict[str, Any]
+    ) -> None:
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,31}", run_id):
             raise CommandError("run-id must be 1–32 lowercase letters, digits or hyphens")
         if options["confirm"] != CONFIRMATION:
@@ -85,34 +96,36 @@ class Command(BaseCommand):
             and any((parent / ".git").exists() for parent in manifest_path.resolve().parents)
         ):
             raise CommandError("seed manifest must be outside Git worktrees")
-        with transaction.atomic():
-            bank_id = fixture_id(run_id, "bank")
-            if action == "seed":
-                if BankSampah.objects.filter(pk=bank_id).exists():
-                    raise CommandError("Fixture already exists; use reset to retain sessions")
-                manifest = self.seed(run_id)
-                assert manifest_path is not None
-                # Failure to persist credentials rolls back all fixture writes.
-                result = self.audit(run_id, 0)
-                private_json(manifest_path, manifest)
-            else:
-                self.check_owner(run_id)
-                if action == "telemetry":
-                    result = self.telemetry()
-                elif action == "audit":
-                    result = self.audit(run_id, options["expected_writes"])
-                elif action == "reset":
-                    self.history(run_id)
-                    result = self.audit(run_id, 0)
-                else:
-                    Transaksi.objects.filter(bank_sampah_id=bank_id).delete()
-                    HargaSampah.objects.filter(bank_sampah_id=bank_id).delete()
-                    JadwalKegiatan.objects.filter(bank_sampah_id=bank_id).delete()
-                    Nasabah.objects.filter(bank_sampah_id=bank_id).delete()
-                    User.objects.filter(pk__in=self.user_ids(run_id)).delete()
-                    BankSampah.objects.get(pk=bank_id).delete()
-                    result = {"run_id": run_id, "cleaned": True}
-        self.stdout.write(json.dumps(result))
+
+    def _run_action(
+        self, run_id: str, action: str, manifest_path: Path | None, options: dict[str, Any]
+    ) -> dict[str, Any]:
+        bank_id = fixture_id(run_id, "bank")
+        if action == "seed":
+            if BankSampah.objects.filter(pk=bank_id).exists():
+                raise CommandError("Fixture already exists; use reset to retain sessions")
+            manifest = self.seed(run_id)
+            assert manifest_path is not None
+            # Failure to persist credentials rolls back all fixture writes.
+            result = self.audit(run_id, 0)
+            private_json(manifest_path, manifest)
+            return result
+
+        self.check_owner(run_id)
+        if action == "telemetry":
+            return self.telemetry()
+        if action == "audit":
+            return self.audit(run_id, options["expected_writes"])
+        if action == "reset":
+            self.history(run_id)
+            return self.audit(run_id, 0)
+        Transaksi.objects.filter(bank_sampah_id=bank_id).delete()
+        HargaSampah.objects.filter(bank_sampah_id=bank_id).delete()
+        JadwalKegiatan.objects.filter(bank_sampah_id=bank_id).delete()
+        Nasabah.objects.filter(bank_sampah_id=bank_id).delete()
+        User.objects.filter(pk__in=self.user_ids(run_id)).delete()
+        BankSampah.objects.get(pk=bank_id).delete()
+        return {"run_id": run_id, "cleaned": True}
 
     @staticmethod
     def user_ids(run_id: str) -> list[UUID]:

@@ -29,6 +29,12 @@ def target_url(value: str) -> str:
     return value
 
 
+def validate_run_id(value: str) -> str:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,31}", value):
+        raise ValueError("run-id must be 1–32 lowercase letters, digits or hyphens")
+    return value
+
+
 def private_write(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
@@ -38,6 +44,7 @@ def private_write(path: Path, data: dict[str, Any]) -> None:
 
 
 def authenticate(path: Path, base: str, interval: float = 16) -> None:
+    base = target_url(base)
     manifest = json.loads(path.read_text())
     for index, account in enumerate(manifest["accounts"]):
         if account.get("access_token"):
@@ -68,7 +75,9 @@ def authenticate(path: Path, base: str, interval: float = 16) -> None:
 
 
 def fixture(args: argparse.Namespace, action: str, expected: int | None = None) -> dict[str, Any]:
-    if args.base_url == STAGING:
+    validate_run_id(args.run_id)
+    base_url = target_url(args.base_url)
+    if base_url == STAGING:
         with urllib.request.urlopen(
             STAGING.removesuffix("/api/v1") + "/healthz", timeout=45
         ) as health:
@@ -86,7 +95,7 @@ def fixture(args: argparse.Namespace, action: str, expected: int | None = None) 
     ]
     if expected is not None:
         command += ["--expected-writes", str(expected)]
-    if args.base_url == STAGING:
+    if base_url == STAGING:
         source = (
             "import os,sys; sys.path.insert(0, '/app'); "
             "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); "
@@ -253,7 +262,7 @@ def run_trial(
     return passed
 
 
-def main() -> None:
+def _parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "action",
@@ -268,30 +277,44 @@ def main() -> None:
     parser.add_argument("--users", type=int, choices=(10, 20, 30))
     parser.add_argument("--probe-role", choices=("pengelola", "nasabah"))
     parser.add_argument("--probe-writes", type=int, default=0)
-    args = parser.parse_args()
+    return parser, parser.parse_args()
+
+
+def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    try:
+        validate_run_id(args.run_id)
+    except ValueError as error:
+        parser.error(str(error))
     manifest = json.loads(args.accounts.read_text())
     if args.run_id != manifest["run_id"]:
         parser.error("run-id must match the account manifest")
-    if args.action in ("audit", "cleanup"):
-        print(json.dumps(fixture(args, args.action)))
-        return
-    if args.action == "auth":
-        authenticate(args.accounts, args.base_url)
-        return
-    if args.action == "snapshot":
-        snapshot(args.output / "deployment.json")
-        return
     if args.action == "probe" and (args.probe_role is None or args.users is None):
         parser.error("probe requires --users and --probe-role")
     if args.probe_writes < 0 or (args.probe_writes and args.action != "probe"):
         parser.error("Only probe runs may declare non-negative actual-client writes")
     if args.probe_role and args.action != "probe":
         parser.error("Only probe runs may reserve one virtual-user slot")
+
+
+def _run_single_action(args: argparse.Namespace) -> bool:
+    if args.action in ("audit", "cleanup"):
+        print(json.dumps(fixture(args, args.action)))
+    elif args.action == "auth":
+        authenticate(args.accounts, args.base_url)
+    elif args.action == "snapshot":
+        snapshot(args.output / "deployment.json")
+    else:
+        return False
+    return True
+
+
+def _build_trials(args: argparse.Namespace) -> list[tuple[str, int, str, str, str]]:
     if args.action == "smoke":
         trials = [
             ("smoke", 1, f"baseline-{role}", "separate", role) for role in ("pengelola", "nasabah")
         ]
     elif args.action == "probe":
+        assert args.users is not None and args.probe_role is not None
         trials = [
             (
                 "realistic",
@@ -302,18 +325,25 @@ def main() -> None:
             )
         ]
     elif args.action == "matrix":
+        levels = [args.users] if args.users is not None else [10, 20, 30]
         trials = [
             ("realistic", users, f"realistic-{users}-{repeat}", "separate", "pengelola")
-            for users in ([args.users] if args.users else [10, 20, 30])
+            for users in levels
             for repeat in (1, 2)
         ]
     else:
+        levels = [args.users] if args.users is not None else [10, 20, 30]
         trials = [
             ("burst", users, f"burst-{users}-{contention}-{repeat}", contention, "pengelola")
-            for users in ([args.users] if args.users else [10, 20, 30])
+            for users in levels
             for contention in ("separate", "shared")
             for repeat in (1, 2, 3)
         ]
+
+    return trials
+
+
+def _run_trials(args: argparse.Namespace, trials: list[tuple[str, int, str, str, str]]) -> None:
     failed_level = None
     for mode, users, label, contention, role in trials:
         if failed_level is not None and users != failed_level:
@@ -329,6 +359,14 @@ def main() -> None:
         raise SystemExit(
             f"Burst latency failed at {failed_level} users; integrity results retained"
         )
+
+
+def main() -> None:
+    parser, args = _parse_args()
+    _validate_args(parser, args)
+    if _run_single_action(args):
+        return
+    _run_trials(args, _build_trials(args))
 
 
 if __name__ == "__main__":
