@@ -23,7 +23,8 @@ CONFIRMATION = "PIL-393-STAGING-ONLY"
 def target_url(value: str) -> str:
     value = value.rstrip("/")
     if value != STAGING and not re.fullmatch(
-        r"http://(?:127\.0\.0\.1|localhost):\d+/api/v1", value
+        r"http://(?:127\.0\.0\.1|localhost):\d+/api/v1",  # NOSONAR: loopback-only local development.
+        value,
     ):
         raise ValueError("Only the exact Fly staging API or loopback API is allowed")
     return value
@@ -37,7 +38,11 @@ def validate_run_id(value: str) -> str:
 
 def private_write(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    descriptor = (
+        os.open(  # NOSONAR: only operator-selected local output paths reach this private writer.
+            path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600
+        )
+    )
     os.fchmod(descriptor, 0o600)
     with os.fdopen(descriptor, "w") as output:
         json.dump(data, output, indent=2)
@@ -45,7 +50,7 @@ def private_write(path: Path, data: dict[str, Any]) -> None:
 
 def authenticate(path: Path, base: str, interval: float = 16) -> None:
     base = target_url(base)
-    manifest = json.loads(path.read_text())
+    manifest = json.loads(path.read_text())  # NOSONAR: operator-selected local credential manifest.
     for index, account in enumerate(manifest["accounts"]):
         if account.get("access_token"):
             continue
@@ -118,7 +123,9 @@ def fixture(args: argparse.Namespace, action: str, expected: int | None = None) 
         ]
     else:
         command[0] = args.python
-    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=180)
+    result = subprocess.run(  # NOSONAR: argv is shell-free; Fly's -C string uses shlex.join.
+        command, check=False, capture_output=True, text=True, timeout=180, shell=False
+    )
     if result.returncode:
         message = (result.stderr or result.stdout).strip().splitlines()
         raise RuntimeError(
@@ -182,7 +189,9 @@ def run_trial(
     contention: str = "separate",
     smoke_role: str = "pengelola",
 ) -> bool:
-    args.output.mkdir(parents=True, exist_ok=True, mode=0o700)
+    args.output.mkdir(  # NOSONAR: operator-selected local output.
+        parents=True, exist_ok=True, mode=0o700
+    )
     folder = args.output / label
     folder.mkdir(mode=0o700)
     fixture(args, "reset")
@@ -202,6 +211,8 @@ def run_trial(
     telemetry_file = (folder / "telemetry.jsonl").open("w")
     monitor = None
     if args.base_url == STAGING:
+        monitor_path = Path(__file__).with_name("monitor.py")
+        monitor_source = monitor_path.read_text()  # NOSONAR: tracked source, quoted for Fly.
         monitor = subprocess.Popen(
             [
                 "flyctl",
@@ -210,14 +221,13 @@ def run_trial(
                 "--app",
                 APP,
                 "-C",
-                shlex.join(
-                    ["python", "-u", "-c", Path(__file__).with_name("monitor.py").read_text()]
-                ),
+                shlex.join(["python", "-u", "-c", monitor_source]),
             ],
             stdout=telemetry_file,
             stderr=subprocess.DEVNULL,
+            shell=False,
         )
-    result = subprocess.run(
+    result = subprocess.run(  # NOSONAR: selected k6 executable is one argv item; shell is disabled.
         [
             args.k6,
             "run",
@@ -228,6 +238,7 @@ def run_trial(
         ],
         env=environment,
         check=False,
+        shell=False,
     )
     if monitor:
         monitor.send_signal(signal.SIGINT)

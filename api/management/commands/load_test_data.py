@@ -84,8 +84,6 @@ class Command(BaseCommand):
             staging and (not isinstance(host, str) or not host.endswith(".neon.tech"))
         ):
             raise CommandError("Only a local database or staging's separate Neon DB is allowed")
-        action = options["action"]
-        manifest_path = options["manifest"]
         if action == "seed" and (
             manifest_path is None or not manifest_path.is_absolute() or manifest_path.exists()
         ):

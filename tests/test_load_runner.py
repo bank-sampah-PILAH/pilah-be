@@ -108,7 +108,7 @@ class LoadRunnerTests(SimpleTestCase):
             self.assertEqual(runner.fixture(args, "cleanup"), {"cleaned": True})
         command = run.call_args.args[0]
         self.assertEqual(command[:4], ["python3", "manage.py", "load_test_data", "cleanup"])
-        self.assertNotIn("shell", run.call_args.kwargs)
+        self.assertIs(run.call_args.kwargs["shell"], False)
 
     def test_trial_plans_match_supported_levels_and_modes(self) -> None:
         args = argparse.Namespace(action="matrix", users=None, probe_role=None)
