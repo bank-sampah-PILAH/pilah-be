@@ -157,7 +157,6 @@ function pause(min = 3, max = 8) {
 }
 let verified = false;
 let lastLogin = 0;
-let recipientIndex = 0;
 
 function verifyIdentity(account) {
   const me = request(account, 'auth_me', '/auth/me').body;
@@ -182,7 +181,7 @@ function runBurst(account) {
 function runPengurus(account) {
   list(account, 'nasabah_list', '/nasabah?page=1', row => manifest.recipient_ids.includes(row.id));
   pause();
-  const index = recipientIndex++ % manifest.recipient_ids.length;
+  const index = parseInt(crypto.randomUUID().slice(0, 8), 16) % manifest.recipient_ids.length;
   const query = encodeURIComponent(`Load Nasabah ${String(index).padStart(4, '0')}`);
   const found = list(account, 'nasabah_search', `/nasabah?search=${query}`,
     row => row.id === manifest.recipient_ids[index]);
