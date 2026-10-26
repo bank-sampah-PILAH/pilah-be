@@ -6,6 +6,7 @@ build_statement, including the BalanceService.saldo_at equivalence that pins
 the tie-break rule. HTTP contract lives in apps/nasabah/test_history_pdf_export.py.
 """
 
+from dataclasses import replace
 from datetime import datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
@@ -143,8 +144,6 @@ class NasabahStatementDataTests(TestCase):
             self.assertIsNone(_logo_file())
 
     def test_render_statement_covers_escaped_subrows_and_long_bank_name(self) -> None:
-        self.bank.nama = "Bank Sampah dengan Nama yang Sangat Panjang " * 2
-        self.bank.save(update_fields=["nama"])
         trans = Transaksi.objects.create(
             nasabah=self.member,
             bank_sampah=self.bank,
@@ -160,10 +159,12 @@ class NasabahStatementDataTests(TestCase):
             berat=Decimal("2.000"),
             subtotal=Decimal("7000.00"),
         )
+        data = replace(
+            build_statement(self.member, self._request()),
+            bank_nama="Bank Sampah dengan Nama yang Sangat Panjang " * 4,
+        )
         with patch("apps.reporting.render._logo_file", return_value=None):
-            self.assertTrue(
-                render_statement(build_statement(self.member, self._request()), "pilah")
-            )
+            self.assertTrue(render_statement(data, "pilah"))
         self.assertEqual(item_berat(Decimal("2.000")), "2 kg")
         self.assertIn("&amp;", _p("A & B", _STYLES["cell"]).text)
 
