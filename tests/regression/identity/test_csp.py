@@ -7,6 +7,7 @@ X-Frame-Options, X-Content-Type-Options, Referrer-Policy dan COOP.
 """
 
 import os
+import re
 from typing import cast
 
 from django.http import HttpResponse
@@ -179,9 +180,116 @@ class CspHalamanDjangoTests(SimpleTestCase):
         admin, test ini gagal lebih dulu dan menjelaskan sebabnya — alih-alih
         halaman admin yang rusak tanpa petunjuk di produksi.
         """
-        import re
-
         body = self.client.get("/admin/login/").content.decode()
         self.assertEqual(re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", body), [])
         self.assertEqual(re.findall(r"<style[^>]*>", body), [])
         self.assertEqual(re.findall(r'\sstyle="', body), [])
+
+
+TAG_INLINE_TANPA_NONCE = r"<(?:script|style)(?![^>]*\b(?:src=|nonce=))[^>]*>"
+"""Tag `<script>`/`<style>` yang bukan berkas luar dan tidak punya nonce.
+
+Tag seperti itu diblokir kebijakan halaman tanpa pesan apa pun di sisi server:
+halamannya tetap 200, hanya mati di peramban. Jadi yang diperiksa bentuk
+dokumennya, bukan status responsnya.
+"""
+
+
+@override_settings(DEBUG=True)
+class CspHalamanPengembangTests(SimpleTestCase):
+    """Dua halaman `debug_only` yang punya tag inline sendiri.
+
+    Keduanya bekerja sebelum ada CSP dan diam-diam berhenti bekerja setelahnya,
+    karena `kebijakan_halaman` tidak mengizinkan tag inline tanpa nonce.
+    Produksi tidak terpengaruh — `debug_only` membalas 404 di sana — tetapi
+    kegagalan yang hanya terlihat di peramban pengembang adalah kegagalan yang
+    tidak ada test lain akan menyadarinya.
+
+    `DEBUG=True` dipaksa di sini karena runner Django memaksanya `False`, yang
+    membuat kedua halaman ini 404 dan cabang CDN `kebijakan_halaman` tidak
+    pernah terpakai.
+    """
+
+    def _nonce_dari_header(self, response: HttpResponse) -> str:
+        kebijakan = response.headers["Content-Security-Policy"]
+        self.assertIn("'nonce-", kebijakan, kebijakan)
+        awal = kebijakan.index("'nonce-") + len("'nonce-")
+        return kebijakan[awal : kebijakan.index("'", awal)]
+
+    def test_api_test_memberi_nonce_pada_kedua_tag_inlinenya(self) -> None:
+        response = cast(HttpResponse, self.client.get("/api-test/"))
+        self.assertEqual(response.status_code, 200)
+        nonce = self._nonce_dari_header(response)
+        body = response.content.decode()
+        self.assertIn(f'<style nonce="{nonce}">', body)
+        self.assertIn(f'<script nonce="{nonce}">', body)
+
+    def test_api_test_tidak_memuat_tag_inline_tanpa_nonce(self) -> None:
+        body = self.client.get("/api-test/").content.decode()
+        self.assertEqual(re.findall(TAG_INLINE_TANPA_NONCE, body), [])
+
+    def test_api_test_tidak_memuat_atribut_style(self) -> None:
+        """Atribut `style="…"` tidak bisa diizinkan nonce, hanya
+        `'unsafe-inline'` — jadi satu atribut baru memaksa pilihan antara
+        halaman yang rusak dan kebijakan yang batal."""
+        body = self.client.get("/api-test/").content.decode()
+        self.assertEqual(re.findall(r'\sstyle="', body), [])
+
+    def test_docs_memberi_nonce_pada_gaya_inline_bawaan_swagger(self) -> None:
+        response = cast(HttpResponse, self.client.get("/api/docs/"))
+        self.assertEqual(response.status_code, 200)
+        nonce = self._nonce_dari_header(response)
+        self.assertIn(f'<style nonce="{nonce}">', response.content.decode())
+
+    def test_docs_menyajikan_skrip_inisialisasi_sebagai_berkas_luar(self) -> None:
+        """Inilah yang `SpectacularSwaggerSplitView` ada untuk melakukannya."""
+        body = self.client.get("/api/docs/").content.decode()
+        self.assertEqual(re.findall(TAG_INLINE_TANPA_NONCE, body), [])
+        self.assertIn("script=", body)
+
+    def test_berkas_skrip_swagger_bukan_dokumen_html(self) -> None:
+        """Cabang `?script=` menyajikan JavaScript, jadi ia mendapat kebijakan
+        API yang paling ketat dan tidak perlu nonce sama sekali."""
+        response = cast(HttpResponse, self.client.get("/api/docs/", {"script": ""}))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("javascript", response.headers["Content-Type"])
+        self.assertIn("default-src 'none'", response.headers["Content-Security-Policy"])
+
+    def test_halaman_pengembang_tetap_tanpa_unsafe_inline(self) -> None:
+        for path in ("/api-test/", "/api/docs/"):
+            with self.subTest(path=path):
+                kebijakan = self.client.get(path).headers["Content-Security-Policy"]
+                self.assertNotIn("'unsafe-inline'", kebijakan)
+                self.assertNotIn("'unsafe-eval'", kebijakan)
+
+
+class CspMiddlewarePalingLuarTests(SimpleTestCase):
+    """Respons yang tidak pernah mencapai view tetap membawa header.
+
+    Di posisi terakhir pada `MIDDLEWARE`, `CspMiddleware` tidak pernah
+    dijalankan untuk respons yang dibuat middleware di atasnya: preflight CORS,
+    pengalihan HTTPS, dan Host yang tidak diizinkan semuanya kembali sebelum
+    rantainya turun sejauh itu. Kontrak PR ini "setiap respons membawa
+    kebijakan", jadi ketiganya dikunci di sini — bukan karena salah satunya
+    bisa dieksploitasi, melainkan karena klaimnya harus benar seluruhnya.
+    """
+
+    def test_preflight_cors_membawa_kebijakan(self) -> None:
+        response = self.client.options(
+            "/api/v1/auth/google/start",
+            HTTP_ORIGIN="http://localhost:3000",
+            HTTP_ACCESS_CONTROL_REQUEST_METHOD="GET",
+        )
+        self.assertIn("Content-Security-Policy", response.headers)
+
+    @override_settings(SECURE_SSL_REDIRECT=True)
+    def test_pengalihan_ke_https_membawa_kebijakan(self) -> None:
+        response = self.client.get("/healthz")
+        self.assertEqual(response.status_code, 301)
+        self.assertIn("Content-Security-Policy", response.headers)
+
+    @override_settings(ALLOWED_HOSTS=["testserver"])
+    def test_host_yang_tidak_diizinkan_membawa_kebijakan(self) -> None:
+        response = self.client.get("/healthz", HTTP_HOST="penyerang.example")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Content-Security-Policy", response.headers)

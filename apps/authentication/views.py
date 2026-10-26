@@ -28,7 +28,7 @@ from apps.authentication.services import (
     AuthServiceError,
     OnboardingService,
 )
-from shared_kernel.csp import nonce_baru
+from shared_kernel.csp import nonce_baru, tandai_dokumen_tertutup
 from shared_kernel.keluaran_dokumen import LITERAL_SKRIP, TEKS_HTML
 from shared_kernel.permissions import (
     IsRegistrationRole,
@@ -174,9 +174,7 @@ class GoogleOAuthCallbackView(APIView):
 </body>
 </html>"""
         response = HttpResponse(html, status=200 if ok else 400)
-        # Dibaca CspMiddleware, yang menyusun kebijakannya. View menyatakan
-        # "saya punya skrip inline dengan nonce ini", bukan kebijakannya sendiri.
-        response.csp_nonce = nonce  # type: ignore[attr-defined]
+        tandai_dokumen_tertutup(response, nonce)
         return response
 
 

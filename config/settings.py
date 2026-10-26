@@ -74,6 +74,17 @@ if os.getenv("MIGRATION_LINTER") == "1":
     INSTALLED_APPS += ["django_migration_linter"]
 
 MIDDLEWARE = [
+    # Paling luar, supaya SETIAP respons membawa header — termasuk yang dibuat
+    # middleware di bawahnya tanpa pernah mencapai view: preflight CORS,
+    # pengalihan 301 ke HTTPS oleh SecurityMiddleware, berkas statis WhiteNoise,
+    # dan 400 untuk Host yang tidak diizinkan. Di posisi terakhir, middleware
+    # ini tidak pernah dijalankan untuk respons-respons itu.
+    #
+    # Posisi ini tidak mengganggu pemilihan kebijakan: kebijakannya dipilih
+    # setelah `get_response(request)` kembali, jadi tipe konten respons dan
+    # penanda nonce dari view sudah ada saat dibaca. Yang menentukan bukan
+    # urutan di daftar ini, melainkan fase tempat kebijakan dibaca.
+    "shared_kernel.csp.CspMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
@@ -83,9 +94,6 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    # Terakhir: memilih kebijakan CSP dari tipe konten respons, jadi harus
-    # berjalan setelah view dan renderer menentukannya.
-    "shared_kernel.csp.CspMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
