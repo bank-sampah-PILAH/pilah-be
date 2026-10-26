@@ -45,6 +45,17 @@ class LoadTestDataTests(TestCase):
             self.command("seed")
         self.assertEqual(BankSampah.objects.count(), 0)
 
+    def test_seed_refuses_credentials_manifest_inside_git_worktree(self) -> None:
+        with TemporaryDirectory() as folder:
+            checkout = Path(folder) / "checkout"
+            checkout.mkdir()
+            (checkout / ".git").mkdir()
+            manifest = checkout / "accounts.json"
+            with self.assertRaisesMessage(CommandError, "outside Git worktrees"):
+                self.command("seed", manifest=manifest)
+            self.assertFalse(manifest.exists())
+            self.assertEqual(BankSampah.objects.count(), 0)
+
     def test_full_fixture_journeys_reset_audit_and_scoped_cleanup(self) -> None:
         other = BankSampah.objects.create(nama="Unrelated UAT bank", no_hp_pic="")
         with TemporaryDirectory() as folder:
