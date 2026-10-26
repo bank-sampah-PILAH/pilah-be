@@ -92,6 +92,7 @@ class LoadTestDataTests(TestCase):
             self.assertEqual(Transaksi.objects.count(), 10000)
             self.assertEqual(User.objects.count(), 30)
             self.assertEqual(Saldo.objects.filter(total_saldo=25000).count(), 1000)
+            self.assertTrue(self.command("telemetry"))
             with self.assertRaises(CommandError):
                 self.command("seed", manifest=Path(folder) / "accounts-again.json")
             client = APIClient()

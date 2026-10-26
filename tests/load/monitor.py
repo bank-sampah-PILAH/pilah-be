@@ -26,7 +26,10 @@ def main() -> None:
     while time.monotonic() < until:
         now = time.monotonic()
         cpu = [int(n) for n in Path("/proc/stat").read_text().splitlines()[0].split()[1:9]]
-        memory = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
+        memory = {}
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            key, value = line.split(":", 1)
+            memory[key] = value
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT count(*), count(*) FILTER (WHERE state='active'), "
