@@ -149,8 +149,11 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         qs = (
             Transaksi.objects.filter(bank_sampah=current_bank(self.request))
             .select_related("nasabah", "bank_sampah", "dicatat_oleh")
-            .prefetch_related("items", "revisi__diubah_oleh")
+            .prefetch_related("items")
         )
+        # Only the detail response carries the change history.
+        if self.action in {"retrieve", "partial_update"}:
+            qs = qs.prefetch_related("revisi__diubah_oleh")
         search = self.request.query_params.get("search", "")
         nasabah_id = self.request.query_params.get("nasabah_id")
         if len(search) >= 2:

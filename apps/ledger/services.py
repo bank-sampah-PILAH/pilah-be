@@ -139,9 +139,14 @@ class TransactionService:
         lama = list(transaksi.items.all())
         catatan = payload["catatan"] or "" if "catatan" in payload else transaksi.catatan
 
+        # A jenis deactivated since the setoran stays editable on the items it already has;
+        # only adding a new one needs it to be active.
+        jenis_lama = {i.jenis_sampah_id: i.jenis_sampah for i in lama if i.jenis_sampah}
         baru: list[tuple[Any, Decimal, Decimal, Decimal]] = []
         for index, item_payload in enumerate(payload.get("items", [])):
-            jenis = get_active_jenis(transaksi.bank_sampah, item_payload["jenis_sampah_id"])
+            jenis = jenis_lama.get(item_payload["jenis_sampah_id"]) or get_active_jenis(
+                transaksi.bank_sampah, item_payload["jenis_sampah_id"]
+            )
             if not jenis:
                 raise serializers.ValidationError(
                     {f"items[{index}].jenis_sampah_id": [_JENIS_TIDAK_AKTIF]}
@@ -171,7 +176,20 @@ class TransactionService:
 
         selisih = total_baru - transaksi.total_nilai
         saldo_baru = bulatkan_rupiah(saldo.total_saldo + selisih)
-        if saldo_baru < 0:
+        # Pencairan from the setoran onwards were paid out of a balance this edit moves, so
+        # their recorded snapshots (and the statement built from them) shift by the same
+        # amount. None of them may end up paid from less than it took out.
+        sesudahnya = list(
+            Pencairan.objects.select_for_update().filter(
+                bank_sampah_id=transaksi.bank_sampah_id,
+                nasabah_id=transaksi.nasabah_id,
+                tanggal__gte=transaksi.tanggal,
+            )
+        )
+        for cair in sesudahnya:
+            cair.saldo_sebelum += selisih
+            cair.saldo_sesudah += selisih
+        if saldo_baru < 0 or any(cair.saldo_sesudah < 0 for cair in sesudahnya):
             raise SaldoTidakCukup(
                 "Perubahan ini membuat saldo nasabah menjadi negatif, "
                 "karena sebagian saldo sudah dicairkan"
@@ -211,6 +229,7 @@ class TransactionService:
         transaksi.total_nilai = total_baru
         transaksi.catatan = catatan
         transaksi.save(update_fields=["total_nilai", "catatan", "updated_at"])
+        Pencairan.objects.bulk_update(sesudahnya, ["saldo_sebelum", "saldo_sesudah"])
         saldo.total_saldo = saldo_baru
         saldo.save(update_fields=["total_saldo", "updated_at"])
         return transaksi
