@@ -9,7 +9,6 @@ from uuid import uuid4
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import connection
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
@@ -93,14 +92,6 @@ class LoadTestDataTests(TestCase):
             self.assertEqual(Transaksi.objects.count(), 10000)
             self.assertEqual(User.objects.count(), 30)
             self.assertEqual(Saldo.objects.filter(total_saldo=25000).count(), 1000)
-            telemetry = self.command("telemetry")
-            if connection.vendor == "postgresql":
-                self.assertEqual(set(telemetry), {"connections", "active", "waiting_for_lock"})
-            else:
-                self.assertEqual(
-                    telemetry["database_metrics"],
-                    "unavailable for non-PostgreSQL database",
-                )
             with self.assertRaises(CommandError):
                 self.command("seed", manifest=Path(folder) / "accounts-again.json")
             client = APIClient()
@@ -240,6 +231,15 @@ class LoadTestDataTests(TestCase):
                 {"connections": 8, "active": 2, "waiting_for_lock": 1},
             )
         connection.cursor.return_value.__enter__.return_value.execute.assert_called_once()
+
+    def test_non_postgres_telemetry_reports_unavailable_metrics(self) -> None:
+        connection = MagicMock(vendor="sqlite")
+        with patch("api.management.commands.load_test_data.connection", connection):
+            self.assertEqual(
+                Command.telemetry(),
+                {"database_metrics": "unavailable for non-PostgreSQL database"},
+            )
+        connection.cursor.assert_not_called()
 
     def test_cleanup_refuses_missing_owned_fixture(self) -> None:
         with self.assertRaisesMessage(CommandError, "Owned fixture bank not found"):
