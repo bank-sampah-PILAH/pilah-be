@@ -28,7 +28,11 @@ from django.utils.html import escape
 # ditempelkan ke dalam dokumen HTML. Parser HTML mengakhiri sebuah blok
 # <script> pada "</script>" pertama tanpa peduli bahwa urutan itu berada di
 # dalam string JavaScript, jadi meloloskannya harus terjadi di sisi JSON.
-# Peta ini sama dengan yang dipakai django.utils.html.json_script.
+# Peta ini salinan django.utils.html._json_script_escapes, yaitu peta yang
+# dipakai django.utils.html.json_script (diperiksa sama pada Django 6.0.8,
+# lihat django/utils/html.py di hulu). Namanya privat dan tanpa jaminan
+# kestabilan, jadi disalin alih-alih diimpor — konsekuensinya menyetarakan
+# ulang salinan ini adalah pekerjaan tangan setiap kali Django naik versi.
 _LOLOS_JSON_DALAM_HTML = {ord("<"): "\\u003C", ord(">"): "\\u003E", ord("&"): "\\u0026"}
 
 
@@ -63,6 +67,8 @@ LITERAL_SKRIP = KonteksKeluaran("literal skrip", _sebagai_literal_skrip)
 SEMUA_KONTEKS: tuple[KonteksKeluaran, ...] = (TEKS_HTML, LITERAL_SKRIP)
 """Setiap konteks yang dikenal, supaya sebuah test bisa menuntut semuanya aman.
 
-Konteks ketiga belum ada. Mengiterasi tuple ini berarti konteks itu sudah
-terjaga sebelum seseorang menuliskan test untuknya.
+Kontraknya satu arah: konteks baru wajib masuk tuple ini, dan test keamanan
+wajib mengiterasi tuple ini alih-alih menyebut konteks satu per satu. Dengan
+begitu konteks berikutnya ikut terjaga pada saat ia ditambahkan, bukan pada
+saat seseorang ingat menuliskan test untuknya.
 """

@@ -12,7 +12,7 @@ PEMBOBOL = "</pre><script>alert(document.domain)</script>"
 
 class KonteksKeluaranTests(SimpleTestCase):
     def test_setiap_konteks_menetralkan_pembuka_tag(self) -> None:
-        """Termasuk konteks ketiga, yang belum ditulis siapa pun.
+        """Termasuk konteks yang ditambahkan sesudah test ini ditulis.
 
         `assertTrue` ada karena perulangan atas tuple kosong lulus secara
         hampa — satu-satunya cara test ini bisa berhenti menguji apa pun.
