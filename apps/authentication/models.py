@@ -96,3 +96,22 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
 
     def __str__(self) -> str:
         return self.email
+
+
+class UserRoleChangeLog(models.Model):
+    """A role an account switched away from during onboarding (PIL-451).
+
+    Written only by AuthService.change_role, in the same transaction as the
+    change; rows are never edited.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="role_change_logs")
+    from_role = models.CharField(max_length=20, choices=User.Role.choices)
+    to_role = models.CharField(max_length=20, choices=User.Role.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "api"
+        db_table = "user_role_change_log"
+        ordering = ["-created_at"]

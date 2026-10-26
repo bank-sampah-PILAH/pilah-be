@@ -11,7 +11,7 @@ from google.oauth2 import id_token as google_id_token
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import BankSampah, Nasabah, NasabahApprovalLog, Saldo, User
+from api.models import BankSampah, Nasabah, NasabahApprovalLog, Saldo, User, UserRoleChangeLog
 from shared_kernel.permissions import (
     email_verification_exempt_allowlist,
     is_app_superadmin_allowlisted,
@@ -97,19 +97,25 @@ class AuthService:
         # committed for it: no completed profile, no bank sampah (pending
         # included), no linked membership. Conditional UPDATE rather than a
         # check then save(), so a bank registration landing between the two
-        # cannot be stranded under a role it no longer matches.
-        updated = User.objects.filter(
-            pk=user.pk,
-            is_profile_complete=False,
-            bank_sampah__isnull=True,
-            keanggotaan_nasabah__isnull=True,
-        ).update(role=role, updated_at=timezone.now())
-        if updated == 0:
-            raise AuthServiceError(
-                "Peran tidak dapat diganti setelah pendaftaran berjalan.",
-                code="role_locked",
-                status_code=409,
-            )
+        # cannot be stranded under a role it no longer matches. Pinning the
+        # role read here keeps the log honest under a double tap.
+        with transaction.atomic():
+            previous = User.objects.filter(pk=user.pk).values_list("role", flat=True).get()
+            updated = User.objects.filter(
+                pk=user.pk,
+                role=previous,
+                is_profile_complete=False,
+                bank_sampah__isnull=True,
+                keanggotaan_nasabah__isnull=True,
+            ).update(role=role, updated_at=timezone.now())
+            if updated == 0:
+                raise AuthServiceError(
+                    "Peran tidak dapat diganti setelah pendaftaran berjalan.",
+                    code="role_locked",
+                    status_code=409,
+                )
+            if previous != role:
+                UserRoleChangeLog.objects.create(user=user, from_role=previous, to_role=role)
         user.refresh_from_db()
         return AuthService._session_response(user, is_new_user=False)
 
