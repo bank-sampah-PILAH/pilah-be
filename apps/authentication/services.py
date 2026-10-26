@@ -93,8 +93,24 @@ class AuthService:
 
     @staticmethod
     def change_role(user: User, role: str) -> dict[str, Any]:
-        user.role = role
-        user.save(update_fields=["role", "updated_at"])
+        # A mis-tapped role is only correctable while nothing has been
+        # committed for it: no completed profile, no bank sampah (pending
+        # included), no linked membership. Conditional UPDATE rather than a
+        # check then save(), so a bank registration landing between the two
+        # cannot be stranded under a role it no longer matches.
+        updated = User.objects.filter(
+            pk=user.pk,
+            is_profile_complete=False,
+            bank_sampah__isnull=True,
+            keanggotaan_nasabah__isnull=True,
+        ).update(role=role, updated_at=timezone.now())
+        if updated == 0:
+            raise AuthServiceError(
+                "Peran tidak dapat diganti setelah pendaftaran berjalan.",
+                code="role_locked",
+                status_code=409,
+            )
+        user.refresh_from_db()
         return AuthService._session_response(user, is_new_user=False)
 
     @staticmethod

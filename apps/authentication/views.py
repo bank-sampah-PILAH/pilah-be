@@ -251,9 +251,12 @@ class RoleChangeView(APIView):
     def patch(self, request: Request) -> Response:
         serializer = RoleChangeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        return Response(
-            AuthService.change_role(current_user(request), serializer.validated_data["role"])
-        )
+        try:
+            return Response(
+                AuthService.change_role(current_user(request), serializer.validated_data["role"])
+            )
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
 
 
 def _auth_service_error_response(error: AuthServiceError) -> Response:
