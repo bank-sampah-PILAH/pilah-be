@@ -56,6 +56,14 @@ class NasabahSearchTests(RegressionTestCase):
             with self.subTest(query=query):
                 self.assert_search(query, [self.budi])
 
+    def test_query_matches_different_fields_without_duplicate_customers(self) -> None:
+        by_id = self.customer("BUDI-ID", "Rani Maharani", "081211110005", "rani@example.test")
+        # Budi matches both name and email, while Rani matches only her ID.
+        self.assert_search("budi", [self.budi, by_id])
+
+    def test_two_character_id_fragment_is_searched(self) -> None:
+        self.assert_search("ZX", [self.dewi])
+
     def test_type_unknown_or_special_input_returns_no_matches(self) -> None:
         for query in ("unknown-id", "' OR 1=1 --", "%%", "__", "x" * 1000):
             with self.subTest(query=query):
