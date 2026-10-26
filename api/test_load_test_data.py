@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import connection
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
@@ -92,10 +93,14 @@ class LoadTestDataTests(TestCase):
             self.assertEqual(Transaksi.objects.count(), 10000)
             self.assertEqual(User.objects.count(), 30)
             self.assertEqual(Saldo.objects.filter(total_saldo=25000).count(), 1000)
-            self.assertEqual(
-                self.command("telemetry")["database_metrics"],
-                "unavailable for non-PostgreSQL database",
-            )
+            telemetry = self.command("telemetry")
+            if connection.vendor == "postgresql":
+                self.assertEqual(set(telemetry), {"connections", "active", "waiting_for_lock"})
+            else:
+                self.assertEqual(
+                    telemetry["database_metrics"],
+                    "unavailable for non-PostgreSQL database",
+                )
             with self.assertRaises(CommandError):
                 self.command("seed", manifest=Path(folder) / "accounts-again.json")
             client = APIClient()
