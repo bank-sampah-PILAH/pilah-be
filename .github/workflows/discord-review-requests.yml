@@ -1,0 +1,49 @@
+name: Discord review requests
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request:
+    paths:
+      - .github/scripts/discord-review-request.cjs
+      - .github/scripts/discord-review-request.test.cjs
+      - .github/workflows/discord-review-requests.yml
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  test:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Test command authorization and Discord delivery
+        run: node --test .github/scripts/discord-review-request.test.cjs
+
+  notify:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      (startsWith(github.event.comment.body, '/request-review') ||
+       startsWith(github.event.comment.body, '/request-qa'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check out trusted default-branch handler
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Send authorized request
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          DISCORD_REVIEW_WEBHOOK_URL: ${{ secrets.DISCORD_REVIEW_WEBHOOK_URL }}
+          DISCORD_QA_WEBHOOK_URL: ${{ secrets.DISCORD_QA_WEBHOOK_URL }}
+        with:
+          script: |
+            const { requestDiscordReview } = require('./.github/scripts/discord-review-request.cjs');
+            await requestDiscordReview({ github, context, core });
