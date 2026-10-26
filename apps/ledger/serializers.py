@@ -17,6 +17,7 @@ from api.models import (
     TransaksiRevisi,
 )
 from apps.ledger.services import BalanceService, PencairanService
+from apps.waste_catalog.api import harga_berlaku_bank
 from shared_kernel.kalkulasi import bulatkan_rupiah, format_ribuan
 from shared_kernel.validators import get_initials
 
@@ -183,6 +184,7 @@ class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
     items = DetailTransaksiSerializer(many=True)
     revisi = TransaksiRevisiSerializer(many=True, read_only=True)
     saldo_setelah_transaksi = serializers.SerializerMethodField()
+    harga_pada_tanggal = serializers.SerializerMethodField()
 
     class Meta:
         model = Transaksi
@@ -199,7 +201,15 @@ class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
             "items",
             "revisi",
             "saldo_setelah_transaksi",
+            "harga_pada_tanggal",
         ]
+
+    def get_harga_pada_tanggal(self, obj: Any) -> dict[str, str]:
+        """Price per kg each jenis had on the setoran date, which is what an edit is priced at."""
+        return {
+            str(jenis_id): str(harga)
+            for jenis_id, harga in harga_berlaku_bank(obj.bank_sampah, obj.tanggal).items()
+        }
 
     def get_saldo_setelah_transaksi(self, obj: Any) -> Any:
         return bulatkan_rupiah(

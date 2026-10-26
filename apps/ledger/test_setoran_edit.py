@@ -12,8 +12,8 @@ from rest_framework.test import APITestCase
 
 from api.models import BankSampah, Nasabah, Pencairan, Saldo, Transaksi, User
 from apps.ledger.services import PencairanService
-from apps.waste_catalog.models import HargaSampah
 from apps.waste_catalog.api import buat_jenis_sampah
+from apps.waste_catalog.models import HargaSampah
 
 
 class SetoranEditTests(APITestCase):
