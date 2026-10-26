@@ -92,6 +92,12 @@ class AuthService:
         return AuthService._session_response(user, is_new_user=created), created
 
     @staticmethod
+    def change_role(user: User, role: str) -> dict[str, Any]:
+        user.role = role
+        user.save(update_fields=["role", "updated_at"])
+        return AuthService._session_response(user, is_new_user=False)
+
+    @staticmethod
     def _user_for_email(email: str) -> User | None:
         matches = list(User.objects.filter(email__iexact=email)[:2])
         if len(matches) > 1:
