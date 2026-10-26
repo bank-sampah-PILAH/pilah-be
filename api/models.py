@@ -40,4 +40,5 @@ __all__ = [
     "Transaksi",
     "User",
     "UserManager",
+    "UserRoleChangeLog",
 ]
