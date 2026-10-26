@@ -110,3 +110,26 @@ class RoleChangeTests(APITestCase):
         self.assertEqual(refused.exception.code, "role_locked")
         user.refresh_from_db()
         self.assertEqual(user.role, User.Role.PENGELOLA)
+
+    def test_each_change_is_recorded_and_nothing_else_is(self) -> None:
+        user = self._fresh(User.Role.PENGELOLA)
+        locked = User.objects.create_user(
+            email="locked@example.com",
+            nama="Lengkap",
+            role=User.Role.PENGELOLA,
+            is_profile_complete=True,
+        )
+
+        self.client.force_authenticate(user)
+        self.client.patch(URL, {"role": User.Role.NASABAH}, format="json")
+        same = self.client.patch(URL, {"role": User.Role.NASABAH}, format="json")
+        self.client.force_authenticate(locked)
+        self.client.patch(URL, {"role": User.Role.NASABAH}, format="json")
+
+        self.assertEqual(same.status_code, 200, same.data)
+        self.assertEqual(
+            list(user.role_change_logs.values_list("from_role", "to_role")),
+            [(User.Role.PENGELOLA, User.Role.NASABAH)],
+        )
+        self.assertIsNotNone(user.role_change_logs.get().created_at)
+        self.assertFalse(locked.role_change_logs.exists())
