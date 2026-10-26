@@ -28,6 +28,7 @@ from apps.authentication.services import (
     AuthServiceError,
     OnboardingService,
 )
+from shared_kernel.csp import nonce_baru, tandai_dokumen_tertutup
 from shared_kernel.keluaran_dokumen import LITERAL_SKRIP, TEKS_HTML
 from shared_kernel.permissions import (
     IsRegistrationRole,
@@ -152,6 +153,7 @@ class GoogleOAuthCallbackView(APIView):
     def _popup_response(
         ok: bool, payload: Any, next_url: str = _OAUTH_FALLBACK_PATH
     ) -> HttpResponse:
+        nonce = nonce_baru()
         isi = {"type": "pilah-google-oauth", "ok": ok, "payload": payload}
         message = LITERAL_SKRIP.loloskan(isi)
         fallback = TEKS_HTML.loloskan(payload)
@@ -160,7 +162,7 @@ class GoogleOAuthCallbackView(APIView):
 <head><meta charset="utf-8"><title>PILAH Google OAuth</title></head>
 <body>
 <pre>{fallback}</pre>
-<script>
+<script nonce="{nonce}">
   const message = {message};
   if (window.opener) {{
     window.opener.postMessage(message, window.location.origin);
@@ -171,7 +173,9 @@ class GoogleOAuthCallbackView(APIView):
 </script>
 </body>
 </html>"""
-        return HttpResponse(html, status=200 if ok else 400)
+        response = HttpResponse(html, status=200 if ok else 400)
+        tandai_dokumen_tertutup(response, nonce)
+        return response
 
 
 class RefreshTokenView(APIView):

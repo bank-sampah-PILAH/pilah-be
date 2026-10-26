@@ -74,6 +74,17 @@ if os.getenv("MIGRATION_LINTER") == "1":
     INSTALLED_APPS += ["django_migration_linter"]
 
 MIDDLEWARE = [
+    # Paling luar, supaya SETIAP respons membawa header — termasuk yang dibuat
+    # middleware di bawahnya tanpa pernah mencapai view: preflight CORS,
+    # pengalihan 301 ke HTTPS oleh SecurityMiddleware, berkas statis WhiteNoise,
+    # dan 400 untuk Host yang tidak diizinkan. Di posisi terakhir, middleware
+    # ini tidak pernah dijalankan untuk respons-respons itu.
+    #
+    # Posisi ini tidak mengganggu pemilihan kebijakan: kebijakannya dipilih
+    # setelah `get_response(request)` kembali, jadi tipe konten respons dan
+    # penanda nonce dari view sudah ada saat dibaca. Yang menentukan bukan
+    # urutan di daftar ini, melainkan fase tempat kebijakan dibaca.
+    "shared_kernel.csp.CspMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
@@ -203,7 +214,16 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "api.User"
 AUTHENTICATION_BACKENDS = ("apps.authentication.backends.AllowlistedSuperadminBackend",)
 
+# Browsable API hanya untuk pengembangan. Tanpa ini bawaan DRF menyertakan
+# BrowsableAPIRenderer, sehingga setiap endpoint membalas dokumen HTML begitu
+# klien mengirim `Accept: text/html` — permukaan yang tidak dipakai klien
+# Flutter dan yang memaksa kebijakan CSP jauh lebih longgar untuk seluruh API.
+_RENDERER = ["rest_framework.renderers.JSONRenderer"]
+if DEBUG:
+    _RENDERER.append("rest_framework.renderers.BrowsableAPIRenderer")
+
 REST_FRAMEWORK = {
+    "DEFAULT_RENDERER_CLASSES": tuple(_RENDERER),
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
