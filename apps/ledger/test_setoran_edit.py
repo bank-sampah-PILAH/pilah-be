@@ -5,10 +5,13 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from api.models import BankSampah, Nasabah, Saldo, Transaksi, User
+from api.models import BankSampah, Nasabah, Pencairan, Saldo, Transaksi, User
+from apps.ledger.services import PencairanService
 from apps.waste_catalog.api import buat_jenis_sampah
 
 
@@ -172,3 +175,78 @@ class SetoranEditTests(APITestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(self.transaksi.revisi.count(), 0)
+
+    def _cairkan(self, nominal: int, tanggal: Any) -> Pencairan:
+        saldo = Saldo.objects.get(nasabah=self.nasabah)
+        return PencairanService.realisasi(
+            user=self.pengelola,
+            nasabah=self.nasabah,
+            saldo=saldo,
+            nominal=Decimal(nominal),
+            metode="tunai",
+            tanggal=tanggal,
+            keterangan="",
+        )
+
+    def test_edit_shifts_the_snapshots_of_later_pencairan(self) -> None:
+        cair = self._cairkan(2000, self.transaksi.tanggal + timedelta(hours=1))
+
+        response = self._patch(items=[{"jenis_sampah_id": str(self.pet.id), "berat": "3.000"}])
+
+        self.assertEqual(response.status_code, 200)
+        cair.refresh_from_db()
+        self.assertEqual((cair.saldo_sebelum, cair.saldo_sesudah), (Decimal(9000), Decimal(7000)))
+        self.assertEqual(self._saldo(), Decimal(7000))
+
+    def test_edit_leaves_earlier_pencairan_alone(self) -> None:
+        cair = self._cairkan(1000, self.transaksi.tanggal - timedelta(hours=1))
+        before = (cair.saldo_sebelum, cair.saldo_sesudah)
+
+        self._patch(items=[{"jenis_sampah_id": str(self.pet.id), "berat": "3.000"}])
+
+        cair.refresh_from_db()
+        self.assertEqual((cair.saldo_sebelum, cair.saldo_sesudah), before)
+
+    def test_edit_that_leaves_a_later_pencairan_unfunded_is_rejected(self) -> None:
+        # Saldo ends positive, but the 5.000 pencairan would have been paid from 3.000.
+        cair = self._cairkan(5000, self.transaksi.tanggal + timedelta(hours=1))
+        kedua = self.client.post(
+            "/api/v1/transaksi",
+            {
+                "nasabah_id": str(self.nasabah.id),
+                "items": [{"jenis_sampah_id": str(self.pet.id), "berat": "2.000"}],
+            },
+            format="json",
+        )
+        Transaksi.objects.filter(pk=kedua.data["id"]).update(
+            tanggal=cair.tanggal + timedelta(hours=1)
+        )
+
+        response = self._patch(items=[{"jenis_sampah_id": str(self.pet.id), "berat": "1.000"}])
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.transaksi.revisi.count(), 0)
+
+    def test_inactive_waste_type_can_keep_its_item_when_only_the_weight_changes(self) -> None:
+        self.pet.is_active = False
+        self.pet.save(update_fields=["is_active"])
+
+        response = self._patch(items=[{"jenis_sampah_id": str(self.pet.id), "berat": "3.000"}])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Decimal(response.data["total_nilai"]), Decimal(9000))
+
+    def test_inactive_waste_type_cannot_be_newly_added(self) -> None:
+        self.kardus.is_active = False
+        self.kardus.save(update_fields=["is_active"])
+
+        response = self._patch(items=[{"jenis_sampah_id": str(self.kardus.id), "berat": "1.000"}])
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_listing_does_not_load_revisions(self) -> None:
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get("/api/v1/transaksi")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse([q for q in queries if "transaksi_revisi" in q["sql"]])
