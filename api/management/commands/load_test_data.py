@@ -79,6 +79,12 @@ class Command(BaseCommand):
             manifest_path is None or not manifest_path.is_absolute() or manifest_path.exists()
         ):
             raise CommandError("seed requires a new absolute --manifest path outside Git")
+        if (
+            action == "seed"
+            and manifest_path is not None
+            and any((parent / ".git").exists() for parent in manifest_path.resolve().parents)
+        ):
+            raise CommandError("seed manifest must be outside Git worktrees")
         with transaction.atomic():
             bank_id = fixture_id(run_id, "bank")
             if action == "seed":
