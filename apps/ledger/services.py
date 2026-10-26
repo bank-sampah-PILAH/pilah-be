@@ -24,6 +24,7 @@ from api.models import (
     PencairanRevisi,
     Saldo,
     Transaksi,
+    TransaksiRevisi,
     User,
 )
 from apps.nasabah.api import (
@@ -41,6 +42,13 @@ from shared_kernel.kalkulasi import (
 
 _NASABAH_TIDAK_AKTIF = "Nasabah tidak ditemukan atau tidak aktif"
 _SALDO_KURANG = "Saldo nasabah tidak mencukupi"
+_JENIS_TIDAK_AKTIF = "Jenis sampah tidak ditemukan atau tidak aktif"
+_HARGA_BELUM_ADA = "Harga jenis sampah belum diatur"
+_SUBTOTAL_NOL = "Nilai setoran item kurang dari Rp 1 setelah pembulatan"
+
+
+class SaldoTidakCukup(Exception):
+    """An edit would take the nasabah's saldo below zero."""
 
 
 class TransactionService:
@@ -116,6 +124,128 @@ class TransactionService:
         saldo.total_saldo = bulatkan_rupiah(saldo.total_saldo + total_nilai)
         saldo.save(update_fields=["total_saldo", "updated_at"])
         return transaksi
+
+    @staticmethod
+    @transaction.atomic
+    def edit_setoran(user: User, transaksi: Transaksi, payload: Mapping[str, Any]) -> Transaksi:
+        """Correct weight, waste type or note, keeping the replaced version as a TransaksiRevisi.
+
+        `transaksi` comes from the caller's bank-scoped queryset; it is re-read under lock.
+        The price of each item is the one in force at the original `tanggal`, so an edit
+        never reprices a setoran.
+        """
+        saldo = Saldo.objects.select_for_update().get(nasabah_id=transaksi.nasabah_id)
+        transaksi = Transaksi.objects.select_for_update().get(pk=transaksi.pk)
+        lama = list(transaksi.items.all())
+        catatan = payload["catatan"] or "" if "catatan" in payload else transaksi.catatan
+
+        baru = TransactionService._harga_item_edit(transaksi, lama, payload.get("items", []))
+
+        if "items" in payload:
+            total_baru = total_setoran([subtotal for *_, subtotal in baru])
+            tanpa_perubahan = catatan == transaksi.catatan and sorted(
+                (str(i.jenis_sampah_id), i.berat) for i in lama
+            ) == sorted((str(jenis.id), berat) for jenis, _, berat, _ in baru)
+        else:
+            total_baru = transaksi.total_nilai
+            tanpa_perubahan = catatan == transaksi.catatan
+        if tanpa_perubahan:
+            raise serializers.ValidationError({"non_field_errors": ["Tidak ada data yang diubah"]})
+
+        selisih = total_baru - transaksi.total_nilai
+        saldo_baru = bulatkan_rupiah(saldo.total_saldo + selisih)
+        sesudahnya = TransactionService._geser_pencairan(transaksi, selisih)
+        if saldo_baru < 0 or any(cair.saldo_sesudah < 0 for cair in sesudahnya):
+            raise SaldoTidakCukup(
+                "Perubahan ini membuat saldo nasabah menjadi negatif, "
+                "karena sebagian saldo sudah dicairkan"
+            )
+
+        TransaksiRevisi.objects.create(
+            transaksi=transaksi,
+            versi=transaksi.revisi.count() + 1,
+            total_nilai=transaksi.total_nilai,
+            catatan=transaksi.catatan,
+            items=[
+                {
+                    "nama_sampah": i.nama_sampah_snapshot,
+                    "harga": str(i.harga_snapshot),
+                    "berat": str(i.berat),
+                    "subtotal": str(i.subtotal),
+                }
+                for i in lama
+            ],
+            alasan=payload["alasan"],
+            diubah_oleh=user,
+        )
+        if "items" in payload:
+            transaksi.items.all().delete()
+            DetailTransaksi.objects.bulk_create(
+                DetailTransaksi(
+                    transaksi=transaksi,
+                    jenis_sampah=jenis,
+                    nama_sampah_snapshot=jenis.nama_sampah,
+                    kategori_snapshot=jenis.kategori,
+                    harga_snapshot=harga,
+                    berat=berat,
+                    subtotal=subtotal,
+                )
+                for jenis, harga, berat, subtotal in baru
+            )
+        transaksi.total_nilai = total_baru
+        transaksi.catatan = catatan
+        transaksi.save(update_fields=["total_nilai", "catatan", "updated_at"])
+        Pencairan.objects.bulk_update(sesudahnya, ["saldo_sebelum", "saldo_sesudah"])
+        saldo.total_saldo = saldo_baru
+        saldo.save(update_fields=["total_saldo", "updated_at"])
+        return transaksi
+
+    @staticmethod
+    def _harga_item_edit(
+        transaksi: Transaksi, lama: list[DetailTransaksi], items: Any
+    ) -> list[tuple[Any, Decimal, Decimal, Decimal]]:
+        """Price the submitted items as on the original setoran date: (jenis, harga, berat, subtotal).
+
+        A jenis deactivated since the setoran stays editable on the items it already has;
+        only adding a new one needs it to be active.
+        """
+        jenis_lama = {i.jenis_sampah_id: i.jenis_sampah for i in lama if i.jenis_sampah}
+        hasil: list[tuple[Any, Decimal, Decimal, Decimal]] = []
+        for index, item_payload in enumerate(items):
+            kunci = f"items[{index}].jenis_sampah_id"
+            jenis = jenis_lama.get(item_payload["jenis_sampah_id"]) or get_active_jenis(
+                transaksi.bank_sampah, item_payload["jenis_sampah_id"]
+            )
+            if not jenis:
+                raise serializers.ValidationError({kunci: [_JENIS_TIDAK_AKTIF]})
+            harga = harga_berlaku(jenis, transaksi.tanggal)
+            if harga is None:
+                raise serializers.ValidationError({kunci: [_HARGA_BELUM_ADA]})
+            subtotal = hitung_subtotal(harga, item_payload["berat"])
+            if subtotal <= 0:
+                raise serializers.ValidationError({kunci: [_SUBTOTAL_NOL]})
+            hasil.append((jenis, harga, item_payload["berat"], subtotal))
+        return hasil
+
+    @staticmethod
+    def _geser_pencairan(transaksi: Transaksi, selisih: Decimal) -> list[Pencairan]:
+        """Shift the snapshots of every pencairan from the setoran onwards by `selisih`.
+
+        They were paid out of a balance this edit moves, so their recorded snapshots (and the
+        statement built from them) move by the same amount. Returned unsaved: the caller checks
+        none ends up paid from less than it took out, then saves them.
+        """
+        sesudahnya = list(
+            Pencairan.objects.select_for_update().filter(
+                bank_sampah_id=transaksi.bank_sampah_id,
+                nasabah_id=transaksi.nasabah_id,
+                tanggal__gte=transaksi.tanggal,
+            )
+        )
+        for cair in sesudahnya:
+            cair.saldo_sebelum += selisih
+            cair.saldo_sesudah += selisih
+        return sesudahnya
 
 
 # ponytail: pencairan edit-window constant (PIL-2xx), shared with tests.

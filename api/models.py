@@ -13,6 +13,7 @@ from apps.ledger.models import (  # noqa: F401
     PencairanRevisi,
     Saldo,
     Transaksi,
+    TransaksiRevisi,
 )
 from apps.nasabah.models import Nasabah, NasabahApprovalLog  # noqa: F401
 from apps.waste_catalog.models import HargaSampah, JenisSampah  # noqa: F401
@@ -33,6 +34,7 @@ __all__ = [
     "PengumumanDibaca",
     "Pencairan",
     "PencairanRevisi",
+    "TransaksiRevisi",
     "Saldo",
     "TimestampedModel",
     "Transaksi",

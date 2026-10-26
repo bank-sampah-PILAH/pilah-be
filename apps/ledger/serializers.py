@@ -14,8 +14,10 @@ from api.models import (
     Pencairan,
     PencairanRevisi,
     Transaksi,
+    TransaksiRevisi,
 )
 from apps.ledger.services import BalanceService, PencairanService
+from apps.waste_catalog.api import harga_berlaku_bank
 from shared_kernel.kalkulasi import bulatkan_rupiah, format_ribuan
 from shared_kernel.validators import get_initials
 
@@ -25,6 +27,7 @@ _NASABAH_NAMA = "nasabah.nama"
 _DIBUAT_OLEH_NAMA = "dibuat_oleh.nama"
 _DIUBAH_OLEH_NAMA = "diubah_oleh.nama"
 _BANK_SAMPAH_ID = "bank_sampah.id"
+_ALASAN_WAJIB = "Alasan perubahan wajib diisi"
 _DICATAT_OLEH_ID = "dicatat_oleh.id"
 
 
@@ -79,9 +82,9 @@ class TransactionItemInputSerializer(serializers.Serializer[Any]):
     )
 
 
-class TransactionCreateSerializer(serializers.Serializer[Any]):
-    nasabah_id = serializers.UUIDField(required=True)
-    items = TransactionItemInputSerializer(many=True, required=True)
+class _SetoranWriteSerializer(serializers.Serializer[Any]):
+    """Rules shared by creating a setoran and correcting one."""
+
     catatan = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     def validate_items(self, value: Any) -> Any:
@@ -138,13 +141,50 @@ class DetailTransaksiSerializer(serializers.ModelSerializer[Model]):
         ]
 
 
+class TransactionCreateSerializer(_SetoranWriteSerializer):
+    nasabah_id = serializers.UUIDField(required=True)
+    items = TransactionItemInputSerializer(many=True, required=True)
+
+
+class TransactionEditSerializer(_SetoranWriteSerializer):
+    items = TransactionItemInputSerializer(many=True, required=False)
+    alasan = serializers.CharField(
+        required=True,
+        max_length=255,
+        error_messages={
+            "required": _ALASAN_WAJIB,
+            "blank": _ALASAN_WAJIB,
+        },
+    )
+
+
+class TransaksiRevisiSerializer(serializers.ModelSerializer[Model]):
+    diubah_oleh = serializers.UUIDField(source="diubah_oleh.id")
+    diubah_oleh_nama = serializers.CharField(source=_DIUBAH_OLEH_NAMA)
+
+    class Meta:
+        model = TransaksiRevisi
+        fields = [
+            "versi",
+            "total_nilai",
+            "catatan",
+            "items",
+            "alasan",
+            "diubah_oleh",
+            "diubah_oleh_nama",
+            "diubah_pada",
+        ]
+
+
 class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
     nasabah_id = serializers.UUIDField(source=_NASABAH_ID)
     nasabah_nama = serializers.CharField(source=_NASABAH_NAMA)
     bank_sampah_id = serializers.UUIDField(source=_BANK_SAMPAH_ID)
     dicatat_oleh = serializers.UUIDField(source=_DICATAT_OLEH_ID)
     items = DetailTransaksiSerializer(many=True)
+    revisi = TransaksiRevisiSerializer(many=True, read_only=True)
     saldo_setelah_transaksi = serializers.SerializerMethodField()
+    harga_pada_tanggal = serializers.SerializerMethodField()
 
     class Meta:
         model = Transaksi
@@ -159,8 +199,17 @@ class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
             "catatan",
             "status_wa",
             "items",
+            "revisi",
             "saldo_setelah_transaksi",
+            "harga_pada_tanggal",
         ]
+
+    def get_harga_pada_tanggal(self, obj: Any) -> dict[str, str]:
+        """Price per kg each jenis had on the setoran date, which is what an edit is priced at."""
+        return {
+            str(jenis_id): str(harga)
+            for jenis_id, harga in harga_berlaku_bank(obj.bank_sampah, obj.tanggal).items()
+        }
 
     def get_saldo_setelah_transaksi(self, obj: Any) -> Any:
         return bulatkan_rupiah(
@@ -193,8 +242,8 @@ class PencairanEditSerializer(serializers.Serializer[Any]):
         required=True,
         max_length=255,
         error_messages={
-            "required": "Alasan perubahan wajib diisi",
-            "blank": "Alasan perubahan wajib diisi",
+            "required": _ALASAN_WAJIB,
+            "blank": _ALASAN_WAJIB,
         },
     )
 
