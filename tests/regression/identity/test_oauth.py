@@ -1,5 +1,7 @@
 """Identity contracts: Google OAuth start/callback and real-token verification."""
 
+import json
+from typing import Any
 from unittest.mock import Mock, patch
 
 import requests
@@ -153,3 +155,101 @@ class OAuthRegressionTests(RegressionTestCase):
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(verify.call_args.args[2], "web-client-id")
+
+
+class OAuthPopupEscapingTests(RegressionTestCase):
+    """Halaman popup OAuth menyusun HTML sendiri, jadi setiap nilai yang ikut
+    tercetak harus lolos dari konteksnya.
+
+    ``?error=`` sampai ke halaman tanpa autentikasi apa pun, dan ``json.dumps``
+    tidak meloloskan ``<``, ``>``, maupun ``/``. Nilai itu mendarat di dua
+    tempat dengan aturan lolos yang berbeda: badan ``<pre>`` (konteks HTML) dan
+    blok ``<script>`` (konteks skrip). Masing-masing dikunci terpisah, karena
+    memperbaiki satu tidak memperbaiki yang lain.
+    """
+
+    PEMBOBOL = "</pre><script>alert(document.domain)</script>"
+
+    def _popup(self, **params: str) -> str:
+        self.client.credentials()
+        response = self.client.get("/api/v1/auth/google/callback", params)
+        body: str = response.content.decode()
+        return body
+
+    @staticmethod
+    def _blok_pre(body: str) -> str:
+        awal = body.index("<pre>") + len("<pre>")
+        return body[awal : body.index("</pre>", awal)]
+
+    def test_blok_pre_tidak_bisa_ditutup_oleh_nilai_error(self) -> None:
+        blok = self._blok_pre(self._popup(error=self.PEMBOBOL))
+        self.assertNotIn("<", blok)
+        self.assertNotIn(">", blok)
+        self.assertIn("&lt;/pre&gt;", blok)
+
+    @staticmethod
+    def _blok_skrip(body: str) -> str:
+        awal = body.index("<script>") + len("<script>")
+        return body[awal : body.index("</script>", awal)]
+
+    def test_blok_skrip_tidak_bisa_ditutup_oleh_nilai_error(self) -> None:
+        blok = self._blok_skrip(self._popup(error=self.PEMBOBOL))
+        self.assertNotIn("</script", blok)
+        self.assertNotIn("<script", blok)
+
+    def test_next_url_bertanda_tangan_tidak_menambah_elemen_skrip(self) -> None:
+        """`next` hanya diperiksa berawalan "/" sebelum ditandatangani, jadi
+        tanda tangan justru meloloskan markup ke dalam blok skrip callback.
+
+        Nilai ini hanya terbaca pada jalur tukar-token, bukan pada cabang
+        `?error=`, jadi pertukaran tokennya distub di batas HTTP.
+
+        Pemeriksaannya menghitung elemen skrip pada seluruh dokumen, bukan
+        memotong blok pertama. Versi pertama test ini memotong, dan lulus
+        terhadap kode yang masih bocor: pemotong `</script>` justru berhenti
+        pada tag tutup milik penyerang, sehingga `<script>` suntikan berada di
+        luar potongan dan tidak pernah ikut diperiksa.
+        """
+        jahat = "/</script><script>alert(document.domain)</script>"
+        self.assertTrue(jahat.startswith("/"), "harus lolos satu-satunya validasi start")
+        state = TimestampSigner().sign(jahat)
+        token_response = Mock(status_code=400)
+        token_response.json = Mock(return_value={"error": "invalid_grant"})
+        self.client.credentials()
+        with patch("apps.authentication.views.requests.post", return_value=token_response):
+            response = self.client.get(
+                "/api/v1/auth/google/callback", {"code": "abc", "state": state}
+            )
+        body = response.content.decode()
+        self.assertIn("window.location.href", body)
+        self.assertEqual(body.count("<script"), 1)
+        self.assertEqual(body.count("</script"), 1)
+
+    @staticmethod
+    def _pesan_terparse(body: str) -> Any:
+        """Ambil literal `const message = …;` lalu parse sebagai JSON.
+
+        `\u003c` adalah escape JSON yang sah, jadi parser Python membacanya
+        sama seperti `JSON.parse` di browser. Test ini karena itu memeriksa
+        kontrak yang betul-betul dilihat klien, bukan tiruannya.
+        """
+        awal = body.index("const message = ") + len("const message = ")
+        return json.loads(body[awal : body.index(";\n", awal)])
+
+    def test_payload_wajar_tetap_terkirim_utuh(self) -> None:
+        """Meloloskan nilai tidak boleh mengubah kontrak `postMessage`."""
+        pesan = self._pesan_terparse(self._popup(error="access_denied"))
+        self.assertEqual(pesan["type"], "pilah-google-oauth")
+        self.assertFalse(pesan["ok"])
+        self.assertEqual(pesan["payload"], {"error": "access_denied"})
+
+    def test_payload_berbahaya_tetap_utuh_setelah_diparse(self) -> None:
+        """Meloloskan bukan menyaring: datanya tetap sama persis, yang hilang
+        hanya kemampuannya dieksekusi.
+
+        Kalau perbaikannya memotong atau membuang karakter, pengurus akan
+        membaca pesan galat Google yang sudah berubah — jadi kesamaan string
+        ini sengaja dikunci, bukan sekadar ketiadaan tag.
+        """
+        pesan = self._pesan_terparse(self._popup(error=self.PEMBOBOL))
+        self.assertEqual(pesan["payload"], {"error": self.PEMBOBOL})

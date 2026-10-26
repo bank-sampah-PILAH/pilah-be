@@ -1,4 +1,3 @@
-import json
 from typing import Any
 
 import requests
@@ -29,6 +28,7 @@ from apps.authentication.services import (
     AuthServiceError,
     OnboardingService,
 )
+from shared_kernel.keluaran_dokumen import LITERAL_SKRIP, TEKS_HTML
 from shared_kernel.permissions import (
     IsRegistrationRole,
 )
@@ -152,8 +152,9 @@ class GoogleOAuthCallbackView(APIView):
     def _popup_response(
         ok: bool, payload: Any, next_url: str = _OAUTH_FALLBACK_PATH
     ) -> HttpResponse:
-        message = json.dumps({"type": "pilah-google-oauth", "ok": ok, "payload": payload})
-        fallback = json.dumps(payload, indent=2)
+        isi = {"type": "pilah-google-oauth", "ok": ok, "payload": payload}
+        message = LITERAL_SKRIP.loloskan(isi)
+        fallback = TEKS_HTML.loloskan(payload)
         html = f"""<!doctype html>
 <html>
 <head><meta charset="utf-8"><title>PILAH Google OAuth</title></head>
@@ -165,7 +166,7 @@ class GoogleOAuthCallbackView(APIView):
     window.opener.postMessage(message, window.location.origin);
     window.close();
   }} else {{
-    window.location.href = {json.dumps(next_url)};
+    window.location.href = {LITERAL_SKRIP.loloskan(next_url)};
   }}
 </script>
 </body>
