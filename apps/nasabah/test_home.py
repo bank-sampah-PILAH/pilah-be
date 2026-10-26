@@ -1,5 +1,6 @@
 from datetime import timedelta
 from decimal import Decimal
+from unittest.mock import patch
 from uuid import UUID
 
 from django.utils import timezone
@@ -112,6 +113,14 @@ class NasabahHomeTests(APITestCase):
         response = self.client.get(self.url, {"keanggotaan_id": str(member.id)})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["bank_sampah"]["nama"], "Mawar")
+
+    def test_history_returns_unpaginated_results_when_paginator_is_disabled(self) -> None:
+        from apps.nasabah.home import NasabahHistoryView
+
+        with patch.object(NasabahHistoryView, "paginate_queryset", return_value=None):
+            response = self.client.get("/api/v1/nasabah/me/riwayat")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [])
 
     def test_history_is_paginated_ordered_and_scoped(self) -> None:
         for value in range(7):

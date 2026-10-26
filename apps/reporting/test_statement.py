@@ -8,6 +8,7 @@ the tie-break rule. HTTP contract lives in apps/nasabah/test_history_pdf_export.
 
 from datetime import datetime, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from django.test import SimpleTestCase, TestCase
@@ -25,7 +26,14 @@ from api.models import (
     User,
 )
 from apps.ledger.api import saldo_at
-from apps.reporting.render import _tanggal_label
+from apps.reporting.render import (
+    _STYLES,
+    _logo_file,
+    _p,
+    _tanggal_label,
+    item_berat,
+    render_statement,
+)
 from apps.reporting.statement import MAX_DISPLAYED_ROWS, StatementPeriodError, build_statement
 from apps.waste_catalog.api import buat_jenis_sampah
 from shared_kernel.kalkulasi import bulatkan_rupiah
@@ -129,6 +137,35 @@ class NasabahStatementDataTests(TestCase):
         # Saldo akhir follows the pencairan snapshot chain (7000 in setUp).
         self.assertEqual(data.saldo_akhir, Decimal("7000.00"))
         self.assertEqual(data.saldo_awal, Decimal(0))
+
+    def test_logo_resource_failure_is_nonfatal(self) -> None:
+        with patch("apps.reporting.render.resources.as_file", side_effect=OSError):
+            self.assertIsNone(_logo_file())
+
+    def test_render_statement_covers_escaped_subrows_and_long_bank_name(self) -> None:
+        self.bank.nama = "Bank Sampah dengan Nama yang Sangat Panjang " * 8
+        self.bank.save(update_fields=["nama"])
+        trans = Transaksi.objects.create(
+            nasabah=self.member,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.manager,
+            total_nilai=Decimal("7000.00"),
+        )
+        DetailTransaksi.objects.create(
+            transaksi=trans,
+            jenis_sampah=self.jenis,
+            nama_sampah_snapshot="PET & Plastik",
+            kategori_snapshot="plastik",
+            harga_snapshot=Decimal("3500.00"),
+            berat=Decimal("2.000"),
+            subtotal=Decimal("7000.00"),
+        )
+        with patch("apps.reporting.render._logo_file", return_value=None):
+            self.assertTrue(
+                render_statement(build_statement(self.member, self._request()), "pilah")
+            )
+        self.assertEqual(item_berat(Decimal("2.000")), "2 kg")
+        self.assertIn("&amp;", _p("A & B", _STYLES["cell"]).text)
 
     def test_detail_subrows_carry_item_snapshots(self) -> None:
         trans = Transaksi.objects.create(

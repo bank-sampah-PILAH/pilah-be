@@ -9,11 +9,25 @@ from unittest.mock import patch
 
 from django.db import DatabaseError, connection, connections, transaction
 from django.db.models import QuerySet
+from django.test import TestCase
 
 from api.models import DetailTransaksi, Pencairan, Transaksi
 from apps.reporting.operational import OperationalSummary, operational_summary
 from apps.reporting.snapshot import export_snapshot
 from apps.reporting.test_operational_report import OperationalReportFixture
+
+
+class ExportSnapshotSetupTests(TestCase):
+    def test_snapshot_sets_postgresql_read_only_repeatable_read(self) -> None:
+        with (
+            patch("apps.reporting.snapshot.connection.vendor", "postgresql"),
+            patch("apps.reporting.snapshot.connection.cursor") as cursor,
+        ):
+            with export_snapshot():
+                pass
+        cursor.return_value.__enter__.return_value.execute.assert_any_call(
+            "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
+        )
 
 
 @skipUnless(connection.vendor == "postgresql", "Real PostgreSQL snapshot regression")
