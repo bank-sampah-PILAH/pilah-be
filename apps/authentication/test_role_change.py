@@ -5,6 +5,7 @@ from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import AccessToken
 
 from api.models import BankSampah, Nasabah, User
+from apps.authentication.services import AuthService, AuthServiceError
 
 URL = "/api/v1/onboarding/role"
 
@@ -90,3 +91,22 @@ class RoleChangeTests(APITestCase):
         user.refresh_from_db()
         self.assertEqual(admin.role, User.Role.SUPERADMIN)
         self.assertEqual(user.role, User.Role.NASABAH)
+
+    def test_a_bank_registered_after_the_account_was_loaded_still_keeps_the_role(self) -> None:
+        user = self._fresh(User.Role.PENGELOLA)
+        # Loaded by this request before a parallel one registered a bank sampah.
+        stale = User.objects.get(pk=user.pk)
+        bank = BankSampah.objects.create(
+            nama="Bank Baru",
+            alamat="Depok",
+            no_hp_pic="+628111111111",
+            status=BankSampah.Status.PENDING,
+        )
+        User.objects.filter(pk=user.pk).update(bank_sampah=bank)
+
+        with self.assertRaises(AuthServiceError) as refused:
+            AuthService.change_role(stale, User.Role.NASABAH)
+
+        self.assertEqual(refused.exception.code, "role_locked")
+        user.refresh_from_db()
+        self.assertEqual(user.role, User.Role.PENGELOLA)
