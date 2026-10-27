@@ -1,0 +1,318 @@
+import uuid
+from decimal import Decimal
+
+from django.core.exceptions import ObjectDoesNotExist
+from django.db import models
+from django.utils import timezone
+
+from shared_kernel.kalkulasi import hitung_potongan
+from shared_kernel.models import TimestampedModel
+
+# Cross-context FK targets through the frozen api app registry (see AGENTS.md:
+# app_label = "api" until the squash migration). Constants keep them in sync.
+_NASABAH_API = "api.Nasabah"
+_USER_API = "api.User"
+_BANK_API = "api.BankSampah"
+
+
+class Saldo(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    nasabah = models.OneToOneField(_NASABAH_API, on_delete=models.CASCADE, related_name="saldo")
+    total_saldo = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = "api"
+        db_table = "saldo"
+
+
+class Transaksi(TimestampedModel):
+    class Tipe(models.TextChoices):
+        SETORAN = "setoran", "Setoran"
+
+    class StatusWA(models.TextChoices):
+        BELUM_DIKIRIM = "belum_dikirim", "Belum Dikirim"
+        TERKIRIM = "terkirim", "Terkirim"
+        GAGAL = "gagal", "Gagal"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    nasabah = models.ForeignKey(_NASABAH_API, on_delete=models.PROTECT, related_name="transaksi")
+    bank_sampah = models.ForeignKey(_BANK_API, on_delete=models.PROTECT, related_name="transaksi")
+    dicatat_oleh = models.ForeignKey(
+        _USER_API, on_delete=models.PROTECT, related_name="transaksi_dicatat"
+    )
+    tanggal = models.DateTimeField(default=timezone.now)
+    total_nilai = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    tipe = models.CharField(max_length=20, choices=Tipe.choices, default=Tipe.SETORAN)
+    # catatan holds "" for "no note": serializer allows blank, service maps an
+    # absent value to None only via the same field. Non-null keeps the column
+    # honest and satisfies S6553 (nullable text fields).
+    catatan = models.TextField(blank=True, default="")
+    status_wa = models.CharField(
+        max_length=20, choices=StatusWA.choices, default=StatusWA.BELUM_DIKIRIM
+    )
+    # PBI-12: kunci idempotensi POST setoran. Null boleh — setoran lama dan
+    # klien tanpa header tidak memilikinya.
+    idempotency_key = models.UUIDField(blank=True, null=True)
+    # S6553: "" instead of NULL for rows without the header. Comparisons stay
+    # correct because a setoran with a header always writes a real digest.
+    idempotency_request_hash = models.CharField(max_length=64, blank=True, default="")
+
+    class Meta:
+        # ponytail: single Django app label until the squash migration; db_table
+        # frozen so this move is code-only with zero migrations.
+        app_label = "api"
+        db_table = "transaksi"
+        ordering = ["-tanggal"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["bank_sampah", "idempotency_key"],
+                name="transaksi_bank_idempotency_key_unique",
+            ),
+        ]
+
+
+class DetailTransaksi(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    transaksi = models.ForeignKey(Transaksi, on_delete=models.CASCADE, related_name="items")
+    jenis_sampah = models.ForeignKey(
+        "api.JenisSampah", on_delete=models.PROTECT, related_name="detail_transaksi"
+    )
+    nama_sampah_snapshot = models.CharField(max_length=50)
+    kategori_snapshot = models.CharField(max_length=20)
+    harga_snapshot = models.DecimalField(max_digits=11, decimal_places=2)
+    berat = models.DecimalField(max_digits=10, decimal_places=3)
+    subtotal = models.DecimalField(max_digits=14, decimal_places=2)
+
+    class Meta:
+        app_label = "api"
+        db_table = "detail_transaksi"
+
+
+class TransaksiRevisi(models.Model):
+    """A replaced version of a setoran (PIL-427). Append-only: never edited or deleted."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    transaksi = models.ForeignKey(Transaksi, on_delete=models.PROTECT, related_name="revisi")
+    versi = models.PositiveIntegerField()
+    total_nilai = models.DecimalField(max_digits=14, decimal_places=2)
+    catatan = models.TextField(blank=True, default="")
+    # The replaced items as they were: nama_sampah, harga, berat, subtotal.
+    items = models.JSONField()
+    alasan = models.CharField(max_length=255)
+    diubah_oleh = models.ForeignKey(
+        _USER_API, on_delete=models.PROTECT, related_name="transaksi_revisi_dibuat"
+    )
+    diubah_pada = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "api"
+        db_table = "transaksi_revisi"
+        ordering = ["transaksi", "versi"]
+        constraints = [
+            models.UniqueConstraint(fields=["transaksi", "versi"], name="transaksi_revisi_unik"),
+        ]
+
+
+class Pencairan(TimestampedModel):
+    class Metode(models.TextChoices):
+        TUNAI = "tunai", "Tunai"
+        TRANSFER = "transfer", "Transfer"
+
+    class Status(models.TextChoices):
+        TERCATAT = "tercatat", "Tercatat"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    nasabah = models.ForeignKey(_NASABAH_API, on_delete=models.PROTECT, related_name="pencairan")
+    bank_sampah = models.ForeignKey(_BANK_API, on_delete=models.PROTECT, related_name="pencairan")
+    dicatat_oleh = models.ForeignKey(
+        _USER_API, on_delete=models.PROTECT, related_name="pencairan_dicatat"
+    )
+    tanggal = models.DateTimeField(default=timezone.now)
+    nominal = models.DecimalField(max_digits=14, decimal_places=2)
+    metode = models.CharField(max_length=20, choices=Metode.choices)
+    keterangan = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.TERCATAT)
+    # Receipt snapshots at record time; PIL-230 decides how edits affect them.
+    saldo_sebelum = models.DecimalField(max_digits=14, decimal_places=2)
+    saldo_sesudah = models.DecimalField(max_digits=14, decimal_places=2)
+    # `nominal` leaves the saldo (bruto); the pengurus pays `nominal - potongan`.
+    potongan = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    # Set when the pencairan came from confirming a draft (PIL-300).
+    draft = models.ForeignKey(
+        "api.DraftPencairan",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="pencairan",
+    )
+
+    class Meta:
+        app_label = "api"
+        db_table = "pencairan"
+        ordering = ["-tanggal"]
+        indexes = [models.Index(fields=["bank_sampah", "nasabah", "tanggal"])]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(nominal__gt=0), name="pencairan_nominal_positive"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(potongan__gte=0, potongan__lte=models.F("nominal")),
+                name="pencairan_potongan_within_nominal",
+            ),
+            # A draft pays each nasabah once, whatever path realises it.
+            models.UniqueConstraint(
+                fields=["draft", "nasabah"],
+                condition=models.Q(draft__isnull=False),
+                name="pencairan_draft_nasabah_unik",
+            ),
+        ]
+
+    @property
+    def dibayar(self) -> Decimal:
+        return self.nominal - self.potongan
+
+
+class PencairanRevisi(models.Model):
+    """A replaced version of a pencairan (PIL-230). Append-only: never edited or deleted."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    pencairan = models.ForeignKey(Pencairan, on_delete=models.PROTECT, related_name="revisi")
+    versi = models.PositiveIntegerField()
+    tanggal = models.DateTimeField()
+    nominal = models.DecimalField(max_digits=14, decimal_places=2)
+    metode = models.CharField(max_length=20, choices=Pencairan.Metode.choices)
+    keterangan = models.TextField(blank=True)
+    saldo_sebelum = models.DecimalField(max_digits=14, decimal_places=2)
+    saldo_sesudah = models.DecimalField(max_digits=14, decimal_places=2)
+    # Why this version was replaced, by whom and when.
+    alasan = models.CharField(max_length=255)
+    diubah_oleh = models.ForeignKey(
+        _USER_API, on_delete=models.PROTECT, related_name="pencairan_revisi_dibuat"
+    )
+    diubah_pada = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "api"
+        db_table = "pencairan_revisi"
+        ordering = ["pencairan", "versi"]
+        constraints = [
+            models.UniqueConstraint(fields=["pencairan", "versi"], name="pencairan_revisi_unik"),
+        ]
+
+
+class DraftPencairan(TimestampedModel):
+    """A payout plan for one or many nasabah (PIL-327). Never touches saldo."""
+
+    # A draft is read, saved and confirmed whole, in one request and one
+    # transaction. Past this it should be split; if banks outgrow it, items need
+    # their own paginated endpoints (ordered by nasabah name, then id).
+    MAKSIMAL_ITEM = 1000
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        DIKONFIRMASI = "dikonfirmasi", "Dikonfirmasi"
+        DIBATALKAN = "dibatalkan", "Dibatalkan"
+
+    class PotonganJenis(models.TextChoices):
+        PERSEN = "persen", "Persen"
+        RUPIAH = "rupiah", "Rupiah"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    bank_sampah = models.ForeignKey(
+        _BANK_API, on_delete=models.PROTECT, related_name="draft_pencairan"
+    )
+    nama = models.CharField(max_length=150, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+    # Default potongan for every item that does not carry its own.
+    potongan_jenis = models.CharField(
+        max_length=10, choices=PotonganJenis.choices, default=PotonganJenis.PERSEN
+    )
+    potongan_nilai = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    # What the pengurus last applied to everyone ("50%" or "up to Rp 100.000"), kept so the
+    # form reopens as it was left. Only a record: the item nominals are the truth.
+    jumlah_jenis = models.CharField(
+        max_length=10, choices=PotonganJenis.choices, blank=True, default=""
+    )
+    jumlah_nilai = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    dibuat_oleh = models.ForeignKey(
+        _USER_API, on_delete=models.PROTECT, related_name="draft_pencairan_dibuat"
+    )
+    diubah_oleh = models.ForeignKey(
+        _USER_API, on_delete=models.PROTECT, related_name="draft_pencairan_diubah"
+    )
+
+    class Meta:
+        app_label = "api"
+        db_table = "draft_pencairan"
+        ordering = ["-created_at"]
+
+    @property
+    def jumlah_item(self) -> int:
+        return len(self.items.all())
+
+    @property
+    def total_nominal(self) -> Decimal:
+        return sum((item.nominal for item in self.items.all()), Decimal(0))
+
+    @property
+    def total_potongan(self) -> Decimal:
+        return sum((item.potongan for item in self.items.all()), Decimal(0))
+
+    @property
+    def total_dibayar(self) -> Decimal:
+        return self.total_nominal - self.total_potongan
+
+
+class DraftPencairanItem(TimestampedModel):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    draft = models.ForeignKey(DraftPencairan, on_delete=models.CASCADE, related_name="items")
+    nasabah = models.ForeignKey(
+        _NASABAH_API, on_delete=models.PROTECT, related_name="draft_pencairan_item"
+    )
+    nominal = models.DecimalField(max_digits=14, decimal_places=2)
+    metode = models.CharField(
+        max_length=20, choices=Pencairan.Metode.choices, default=Pencairan.Metode.TUNAI
+    )
+    # Blank jenis means "follow the draft default"; a set pair overrides it.
+    potongan_jenis = models.CharField(
+        max_length=10, choices=DraftPencairan.PotonganJenis.choices, blank=True, default=""
+    )
+    potongan_nilai = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    # The nasabah's saldo just before this was paid; set once, on confirmation.
+    saldo_sebelum = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+
+    class Meta:
+        app_label = "api"
+        db_table = "draft_pencairan_item"
+        ordering = ["nasabah__nama", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["draft", "nasabah"], name="draft_item_nasabah_unik"),
+            models.CheckConstraint(
+                condition=models.Q(nominal__gt=0), name="draft_item_nominal_positive"
+            ),
+        ]
+
+    @property
+    def potongan(self) -> Decimal:
+        """Effective potongan: the item's own pair, else the draft default; whole rupiah."""
+        if self.potongan_jenis:
+            jenis, nilai = self.potongan_jenis, self.potongan_nilai or Decimal(0)
+        else:
+            jenis, nilai = self.draft.potongan_jenis, self.draft.potongan_nilai
+        return hitung_potongan(self.nominal, jenis, nilai)
+
+    @property
+    def saldo_saat_ini(self) -> Decimal:
+        """The saldo to start from: the nasabah's saldo right now while the draft is open,
+        and what it was when paid once confirmed, since paying lowers the live one."""
+        if self.saldo_sebelum is not None:
+            return self.saldo_sebelum
+        try:
+            return self.nasabah.saldo.total_saldo
+        except ObjectDoesNotExist:
+            return Decimal(0)
+
+    @property
+    def dibayar(self) -> Decimal:
+        return self.nominal - self.potongan

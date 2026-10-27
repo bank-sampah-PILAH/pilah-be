@@ -1,6 +1,6 @@
 ---
 name: lgtm
-description: Merge an approved GitHub pull request, delete its merged remote branch, and remove its clean linked worktree. Use when the user says LGTM, approve and merge, merge this PR, or asks to clean up a merged worktree.
+description: Merge an approved GitHub pull request, using gh-stack for stacked PRs and standalone cleanup for ordinary PRs. Use when the user says LGTM, approve and merge, merge this PR, or asks to clean up a merged worktree.
 argument-hint: "[PR URL, number, or branch]"
 compatibility: Requires git and the GitHub CLI (gh); run from the PR's linked worktree.
 metadata:
@@ -26,6 +26,7 @@ Run this workflow from the feature worktree created by `ship`. It is GitHub-only
 
 - Require a named branch, PR URL/number, or a current non-default branch. If the target is ambiguous, stop and ask; never guess among multiple PRs.
 - Resolve the PR with `gh pr view <target> --json number,title,state,isDraft,mergeStateStatus,reviewDecision,statusCheckRollup,headRefName,headRefOid,baseRefName,url`.
+- Check `gh stack view --json` and match the target PR in `branches[].pr.number`. Treat a PR based on another PR's head branch as stacked too. If it is stacked, use the stack workflow below; if stack membership is uncertain, stop and resolve it rather than using ordinary PR merge or cleanup.
 - Run `gh pr checks <number> --required` and stop if any required check is failing or pending. Also stop for `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, a draft PR, or a dirty, blocked, conflicted, or unknown merge state.
 - Require the PR head branch to equal the current branch when running from a worktree. Never merge a different branch accidentally.
 - Stop if the current worktree has uncommitted or untracked files. Never discard user work.
@@ -33,7 +34,15 @@ Run this workflow from the feature worktree created by `ship`. It is GitHub-only
 
 ## 2. Merge on GitHub
 
-- Use the repository's documented merge policy. If no policy is documented and the user did not specify a method, use squash merge:
+### Stacked PRs
+
+- Use `gh stack merge <number> --yes --squash` for a stack member when squash is the repository policy/default; use `--merge` or `--rebase` when required by policy. `gh pr merge` cannot safely merge a stack. This merges the selected PR and every unmerged PR below it, so verify each PR in that set is open, approved, mergeable, and has passing required checks; capture and recheck their head SHAs before merging.
+- After the merge, verify PR states with `gh stack view --json`. If any stack PRs remain open, run `gh stack sync` and verify they remain open and correctly based.
+- Never manually delete a stack branch. Keep its linked worktree while any stack PR remains open; once all are merged, remove the clean worktree using the normal safe worktree-removal procedure.
+
+### Standalone PRs
+
+- For a standalone PR, use the repository's documented merge policy. If no policy is documented and the user did not specify a method, use squash merge:
 
   ```bash
   gh pr merge <number> --squash --match-head-commit <head-sha>
@@ -46,7 +55,7 @@ Run this workflow from the feature worktree created by `ship`. It is GitHub-only
   gh pr view <number> --json state,mergedAt,headRefName,url
   ```
 
-- Only after confirmed `MERGED`, delete the remote head branch. Use an explicit remote deletion rather than `--delete-branch`, because the local branch is still checked out in the worktree:
+- For standalone PRs only, and only after confirmed `MERGED`, delete the remote head branch. Use an explicit remote deletion rather than `--delete-branch`, because the local branch is still checked out in the worktree:
 
   ```bash
   git push origin --delete <head-branch>
@@ -56,22 +65,22 @@ Run this workflow from the feature worktree created by `ship`. It is GitHub-only
 
 ## 3. Remove the linked worktree
 
-- Run cleanup from the primary checkout, not from the worktree being removed:
+- Run cleanup from the primary checkout, not from the worktree being removed. For stacks, only remove the worktree once every stack PR is merged:
 
   ```bash
   git -C <primary-checkout> worktree remove <worktree-path>
   ```
 
 - Do not use `--force`. If removal refuses because the worktree is dirty or otherwise unsafe, stop and report the exact blocker.
-- After removal, run `git -C <primary-checkout> worktree prune` and verify the worktree path is gone. Leave the local branch reference in place unless the user explicitly asks to delete it; remote branch deletion and worktree removal are the required cleanup.
+- After removal, run `git -C <primary-checkout> worktree prune` and verify the worktree path is gone. Leave local branch references in place unless the user explicitly asks to delete them. Remote branch deletion is required only for standalone PRs; never manually delete stack branches.
 
 ## 4. Report
 
 Return a concise result containing:
 
 - PR URL and merge method
-- merge confirmation and remote branch deletion result
-- removed worktree path and branch
+- merge confirmation and remote branch state
+- removed worktree path and branch, or why cleanup was deferred
 - any cleanup that was not performed
 
 Never claim merge, branch deletion, or worktree removal succeeded without inspecting each command result.
