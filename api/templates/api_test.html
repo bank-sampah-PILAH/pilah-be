@@ -946,12 +946,7 @@
         state.report.failure = error.message;
         setRunState("FAILED", "failed");
       } finally {
-        state.report.finished_at = new Date().toISOString();
-        state.report.duration_ms = Math.round(performance.now() - runStart);
-        state.report.created = { ...state.ids };
-        els.runAll.disabled = false;
-        els.download.disabled = false;
-        renderReport();
+        finishRun(runStart);
       }
     }
 
@@ -1132,16 +1127,20 @@
         state.report.failure = error.message;
         setRunState("FAILED", "failed");
       } finally {
-        state.report.finished_at = new Date().toISOString();
-        state.report.duration_ms = Math.round(performance.now() - runStart);
-        state.report.created = { ...state.ids };
-        els.runAll.disabled = false;
+        finishRun(runStart);
         if (state.token) {
           els.runToken.disabled = false;
         }
-        els.download.disabled = false;
-        renderReport();
       }
+    }
+
+    function finishRun(runStart) {
+      state.report.finished_at = new Date().toISOString();
+      state.report.duration_ms = Math.round(performance.now() - runStart);
+      state.report.created = { ...state.ids };
+      els.runAll.disabled = false;
+      els.download.disabled = false;
+      renderReport();
     }
 
     function renderReport() {

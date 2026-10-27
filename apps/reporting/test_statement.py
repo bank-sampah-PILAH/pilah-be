@@ -6,8 +6,10 @@ build_statement, including the BalanceService.saldo_at equivalence that pins
 the tie-break rule. HTTP contract lives in apps/nasabah/test_history_pdf_export.py.
 """
 
+from dataclasses import replace
 from datetime import datetime, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from django.test import SimpleTestCase, TestCase
@@ -25,7 +27,7 @@ from api.models import (
     User,
 )
 from apps.ledger.api import saldo_at
-from apps.reporting.render import _tanggal_label
+from apps.reporting.render import _tanggal_label, item_berat, render_statement
 from apps.reporting.statement import MAX_DISPLAYED_ROWS, StatementPeriodError, build_statement
 from apps.waste_catalog.api import buat_jenis_sampah
 from shared_kernel.kalkulasi import bulatkan_rupiah
@@ -129,6 +131,49 @@ class NasabahStatementDataTests(TestCase):
         # Saldo akhir follows the pencairan snapshot chain (7000 in setUp).
         self.assertEqual(data.saldo_akhir, Decimal("7000.00"))
         self.assertEqual(data.saldo_awal, Decimal(0))
+
+    def test_missing_logo_resource_does_not_abort_pdf_render(self) -> None:
+        data = build_statement(self.member, self._request())
+        with patch("apps.reporting.render.resources.as_file", side_effect=OSError):
+            pdf = render_statement(data, "pilah")
+        self.assertTrue(pdf.startswith(b"%PDF-"))
+
+    def test_render_statement_escapes_special_characters_in_subrows(self) -> None:
+        trans = Transaksi.objects.create(
+            nasabah=self.member,
+            bank_sampah=self.bank,
+            dicatat_oleh=self.manager,
+            total_nilai=Decimal("7000.00"),
+        )
+        DetailTransaksi.objects.create(
+            transaksi=trans,
+            jenis_sampah=self.jenis,
+            nama_sampah_snapshot="<PET & Plastik>",
+            kategori_snapshot="plastik",
+            harga_snapshot=Decimal("3500.00"),
+            berat=Decimal("2.000"),
+            subtotal=Decimal("7000.00"),
+        )
+        pdf = render_statement(build_statement(self.member, self._request()), "pilah")
+        self.assertTrue(pdf.startswith(b"%PDF-"))
+
+    def test_long_bank_name_is_ellipsized_in_pdf_header(self) -> None:
+        long_name = "Bank Sampah dengan Nama yang Sangat Panjang " * 4
+        data = replace(build_statement(self.member, self._request()), bank_nama=long_name)
+        with patch("apps.reporting.render.Canvas.drawRightString", autospec=True) as draw_right:
+            pdf = render_statement(data, "pilah")
+        rendered_names = [
+            call.args[3]
+            for call in draw_right.call_args_list
+            if len(call.args) > 3 and call.args[3].startswith("Bank Sampah")
+        ]
+        self.assertTrue(pdf.startswith(b"%PDF-"))
+        self.assertEqual(len(rendered_names), 1)
+        self.assertLess(len(rendered_names[0]), len(long_name))
+        self.assertTrue(rendered_names[0].endswith("…"))
+
+    def test_item_berat_formats_integral_weight(self) -> None:
+        self.assertEqual(item_berat(Decimal("2.000")), "2 kg")
 
     def test_detail_subrows_carry_item_snapshots(self) -> None:
         trans = Transaksi.objects.create(
