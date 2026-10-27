@@ -248,10 +248,9 @@ class NasabahHistoryView(ListAPIView[Transaksi]):
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         page = self.paginate_queryset(queryset)
-        serializer = self.get_serializer(page or queryset, many=True)
-        if page is not None:
-            return self.get_paginated_response(serializer.data)
-        return Response(serializer.data)
+        assert page is not None  # StandardPagination is always enabled.
+        serializer = self.get_serializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
 
 
 class NasabahHistoryExportPdfView(GenericAPIView[Nasabah]):
