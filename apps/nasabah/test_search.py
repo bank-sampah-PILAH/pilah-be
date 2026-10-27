@@ -5,7 +5,7 @@ from typing import Any
 from rest_framework.response import Response
 
 from api.models import BankSampah, Nasabah, Saldo
-from tests.regression.helpers import RegressionTestCase
+from tests.regression.helpers import RegressionTestCase, nasabah_payload
 
 
 class NasabahSearchTests(RegressionTestCase):
@@ -110,7 +110,18 @@ class NasabahSearchTests(RegressionTestCase):
             with self.subTest(query=query):
                 self.assert_search(query, [self.budi, self.siti, self.dewi])
 
-    def test_type_maximum_length_id(self) -> None:
+    def test_type_maximum_api_length_id_created_through_api(self) -> None:
+        code = "NAS-" + "0" * 16
+        response = self.client.post(
+            self.url,
+            nasabah_payload(kode=code, no_hp="081211110004", email="long-api@example.test"),
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        customer = Nasabah.objects.get(pk=response.data["id"])
+        self.assert_search(code, [customer])
+
+    def test_type_legacy_id_at_model_column_limit(self) -> None:
         code = "MEMBER-" + "0" * 23
         customer = self.customer(code, "Long ID", "081211110004", "long@example.test")
         self.assert_search(code, [customer])
