@@ -6,14 +6,18 @@ from uuid import UUID
 from django.db import IntegrityError, transaction
 from django.db.models import Prefetch, QuerySet
 from django.http import HttpResponse
+from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ParseError
+from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from api.models import BankSampah, DraftPencairan, DraftPencairanItem, Pencairan, Transaksi, User
+from apps.ledger.activity import activity_rows, serialize_activity_page
+from apps.ledger.schema import ACTIVITY_PARAMETERS, ACTIVITY_RESPONSE, ActivityPagination
 from apps.ledger.serializers import (
     DraftBatchSerializer,
     DraftExportQuerySerializer,
@@ -23,24 +27,31 @@ from apps.ledger.serializers import (
     DraftPencairanListSerializer,
     DraftPencairanSerializer,
     DraftPencairanUpdateSerializer,
-    PencairanCreateSerializer,
     PencairanDetailSerializer,
     PencairanEditSerializer,
     PencairanRevisiSerializer,
     TransactionCreateSerializer,
     TransactionDetailSerializer,
+    TransactionEditSerializer,
     TransactionListSerializer,
 )
 from apps.ledger.services import (
     DraftPencairanService,
     DraftTidakBisaDiubah,
     PencairanService,
+    SaldoTidakCukup,
     TransactionFilterService,
     TransactionService,
 )
 from apps.nasabah.api import kandidat_pencairan
 from apps.notification.api import send_setoran_receipt
-from apps.reporting.api import export_draft_pencairan, export_excel
+from apps.reporting.api import (
+    export_draft_pencairan,
+    export_operational_report,
+    operational_queries,
+    operational_summary,
+)
+from shared_kernel.http_headers import CONTENT_DISPOSITION, IDEMPOTENCY_KEY
 from shared_kernel.permissions import (
     IsActivePengelola,
     IsActivePengelolaOrNasabah,
@@ -60,7 +71,7 @@ def _bank_sampah(request: Request) -> BankSampah:
 
 
 def _idempotency_key(request: Request) -> UUID | None:
-    raw_key = request.headers.get("Idempotency-Key")
+    raw_key = request.headers.get(IDEMPOTENCY_KEY)
     if raw_key is None:
         return None
     try:
@@ -92,6 +103,28 @@ def _find_idempotent_transaction(bank: BankSampah, key: UUID) -> Transaksi | Non
     return Transaksi.objects.filter(bank_sampah=bank, idempotency_key=key).first()
 
 
+class ActivityHistoryView(GenericAPIView[Any]):
+    permission_classes = [IsActivePengelola]
+    pagination_class = ActivityPagination
+    serializer_class = TransactionListSerializer
+
+    @extend_schema(parameters=ACTIVITY_PARAMETERS, responses=ACTIVITY_RESPONSE)
+    def get(self, request: Request) -> Response:
+        bank = current_bank(request)
+        try:
+            deposits, payouts = operational_queries(bank, request)
+            rows = activity_rows(deposits, payouts)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
+        page = self.paginate_queryset(rows)
+        assert page is not None  # StandardPagination always returns a page.
+        response = self.get_paginated_response(serialize_activity_page(list(page), bank))
+        response.data["summary"] = operational_summary(deposits, payouts)
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
+
+
 class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
     permission_classes = [IsActivePengelola]
     serializer_class = TransactionListSerializer
@@ -99,12 +132,17 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
     def get_serializer_class(
         self,
     ) -> type[
-        TransactionCreateSerializer | TransactionDetailSerializer | TransactionListSerializer
+        TransactionCreateSerializer
+        | TransactionDetailSerializer
+        | TransactionEditSerializer
+        | TransactionListSerializer
     ]:
         if self.action == "create":
             return TransactionCreateSerializer
         if self.action == "retrieve":
             return TransactionDetailSerializer
+        if self.action == "partial_update":
+            return TransactionEditSerializer
         return TransactionListSerializer
 
     def get_queryset(self) -> QuerySet[Transaksi]:
@@ -113,6 +151,9 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
             .select_related("nasabah", "bank_sampah", "dicatat_oleh")
             .prefetch_related("items")
         )
+        # Only the detail response carries the change history.
+        if self.action in {"retrieve", "partial_update"}:
+            qs = qs.prefetch_related("revisi__diubah_oleh")
         search = self.request.query_params.get("search", "")
         nasabah_id = self.request.query_params.get("nasabah_id")
         if len(search) >= 2:
@@ -135,19 +176,20 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
 
     @action(detail=False, methods=["get"], url_path="export")
     def export(self, request: Request) -> HttpResponse:
-        qs = self.get_queryset()
         try:
-            qs = TransactionFilterService.apply_period(qs, request)
+            report = export_operational_report(current_bank(request), request)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
-        if not qs.exists():
+        if report is None:
             return Response({"error": "Tidak ada data pada periode ini"}, status=400)
-        content, filename = export_excel(qs, request)
+        content, filename = report
         response = HttpResponse(
             content,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response[CONTENT_DISPOSITION] = f'attachment; filename="{filename}"'
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
         return response
 
     def create(self, request: Request) -> Response:
@@ -196,6 +238,18 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         transaksi = self.get_object()
         return Response(TransactionDetailSerializer(transaksi).data)
 
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
+        transaksi = self.get_object()
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            TransactionService.edit_setoran(
+                current_user(request), transaksi, serializer.validated_data
+            )
+        except SaldoTidakCukup as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(TransactionDetailSerializer(self.get_queryset().get(pk=transaksi.pk)).data)
+
     @action(detail=True, methods=["post"], url_path="notify-wa")
     def notify_wa(self, request: Request, pk: str | None = None) -> Response:
         transaksi = self.get_object()
@@ -208,7 +262,7 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
     serializer_class = PencairanDetailSerializer
 
     def get_permissions(self) -> list[BasePermission]:
-        # Recording stays pengurus-only; nasabah may read their own riwayat.
+        # Edits stay pengurus-only; nasabah may read their own riwayat.
         if self.action in ("list", "retrieve"):
             return [IsActivePengelolaOrNasabah()]
         return [IsActivePengelola()]
@@ -237,12 +291,6 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         # Pagination is configured globally (PAGE_SIZE), so a page always exists.
         page = self.paginate_queryset(qs)
         return self.get_paginated_response(PencairanDetailSerializer(page, many=True).data)
-
-    def create(self, request: Request) -> Response:
-        serializer = PencairanCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        pencairan = PencairanService.create_pencairan(_user(request), serializer.validated_data)
-        return Response(PencairanDetailSerializer(pencairan).data, status=status.HTTP_201_CREATED)
 
     def retrieve(self, request: Request, pk: str | None = None) -> Response:
         return Response(PencairanDetailSerializer(self.get_object()).data)
@@ -368,7 +416,7 @@ class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg] 
             )
             transaction.set_rollback(True)
         response = HttpResponse(content, content_type=content_type)
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response[CONTENT_DISPOSITION] = f'attachment; filename="{filename}"'
         return response
 
     @action(detail=True, methods=["get"], url_path="export")
@@ -380,5 +428,5 @@ class DraftPencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg] 
             self.get_object(), query.validated_data["berkas"]
         )
         response = HttpResponse(content, content_type=content_type)
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response[CONTENT_DISPOSITION] = f'attachment; filename="{filename}"'
         return response

@@ -1,9 +1,9 @@
 import mimetypes
-from urllib.parse import urlencode
 
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
+from django.db.models import QuerySet
 from django.http import FileResponse, Http404, HttpRequest
 from django.views.decorators.http import require_GET
 from rest_framework import viewsets
@@ -16,6 +16,7 @@ from rest_framework.views import APIView
 
 from api.models import BankSampah, User
 from apps.authentication.api import user_state_hint
+from apps.bank_sampah.constants import REVIEW_BANK_ID
 from apps.bank_sampah.serializers import (
     ApprovalDecisionSerializer,
     ApprovalLogSerializer,
@@ -32,6 +33,7 @@ from shared_kernel.permissions import (
     IsPengelola,
     IsPrimaryPengelola,
     IsSuperAdmin,
+    is_review_superadmin,
 )
 from shared_kernel.scoping import current_bank, current_user
 
@@ -74,6 +76,12 @@ class SuperAdminBankSampahViewSet(viewsets.GenericViewSet):  # type: ignore[type
     permission_classes = [IsSuperAdmin]
     serializer_class = BankSampahApprovalListSerializer
     queryset = BankSampah.objects.all().order_by("created_at")
+
+    def get_queryset(self) -> QuerySet[BankSampah]:
+        queryset = super().get_queryset()
+        if is_review_superadmin(current_user(self.request).email):
+            return queryset.filter(pk=REVIEW_BANK_ID, status=BankSampah.Status.PENDING)
+        return queryset
 
     def list(self, request: Request) -> Response:
         status_filter = request.query_params.get("status", BankSampah.Status.PENDING)
@@ -189,7 +197,7 @@ class GenerateInviteView(APIView):
     def post(self, request: Request) -> Response:
         bank = current_bank(request)
         token = TeamService.generate_invite(bank)
-        invite_path = f"/invite?{urlencode({'token': token})}"
+        invite_path = f"/invite/{token}"
         base_url = request.build_absolute_uri("/")[:-1]
         public_base = getattr(settings, "PILAH_PUBLIC_APP_URL", "") or base_url
         return Response(

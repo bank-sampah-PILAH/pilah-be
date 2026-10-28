@@ -1,10 +1,108 @@
 """Identity contracts: login, refresh, logout, me, and access gating."""
 
+from unittest.mock import patch
+
+from django.core.cache import caches
+
 from api.models import BankSampah, User
+from apps.authentication.views import PasswordLoginThrottle
 from tests.regression.helpers import RegressionTestCase
 
 
 class AuthRegressionTests(RegressionTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        rate_limit_cache = caches["auth_rate_limit"]
+        rate_limit_cache.clear()
+        self.addCleanup(rate_limit_cache.clear)
+
+    def test_password_login_rejects_malformed_credentials(self) -> None:
+        self.client.credentials()
+
+        response = self.client.post(
+            "/api/v1/auth/login", {"email": "not-an-email", "password": "x"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("errors", response.data)
+
+    def test_password_login_hides_ambiguous_email_matches(self) -> None:
+        User.objects.create_user(email="duplicate@example.com", nama="First")
+        User.objects.create_user(email="Duplicate@example.com", nama="Second")
+
+        response = self.client.post(
+            "/api/v1/auth/login",
+            {"email": "duplicate@example.com", "password": "any-password"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.data["code"], "invalid_credentials")
+
+    def test_password_login_rejects_unallowlisted_superadmin(self) -> None:
+        User.objects.create_user(
+            email="blocked-admin@example.com",
+            nama="Blocked Admin",
+            role=User.Role.SUPERADMIN,
+            is_profile_complete=True,
+            email_verified=True,
+            password="correct-password",
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/login",
+            {"email": "blocked-admin@example.com", "password": "correct-password"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.data["code"], "invalid_credentials")
+
+    def test_password_login_is_rate_limited(self) -> None:
+        self.client.credentials()
+        rate_limit_cache = caches["auth_rate_limit"]
+        self.assertIs(PasswordLoginThrottle.cache, rate_limit_cache)
+        payload = {"email": "sari@example.com", "password": "password"}
+
+        with patch(
+            "apps.authentication.views.AuthService.login_with_password", return_value={}
+        ) as login:
+            responses = [
+                self.client.post("/api/v1/auth/login", payload, format="json") for _ in range(6)
+            ]
+
+        self.assertEqual([response.status_code for response in responses], [200] * 5 + [429])
+        self.assertEqual(login.call_count, 5)
+        login.assert_called_with("sari@example.com", "password")
+
+    def test_password_login_throttle_ignores_untrusted_forwarded_prefix(self) -> None:
+        self.client.credentials()
+        payload = {"email": "sari@example.com", "password": "password"}
+        forwarded_for = [
+            f"{spoofed}, 198.51.100.23, 35.191.0.1, 35.191.0.2"
+            for spoofed in (
+                "192.0.2.1",
+                "192.0.2.2",
+                "192.0.2.3",
+                "192.0.2.4",
+                "192.0.2.5",
+                "192.0.2.6",
+            )
+        ]
+
+        with patch("apps.authentication.views.AuthService.login_with_password", return_value={}):
+            responses = [
+                self.client.post(
+                    "/api/v1/auth/login",
+                    payload,
+                    format="json",
+                    HTTP_X_FORWARDED_FOR=header,
+                )
+                for header in forwarded_for
+            ]
+
+        self.assertEqual([response.status_code for response in responses], [200] * 5 + [429])
+
     def test_protected_endpoints_require_auth(self) -> None:
         self.client.credentials()
         paths = [
@@ -79,6 +177,87 @@ class AuthRegressionTests(RegressionTestCase):
     def test_google_login_rejects_missing_token(self) -> None:
         self.client.credentials()
         self.assertGreaterEqual(self.client.post("/api/v1/auth/google", {}).status_code, 400)
+
+    def test_password_login_returns_the_google_session_contract(self) -> None:
+        self.client.credentials()
+        self.user.set_password("correct-password")
+        self.user.email_verified = True
+        self.user.save(update_fields=["password", "email_verified"])
+
+        response = self.client.post(
+            "/api/v1/auth/login",
+            {"email": " SARI@EXAMPLE.COM ", "password": "correct-password"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, getattr(response, "data", None))
+        self.assertEqual(
+            set(response.data),
+            {
+                "access_token",
+                "refresh_token",
+                "token_type",
+                "expires_in",
+                "user",
+                "next_step",
+                "is_new_user",
+            },
+        )
+        self.assertEqual(response.data["user"]["role"], User.Role.PENGELOLA)
+        self.assertEqual(response.data["next_step"], "dashboard")
+        self.assertFalse(response.data["is_new_user"])
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access_token']}")
+        self.assertEqual(self.client.get("/api/v1/auth/me").status_code, 200)
+        refresh = self.client.post(
+            "/api/v1/auth/refresh",
+            {"refresh_token": response.data["refresh_token"]},
+            format="json",
+        )
+        self.assertEqual(refresh.status_code, 200, refresh.data)
+
+    def test_password_login_returns_the_same_error_for_invalid_credentials(self) -> None:
+        self.client.credentials()
+        self.user.set_password("correct-password")
+        self.user.email_verified = True
+        self.user.save(update_fields=["password", "email_verified"])
+        inactive = self.make_user("inactive@example.com", User.Role.PENGELOLA, self.bank)
+        inactive.set_password("correct-password")
+        inactive.is_active = False
+        inactive.save(update_fields=["password", "is_active"])
+        expected = {
+            "error": "Email atau kata sandi tidak valid",
+            "code": "invalid_credentials",
+        }
+
+        for email, password in (
+            ("missing@example.com", "correct-password"),
+            (self.user.email, "wrong-password"),
+            (inactive.email, "correct-password"),
+        ):
+            with self.subTest(email=email):
+                response = self.client.post(
+                    "/api/v1/auth/login",
+                    {"email": email, "password": password},
+                    format="json",
+                )
+                self.assertEqual(response.status_code, 401, getattr(response, "data", None))
+                self.assertEqual(response.data, expected)
+
+    def test_password_login_requires_verified_email_unless_explicitly_exempt(self) -> None:
+        self.client.credentials()
+        self.user.set_password("correct-password")
+        self.user.email_verified = False
+        self.user.save(update_fields=["password", "email_verified"])
+        payload = {"email": self.user.email, "password": "correct-password"}
+
+        with self.settings(PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS=()):
+            denied = self.client.post("/api/v1/auth/login", payload, format="json")
+        self.assertEqual(denied.status_code, 401, getattr(denied, "data", None))
+        self.assertEqual(denied.data["code"], "invalid_credentials")
+
+        with self.settings(PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS=" SARI@EXAMPLE.COM "):
+            allowed = self.client.post("/api/v1/auth/login", payload, format="json")
+        self.assertEqual(allowed.status_code, 200, getattr(allowed, "data", None))
 
     def test_non_pengelola_roles_denied_on_pengelola_endpoints(self) -> None:
         paths = [

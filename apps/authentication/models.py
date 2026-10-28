@@ -43,6 +43,7 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     google_id = models.CharField(max_length=255, blank=True, unique=True, null=True)
     email = models.EmailField(unique=True)
+    email_verified = models.BooleanField(default=False)
     nama = models.CharField(max_length=150)
     no_hp = models.CharField(max_length=20, blank=True)
     jenis_kelamin = models.CharField(max_length=20, choices=Gender.choices, blank=True)

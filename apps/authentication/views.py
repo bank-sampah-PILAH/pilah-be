@@ -1,14 +1,15 @@
-import json
 from typing import Any
 
 import requests
 from django.conf import settings
+from django.core.cache import caches
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.http import HttpResponse, HttpResponseRedirect
 from django.utils.http import urlencode
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -18,6 +19,7 @@ from apps.authentication.serializers import (
     GoogleAuthSerializer,
     GoogleRegistrationSerializer,
     LogoutSerializer,
+    PasswordLoginSerializer,
     RefreshTokenSerializer,
     UserProfileSerializer,
 )
@@ -26,6 +28,8 @@ from apps.authentication.services import (
     AuthServiceError,
     OnboardingService,
 )
+from shared_kernel.csp import nonce_baru, tandai_dokumen_tertutup
+from shared_kernel.keluaran_dokumen import LITERAL_SKRIP, TEKS_HTML
 from shared_kernel.permissions import (
     IsRegistrationRole,
 )
@@ -49,6 +53,30 @@ class GoogleAuthView(APIView):
             return Response({"error": str(exc), "code": exc.code}, status=exc.status_code)
         except Exception:
             return Response({"error": "ID Token invalid atau expired"}, status=401)
+
+
+class PasswordLoginThrottle(ScopedRateThrottle):
+    # Login guessing limits must be shared across autoscaled Cloud Run instances.
+    cache = caches["auth_rate_limit"]
+
+
+class PasswordLoginView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [PasswordLoginThrottle]
+    throttle_scope = "password_login"
+    serializer_class = PasswordLoginSerializer
+
+    def post(self, request: Request) -> Response:
+        serializer = PasswordLoginSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({"errors": serializer.errors}, status=422)
+        try:
+            payload = AuthService.login_with_password(
+                serializer.validated_data["email"], serializer.validated_data["password"]
+            )
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
+        return Response(payload)
 
 
 class GoogleOAuthStartView(APIView):
@@ -125,25 +153,29 @@ class GoogleOAuthCallbackView(APIView):
     def _popup_response(
         ok: bool, payload: Any, next_url: str = _OAUTH_FALLBACK_PATH
     ) -> HttpResponse:
-        message = json.dumps({"type": "pilah-google-oauth", "ok": ok, "payload": payload})
-        fallback = json.dumps(payload, indent=2)
+        nonce = nonce_baru()
+        isi = {"type": "pilah-google-oauth", "ok": ok, "payload": payload}
+        message = LITERAL_SKRIP.loloskan(isi)
+        fallback = TEKS_HTML.loloskan(payload)
         html = f"""<!doctype html>
 <html>
 <head><meta charset="utf-8"><title>PILAH Google OAuth</title></head>
 <body>
 <pre>{fallback}</pre>
-<script>
+<script nonce="{nonce}">
   const message = {message};
   if (window.opener) {{
     window.opener.postMessage(message, window.location.origin);
     window.close();
   }} else {{
-    window.location.href = {json.dumps(next_url)};
+    window.location.href = {LITERAL_SKRIP.loloskan(next_url)};
   }}
 </script>
 </body>
 </html>"""
-        return HttpResponse(html, status=200 if ok else 400)
+        response = HttpResponse(html, status=200 if ok else 400)
+        tandai_dokumen_tertutup(response, nonce)
+        return response
 
 
 class RefreshTokenView(APIView):

@@ -15,25 +15,53 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
+from typing import Any
+from urllib.parse import quote
+
 from django.conf import settings
 from django.contrib import admin
-from django.http import HttpRequest, JsonResponse
+from django.http import (
+    HttpRequest,
+    HttpResponse,
+    HttpResponseRedirect,
+    HttpResponseServerError,
+    JsonResponse,
+)
 from django.urls import include, path, re_path
 from django.views.decorators.http import require_GET
 from django.views.generic import TemplateView
 from django.views.static import serve
-from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerSplitView
+from rest_framework.request import Request
+from rest_framework.response import Response
 
 from apps.bank_sampah.views import bank_sampah_activity_media
+from shared_kernel.csp import nonce_baru, tandai_halaman_bernonce
 from shared_kernel.debug_only import debug_only
 from shared_kernel.health import healthz
 
 
 class ApiTestView(TemplateView):
+    """Halaman uji coba API, hanya saat DEBUG.
+
+    Templatenya memuat satu blok `<style>` dan satu blok `<script>` inline yang
+    tidak bisa dipindah ke berkas luar tanpa merombak halaman ini, jadi
+    keduanya diizinkan lewat nonce per respons. Tanpa itu kebijakan halaman
+    memblokir keduanya dan halaman ini mati tanpa pesan apa pun.
+    """
+
     template_name = "api_test.html"
+    csp_nonce = ""
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        self.csp_nonce = nonce_baru()
+        response = super().get(request, *args, **kwargs)
+        tandai_halaman_bernonce(response, self.csp_nonce)
+        return response
 
     def get_context_data(self, **kwargs: object) -> dict[str, object]:
         context = super().get_context_data(**kwargs)
+        context["csp_nonce"] = self.csp_nonce
         context["google_client_id"] = settings.GOOGLE_CLIENT_ID
         superadmin_emails = settings.PILAH_SUPERADMIN_EMAILS
         context["test_superadmin_email"] = (
@@ -42,6 +70,44 @@ class ApiTestView(TemplateView):
             else ""
         )
         return context
+
+
+class SwaggerUIView(SpectacularSwaggerSplitView):
+    """Swagger UI tanpa satu pun tag inline yang tidak bernonce.
+
+    Dua hal membuat halaman bawaan drf-spectacular diblokir kebijakan halaman:
+
+    1. Skrip inisialisasi SwaggerUIBundle ditempel inline. `…SplitView`
+       menyajikannya sebagai berkas terpisah (`?script=`), yang justru
+       disediakan upstream untuk kebijakan CSP yang ketat.
+    2. Blok `<style>` tiga baris di templatenya. Itulah sebabnya
+       `template_name` menunjuk salinan yang hanya menimpa blok `head` untuk
+       memasang nonce; sisa templatenya tetap milik upstream.
+    """
+
+    template_name = "swagger_ui_bernonce.html"
+
+    def get(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        # drf-spectacular tidak mengirim anotasi tipe, jadi `get` di sana
+        # untyped bagi mypy strict.
+        response: Response = super().get(request, *args, **kwargs)  # type: ignore[no-untyped-call]
+        if request.GET.get("script") is not None:
+            return response  # cabang berkas skrip, bukan dokumen HTML
+        nonce = nonce_baru()
+        response.data["csp_nonce"] = nonce
+        tandai_halaman_bernonce(response, nonce)
+        return response
+
+
+@require_GET
+def invite_redirect(
+    request: HttpRequest, token: str | None = None
+) -> HttpResponseRedirect | HttpResponseServerError:
+    if not settings.PILAH_WEB_ORIGIN:
+        return HttpResponseServerError("PILAH_WEB_ORIGIN is not configured.")
+    origin = settings.PILAH_WEB_ORIGIN.rstrip("/")
+    invite_path = f"/#/invite/{quote(token, safe='')}" if token else "/#/invite"
+    return HttpResponseRedirect(f"{origin}{invite_path}")
 
 
 @require_GET  # S3752: static JSON for Android app links; only GET is valid.
@@ -70,12 +136,14 @@ urlpatterns = [
     path("healthz", healthz, name="healthz"),
     path("admin/", admin.site.urls),
     path(".well-known/assetlinks.json", assetlinks, name="assetlinks"),
+    path("invite", invite_redirect, name="invite-redirect"),
+    path("invite/<str:token>", invite_redirect, name="invite-token-redirect"),
     # Developer tools: served only when DEBUG is on, so staging and production answer 404.
     path("api-test/", debug_only(ApiTestView.as_view()), name="api-test"),
     path("api/schema/", debug_only(SpectacularAPIView.as_view()), name="schema"),
     path(
         "api/docs/",
-        debug_only(SpectacularSwaggerView.as_view(url_name="schema")),
+        debug_only(SwaggerUIView.as_view(url_name="schema")),
         name="swagger-ui",
     ),
     path("api/v1/", include("api.urls")),

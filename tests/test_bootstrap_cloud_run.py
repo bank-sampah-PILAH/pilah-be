@@ -12,6 +12,13 @@ from django.test import SimpleTestCase
 
 from scripts.bootstrap_cloud_run import bootstrap_cloud_run, validate_configuration
 
+REVIEW_ACCOUNTS = (
+    "pilah.pengelola@pilah.com",
+    "pilah.pengurus@pilah.com",
+    "pilah.nasabah@pilah.com",
+    "pilah.superadmin@pilah.com",
+)
+
 
 class BootstrapCloudRunTests(SimpleTestCase):
     def test_invalid_allowlist_fails_validate_only_before_cloud_calls(self) -> None:
@@ -39,6 +46,8 @@ class BootstrapCloudRunTests(SimpleTestCase):
                     **os.environ,
                     "PILAH_WEB_ORIGIN": "https://web.run.app",
                     "PILAH_SUPERADMIN_EMAILS": f"valid@example.com,{email}",
+                    "PILAH_REVIEW_SUPERADMIN_EMAILS": "pilah.superadmin@pilah.com",
+                    "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS": ",".join(REVIEW_ACCOUNTS),
                 }
                 result = subprocess.run(
                     [
@@ -72,6 +81,8 @@ class BootstrapCloudRunTests(SimpleTestCase):
                     {
                         "PILAH_WEB_ORIGIN": "https://web.run.app",
                         "PILAH_SUPERADMIN_EMAILS": f" {email} , second@example.com ",
+                        "PILAH_REVIEW_SUPERADMIN_EMAILS": "pilah.superadmin@pilah.com",
+                        "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS": ",".join(REVIEW_ACCOUNTS),
                     },
                 ):
                     validate_configuration()
@@ -87,6 +98,8 @@ class BootstrapCloudRunTests(SimpleTestCase):
                     {
                         "PILAH_WEB_ORIGIN": "https://web.run.app",
                         "PILAH_SUPERADMIN_EMAILS": email,
+                        "PILAH_REVIEW_SUPERADMIN_EMAILS": "pilah.superadmin@pilah.com",
+                        "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS": ",".join(REVIEW_ACCOUNTS),
                     },
                 ):
                     with self.assertRaises(ValueError):
@@ -116,6 +129,23 @@ class BootstrapCloudRunTests(SimpleTestCase):
                                         "value": "admin@example.com",
                                     },
                                     {
+                                        "name": "PILAH_REVIEW_SUPERADMIN_EMAILS",
+                                        "value": "pilah.superadmin@pilah.com",
+                                    },
+                                    {
+                                        "name": "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS",
+                                        "value": ",".join(REVIEW_ACCOUNTS),
+                                    },
+                                    {
+                                        "name": "PILAH_REVIEW_ACCOUNT_PASSWORD",
+                                        "valueFrom": {
+                                            "secretKeyRef": {
+                                                "name": "PILAH_REVIEW_ACCOUNT_PASSWORD",
+                                                "key": "latest",
+                                            },
+                                        },
+                                    },
+                                    {
                                         "name": "DJANGO_SECRET_KEY",
                                         "valueFrom": {
                                             "secretKeyRef": {"name": "secret", "key": "latest"},
@@ -134,8 +164,11 @@ class BootstrapCloudRunTests(SimpleTestCase):
             "SERVICE_NAME": "pilah-be",
             "PILAH_WEB_ORIGIN": "https://pilah-web-real-provider.run.app",
             "PILAH_SUPERADMIN_EMAILS": "admin@example.com",
+            "PILAH_REVIEW_SUPERADMIN_EMAILS": "pilah.superadmin@pilah.com",
+            "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS": ",".join(REVIEW_ACCOUNTS),
         }
         commands: list[list[str]] = []
+        jobs: list[tuple[str, list[str]]] = []
         replace_options: dict[str, object] = {}
 
         def gcloud(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -163,7 +196,7 @@ class BootstrapCloudRunTests(SimpleTestCase):
                     container["command"],
                     ["setpriv", "--reuid=appuser", "--regid=appuser", "--init-groups", "python"],
                 )
-                self.assertEqual(container["args"], ["manage.py", "bootstrap_superadmins"])
+                jobs.append((job["metadata"]["name"], container["args"]))
                 # Cloud Run v1 ExecutionTemplate owns SQL/VPC/secret annotations;
                 # TaskTemplate only accepts spec (provider discovery schema).
                 self.assertEqual(
@@ -175,8 +208,25 @@ class BootstrapCloudRunTests(SimpleTestCase):
 
         with patch.dict(os.environ, env, clear=True), patch("subprocess.run", side_effect=gcloud):
             bootstrap_cloud_run()
-        self.assertEqual([cmd[3] for cmd in commands], ["describe", "replace", "execute"])
-        self.assertIn("--wait", commands[-1])
+        self.assertEqual(
+            [cmd[3] for cmd in commands],
+            ["describe", "replace", "execute", "replace", "execute", "replace", "execute"],
+        )
+        self.assertEqual(
+            jobs,
+            [
+                ("pilah-be-bootstrap-superadmins", ["manage.py", "bootstrap_superadmins"]),
+                (
+                    "pilah-be-seed-play-demo-accounts-dry-run",
+                    ["manage.py", "seed_play_demo_accounts", "--dry-run"],
+                ),
+                (
+                    "pilah-be-seed-play-demo-accounts",
+                    ["manage.py", "seed_play_demo_accounts", "--confirm-production"],
+                ),
+            ],
+        )
+        self.assertTrue(all("--wait" in cmd for cmd in commands if cmd[3] == "execute"))
         self.assertNotIn("capture_output", replace_options)
         self.assertTrue(all("never-print-me" not in " ".join(cmd) for cmd in commands))
 
@@ -206,6 +256,22 @@ class BootstrapCloudRunTests(SimpleTestCase):
                 with self.assertRaises(ValueError):
                     validate_configuration()
                 run.assert_not_called()
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PILAH_WEB_ORIGIN": "https://web.run.app",
+                    "PILAH_SUPERADMIN_EMAILS": "Admin@example.com",
+                    "PILAH_REVIEW_SUPERADMIN_EMAILS": " admin@EXAMPLE.com ",
+                    "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS": ",".join(REVIEW_ACCOUNTS),
+                },
+                clear=True,
+            ),
+            patch("subprocess.run") as run,
+        ):
+            with self.assertRaisesRegex(ValueError, "PILAH_REVIEW_SUPERADMIN_EMAILS"):
+                validate_configuration()
+            run.assert_not_called()
         for allowlist in ("", "invalid", "admin@example.com,"):
             with (
                 self.subTest(allowlist=allowlist),
@@ -214,9 +280,72 @@ class BootstrapCloudRunTests(SimpleTestCase):
                     {
                         "PILAH_WEB_ORIGIN": "https://web.run.app",
                         "PILAH_SUPERADMIN_EMAILS": allowlist,
+                        "PILAH_REVIEW_SUPERADMIN_EMAILS": "pilah.superadmin@pilah.com",
+                        "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS": ",".join(REVIEW_ACCOUNTS),
                     },
                     clear=True,
                 ),
             ):
                 with self.assertRaises(ValueError):
                     validate_configuration()
+
+    def test_email_verification_exemption_preflight_requires_valid_review_accounts(self) -> None:
+        for exemptions in (
+            "",
+            "pilah.pengelola@pilah.com,pilah.superadmin@pilah.com",
+            ",".join((*REVIEW_ACCOUNTS[:-1], "invalid")),
+        ):
+            with self.subTest(exemptions=exemptions):
+                with patch.dict(
+                    os.environ,
+                    {
+                        "PILAH_WEB_ORIGIN": "https://web.run.app",
+                        "PILAH_SUPERADMIN_EMAILS": "admin@example.com",
+                        "PILAH_REVIEW_SUPERADMIN_EMAILS": "pilah.superadmin@pilah.com",
+                        "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS": exemptions,
+                    },
+                    clear=True,
+                ):
+                    with self.assertRaisesRegex(
+                        ValueError, "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS"
+                    ):
+                        validate_configuration()
+
+    def test_missing_review_password_secret_reference_fails_before_job_mutations(self) -> None:
+        service: dict[str, Any] = {
+            "spec": {
+                "template": {
+                    "spec": {
+                        "containers": [
+                            {
+                                "image": "registry/image:verified-sha",
+                                "env": [
+                                    {"name": "PILAH_ENVIRONMENT", "value": "production"},
+                                ],
+                            }
+                        ],
+                    },
+                },
+            },
+        }
+        env = {
+            "PROJECT_ID": "project",
+            "REGION": "region",
+            "SERVICE_NAME": "pilah-be",
+            "PILAH_WEB_ORIGIN": "https://web.example.com",
+            "PILAH_SUPERADMIN_EMAILS": "admin@example.com",
+            "PILAH_REVIEW_SUPERADMIN_EMAILS": "pilah.superadmin@pilah.com",
+            "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS": ",".join(REVIEW_ACCOUNTS),
+        }
+        calls: list[list[str]] = []
+
+        def describe(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            calls.append(argv)
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(service))
+
+        with patch.dict(os.environ, env, clear=True), patch("subprocess.run", side_effect=describe):
+            with self.assertRaisesRegex(ValueError, "PILAH_REVIEW_ACCOUNT_PASSWORD"):
+                bootstrap_cloud_run()
+
+        self.assertEqual(len(calls), 1)
+        self.assertIn("describe", calls[0])

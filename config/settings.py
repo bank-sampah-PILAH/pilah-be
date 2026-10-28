@@ -3,9 +3,12 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from corsheaders.defaults import default_headers
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.crypto import get_random_string
 from dotenv import load_dotenv
+
+from shared_kernel.http_headers import HEADER_PERMINTAAN_KUSTOM, HEADER_RESPONS_TEREKSPOS
 
 load_dotenv()
 
@@ -32,6 +35,7 @@ ALLOWED_HOSTS = [
     host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()
 ]
 PILAH_PUBLIC_APP_URL = os.getenv("PILAH_PUBLIC_APP_URL", "")
+PILAH_WEB_ORIGIN = os.getenv("PILAH_WEB_ORIGIN", "")
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
 CSRF_TRUSTED_ORIGINS = [
@@ -70,6 +74,17 @@ if os.getenv("MIGRATION_LINTER") == "1":
     INSTALLED_APPS += ["django_migration_linter"]
 
 MIDDLEWARE = [
+    # Paling luar, supaya SETIAP respons membawa header — termasuk yang dibuat
+    # middleware di bawahnya tanpa pernah mencapai view: preflight CORS,
+    # pengalihan 301 ke HTTPS oleh SecurityMiddleware, berkas statis WhiteNoise,
+    # dan 400 untuk Host yang tidak diizinkan. Di posisi terakhir, middleware
+    # ini tidak pernah dijalankan untuk respons-respons itu.
+    #
+    # Posisi ini tidak mengganggu pemilihan kebijakan: kebijakannya dipilih
+    # setelah `get_response(request)` kembali, jadi tipe konten respons dan
+    # penanda nonce dari view sudah ada saat dibaca. Yang menentukan bukan
+    # urutan di daftar ini, melainkan fase tempat kebijakan dibaca.
+    "shared_kernel.csp.CspMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
@@ -124,6 +139,16 @@ DATABASES = {
     }
 }
 
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    },
+    "auth_rate_limit": {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "auth_rate_limit_cache",
+    },
+}
+
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
@@ -149,7 +174,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "id"
 
-TIME_ZONE = "UTC"
+TIME_ZONE = "Asia/Jakarta"
 
 USE_I18N = True
 
@@ -189,7 +214,16 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "api.User"
 AUTHENTICATION_BACKENDS = ("apps.authentication.backends.AllowlistedSuperadminBackend",)
 
+# Browsable API hanya untuk pengembangan. Tanpa ini bawaan DRF menyertakan
+# BrowsableAPIRenderer, sehingga setiap endpoint membalas dokumen HTML begitu
+# klien mengirim `Accept: text/html` — permukaan yang tidak dipakai klien
+# Flutter dan yang memaksa kebijakan CSP jauh lebih longgar untuk seluruh API.
+_RENDERER = ["rest_framework.renderers.JSONRenderer"]
+if DEBUG:
+    _RENDERER.append("rest_framework.renderers.BrowsableAPIRenderer")
+
 REST_FRAMEWORK = {
+    "DEFAULT_RENDERER_CLASSES": tuple(_RENDERER),
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
@@ -201,7 +235,10 @@ REST_FRAMEWORK = {
     # Scoped rates: keys are the throttle scope of the views declaring one.
     # statement_pdf = the riwayat statement render (CPU-heavy; see
     # apps.nasabah.home.NasabahHistoryExportPdfView).
-    "DEFAULT_THROTTLE_RATES": {"statement_pdf": "10/min"},
+    # Cloud Run appends the client and two proxy addresses to XFF; this count
+    # makes DRF select the client while ignoring any caller-supplied prefix.
+    "NUM_PROXIES": 3,
+    "DEFAULT_THROTTLE_RATES": {"statement_pdf": "10/min", "password_login": "5/min"},
 }
 
 SPECTACULAR_SETTINGS = {
@@ -223,6 +260,17 @@ CORS_ALLOWED_ORIGINS = [
     origin.strip() for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if origin.strip()
 ]
 
+# CORS_ALLOW_ALL_ORIGINS permits any origin but NOT arbitrary request headers:
+# django-cors-headers answers the preflight with its own default list, which
+# carries no custom header. Both lists below are derived from the registry in
+# shared_kernel/http_headers.py so they cannot drift from the headers the
+# views actually read and write.
+CORS_ALLOW_HEADERS = (
+    *default_headers,
+    *(header.lower() for header in HEADER_PERMINTAAN_KUSTOM),
+)
+CORS_EXPOSE_HEADERS = HEADER_RESPONS_TEREKSPOS
+
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "")
@@ -237,6 +285,21 @@ PILAH_SUPERADMIN_EMAILS = tuple(
     for email in os.getenv("PILAH_SUPERADMIN_EMAILS", "").split(",")
     if email.strip()
 )
+PILAH_REVIEW_SUPERADMIN_EMAILS = tuple(
+    email.strip().lower()
+    for email in os.getenv("PILAH_REVIEW_SUPERADMIN_EMAILS", "").split(",")
+    if email.strip()
+)
+PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS = tuple(
+    email.strip().lower()
+    for email in os.getenv("PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS", "").split(",")
+    if email.strip()
+)
+PILAH_REVIEW_ACCOUNT_PASSWORD = os.getenv("PILAH_REVIEW_ACCOUNT_PASSWORD", "")
+if set(PILAH_SUPERADMIN_EMAILS).intersection(PILAH_REVIEW_SUPERADMIN_EMAILS):
+    raise ImproperlyConfigured(
+        "PILAH_REVIEW_SUPERADMIN_EMAILS must not overlap PILAH_SUPERADMIN_EMAILS"
+    )
 if not DEBUG and not PILAH_SUPERADMIN_EMAILS:
     logging.getLogger(__name__).warning(
         "PILAH_SUPERADMIN_EMAILS is empty; all Superadmin logins will be rejected"

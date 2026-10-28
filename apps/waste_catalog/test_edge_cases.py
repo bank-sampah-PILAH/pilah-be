@@ -3,7 +3,8 @@ from decimal import Decimal
 from rest_framework import serializers
 from rest_framework.test import APITestCase
 
-from api.models import BankSampah, JenisSampah, User
+from api.models import BankSampah, User
+from apps.waste_catalog.api import buat_jenis_sampah
 from apps.waste_catalog.serializers import JenisSampahSerializer
 
 
@@ -35,7 +36,7 @@ class JenisSampahEdgeCaseTests(APITestCase):
         self.assertEqual(duplicate.data["errors"]["kode"], ["Kode sampah sudah digunakan"])
 
     def test_waste_type_string_is_its_name(self) -> None:
-        jenis = JenisSampah.objects.create(
+        jenis = buat_jenis_sampah(
             bank_sampah=self.bank, nomor="PET", nama_sampah="Botol PET", harga_per_kg=Decimal(3000)
         )
 

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PILAH API E2E Test Runner</title>
   <script src="https://accounts.google.com/gsi/client" defer></script>
-  <style>
+  <style nonce="{{ csp_nonce }}">
     :root {
       color-scheme: light;
       --bg: #f6f7f9;
@@ -197,6 +197,10 @@
       main { grid-template-columns: 1fr; }
       .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
+    /* Dulu dua atribut style inline. Nonce tidak berlaku untuk atribut
+       style, hanya `'unsafe-inline'`, jadi keduanya pindah ke sini. */
+    .full-span { grid-column: 1 / -1; }
+    .scroll-x { overflow: auto; }
   </style>
 </head>
 <body>
@@ -279,12 +283,12 @@
       </div>
     </section>
 
-    <section style="grid-column: 1 / -1;">
+    <section class="full-span">
       <div class="section-head">
         <h2>Step Results</h2>
         <span class="muted small">HTTP status, duration, and assertions</span>
       </div>
-      <div style="overflow:auto;">
+      <div class="scroll-x">
         <table>
           <thead>
             <tr>
@@ -306,7 +310,7 @@
     </section>
   </main>
 
-  <script>
+  <script nonce="{{ csp_nonce }}">
     const state = {
       token: null,
       refresh: null,
@@ -942,12 +946,7 @@
         state.report.failure = error.message;
         setRunState("FAILED", "failed");
       } finally {
-        state.report.finished_at = new Date().toISOString();
-        state.report.duration_ms = Math.round(performance.now() - runStart);
-        state.report.created = { ...state.ids };
-        els.runAll.disabled = false;
-        els.download.disabled = false;
-        renderReport();
+        finishRun(runStart);
       }
     }
 
@@ -1128,16 +1127,20 @@
         state.report.failure = error.message;
         setRunState("FAILED", "failed");
       } finally {
-        state.report.finished_at = new Date().toISOString();
-        state.report.duration_ms = Math.round(performance.now() - runStart);
-        state.report.created = { ...state.ids };
-        els.runAll.disabled = false;
+        finishRun(runStart);
         if (state.token) {
           els.runToken.disabled = false;
         }
-        els.download.disabled = false;
-        renderReport();
       }
+    }
+
+    function finishRun(runStart) {
+      state.report.finished_at = new Date().toISOString();
+      state.report.duration_ms = Math.round(performance.now() - runStart);
+      state.report.created = { ...state.ids };
+      els.runAll.disabled = false;
+      els.download.disabled = false;
+      renderReport();
     }
 
     function renderReport() {

@@ -89,6 +89,31 @@ class DetailTransaksi(models.Model):
         db_table = "detail_transaksi"
 
 
+class TransaksiRevisi(models.Model):
+    """A replaced version of a setoran (PIL-427). Append-only: never edited or deleted."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    transaksi = models.ForeignKey(Transaksi, on_delete=models.PROTECT, related_name="revisi")
+    versi = models.PositiveIntegerField()
+    total_nilai = models.DecimalField(max_digits=14, decimal_places=2)
+    catatan = models.TextField(blank=True, default="")
+    # The replaced items as they were: nama_sampah, harga, berat, subtotal.
+    items = models.JSONField()
+    alasan = models.CharField(max_length=255)
+    diubah_oleh = models.ForeignKey(
+        _USER_API, on_delete=models.PROTECT, related_name="transaksi_revisi_dibuat"
+    )
+    diubah_pada = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "api"
+        db_table = "transaksi_revisi"
+        ordering = ["transaksi", "versi"]
+        constraints = [
+            models.UniqueConstraint(fields=["transaksi", "versi"], name="transaksi_revisi_unik"),
+        ]
+
+
 class Pencairan(TimestampedModel):
     class Metode(models.TextChoices):
         TUNAI = "tunai", "Tunai"

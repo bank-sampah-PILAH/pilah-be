@@ -12,6 +12,21 @@ import sys
 import tempfile
 from typing import Any
 
+EMAIL_PATTERN = re.compile(
+    r"[A-Za-z0-9_%+-]+(?:\.[A-Za-z0-9_%+-]+)*@"
+    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+    r"[A-Za-z]{2,63}"
+)
+REVIEW_ACCOUNT_EMAILS = frozenset(
+    {
+        "pilah.pengelola@pilah.com",
+        "pilah.pengurus@pilah.com",
+        "pilah.nasabah@pilah.com",
+        "pilah.superadmin@pilah.com",
+    }
+)
+REVIEW_SUPERADMIN_EMAIL = "pilah.superadmin@pilah.com"
+
 
 def validate_configuration() -> None:
     origin = os.environ.get("PILAH_WEB_ORIGIN", "")
@@ -28,17 +43,47 @@ def validate_configuration() -> None:
     emails = [email.strip() for email in os.environ.get("PILAH_SUPERADMIN_EMAILS", "").split(",")]
     # Conservative ASCII dot-atoms/DNS labels accepted by Django validate_email,
     # bounded by User.email's storage length; this preflight has no Django dependency.
-    if not all(
-        len(email) <= 254
-        and re.fullmatch(
-            r"[A-Za-z0-9_%+-]+(?:\.[A-Za-z0-9_%+-]+)*@"
-            r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
-            r"[A-Za-z]{2,63}",
-            email,
-        )
-        for email in emails
-    ):
+    if not all(len(email) <= 254 and EMAIL_PATTERN.fullmatch(email) for email in emails):
         raise ValueError("PILAH_SUPERADMIN_EMAILS must contain valid email addresses")
+    review_email_values = [
+        email.strip()
+        for email in os.environ.get("PILAH_REVIEW_SUPERADMIN_EMAILS", "").split(",")
+        if email.strip()
+    ]
+    if not all(
+        len(email) <= 254 and EMAIL_PATTERN.fullmatch(email) for email in review_email_values
+    ):
+        raise ValueError("PILAH_REVIEW_SUPERADMIN_EMAILS must contain valid email addresses")
+    review_emails = {email.lower() for email in review_email_values}
+    if {email.lower() for email in emails} & review_emails:
+        raise ValueError("PILAH_REVIEW_SUPERADMIN_EMAILS must not overlap PILAH_SUPERADMIN_EMAILS")
+    if REVIEW_SUPERADMIN_EMAIL not in review_emails:
+        raise ValueError("PILAH_REVIEW_SUPERADMIN_EMAILS must include pilah.superadmin@pilah.com")
+    exemption_values = [
+        email.strip()
+        for email in os.environ.get("PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS", "").split(",")
+        if email.strip()
+    ]
+    if not all(
+        len(email) <= 254 and EMAIL_PATTERN.fullmatch(email) for email in exemption_values
+    ) or not REVIEW_ACCOUNT_EMAILS.issubset({email.lower() for email in exemption_values}):
+        raise ValueError(
+            "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS must contain all four production "
+            "review account addresses"
+        )
+
+
+def validate_review_password_secret(env: list[dict[str, Any]]) -> None:
+    values = [item for item in env if item.get("name") == "PILAH_REVIEW_ACCOUNT_PASSWORD"]
+    if len(values) != 1:
+        raise ValueError("Cloud Run must provide PILAH_REVIEW_ACCOUNT_PASSWORD from Secret Manager")
+    secret = values[0].get("valueFrom", {}).get("secretKeyRef", {})
+    if (
+        values[0].get("value") is not None
+        or secret.get("name") != "PILAH_REVIEW_ACCOUNT_PASSWORD"
+        or not secret.get("key")
+    ):
+        raise ValueError("Cloud Run must provide PILAH_REVIEW_ACCOUNT_PASSWORD from Secret Manager")
 
 
 def bootstrap_cloud_run() -> None:
@@ -55,6 +100,7 @@ def bootstrap_cloud_run() -> None:
     template = service["spec"]["template"]
     runtime = template["spec"]
     source = runtime["containers"][0]
+    validate_review_password_secret(source.get("env", []))
     env = {item["name"]: item.get("value") for item in source.get("env", [])}
     if env.get("PILAH_ENVIRONMENT") != "production":
         raise ValueError("Bootstrap requires the deployed production runtime")
@@ -73,45 +119,55 @@ def bootstrap_cloud_run() -> None:
     container = {
         key: source[key] for key in ("image", "env", "resources", "volumeMounts") if key in source
     }
-    container.update(
-        command=[
-            "setpriv",
-            "--reuid=appuser",
-            "--regid=appuser",
-            "--init-groups",
-            "python",
-        ],
-        args=["manage.py", "bootstrap_superadmins"],
-    )
+    container["command"] = [
+        "setpriv",
+        "--reuid=appuser",
+        "--regid=appuser",
+        "--init-groups",
+        "python",
+    ]
     spec = {key: runtime[key] for key in ("serviceAccountName", "volumes") if key in runtime}
     spec.update(containers=[container], maxRetries=0, timeoutSeconds="300")
-    job_name = f"{service_name}-bootstrap-superadmins"
-    job = {
-        "apiVersion": "run.googleapis.com/v1",
-        "kind": "Job",
-        "metadata": {"name": job_name},
-        "spec": {
-            "template": {
-                "metadata": {"annotations": annotations},
-                "spec": {
-                    "taskCount": 1,
-                    "parallelism": 1,
-                    "template": {"spec": spec},
-                },
-            }
-        },
-    }
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as manifest:
-        json.dump(job, manifest)
-        manifest.flush()
+    commands = (
+        ("bootstrap-superadmins", ["manage.py", "bootstrap_superadmins"]),
+        (
+            "seed-play-demo-accounts-dry-run",
+            ["manage.py", "seed_play_demo_accounts", "--dry-run"],
+        ),
+        (
+            "seed-play-demo-accounts",
+            ["manage.py", "seed_play_demo_accounts", "--confirm-production"],
+        ),
+    )
+    for suffix, args in commands:
+        job_name = f"{service_name}-{suffix}"
+        container["args"] = args
+        job = {
+            "apiVersion": "run.googleapis.com/v1",
+            "kind": "Job",
+            "metadata": {"name": job_name},
+            "spec": {
+                "template": {
+                    "metadata": {"annotations": annotations},
+                    "spec": {
+                        "taskCount": 1,
+                        "parallelism": 1,
+                        "template": {"spec": spec},
+                    },
+                }
+            },
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as manifest:
+            json.dump(job, manifest)
+            manifest.flush()
+            subprocess.run(
+                ["gcloud", "run", "jobs", "replace", manifest.name, *flags, "--quiet"],
+                check=True,
+            )
         subprocess.run(
-            ["gcloud", "run", "jobs", "replace", manifest.name, *flags, "--quiet"],
+            ["gcloud", "run", "jobs", "execute", job_name, *flags, "--wait", "--quiet"],
             check=True,
         )
-    subprocess.run(
-        ["gcloud", "run", "jobs", "execute", job_name, *flags, "--wait", "--quiet"],
-        check=True,
-    )
 
 
 if __name__ == "__main__":

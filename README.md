@@ -158,7 +158,10 @@ Auth and app variables:
 GOOGLE_CLIENT_ID=
 PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false
 PILAH_PUBLIC_APP_URL=https://pilah.example.com
+PILAH_WEB_ORIGIN=https://web.example.com
 PILAH_SUPERADMIN_EMAILS=admin@example.com,another-admin@example.com
+PILAH_REVIEW_SUPERADMIN_EMAILS=pilah.superadmin@pilah.com
+PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS=pilah.pengelola@pilah.com,pilah.pengurus@pilah.com,pilah.nasabah@pilah.com,pilah.superadmin@pilah.com
 ```
 
 `CORS_ALLOWED_ORIGINS` is a comma-separated list of browser origins (scheme,
@@ -169,7 +172,17 @@ host, and optional port; no path). For web Google login, set backend
 Set `PILAH_SUPERADMIN_EMAILS` on Fly and as a GitHub repository variable for
 Cloud Run. It is the authoritative comma-separated list of Superadmin Google
 accounts. The deploy workflow stops before deployment if the repository
-variable is empty.
+variable is empty. Set `PILAH_REVIEW_SUPERADMIN_EMAILS` and
+`PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS` as separate GitHub repository
+variables. The first grants app-only Superadmin access; the second lists the
+password review accounts whose login does not require Google email verification.
+It does not grant Superadmin access.
+
+`PILAH_REVIEW_SUPERADMIN_EMAILS` grants app-only Superadmin access to the
+synthetic review approval flow. These users never receive Django staff or
+superuser access, and their bank approval API is limited to the synthetic
+pending review bank. Keep this list separate from `PILAH_SUPERADMIN_EMAILS`;
+startup fails if the normalized email lists overlap.
 
 WhatsApp gateway variables:
 
@@ -277,15 +290,86 @@ production deployment; both CORS and CSRF explicitly allow it. Add each dashboar
 origin to the Google Web OAuth client's Authorized JavaScript origins. Backend
 `GOOGLE_CLIENT_ID` must match frontend `GOOGLE_SERVER_CLIENT_ID`.
 `PILAH_PUBLIC_APP_URL` is the separate invite-link base, not the API base or CORS
-setting. See [Cloud Run](CLOUD_RUN.md) for first-deploy URL ordering and IAM.
+setting; keep it on the backend host for Android App Links. New invite links use
+`/invite/<token>` and browser requests redirect to `/#/invite/<token>` on
+`PILAH_WEB_ORIGIN`, which must be the trusted Flutter web origin (no path or
+trailing slash). Older `/invite?token=...` links remain supported by the native
+app; browser fallback does not forward their query token. See [Cloud Run](CLOUD_RUN.md)
+for first-deploy URL ordering and IAM, and [Fly staging](FLY_STAGING.md) for its
+configured origin.
 
-Production deployment on `main` automatically runs `bootstrap_superadmins` in
-a Cloud Run Job with the service's image, DB environment and runtime identity.
-It creates only missing allowlisted Superadmins (Google login, no usable
-password); existing profiles/passwords remain unchanged. Role conflicts and
-missing/invalid allowlists fail deployment. It never seeds banks or demo data.
-Manual Cloud Run deployment uses the same bootstrap. Neither cloud provisioning
-nor OAuth Console configuration is performed by this code delivery itself.
+Production deployment on `main` automatically runs `bootstrap_superadmins` and
+the production demo seed in Cloud Run Jobs with the service's image, DB
+environment and runtime identity. The seed runs a dry-run first and applies
+only if that succeeds. It creates only missing global allowlisted Superadmins
+(Google login, no usable password); existing profiles/passwords remain
+unchanged. Role conflicts and missing/invalid allowlists fail deployment.
+Manual Cloud Run deployment uses the same bootstrap and seed. Neither cloud
+provisioning nor OAuth Console configuration is performed by this code delivery
+itself.
+
+## Production password review accounts
+
+The `seed_play_demo_accounts` command provisions PILAH roles for these existing
+password-login identities:
+
+- Pengelola: `pilah.pengelola@pilah.com`
+- Pengurus: `pilah.pengurus@pilah.com`
+- Nasabah: `pilah.nasabah@pilah.com`
+- Review Superadmin: `pilah.superadmin@pilah.com`
+
+These addresses are login identifiers; the seed does not create mailboxes or
+support signup, email delivery, or password reset. The four accounts use the
+same password from the Secret Manager secret `PILAH_REVIEW_ACCOUNT_PASSWORD`.
+Cloud Run receives it through a Secret Manager reference, and the seed stores
+only Django password hashes. Do not put the password in source control, GitHub
+variables, or deployment command arguments. Use your organization's secure
+credential-sharing process when providing review access.
+
+Before deployment, set the GitHub repository variable
+`PILAH_REVIEW_SUPERADMIN_EMAILS` to include
+`pilah.superadmin@pilah.com`, and remove it from `PILAH_SUPERADMIN_EMAILS`.
+Set `PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS` to all four addresses above.
+The review Superadmin must not overlap the global Superadmin list. The Cloud
+Run runtime service account needs `roles/secretmanager.secretAccessor` on the
+password secret. The production workflow validates the lists, deploys the
+service with the secret reference, then runs the seed's dry-run and apply steps
+using the deployed image and production database. The container entrypoint
+applies database migrations before the post-deploy seed job runs.
+
+The commands can also be used by an authorized production operator. The Secret
+Manager reference and its runtime service account access must be configured;
+the dry-run requires the secret to be available too:
+
+```bash
+python manage.py seed_play_demo_accounts --dry-run
+python manage.py seed_play_demo_accounts --confirm-production
+```
+
+The command fails outside production, when Django debug mode is enabled, when
+the review Superadmin email is not in the review-only list, any review email is
+missing from the verification exemption list, the shared password is absent, or
+a seeded identity conflicts with existing data. An unambiguous identity owned
+by the previous seed is migrated in place: its user ID, role, bank relationship,
+membership, and synthetic history are preserved while the email and password
+are updated and the old Google subject binding is cleared. Unrelated or
+ambiguous rows make the command stop before writing.
+
+The seed creates one active synthetic bank with a primary Pengelola, a
+non-primary Pengurus, and one approved Nasabah; four active waste types; three
+historical setoran; two published schedules; and a separate synthetic pending
+bank owned by a non-login `.example.test` account. The fresh Nasabah balance is
+derived from the transaction ledger and is Rp21.250, with no payout history or
+extra Nasabah roster. The review Superadmin remains app-only and synthetic-only,
+without Django staff or superuser access.
+
+The command uses stable IDs and only changes its seeded rows. Re-running it
+preserves unrelated tenant data and any approval decision on the synthetic
+review bank. It refreshes the two schedule dates to 7 and 14 days from the run
+date, updates the seeded catalog and transaction snapshots, and recalculates
+saldo from all setoran and pencairan ledger rows. It runs only as a
+post-deployment Cloud Run Job, never during application startup; do not point a
+local database client at production to run it.
 
 Bank Sampah organizations can be `mandiri`, `induk`, or `unit`. A unit must
 belong to an induk organization. A Nasabah user can have one membership per
@@ -358,6 +442,15 @@ Jenis sampah:
 - `POST /api/v1/jenis-sampah`
 - `PUT /api/v1/jenis-sampah/:id`
 - `PATCH /api/v1/jenis-sampah/:id/status`
+- `POST /api/v1/jenis-sampah/:id/harga` — `{harga_per_kg, berlaku_mulai?}`;
+  tanpa `berlaku_mulai` harga berlaku sekarang. Respons jenis sampah memuat
+  `harga_per_kg` yang berlaku, `harga_berlaku_mulai`, dan `harga_terjadwal`
+  (`{harga_per_kg, berlaku_mulai}` atau `null`).
+- `GET /api/v1/jenis-sampah/:id/harga` — riwayat versi harga, terbaru dulu,
+  dengan pagination standar. Setiap baris: `id`, `harga_per_kg`, `satuan`,
+  `berlaku_mulai`, `dibuat_oleh` (nama, `null` untuk data hasil migrasi), dan
+  `status`: `terjadwal`, `berlaku`, `sebelumnya`, atau `digantikan` (harga
+  terjadwal yang sudah dikoreksi versi lain dengan `berlaku_mulai` sama).
 
 Transaksi:
 
@@ -371,7 +464,6 @@ Pencairan:
 
 - `GET /api/v1/pencairan`
 - `GET /api/v1/pencairan?nasabah_id=:id&periode=:periode&search=:nama`
-- `POST /api/v1/pencairan`
 - `GET /api/v1/pencairan/:id`
 - `PATCH /api/v1/pencairan/:id`
 - `GET /api/v1/pencairan/:id/riwayat`
@@ -404,34 +496,16 @@ SuperAdmin:
 
 ## Pencairan
 
-Pengurus record a payout for a nasabah. There is no payment gateway: the API
-only records what was paid out and lowers the saldo once, atomically.
+Pencairan rows are created only by confirming a draft (see [Draft
+pencairan](#draft-pencairan)); there is no endpoint that records a payout for a
+single nasabah, so `POST /api/v1/pencairan` returns 405.
 
-```http
-POST /api/v1/pencairan
-{
-  "nasabah_id": "uuid",
-  "nominal": "200000",
-  "metode": "tunai",
-  "tanggal": "2026-09-20T10:15:00+07:00",
-  "keterangan": "Diambil pagi"
-}
-```
-
-| Field | Rule |
-| --- | --- |
-| `nasabah_id` | Required. Active nasabah of the pengurus' own bank sampah. |
-| `nominal` | Required. Greater than zero, whole rupiah, not above the saldo. |
-| `metode` | Required. `tunai` or `transfer`. |
-| `tanggal` | Optional, defaults to now. Cannot be in the future, or earlier than the nasabah's latest setoran or pencairan. |
-| `keterangan` | Optional, max 255 characters. |
-
-The response carries `status` (`tercatat`) plus the `saldo_sebelum` and
+A pencairan carries `status` (`tercatat`) plus the `saldo_sebelum` and
 `saldo_sesudah` snapshots taken when the payout was recorded. `saldo_sesudah`
 is rounded down to whole rupiah, and saldo history (`saldo_setelah_transaksi`,
 export) debits `saldo_sebelum - saldo_sesudah`, so it matches the stored saldo.
 
-Only pengurus record pencairan. `GET /api/v1/pencairan` and
+Only pengurus edit pencairan. `GET /api/v1/pencairan` and
 `GET /api/v1/pencairan/:id` also accept nasabah accounts, which see only the
 pencairan on their own memberships. Django admin shows pencairan read-only.
 

@@ -61,6 +61,7 @@ class GoogleRegistrationTests(APITestCase):
                 self.assertEqual(response.data["next_step"], "complete_profile")
                 user = User.objects.get(email=profile["email"])
                 self.assertFalse(user.is_profile_complete)
+                self.assertTrue(user.email_verified)
 
     @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     def test_existing_account_logs_in_with_its_stored_role(self, verify: Mock) -> None:
@@ -70,6 +71,7 @@ class GoogleRegistrationTests(APITestCase):
             role=User.Role.NASABAH,
             is_profile_complete=True,
         )
+        self.assertFalse(user.email_verified)
         verify.return_value = {**GOOGLE_PROFILE, "role": User.Role.SUPERADMIN}
 
         response = self.client.post(
@@ -81,6 +83,7 @@ class GoogleRegistrationTests(APITestCase):
         self.assertEqual(response.data["user"]["role"], User.Role.NASABAH)
         user.refresh_from_db()
         self.assertEqual(user.role, User.Role.NASABAH)
+        self.assertTrue(user.email_verified)
 
     def test_registration_rejects_invalid_tampered_and_expired_tokens(self) -> None:
         invalid_role = self.client.post(
@@ -194,6 +197,31 @@ class SuperadminWhitelistTests(APITestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["user"]["role"], User.Role.SUPERADMIN)
         self.assertEqual(response.data["next_step"], "superadmin_dashboard")
+
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
+    @override_settings(
+        PILAH_SUPERADMIN_EMAILS=(),
+        PILAH_REVIEW_SUPERADMIN_EMAILS=("reviewer@example.com",),
+    )
+    def test_review_allowlist_provisions_superadmin_without_django_admin_access(
+        self, verify: Mock
+    ) -> None:
+        verify.return_value = {
+            **GOOGLE_PROFILE,
+            "sub": "google-reviewer",
+            "email": "REVIEWER@example.com",
+        }
+
+        response = self.client.post(
+            "/api/v1/auth/google", {"id_token": "signed-google-token"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["user"]["role"], User.Role.SUPERADMIN)
+        user = User.objects.get(email="reviewer@example.com")
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
+        self.assertFalse(AllowlistedSuperadminBackend().user_can_authenticate(user))
 
     @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     @override_settings(PILAH_SUPERADMIN_EMAILS=("admin@example.com",))
