@@ -77,14 +77,39 @@ jobs:
             https://*) ;;
             *) echo "::error::Missing or non-HTTPS API URL for $ENVIRONMENT; set the ${ENVIRONMENT^^}_API_URL repository variable."; exit 1 ;;
           esac
-          echo "TARGET=$url" >> "$GITHUB_ENV"
+          # Reduce the URL to host[:port]: a trailing slash, a path or an explicit port
+          # must not leak into the TLS target (host:443:443) or the result file names.
+          hostport="${url#https://}"
+          hostport="${hostport%%[/?#]*}"
+          case "$hostport" in
+            ""|*@*|*\[*) echo "::error::Unsupported API URL '$url' (userinfo and IPv6 literals are not allowed)."; exit 1 ;;
+          esac
+          host="${hostport%%:*}"
+          port=443
+          case "$hostport" in *:*) port="${hostport#*:}" ;; esac
+          if ! [[ "$port" =~ ^[0-9]{1,5}$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+            echo "::error::Invalid port '$port' in API URL '$url'."; exit 1
+          fi
+          if [ "$port" = 443 ]; then base="https://$host"; else base="https://$host:$port"; fi
+          {
+            echo "TARGET=$base"
+            echo "TLS_TARGET=$host:$port"
+            echo "RESULT_NAME=$host-$port"
+          } >> "$GITHUB_ENV"
 
       # A scan of an unreachable host finds nothing and would look green.
+      # Cloud Run's frontend reserves /healthz and answers 404 itself, so production is
+      # checked on the API root instead: unauthenticated it answers 401 (or 200/403).
       - name: Check target is up
         run: |
-          code=$(curl -sS -o /dev/null -m 30 -w '%{http_code}' "$TARGET/healthz" || true)
-          echo "$TARGET/healthz -> $code"
-          [ "$code" = "200" ] || { echo "::error::$TARGET is not answering 200 on /healthz."; exit 1; }
+          if [ "$ENVIRONMENT" = production ]; then
+            path=/api/v1/; ok='^(200|401|403)$'
+          else
+            path=/healthz; ok='^200$'
+          fi
+          code=$(curl -sS -o /dev/null -m 30 -w '%{http_code}' "$TARGET$path" || true)
+          echo "$TARGET$path -> $code"
+          [[ "$code" =~ $ok ]] || { echo "::error::$TARGET is not answering on $path (got $code)."; exit 1; }
 
       - name: Fetch templates
         run: |
@@ -128,9 +153,8 @@ jobs:
               -v "$PWD/results":/results "$NUCLEI_IMAGE" \
               -rl 5 -c 3 -timeout 15 -duc -nc -ni -jsonl "$@"
           }
-          name="${TARGET#https://}"
-          run_nuclei -u "$TARGET" -t "${http_templates#,}" -o "/results/$name-http.jsonl"
-          run_nuclei -u "$name:443" -t "${ssl_templates#,}" -o "/results/$name-ssl.jsonl"
+          run_nuclei -u "$TARGET" -t "${http_templates#,}" -o "/results/$RESULT_NAME-http.jsonl"
+          run_nuclei -u "$TLS_TARGET" -t "${ssl_templates#,}" -o "/results/$RESULT_NAME-ssl.jsonl"
 
       - name: Summary
         if: always()
@@ -145,7 +169,7 @@ jobs:
               jq -r '"| \(.host) | \(.["template-id"]) | \(.info.severity) | \(.["matcher-name"] // (.["extracted-results"] // [] | join(", "))) |"' "$f"
             done
             echo
-            echo "Empty table: no findings. Missing-header items are info-level and known."
+            echo "Empty table: no findings. Missing-header items listed under KNOWN_NOISE in the Gate step are accepted."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload results
@@ -159,20 +183,31 @@ jobs:
 
       # Last, so the summary and artifact exist even when this fails. Gate on the
       # template, not the severity: swagger-api, cors-misconfig and the TLS checks
-      # are "info" yet exactly what we want to catch. For a false positive, add its
-      # template id to KNOWN_NOISE (and say why in the PR).
-      # Known, accepted: http-missing-security-headers fires on every run (no HSTS, CSP,
-      # Permissions-Policy on the API) and is hardening debt, not fixed yet.
-      # django-detect only fingerprints the stack.
+      # are "info" yet exactly what we want to catch. Accepted noise is a list of
+      # [template-id, matcher-name] pairs, so one missing header never hides another:
+      # http-missing-security-headers reports each header as its own matcher. For a
+      # false positive, add its pair (null matcher for templates without one) and say
+      # why in the PR.
+      # Known, accepted hardening debt: no HSTS, Permissions-Policy, COEP, CORP or
+      # X-Permitted-Cross-Domain-Policies on the API. Content-Security-Policy is shipped
+      # and deliberately NOT listed, so dropping it turns this red. django-detect only
+      # fingerprints the stack.
       - name: Gate
         run: |
-          KNOWN_NOISE='["http-missing-security-headers","django-detect"]'
+          KNOWN_NOISE='[
+            ["http-missing-security-headers","strict-transport-security"],
+            ["http-missing-security-headers","permissions-policy"],
+            ["http-missing-security-headers","cross-origin-embedder-policy"],
+            ["http-missing-security-headers","cross-origin-resource-policy"],
+            ["http-missing-security-headers","x-permitted-cross-domain-policies"],
+            ["django-detect",null]
+          ]'
           shopt -s nullglob
           files=(results/*.jsonl)
           [ "${#files[@]}" -gt 0 ] || { echo "::error::No scan results were produced."; exit 1; }
           findings=$(jq -r --argjson noise "$KNOWN_NOISE" \
-            'select(.["template-id"] as $id | $noise | index($id) | not)
-             | "\(.host) \(.["template-id"]) [\(.info.severity)] \(.["matched-at"])"' \
+            'select([.["template-id"], .["matcher-name"]] as $k | $noise | any(. == $k) | not)
+             | "\(.host) \(.["template-id"]) [\(.info.severity)] \(.["matcher-name"] // "-") \(.["matched-at"])"' \
             "${files[@]}")
           if [ -n "$findings" ]; then
             echo "::error::Nuclei findings outside KNOWN_NOISE:"
