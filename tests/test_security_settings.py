@@ -138,3 +138,43 @@ class SecuritySettingsTests(SimpleTestCase):
                     importlib.reload(settings_module)
         finally:
             importlib.reload(settings_module)
+
+
+class HstsTests(SimpleTestCase):
+    """Strict-Transport-Security on the deployed API.
+
+    Cloud Run and Fly only serve HTTPS, so browsers can safely be told to insist on it.
+    The header is only emitted for requests Django sees as secure, so plain-HTTP health
+    checks and local development are unaffected.
+    """
+
+    def _hsts_header(
+        self, *, debug: bool, secure: bool, extra: dict[str, str] | None = None
+    ) -> str:
+        environment = os.environ.copy()
+        environment["DJANGO_DEBUG"] = str(debug).lower()
+        environment["DJANGO_SECRET_KEY"] = "test-secret-key"
+        environment["PILAH_ALLOW_FAKE_GOOGLE_TOKEN"] = "false"
+        environment.pop("SECURE_HSTS_SECONDS", None)
+        environment.update(extra or {})
+        script = (
+            "import os, django; os.environ['DJANGO_SETTINGS_MODULE'] = 'config.settings'; "
+            "django.setup(); from django.test import Client; "
+            f"r = Client().get('/api/v1/auth/google/start', secure={secure}); "
+            "print(r.headers.get('Strict-Transport-Security', ''))"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=Path(__file__).resolve().parent.parent,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.strip()
+
+    def test_https_responses_carry_hsts_in_production(self) -> None:
+        header = self._hsts_header(debug=False, secure=True)
+
+        self.assertRegex(header, r"^max-age=[1-9]\d*$")
