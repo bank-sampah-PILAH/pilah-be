@@ -43,9 +43,11 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         search = self.request.query_params.get("search", "")
         status_filter = self.request.query_params.get("status", "aktif")
         if self.action == "list" and len(search) >= 2:
-            qs = qs.filter(
-                Q(nama__icontains=search) | Q(no_hp__icontains=search) | Q(email__icontains=search)
-            )
+            search_filter = Q(nama__icontains=search)
+            search_filter |= Q(nomor__icontains=search)
+            search_filter |= Q(no_hp__icontains=search)
+            search_filter |= Q(email__icontains=search)
+            qs = qs.filter(search_filter)
         if self.action == "list":
             if status_filter == "aktif":
                 qs = qs.filter(is_active=True, status=Nasabah.Status.APPROVED)
