@@ -1,7 +1,9 @@
+from decimal import Decimal
 from typing import Any
 
 from django.db import IntegrityError, transaction
 from django.db.models import Q, QuerySet
+from django.db.models.functions import Coalesce, Lower
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.request import Request
@@ -55,7 +57,22 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
                 qs = qs.filter(status=Nasabah.Status.PENDING)
             elif status_filter == "ditolak":
                 qs = qs.filter(status=Nasabah.Status.REJECTED)
-        return qs.order_by("nomor")
+        urutan = (
+            self.request.query_params.get("urutan", "nomor") if self.action == "list" else "nomor"
+        )
+        if urutan == "nama":
+            qs = qs.alias(_nama_urutan=Lower("nama"))
+        elif urutan in ("saldo_terbesar", "saldo_terkecil"):
+            # A missing saldo is displayed as zero by NasabahSerializer.
+            qs = qs.alias(_saldo_urutan=Coalesce("saldo__total_saldo", Decimal("0.00")))
+        ordering = {
+            "nomor": ("nomor",),
+            "nama": ("_nama_urutan", "nomor"),
+            "terbaru": ("-tanggal_daftar", "nomor"),
+            "saldo_terbesar": ("-_saldo_urutan", "nomor"),
+            "saldo_terkecil": ("_saldo_urutan", "nomor"),
+        }
+        return qs.order_by(*ordering.get(urutan, ordering["nomor"]))
 
     def get_serializer_class(self) -> type[NasabahSerializer | NasabahDetailSerializer]:
         if self.action == "retrieve":

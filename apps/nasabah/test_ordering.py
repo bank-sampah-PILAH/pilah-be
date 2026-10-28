@@ -10,6 +10,8 @@ from api.models import BankSampah, Nasabah, Saldo, User
 
 
 class NasabahOrderingTests(APITestCase):
+    bank: ClassVar[BankSampah]
+    pengurus: ClassVar[User]
     expected: ClassVar[dict[str, list[int]]] = {
         "nomor": [1, 2, 3, 4, 5, 6],
         "nama": [3, 4, 5, 2, 6, 1],
@@ -124,14 +126,14 @@ class NasabahOrderingTests(APITestCase):
         for order, expected in self.expected.items():
             with self.subTest(order=order):
                 actual: list[str] = []
-                for page in range(1, 4):
-                    response = self.client.get(
-                        "/api/v1/nasabah", {"urutan": order, "page_size": 2, "page": page}
-                    )
+                # One row per page forces every equal-value group across pages.
+                for page in range(1, 7):
+                    params: dict[str, str | int] = {"urutan": order, "page_size": 1, "page": page}
+                    response = self.client.get("/api/v1/nasabah", params)
                     self.assertEqual(response.status_code, 200, response.data)
                     self.assertEqual(response.data["count"], 6)
                     actual.extend(row["kode"] for row in response.data["results"])
-                    self.assertEqual(response.data["next"] is None, page == 3)
+                    self.assertEqual(response.data["next"] is None, page == 6)
                 self.assertEqual(actual, [f"NAS-{number:04}" for number in expected])
                 self.assertEqual(len(set(actual)), 6)
 
