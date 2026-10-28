@@ -178,3 +178,21 @@ class HstsTests(SimpleTestCase):
         header = self._hsts_header(debug=False, secure=True)
 
         self.assertRegex(header, r"^max-age=[1-9]\d*$")
+
+    def test_plain_http_responses_carry_no_hsts(self) -> None:
+        # Fly health checks reach the app over plain HTTP; HSTS must only ride on HTTPS.
+        self.assertEqual(self._hsts_header(debug=False, secure=False), "")
+
+    def test_local_development_does_not_pin_https(self) -> None:
+        self.assertEqual(self._hsts_header(debug=True, secure=True), "")
+
+    def test_hsts_can_be_switched_off_without_a_code_change(self) -> None:
+        header = self._hsts_header(debug=False, secure=True, extra={"SECURE_HSTS_SECONDS": "0"})
+
+        self.assertEqual(header, "")
+
+    def test_hsts_does_not_cover_subdomains_or_preload(self) -> None:
+        header = self._hsts_header(debug=False, secure=True)
+
+        self.assertNotIn("includeSubDomains", header)
+        self.assertNotIn("preload", header)
