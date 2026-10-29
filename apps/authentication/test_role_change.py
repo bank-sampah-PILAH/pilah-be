@@ -27,6 +27,33 @@ class RoleChangeTests(APITestCase):
         user.refresh_from_db()
         self.assertEqual(user.role, User.Role.NASABAH)
 
+    def test_every_registration_role_can_be_switched_to(self) -> None:
+        # PIL-451: "Ganti peran berhasil sebelum onboarding selesai, untuk tiap
+        # peran Google." Each target is reached from a different role.
+        for start, target in (
+            (User.Role.NASABAH, User.Role.PENGELOLA),
+            (User.Role.PENGELOLA, User.Role.PENGELOLA_INDUK),
+            (User.Role.PENGELOLA_INDUK, User.Role.NASABAH),
+        ):
+            with self.subTest(start=start, target=target):
+                user = User.objects.create_user(
+                    email=f"{start}-to-{target}@example.com", nama="Baru", role=start
+                )
+                self.client.force_authenticate(user)
+
+                response = self.client.patch(URL, {"role": target}, format="json")
+
+                self.assertEqual(response.status_code, 200, response.data)
+                self.assertEqual(response.data["user"]["role"], target)
+                self.assertEqual(response.data["next_step"], "complete_profile")
+                self.assertEqual(AccessToken(response.data["access_token"])["role"], target)
+                user.refresh_from_db()
+                self.assertEqual(user.role, target)
+                self.assertEqual(
+                    list(user.role_change_logs.values_list("from_role", "to_role")),
+                    [(start, target)],
+                )
+
     def test_the_role_is_kept_once_onboarding_has_committed_anything_for_it(self) -> None:
         bank = BankSampah.objects.create(
             nama="Bank Pending",
