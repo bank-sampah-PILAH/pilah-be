@@ -11,7 +11,7 @@ from google.oauth2 import id_token as google_id_token
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import BankSampah, Nasabah, NasabahApprovalLog, Saldo, User
+from api.models import BankSampah, Nasabah, NasabahApprovalLog, Saldo, User, UserRoleChangeLog
 from shared_kernel.permissions import (
     email_verification_exempt_allowlist,
     is_app_superadmin_allowlisted,
@@ -90,6 +90,29 @@ class AuthService:
         AuthService._enforce_superadmin_allowlist(user, email)
         AuthService._update_google_identity(user, google_id, name)
         return AuthService._session_response(user, is_new_user=created), created
+
+    @staticmethod
+    def change_role(user: User, role: str) -> dict[str, Any]:
+        # A mis-tapped role is only correctable while nothing has been
+        # committed for it: no completed profile, no bank sampah (pending
+        # included), no linked membership. The account row is locked first:
+        # every onboarding write that checks the role takes the same lock, so
+        # a registration already past its check finishes before this reads
+        # the row, and its link refuses the change.
+        with transaction.atomic():
+            OnboardingService.lock_account(user)
+            if user.is_profile_complete or user.bank_sampah_id or user.keanggotaan_nasabah.exists():
+                raise AuthServiceError(
+                    "Peran tidak dapat diganti setelah pendaftaran berjalan.",
+                    code="role_locked",
+                    status_code=409,
+                )
+            previous = user.role
+            if previous != role:
+                User.objects.filter(pk=user.pk).update(role=role, updated_at=timezone.now())
+                UserRoleChangeLog.objects.create(user=user, from_role=previous, to_role=role)
+        user.refresh_from_db()
+        return AuthService._session_response(user, is_new_user=False)
 
     @staticmethod
     def _user_for_email(email: str) -> User | None:
@@ -416,6 +439,19 @@ NO_HP_TERPAKAI_DI_BANK = "Nomor HP ini sudah terdaftar di bank sampah ini, hubun
 
 class OnboardingService:
     @staticmethod
+    def lock_account(user: User) -> None:
+        """Lock the account row for the caller's transaction and reload it.
+
+        A role change and every onboarding write that checks the role
+        (PIL-451) lock this same row, so they run one after the other: a bank
+        or a membership is never linked under a role that changed after its
+        check, and a role change sees whatever a finished registration
+        linked. Call inside ``transaction.atomic()``.
+        """
+        User.objects.select_for_update().only("pk").get(pk=user.pk)
+        user.refresh_from_db()
+
+    @staticmethod
     @transaction.atomic
     def complete_profile(user: User, profile_data: Mapping[str, Any]) -> User:
         # One-shot for pengelola, whose profile step gates their bank
@@ -492,6 +528,7 @@ class OnboardingService:
     @staticmethod
     @transaction.atomic
     def register_nasabah(user: User, payload: Mapping[str, Any]) -> Nasabah:
+        OnboardingService.lock_account(user)
         if user.role != User.Role.NASABAH:
             raise PermissionError("Hanya nasabah yang dapat mengajukan keanggotaan")
         if not user.alamat.strip():

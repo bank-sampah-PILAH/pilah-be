@@ -21,6 +21,7 @@ from apps.authentication.serializers import (
     LogoutSerializer,
     PasswordLoginSerializer,
     RefreshTokenSerializer,
+    RoleChangeSerializer,
     UserProfileSerializer,
 )
 from apps.authentication.services import (
@@ -241,6 +242,21 @@ class CompleteProfileView(APIView):
         data = UserProfileSerializer(user).data
         data["next_step"] = AuthService.user_state(user)
         return Response(data)
+
+
+class RoleChangeView(APIView):
+    permission_classes = [IsRegistrationRole]
+    serializer_class = RoleChangeSerializer
+
+    def patch(self, request: Request) -> Response:
+        serializer = RoleChangeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            return Response(
+                AuthService.change_role(current_user(request), serializer.validated_data["role"])
+            )
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
 
 
 def _auth_service_error_response(error: AuthServiceError) -> Response:
