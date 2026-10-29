@@ -57,12 +57,15 @@ class RoleChangeRaceTests(TransactionTestCase):
                 connection.close()
 
         def role_change() -> None:
+            # Recorded on both outcomes, so the report reads the same whether
+            # the role change went through (the bug) or was refused.
+            session: dict[str, Any] = {}
             try:
-                AuthService.change_role(User.objects.get(pk=user.pk), new_role)
-                outcome["changed"] = True
+                session = AuthService.change_role(User.objects.get(pk=user.pk), new_role)
             except AuthServiceError as exc:
                 outcome["refused"] = exc.code
             finally:
+                outcome["changed"] = bool(session)
                 connection.close()
 
         with patch.object(owner, method, paused):
