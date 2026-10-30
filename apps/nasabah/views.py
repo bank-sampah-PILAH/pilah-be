@@ -1,22 +1,29 @@
+import logging
 from decimal import Decimal
 from typing import Any
 
-from django.db import IntegrityError, transaction
+from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import Q, QuerySet
 from django.db.models.functions import Coalesce, Lower
+from django.utils.cache import patch_cache_control, patch_vary_headers
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import BaseThrottle
 from rest_framework.views import APIView
 
 from api.models import Nasabah, Saldo, User
 from apps.authentication.api import register_nasabah, user_state_hint
 from apps.bank_sampah.serializers import ApprovalDecisionSerializer
 from apps.nasabah.keanggotaan import email_terkunci, profil_akun, sinkronkan_dari_akun
+from apps.nasabah.security import NasabahListThrottle
 from apps.nasabah.serializers import (
     NasabahApprovalLogSerializer,
     NasabahDetailSerializer,
+    NasabahListQuerySerializer,
     NasabahSelfRegistrationSerializer,
     NasabahSelfViewSerializer,
     NasabahSerializer,
@@ -28,6 +35,7 @@ from shared_kernel.permissions import IsActivePengelola, IsNasabah, IsNasabahRol
 from shared_kernel.scoping import current_bank, current_user
 
 _NO_HP_TERPAKAI = "Nomor HP nasabah sudah digunakan"
+_security_logger = logging.getLogger("apps.nasabah.security")
 
 
 def _user(request: Request) -> User:
@@ -40,10 +48,81 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
     serializer_class = NasabahSerializer
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
+    def get_throttles(self) -> list[BaseThrottle]:
+        if self.action == "list":
+            return [NasabahListThrottle()]
+        return super().get_throttles()
+
+    def handle_exception(self, exc: Exception) -> Response:
+        # Also catches a failed shared throttle cache during initial(), before
+        # list() runs. Do not expose SQL, connection details, or cached rows.
+        if self.action == "list" and isinstance(exc, DatabaseError):
+            return Response(
+                {"error": "Daftar nasabah sementara tidak tersedia. Silakan coba lagi."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return super().handle_exception(exc)
+
+    def finalize_response(
+        self, request: Request, response: Response, *args: Any, **kwargs: Any
+    ) -> Response:
+        response = super().finalize_response(request, response, *args, **kwargs)
+        patch_cache_control(response, private=True, no_store=True, max_age=0)
+        patch_vary_headers(response, ("Authorization",))
+        if self.action == "list" and response.status_code >= 400:
+            # _user is already populated only when authentication completed.
+            # Accessing request.user here could retry a failing authentication.
+            actor = request.__dict__.get("_user")
+            _security_logger.warning(
+                "Customer list rejected: status=%s",
+                response.status_code,
+                extra={
+                    "event": "nasabah_list_rejected",
+                    "status_code": response.status_code,
+                    "actor_id": str(actor.pk) if isinstance(actor, User) else None,
+                },
+            )
+        return response
+
+    @extend_schema(
+        parameters=[
+            NasabahListQuerySerializer,
+            OpenApiParameter(
+                name="urutan",
+                type={"type": "string", "maxLength": 64},
+                default="nomor",
+                description=(
+                    "Maksimal 64 karakter. Pilihan: nomor, nama (A-Z), terbaru "
+                    "(-tanggal_daftar), saldo_terbesar, saldo_terkecil. Nilai kosong "
+                    "atau tidak dikenal memakai nomor. Setiap seri dipecahkan oleh nomor."
+                ),
+            ),
+        ],
+        description=(
+            "Daftar nasabah bank sampah pemanggil; search maksimal 254 karakter. "
+            "Setiap parameter hanya boleh muncul sekali. Hasil tidak boleh disimpan "
+            "cache. Kuota dasar per pengguna menghasilkan 429 dan Retry-After."
+        ),
+    )
+    def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        return super().list(request, *args, **kwargs)
+
     def get_queryset(self) -> QuerySet[Nasabah]:
+        params: dict[str, Any] = {}
+        if self.action == "list":
+            duplicates = {
+                key: ["Parameter hanya boleh dikirim satu kali."]
+                for key in ("search", "status", "urutan", "page", "page_size")
+                if len(self.request.query_params.getlist(key)) > 1
+            }
+            if duplicates:
+                raise ValidationError(duplicates)
+            query = NasabahListQuerySerializer(data=self.request.query_params)
+            query.is_valid(raise_exception=True)
+            params = query.validated_data
         qs = Nasabah.objects.filter(bank_sampah=current_bank(self.request)).select_related("saldo")
-        search = self.request.query_params.get("search", "")
-        status_filter = self.request.query_params.get("status", "aktif")
+        search = params.get("search", "")
+        status_filter = params.get("status", "aktif")
         if self.action == "list" and len(search) >= 2:
             qs = qs.filter(
                 Q(nama__icontains=search) | Q(no_hp__icontains=search) | Q(email__icontains=search)
@@ -57,9 +136,7 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
                 qs = qs.filter(status=Nasabah.Status.PENDING)
             elif status_filter == "ditolak":
                 qs = qs.filter(status=Nasabah.Status.REJECTED)
-        urutan = (
-            self.request.query_params.get("urutan", "nomor") if self.action == "list" else "nomor"
-        )
+        urutan = params.get("urutan", "nomor")
         if urutan == "nama":
             qs = qs.alias(_nama_urutan=Lower("nama"))
         elif urutan in ("saldo_terbesar", "saldo_terkecil"):

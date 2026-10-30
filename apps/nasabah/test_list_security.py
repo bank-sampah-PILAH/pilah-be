@@ -7,11 +7,15 @@ from unittest.mock import patch
 from django.core.cache import caches
 from django.db import DatabaseError
 from django.test import override_settings
+from django.urls import path
 from django.utils import timezone
+from drf_spectacular.generators import SchemaGenerator
+from rest_framework.response import Response
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import AccessToken
 
 from api.models import BankSampah, Nasabah, User
+from apps.nasabah.views import NasabahViewSet
 
 
 class NasabahListSecurityTests(APITestCase):
@@ -59,9 +63,8 @@ class NasabahListSecurityTests(APITestCase):
     def login_as(self, user: User) -> None:
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {AccessToken.for_user(user)}")
 
-    def assert_private(self, response: object) -> None:
-        # DRF Response implements the HTTP header mapping.
-        headers = response.headers  # type: ignore[attr-defined]
+    def assert_private(self, response: Response) -> None:
+        headers = response.headers
         self.assertIn("no-store", headers.get("Cache-Control", ""))
         self.assertIn("private", headers.get("Cache-Control", ""))
         self.assertIn("max-age=0", headers.get("Cache-Control", ""))
@@ -74,13 +77,19 @@ class NasabahListSecurityTests(APITestCase):
 
     def test_rejects_overlong_or_nul_search_before_querying_customers(self) -> None:
         for search in ("x" * 255, "name\x00"):
-            with self.subTest(search_length=len(search)):
+            with (
+                self.subTest(search_length=len(search)),
+                patch("apps.nasabah.views.Nasabah.objects.filter") as customer_query,
+            ):
                 response = self.client.get("/api/v1/nasabah", {"search": search})
                 self.assertEqual(response.status_code, 422)
                 self.assertIn("search", response.data["errors"])
                 self.assert_private(response)
+                customer_query.assert_not_called()
         accepted = self.client.get("/api/v1/nasabah", {"search": "x" * 254})
         self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/nasabah", {"urutan": "x" * 64}).status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/nasabah", {"urutan": "x" * 65}).status_code, 422)
 
     def test_rejects_duplicate_query_keys_instead_of_using_the_last_value(self) -> None:
         for key, first, second in (
@@ -106,7 +115,7 @@ class NasabahListSecurityTests(APITestCase):
             "/api/v1/nasabah",
             {
                 "urutan": "nama; DROP TABLE nasabah;--",
-                "page_size": 10000,
+                "page_size": "10000",
                 "bank_sampah": str(self.foreign_customer.bank_sampah_id),
                 "status": "semua",
             },
@@ -117,7 +126,7 @@ class NasabahListSecurityTests(APITestCase):
         self.assertNotIn(
             str(self.foreign_customer.id), [row["id"] for row in response.data["results"]]
         )
-        for search in ("' OR 1=1 --", "%", "_"):
+        for search in ("' OR 1=1 --", "%%", "__"):
             with self.subTest(search=search):
                 response = self.client.get("/api/v1/nasabah", {"search": search})
                 self.assertEqual(response.status_code, 200)
@@ -148,6 +157,7 @@ class NasabahListSecurityTests(APITestCase):
         for changes in (
             {"role": User.Role.NASABAH},
             {"role": User.Role.SUPERADMIN},
+            {"role": User.Role.PENGELOLA_INDUK},
             {"is_profile_complete": False},
         ):
             with self.subTest(changes=changes):
@@ -159,12 +169,19 @@ class NasabahListSecurityTests(APITestCase):
                 User.objects.filter(pk=self.pengurus.pk).update(**original)
         BankSampah.objects.filter(pk=self.bank.pk).update(is_active=False)
         self.assertEqual(self.client.get("/api/v1/nasabah").status_code, 403)
+        BankSampah.objects.filter(pk=self.bank.pk).update(
+            is_active=True, status=BankSampah.Status.PENDING
+        )
+        self.assertEqual(self.client.get("/api/v1/nasabah").status_code, 403)
+        BankSampah.objects.filter(pk=self.bank.pk).update(status=BankSampah.Status.ACTIVE)
+        User.objects.filter(pk=self.pengurus.pk).update(is_active=False)
+        self.assertEqual(self.client.get("/api/v1/nasabah").status_code, 401)
 
     @override_settings(NASABAH_LIST_RATE="2/min")
     def test_quota_is_per_user_and_cannot_be_reset_with_different_query_values(self) -> None:
         self.assertEqual(self.client.get("/api/v1/nasabah", {"urutan": "nama"}).status_code, 200)
         self.assertEqual(self.client.get("/api/v1/nasabah", {"status": "semua"}).status_code, 200)
-        denied = self.client.get("/api/v1/nasabah", {"urutan": "terbaru", "page_size": 1})
+        denied = self.client.get("/api/v1/nasabah", {"urutan": "terbaru", "page_size": "1"})
         self.assertEqual(denied.status_code, 429)
         self.assertGreater(int(denied["Retry-After"]), 0)
         self.assert_private(denied)
@@ -187,6 +204,32 @@ class NasabahListSecurityTests(APITestCase):
         self.assertNotIn("secret", str(response.data))
         self.assertNotIn("password", str(response.data))
         self.assert_private(response)
+
+    def test_cache_or_auth_database_failure_also_fails_closed_before_list_runs(self) -> None:
+        for target in (
+            "apps.nasabah.security.NasabahListThrottle.cache.get",
+            "rest_framework_simplejwt.authentication.JWTAuthentication.get_user",
+        ):
+            with self.subTest(target=target), patch(target, side_effect=DatabaseError("db secret")):
+                response = self.client.get("/api/v1/nasabah")
+                self.assertEqual(response.status_code, 503)
+                self.assertNotIn("db secret", str(response.data))
+                self.assert_private(response)
+
+    def test_schema_documents_bounded_search_status_and_ordering_contract(self) -> None:
+        generator = SchemaGenerator(  # type: ignore[no-untyped-call]  # drf-spectacular has no constructor annotations
+            patterns=[
+                path("api/v1/nasabah", NasabahViewSet.as_view({"get": "list"})),
+            ]
+        )
+        schema = generator.get_schema(public=True)  # type: ignore[no-untyped-call]  # untyped third-party method
+        parameters = {
+            item["name"]: item for item in schema["paths"]["/api/v1/nasabah"]["get"]["parameters"]
+        }
+        self.assertEqual(parameters["search"]["schema"]["maxLength"], 254)
+        self.assertIn("semua", parameters["status"]["schema"]["enum"])
+        self.assertEqual(parameters["urutan"]["schema"]["maxLength"], 64)
+        self.assertEqual(parameters["urutan"]["schema"]["default"], "nomor")
 
     def test_rejection_audit_does_not_record_tokens_search_or_customer_data(self) -> None:
         token = str(AccessToken.for_user(self.pengurus))
