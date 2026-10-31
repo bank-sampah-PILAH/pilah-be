@@ -447,9 +447,9 @@ class PencairanService:
             .exclude(pk=pencairan.pk)
         )
         setoran = list(
-            Transaksi.objects.filter(tanggal__gte=mulai, **ledger).values_list(
-                "id", "tanggal", "total_nilai"
-            )
+            Transaksi.objects.filter(
+                tanggal__gte=mulai, status=Transaksi.Status.TERCATAT, **ledger
+            ).values_list("id", "tanggal", "total_nilai")
         )
 
         # PILAH 1.0 opening balances have no transaksi behind them, so the replay starts
@@ -571,9 +571,9 @@ class BalanceService:
     def saldo_at(
         bank_sampah: BankSampah, nasabah_id: UUID, until: datetime, until_id: UUID
     ) -> Decimal:
-        setoran = Transaksi.objects.filter(bank_sampah=bank_sampah, nasabah_id=nasabah_id).filter(
-            Q(tanggal__lt=until) | Q(tanggal=until, id__lte=until_id)
-        )
+        setoran = Transaksi.objects.filter(
+            bank_sampah=bank_sampah, nasabah_id=nasabah_id, status=Transaksi.Status.TERCATAT
+        ).filter(Q(tanggal__lt=until) | Q(tanggal=until, id__lte=until_id))
         # At an equal tanggal a pencairan is ordered after the setoran, so it is
         # excluded here; the export's merge below applies the same rule.
         pencairan = Pencairan.objects.filter(
