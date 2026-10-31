@@ -41,6 +41,7 @@ from apps.ledger.services import (
     DraftTidakBisaDiubah,
     PencairanService,
     SaldoTidakCukup,
+    SetoranDibatalkan,
     TransactionFilterService,
     TransactionService,
 )
@@ -250,7 +251,7 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
             TransactionService.edit_setoran(
                 current_user(request), transaksi, serializer.validated_data
             )
-        except SaldoTidakCukup as exc:
+        except (SaldoTidakCukup, SetoranDibatalkan) as exc:
             return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
         return Response(TransactionDetailSerializer(self.get_queryset().get(pk=transaksi.pk)).data)
 
@@ -260,14 +261,19 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         transaksi = self.get_object()
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        TransactionService.batalkan_setoran(
-            current_user(request), transaksi, serializer.validated_data["alasan"]
-        )
+        try:
+            TransactionService.batalkan_setoran(
+                current_user(request), transaksi, serializer.validated_data["alasan"]
+            )
+        except SetoranDibatalkan as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
         return Response(TransactionDetailSerializer(self.get_queryset().get(pk=transaksi.pk)).data)
 
     @action(detail=True, methods=["post"], url_path="notify-wa")
     def notify_wa(self, request: Request, pk: str | None = None) -> Response:
         transaksi = self.get_object()
+        if transaksi.status == Transaksi.Status.DIBATALKAN:
+            return Response({"error": str(SetoranDibatalkan())}, status=status.HTTP_409_CONFLICT)
         result = send_setoran_receipt(transaksi)
         return Response(result, status=200 if result["success"] else 400)
 

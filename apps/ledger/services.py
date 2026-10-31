@@ -51,6 +51,13 @@ class SaldoTidakCukup(Exception):
     """An edit would take the nasabah's saldo below zero."""
 
 
+class SetoranDibatalkan(Exception):
+    """The setoran was voided; a voided setoran is final."""
+
+    def __init__(self) -> None:
+        super().__init__("Setoran sudah dibatalkan")
+
+
 class TransactionService:
     @staticmethod
     @transaction.atomic
@@ -135,7 +142,7 @@ class TransactionService:
         never reprices a setoran.
         """
         saldo = Saldo.objects.select_for_update().get(nasabah_id=transaksi.nasabah_id)
-        transaksi = Transaksi.objects.select_for_update().get(pk=transaksi.pk)
+        transaksi = TransactionService._kunci_tercatat(transaksi)
         lama = list(transaksi.items.all())
         catatan = payload["catatan"] or "" if "catatan" in payload else transaksi.catatan
 
@@ -208,7 +215,7 @@ class TransactionService:
         `transaksi` comes from the caller's bank-scoped queryset; it is re-read under lock.
         """
         saldo = Saldo.objects.select_for_update().get(nasabah_id=transaksi.nasabah_id)
-        transaksi = Transaksi.objects.select_for_update().get(pk=transaksi.pk)
+        transaksi = TransactionService._kunci_tercatat(transaksi)
         transaksi.status = Transaksi.Status.DIBATALKAN
         transaksi.alasan_batal = alasan
         transaksi.dibatalkan_oleh = user
@@ -224,6 +231,14 @@ class TransactionService:
         )
         saldo.total_saldo = bulatkan_rupiah(saldo.total_saldo - transaksi.total_nilai)
         saldo.save(update_fields=["total_saldo", "updated_at"])
+        return transaksi
+
+    @staticmethod
+    def _kunci_tercatat(transaksi: Transaksi) -> Transaksi:
+        """Re-read under lock and refuse a setoran that was voided meanwhile."""
+        transaksi = Transaksi.objects.select_for_update().get(pk=transaksi.pk)
+        if transaksi.status == Transaksi.Status.DIBATALKAN:
+            raise SetoranDibatalkan
         return transaksi
 
     @staticmethod
