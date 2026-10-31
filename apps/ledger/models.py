@@ -84,6 +84,26 @@ class Transaksi(TimestampedModel):
                 fields=["bank_sampah", "idempotency_key"],
                 name="transaksi_bank_idempotency_key_unique",
             ),
+            # A void always carries who, when and why; a tercatat setoran carries none of it.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status="tercatat",
+                        alasan_batal="",
+                        dibatalkan_oleh__isnull=True,
+                        dibatalkan_pada__isnull=True,
+                    )
+                    | (
+                        models.Q(
+                            status="dibatalkan",
+                            dibatalkan_oleh__isnull=False,
+                            dibatalkan_pada__isnull=False,
+                        )
+                        & ~models.Q(alasan_batal="")
+                    )
+                ),
+                name="transaksi_batal_lengkap",
+            ),
         ]
 
 

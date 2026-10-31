@@ -242,7 +242,7 @@ class SetoranVoidTests(APITestCase):
         self.assertEqual(self._saldo(), Decimal(2000))
 
     def test_database_refuses_a_void_without_who_when_and_why(self) -> None:
-        setengah = [
+        setengah: list[dict[str, Any]] = [
             {"status": Transaksi.Status.DIBATALKAN},
             {"status": Transaksi.Status.DIBATALKAN, "dibatalkan_oleh": self.pengelola},
             {"alasan_batal": "x", "dibatalkan_pada": timezone.now()},
