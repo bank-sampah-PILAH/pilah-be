@@ -265,7 +265,7 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
             TransactionService.batalkan_setoran(
                 current_user(request), transaksi, serializer.validated_data["alasan"]
             )
-        except SetoranDibatalkan as exc:
+        except (SaldoTidakCukup, SetoranDibatalkan) as exc:
             return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
         return Response(TransactionDetailSerializer(self.get_queryset().get(pk=transaksi.pk)).data)
 

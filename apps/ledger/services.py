@@ -216,6 +216,12 @@ class TransactionService:
         """
         saldo = Saldo.objects.select_for_update().get(nasabah_id=transaksi.nasabah_id)
         transaksi = TransactionService._kunci_tercatat(transaksi)
+        saldo_baru = bulatkan_rupiah(saldo.total_saldo - transaksi.total_nilai)
+        sesudahnya = TransactionService._geser_pencairan(transaksi, -transaksi.total_nilai)
+        if saldo_baru < 0 or any(cair.saldo_sesudah < 0 for cair in sesudahnya):
+            raise SaldoTidakCukup(
+                "Setoran ini tidak bisa dibatalkan karena sebagian saldonya sudah dicairkan"
+            )
         transaksi.status = Transaksi.Status.DIBATALKAN
         transaksi.alasan_batal = alasan
         transaksi.dibatalkan_oleh = user
@@ -229,7 +235,8 @@ class TransactionService:
                 "updated_at",
             ]
         )
-        saldo.total_saldo = bulatkan_rupiah(saldo.total_saldo - transaksi.total_nilai)
+        Pencairan.objects.bulk_update(sesudahnya, ["saldo_sebelum", "saldo_sesudah"])
+        saldo.total_saldo = saldo_baru
         saldo.save(update_fields=["total_saldo", "updated_at"])
         return transaksi
 
