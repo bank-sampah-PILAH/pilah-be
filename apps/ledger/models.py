@@ -35,6 +35,10 @@ class Transaksi(TimestampedModel):
         TERKIRIM = "terkirim", "Terkirim"
         GAGAL = "gagal", "Gagal"
 
+    class Status(models.TextChoices):
+        TERCATAT = "tercatat", "Tercatat"
+        DIBATALKAN = "dibatalkan", "Dibatalkan"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     nasabah = models.ForeignKey(_NASABAH_API, on_delete=models.PROTECT, related_name="transaksi")
     bank_sampah = models.ForeignKey(_BANK_API, on_delete=models.PROTECT, related_name="transaksi")
@@ -57,6 +61,17 @@ class Transaksi(TimestampedModel):
     # S6553: "" instead of NULL for rows without the header. Comparisons stay
     # correct because a setoran with a header always writes a real digest.
     idempotency_request_hash = models.CharField(max_length=64, blank=True, default="")
+    # PIL-428: "hapus" is a void. The row stays, marked cancelled, with who, when and why.
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.TERCATAT)
+    alasan_batal = models.CharField(max_length=255, blank=True, default="")
+    dibatalkan_oleh = models.ForeignKey(
+        _USER_API,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="transaksi_dibatalkan",
+    )
+    dibatalkan_pada = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         # ponytail: single Django app label until the squash migration; db_table

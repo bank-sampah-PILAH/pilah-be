@@ -201,6 +201,32 @@ class TransactionService:
         return transaksi
 
     @staticmethod
+    @transaction.atomic
+    def batalkan_setoran(user: User, transaksi: Transaksi, alasan: str) -> Transaksi:
+        """Void a setoran: keep the row, mark it cancelled, take its total out of the saldo.
+
+        `transaksi` comes from the caller's bank-scoped queryset; it is re-read under lock.
+        """
+        saldo = Saldo.objects.select_for_update().get(nasabah_id=transaksi.nasabah_id)
+        transaksi = Transaksi.objects.select_for_update().get(pk=transaksi.pk)
+        transaksi.status = Transaksi.Status.DIBATALKAN
+        transaksi.alasan_batal = alasan
+        transaksi.dibatalkan_oleh = user
+        transaksi.dibatalkan_pada = timezone.now()
+        transaksi.save(
+            update_fields=[
+                "status",
+                "alasan_batal",
+                "dibatalkan_oleh",
+                "dibatalkan_pada",
+                "updated_at",
+            ]
+        )
+        saldo.total_saldo = bulatkan_rupiah(saldo.total_saldo - transaksi.total_nilai)
+        saldo.save(update_fields=["total_saldo", "updated_at"])
+        return transaksi
+
+    @staticmethod
     def _harga_item_edit(
         transaksi: Transaksi, lama: list[DetailTransaksi], items: Any
     ) -> list[tuple[Any, Decimal, Decimal, Decimal]]:

@@ -30,6 +30,7 @@ from apps.ledger.serializers import (
     PencairanDetailSerializer,
     PencairanEditSerializer,
     PencairanRevisiSerializer,
+    TransactionBatalSerializer,
     TransactionCreateSerializer,
     TransactionDetailSerializer,
     TransactionEditSerializer,
@@ -132,7 +133,8 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
     def get_serializer_class(
         self,
     ) -> type[
-        TransactionCreateSerializer
+        TransactionBatalSerializer
+        | TransactionCreateSerializer
         | TransactionDetailSerializer
         | TransactionEditSerializer
         | TransactionListSerializer
@@ -143,16 +145,18 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
             return TransactionDetailSerializer
         if self.action == "partial_update":
             return TransactionEditSerializer
+        if self.action == "batalkan":
+            return TransactionBatalSerializer
         return TransactionListSerializer
 
     def get_queryset(self) -> QuerySet[Transaksi]:
         qs = (
             Transaksi.objects.filter(bank_sampah=current_bank(self.request))
-            .select_related("nasabah", "bank_sampah", "dicatat_oleh")
+            .select_related("nasabah", "bank_sampah", "dicatat_oleh", "dibatalkan_oleh")
             .prefetch_related("items")
         )
         # Only the detail response carries the change history.
-        if self.action in {"retrieve", "partial_update"}:
+        if self.action in {"retrieve", "partial_update", "batalkan"}:
             qs = qs.prefetch_related("revisi__diubah_oleh")
         search = self.request.query_params.get("search", "")
         nasabah_id = self.request.query_params.get("nasabah_id")
@@ -248,6 +252,17 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
             )
         except SaldoTidakCukup as exc:
             return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(TransactionDetailSerializer(self.get_queryset().get(pk=transaksi.pk)).data)
+
+    @action(detail=True, methods=["post"], url_path="batalkan")
+    def batalkan(self, request: Request, pk: str | None = None) -> Response:
+        """Void ("hapus") a setoran: it stays in the riwayat, marked cancelled."""
+        transaksi = self.get_object()
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        TransactionService.batalkan_setoran(
+            current_user(request), transaksi, serializer.validated_data["alasan"]
+        )
         return Response(TransactionDetailSerializer(self.get_queryset().get(pk=transaksi.pk)).data)
 
     @action(detail=True, methods=["post"], url_path="notify-wa")

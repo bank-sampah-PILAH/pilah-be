@@ -28,6 +28,7 @@ _DIBUAT_OLEH_NAMA = "dibuat_oleh.nama"
 _DIUBAH_OLEH_NAMA = "diubah_oleh.nama"
 _BANK_SAMPAH_ID = "bank_sampah.id"
 _ALASAN_WAJIB = "Alasan perubahan wajib diisi"
+_ALASAN_BATAL_WAJIB = "Alasan pembatalan wajib diisi"
 _DICATAT_OLEH_ID = "dicatat_oleh.id"
 
 
@@ -158,6 +159,17 @@ class TransactionEditSerializer(_SetoranWriteSerializer):
     )
 
 
+class TransactionBatalSerializer(serializers.Serializer[Any]):
+    alasan = serializers.CharField(
+        required=True,
+        max_length=255,
+        error_messages={
+            "required": _ALASAN_BATAL_WAJIB,
+            "blank": _ALASAN_BATAL_WAJIB,
+        },
+    )
+
+
 class TransaksiRevisiSerializer(serializers.ModelSerializer[Model]):
     diubah_oleh = serializers.UUIDField(source="diubah_oleh.id")
     diubah_oleh_nama = serializers.CharField(source=_DIUBAH_OLEH_NAMA)
@@ -185,6 +197,12 @@ class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
     revisi = TransaksiRevisiSerializer(many=True, read_only=True)
     saldo_setelah_transaksi = serializers.SerializerMethodField()
     harga_pada_tanggal = serializers.SerializerMethodField()
+    dibatalkan_oleh = serializers.UUIDField(
+        source="dibatalkan_oleh.id", allow_null=True, read_only=True
+    )
+    dibatalkan_oleh_nama = serializers.CharField(
+        source="dibatalkan_oleh.nama", allow_null=True, read_only=True
+    )
 
     class Meta:
         model = Transaksi
@@ -202,6 +220,11 @@ class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
             "revisi",
             "saldo_setelah_transaksi",
             "harga_pada_tanggal",
+            "status",
+            "alasan_batal",
+            "dibatalkan_oleh",
+            "dibatalkan_oleh_nama",
+            "dibatalkan_pada",
         ]
 
     def get_harga_pada_tanggal(self, obj: Any) -> dict[str, str]:
