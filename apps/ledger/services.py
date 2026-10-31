@@ -51,6 +51,13 @@ class SaldoTidakCukup(Exception):
     """An edit would take the nasabah's saldo below zero."""
 
 
+class SetoranDibatalkan(Exception):
+    """The setoran was voided; a voided setoran is final."""
+
+    def __init__(self) -> None:
+        super().__init__("Setoran sudah dibatalkan")
+
+
 class TransactionService:
     @staticmethod
     @transaction.atomic
@@ -135,7 +142,7 @@ class TransactionService:
         never reprices a setoran.
         """
         saldo = Saldo.objects.select_for_update().get(nasabah_id=transaksi.nasabah_id)
-        transaksi = Transaksi.objects.select_for_update().get(pk=transaksi.pk)
+        transaksi = TransactionService._kunci_tercatat(transaksi)
         lama = list(transaksi.items.all())
         catatan = payload["catatan"] or "" if "catatan" in payload else transaksi.catatan
 
@@ -198,6 +205,47 @@ class TransactionService:
         Pencairan.objects.bulk_update(sesudahnya, ["saldo_sebelum", "saldo_sesudah"])
         saldo.total_saldo = saldo_baru
         saldo.save(update_fields=["total_saldo", "updated_at"])
+        return transaksi
+
+    @staticmethod
+    @transaction.atomic
+    def batalkan_setoran(user: User, transaksi: Transaksi, alasan: str) -> Transaksi:
+        """Void a setoran: keep the row, mark it cancelled, take its total out of the saldo.
+
+        `transaksi` comes from the caller's bank-scoped queryset; it is re-read under lock.
+        """
+        saldo = Saldo.objects.select_for_update().get(nasabah_id=transaksi.nasabah_id)
+        transaksi = TransactionService._kunci_tercatat(transaksi)
+        saldo_baru = bulatkan_rupiah(saldo.total_saldo - transaksi.total_nilai)
+        sesudahnya = TransactionService._geser_pencairan(transaksi, -transaksi.total_nilai)
+        if saldo_baru < 0 or any(cair.saldo_sesudah < 0 for cair in sesudahnya):
+            raise SaldoTidakCukup(
+                "Setoran ini tidak bisa dibatalkan karena sebagian saldonya sudah dicairkan"
+            )
+        transaksi.status = Transaksi.Status.DIBATALKAN
+        transaksi.alasan_batal = alasan
+        transaksi.dibatalkan_oleh = user
+        transaksi.dibatalkan_pada = timezone.now()
+        transaksi.save(
+            update_fields=[
+                "status",
+                "alasan_batal",
+                "dibatalkan_oleh",
+                "dibatalkan_pada",
+                "updated_at",
+            ]
+        )
+        Pencairan.objects.bulk_update(sesudahnya, ["saldo_sebelum", "saldo_sesudah"])
+        saldo.total_saldo = saldo_baru
+        saldo.save(update_fields=["total_saldo", "updated_at"])
+        return transaksi
+
+    @staticmethod
+    def _kunci_tercatat(transaksi: Transaksi) -> Transaksi:
+        """Re-read under lock and refuse a setoran that was voided meanwhile."""
+        transaksi = Transaksi.objects.select_for_update().get(pk=transaksi.pk)
+        if transaksi.status == Transaksi.Status.DIBATALKAN:
+            raise SetoranDibatalkan
         return transaksi
 
     @staticmethod
@@ -399,9 +447,9 @@ class PencairanService:
             .exclude(pk=pencairan.pk)
         )
         setoran = list(
-            Transaksi.objects.filter(tanggal__gte=mulai, **ledger).values_list(
-                "id", "tanggal", "total_nilai"
-            )
+            Transaksi.objects.filter(
+                tanggal__gte=mulai, status=Transaksi.Status.TERCATAT, **ledger
+            ).values_list("id", "tanggal", "total_nilai")
         )
 
         # PILAH 1.0 opening balances have no transaksi behind them, so the replay starts
@@ -523,9 +571,9 @@ class BalanceService:
     def saldo_at(
         bank_sampah: BankSampah, nasabah_id: UUID, until: datetime, until_id: UUID
     ) -> Decimal:
-        setoran = Transaksi.objects.filter(bank_sampah=bank_sampah, nasabah_id=nasabah_id).filter(
-            Q(tanggal__lt=until) | Q(tanggal=until, id__lte=until_id)
-        )
+        setoran = Transaksi.objects.filter(
+            bank_sampah=bank_sampah, nasabah_id=nasabah_id, status=Transaksi.Status.TERCATAT
+        ).filter(Q(tanggal__lt=until) | Q(tanggal=until, id__lte=until_id))
         # At an equal tanggal a pencairan is ordered after the setoran, so it is
         # excluded here; the export's merge below applies the same rule.
         pencairan = Pencairan.objects.filter(

@@ -28,7 +28,26 @@ _DIBUAT_OLEH_NAMA = "dibuat_oleh.nama"
 _DIUBAH_OLEH_NAMA = "diubah_oleh.nama"
 _BANK_SAMPAH_ID = "bank_sampah.id"
 _ALASAN_WAJIB = "Alasan perubahan wajib diisi"
+_ALASAN_BATAL_WAJIB = "Alasan pembatalan wajib diisi"
 _DICATAT_OLEH_ID = "dicatat_oleh.id"
+
+
+# PIL-428: the void and who made it; the dibatalkan_* fields are null while tercatat.
+_VOID_FIELDS = [
+    "status",
+    "alasan_batal",
+    "dibatalkan_oleh",
+    "dibatalkan_oleh_nama",
+    "dibatalkan_pada",
+]
+
+
+def _dibatalkan_oleh() -> serializers.UUIDField:
+    return serializers.UUIDField(source="dibatalkan_oleh.id", allow_null=True, read_only=True)
+
+
+def _dibatalkan_oleh_nama() -> serializers.CharField:
+    return serializers.CharField(source="dibatalkan_oleh.nama", allow_null=True, read_only=True)
 
 
 class TransactionListSerializer(serializers.ModelSerializer[Model]):
@@ -38,6 +57,8 @@ class TransactionListSerializer(serializers.ModelSerializer[Model]):
     jenis_sampah_utama = serializers.SerializerMethodField()
     total_berat_kg = serializers.SerializerMethodField()
     dicatat_oleh = serializers.UUIDField(source=_DICATAT_OLEH_ID)
+    dibatalkan_oleh = _dibatalkan_oleh()
+    dibatalkan_oleh_nama = _dibatalkan_oleh_nama()
 
     class Meta:
         model = Transaksi
@@ -52,6 +73,7 @@ class TransactionListSerializer(serializers.ModelSerializer[Model]):
             "tanggal",
             "status_wa",
             "dicatat_oleh",
+            *_VOID_FIELDS,
         ]
 
     def get_nasabah_inisial(self, obj: Any) -> Any:
@@ -158,6 +180,17 @@ class TransactionEditSerializer(_SetoranWriteSerializer):
     )
 
 
+class TransactionBatalSerializer(serializers.Serializer[Any]):
+    alasan = serializers.CharField(
+        required=True,
+        max_length=255,
+        error_messages={
+            "required": _ALASAN_BATAL_WAJIB,
+            "blank": _ALASAN_BATAL_WAJIB,
+        },
+    )
+
+
 class TransaksiRevisiSerializer(serializers.ModelSerializer[Model]):
     diubah_oleh = serializers.UUIDField(source="diubah_oleh.id")
     diubah_oleh_nama = serializers.CharField(source=_DIUBAH_OLEH_NAMA)
@@ -185,6 +218,8 @@ class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
     revisi = TransaksiRevisiSerializer(many=True, read_only=True)
     saldo_setelah_transaksi = serializers.SerializerMethodField()
     harga_pada_tanggal = serializers.SerializerMethodField()
+    dibatalkan_oleh = _dibatalkan_oleh()
+    dibatalkan_oleh_nama = _dibatalkan_oleh_nama()
 
     class Meta:
         model = Transaksi
@@ -202,6 +237,7 @@ class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
             "revisi",
             "saldo_setelah_transaksi",
             "harga_pada_tanggal",
+            *_VOID_FIELDS,
         ]
 
     def get_harga_pada_tanggal(self, obj: Any) -> dict[str, str]:

@@ -217,6 +217,7 @@ def _saldo_after_by_transaction(queryset: QuerySet[Transaksi]) -> dict[UUID, Dec
             bank_sampah=bank_sampah,
             nasabah_id__in=nasabah_ids,
             tanggal__lte=latest_transaction.tanggal,
+            status=Transaksi.Status.TERCATAT,
         )
         .only("id", "nasabah_id", "total_nilai", "tanggal")
         .order_by("nasabah_id", "tanggal", "id")

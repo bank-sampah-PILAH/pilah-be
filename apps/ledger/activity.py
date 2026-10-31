@@ -92,7 +92,7 @@ def serialize_activity_page(rows: list[dict[str, Any]], bank: BankSampah) -> lis
     payout_ids = [row["id"] for row in rows if row["tipe_aktivitas"] == "pencairan"]
     deposits = (
         Transaksi.objects.filter(bank_sampah=bank, id__in=deposit_ids)
-        .select_related("nasabah", "dicatat_oleh")
+        .select_related("nasabah", "dicatat_oleh", "dibatalkan_oleh")
         .prefetch_related("items")
     )
     payouts = PencairanService.dengan_info_revisi(

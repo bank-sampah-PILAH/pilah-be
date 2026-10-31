@@ -27,6 +27,8 @@ def operational_queries(
 def operational_summary(
     deposits: QuerySet[Transaksi], payouts: QuerySet[Pencairan]
 ) -> OperationalSummary:
+    # A voided setoran stays in the riwayat rows but counts toward nothing (PIL-428).
+    deposits = deposits.filter(status=Transaksi.Status.TERCATAT)
     # Each ledger returns one row regardless of history size. Round per event,
     # not after summing, to preserve legacy full-Rupiah display rules.
     deposit_totals = deposits.aggregate(count=Count("id"), total=sum_full_rupiah("total_nilai"))
