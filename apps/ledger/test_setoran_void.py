@@ -4,6 +4,7 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from api.models import BankSampah, Nasabah, Pencairan, Saldo, Transaksi, User
@@ -188,6 +189,56 @@ class SetoranVoidTests(APITestCase):
         self.assertEqual(self._status(), Transaksi.Status.TERCATAT)
         cair.refresh_from_db()
         self.assertEqual(cair.saldo_sebelum, Decimal(6000))
+
+    def test_saldo_after_a_later_setoran_leaves_the_voided_one_out(self) -> None:
+        self._batalkan()
+        kedua = self._setor("1.000")
+
+        detail = self.client.get(f"/api/v1/transaksi/{kedua.id}")
+
+        self.assertEqual(Decimal(detail.data["saldo_setelah_transaksi"]), Decimal(3000))
+
+    def test_riwayat_lists_the_voided_setoran_but_its_summary_does_not_count_it(self) -> None:
+        self._setor("1.000")
+        self._batalkan()
+
+        response = self.client.get("/api/v1/aktivitas", {"periode": "semua"})
+
+        statuses = sorted(row["data"]["status"] for row in response.data["results"])
+        self.assertEqual(statuses, ["dibatalkan", "tercatat"])
+        self.assertEqual(response.data["summary"]["jumlah_transaksi"], 1)
+        self.assertEqual(response.data["summary"]["total_setoran"], 3000)
+        self.assertEqual(response.data["summary"]["total_berat"], "1.000")
+
+    def test_setoran_list_carries_the_void(self) -> None:
+        self._batalkan()
+
+        response = self.client.get("/api/v1/transaksi", {"periode": "semua"})
+
+        row = response.data["results"][0]
+        self.assertEqual(row["status"], "dibatalkan")
+        self.assertEqual(row["alasan_batal"], "Salah nasabah")
+        self.assertEqual(row["dibatalkan_oleh_nama"], "Pengelola")
+
+    def test_editing_a_pencairan_replays_the_saldo_without_the_voided_setoran(self) -> None:
+        sekarang = timezone.now()
+        lama = self._setor("1.000")
+        Transaksi.objects.filter(pk=lama.pk).update(tanggal=sekarang - timedelta(hours=4))
+        Transaksi.objects.filter(pk=self.transaksi.pk).update(tanggal=sekarang - timedelta(hours=3))
+        self._batalkan()
+        cair = self._cairkan(1000, sekarang - timedelta(hours=1))
+
+        # Moved before the voided setoran, so the replay walks over it.
+        response = self.client.patch(
+            f"/api/v1/pencairan/{cair.id}",
+            {"tanggal": (sekarang - timedelta(hours=3, minutes=30)).isoformat(), "alasan": "x"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        cair.refresh_from_db()
+        self.assertEqual((cair.saldo_sebelum, cair.saldo_sesudah), (Decimal(3000), Decimal(2000)))
+        self.assertEqual(self._saldo(), Decimal(2000))
 
     def _status(self) -> str:
         return Transaksi.objects.values_list("status", flat=True).get(pk=self.transaksi.pk)
