@@ -241,6 +241,9 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {"statement_pdf": "10/min", "password_login": "5/min"},
 }
 
+# List-only per-user overuse budget; DRF throttles are not a strict DDoS limit.
+NASABAH_LIST_RATE = os.getenv("NASABAH_LIST_RATE", "120/min")
+
 SPECTACULAR_SETTINGS = {
     "TITLE": "PILAH API",
     "DESCRIPTION": "Bank Sampah Management System API",

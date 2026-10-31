@@ -10,6 +10,22 @@ from apps.nasabah.keanggotaan import profil_akun, profil_berbeda, punya_akun
 from shared_kernel.validators import normalize_indonesian_phone
 
 
+class NasabahListQuerySerializer(serializers.Serializer[dict[str, Any]]):
+    """Bound list-only inputs without changing the customer write contract."""
+
+    search = serializers.CharField(
+        required=False, default="", allow_blank=True, max_length=254, trim_whitespace=False
+    )
+    status = serializers.ChoiceField(
+        choices=("aktif", "tidak_aktif", "menunggu", "ditolak", "semua"),
+        required=False,
+        default="aktif",
+    )
+    urutan = serializers.CharField(
+        required=False, default="nomor", allow_blank=True, max_length=64, trim_whitespace=False
+    )
+
+
 class NasabahApprovalLogSerializer(serializers.ModelSerializer[Model]):
     pengurus_email = serializers.EmailField(source="pengurus.email")
 
