@@ -4,6 +4,7 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -239,6 +240,17 @@ class SetoranVoidTests(APITestCase):
         cair.refresh_from_db()
         self.assertEqual((cair.saldo_sebelum, cair.saldo_sesudah), (Decimal(3000), Decimal(2000)))
         self.assertEqual(self._saldo(), Decimal(2000))
+
+    def test_database_refuses_a_void_without_who_when_and_why(self) -> None:
+        setengah = [
+            {"status": Transaksi.Status.DIBATALKAN},
+            {"status": Transaksi.Status.DIBATALKAN, "dibatalkan_oleh": self.pengelola},
+            {"alasan_batal": "x", "dibatalkan_pada": timezone.now()},
+        ]
+        for fields in setengah:
+            with self.subTest(fields=fields), self.assertRaises(IntegrityError):
+                with transaction.atomic():
+                    Transaksi.objects.filter(pk=self.transaksi.pk).update(**fields)
 
     def _status(self) -> str:
         return Transaksi.objects.values_list("status", flat=True).get(pk=self.transaksi.pk)
