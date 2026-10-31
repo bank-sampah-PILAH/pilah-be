@@ -1,11 +1,13 @@
 """PIL-428: pengurus membatalkan (void) setoran. Datanya tetap ada, hanya ditandai dibatalkan."""
 
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
 from rest_framework.test import APITestCase
 
-from api.models import BankSampah, Nasabah, Saldo, Transaksi, User
+from api.models import BankSampah, Nasabah, Pencairan, Saldo, Transaksi, User
+from apps.ledger.services import PencairanService
 from apps.waste_catalog.api import buat_jenis_sampah
 
 
@@ -139,6 +141,53 @@ class SetoranVoidTests(APITestCase):
         response = self.client.post(f"/api/v1/transaksi/{self.transaksi.id}/notify-wa")
 
         self.assertEqual(response.status_code, 409)
+
+    def _cairkan(self, nominal: int, tanggal: Any) -> Pencairan:
+        return PencairanService.realisasi(
+            user=self.pengelola,
+            nasabah=self.nasabah,
+            saldo=Saldo.objects.get(nasabah=self.nasabah),
+            nominal=Decimal(nominal),
+            metode="tunai",
+            tanggal=tanggal,
+            keterangan="",
+        )
+
+    def test_void_shifts_the_snapshots_of_later_pencairan(self) -> None:
+        self._setor("1.000")  # 3.000 more, so the 2.000 pencairan stays funded
+        cair = self._cairkan(2000, self.transaksi.tanggal + timedelta(hours=1))
+        Transaksi.objects.exclude(pk=self.transaksi.pk).update(
+            tanggal=self.transaksi.tanggal - timedelta(hours=1)
+        )
+
+        response = self._batalkan()
+
+        self.assertEqual(response.status_code, 200)
+        cair.refresh_from_db()
+        self.assertEqual((cair.saldo_sebelum, cair.saldo_sesudah), (Decimal(3000), Decimal(1000)))
+        self.assertEqual(self._saldo(), Decimal(1000))
+
+    def test_void_of_money_already_paid_out_is_rejected(self) -> None:
+        self._cairkan(5000, self.transaksi.tanggal + timedelta(hours=1))
+
+        response = self._batalkan()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self._status(), Transaksi.Status.TERCATAT)
+        self.assertEqual(self._saldo(), Decimal(1000))
+
+    def test_void_that_leaves_a_later_pencairan_unfunded_is_rejected(self) -> None:
+        # Saldo ends positive, but the 5.000 pencairan would have been paid from nothing.
+        cair = self._cairkan(5000, self.transaksi.tanggal + timedelta(hours=1))
+        kedua = self._setor("2.000")
+        Transaksi.objects.filter(pk=kedua.pk).update(tanggal=cair.tanggal + timedelta(hours=1))
+
+        response = self._batalkan()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self._status(), Transaksi.Status.TERCATAT)
+        cair.refresh_from_db()
+        self.assertEqual(cair.saldo_sebelum, Decimal(6000))
 
     def _status(self) -> str:
         return Transaksi.objects.values_list("status", flat=True).get(pk=self.transaksi.pk)
