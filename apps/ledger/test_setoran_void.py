@@ -67,3 +67,44 @@ class SetoranVoidTests(APITestCase):
         # Soft delete: the row and its items stay.
         self.assertTrue(Transaksi.objects.filter(pk=self.transaksi.pk).exists())
         self.assertEqual(self.transaksi.items.count(), 1)
+
+    def test_alasan_is_required(self) -> None:
+        response = self._batalkan(alasan="")
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.data["errors"]["alasan"], ["Alasan pembatalan wajib diisi"])
+        self.assertEqual(self._status(), Transaksi.Status.TERCATAT)
+        self.assertEqual(self._saldo(), Decimal(6000))
+
+    def test_other_banks_setoran_is_not_found(self) -> None:
+        other = BankSampah.objects.create(
+            nama="Bank Lain", alamat="Depok", kota="Depok", no_hp_pic="+628123450000"
+        )
+        intruder = User.objects.create_user(
+            email="lain@example.test",
+            nama="Lain",
+            bank_sampah=other,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+        self.client.force_authenticate(intruder)
+
+        response = self._batalkan()
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self._status(), Transaksi.Status.TERCATAT)
+
+    def test_nasabah_cannot_void_their_own_setoran(self) -> None:
+        akun = User.objects.create_user(
+            email="budi@example.test", nama="Budi", role=User.Role.NASABAH
+        )
+        Nasabah.objects.filter(pk=self.nasabah.pk).update(user=akun)
+        self.client.force_authenticate(akun)
+
+        response = self._batalkan()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self._status(), Transaksi.Status.TERCATAT)
+
+    def _status(self) -> str:
+        return Transaksi.objects.values_list("status", flat=True).get(pk=self.transaksi.pk)
