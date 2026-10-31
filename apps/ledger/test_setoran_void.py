@@ -106,5 +106,39 @@ class SetoranVoidTests(APITestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(self._status(), Transaksi.Status.TERCATAT)
 
+    def test_a_voided_setoran_cannot_be_voided_again(self) -> None:
+        self._batalkan()
+
+        response = self._batalkan(alasan="Lagi")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["error"], "Setoran sudah dibatalkan")
+        self.assertEqual(self._saldo(), Decimal(0))
+        self.transaksi.refresh_from_db()
+        self.assertEqual(self.transaksi.alasan_batal, "Salah nasabah")
+
+    def test_a_voided_setoran_cannot_be_edited(self) -> None:
+        self._batalkan()
+
+        response = self.client.patch(
+            f"/api/v1/transaksi/{self.transaksi.id}",
+            {
+                "items": [{"jenis_sampah_id": str(self.pet.id), "berat": "3.000"}],
+                "alasan": "Salah timbang",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self._saldo(), Decimal(0))
+        self.assertEqual(self.transaksi.revisi.count(), 0)
+
+    def test_a_voided_setoran_sends_no_whatsapp_receipt(self) -> None:
+        self._batalkan()
+
+        response = self.client.post(f"/api/v1/transaksi/{self.transaksi.id}/notify-wa")
+
+        self.assertEqual(response.status_code, 409)
+
     def _status(self) -> str:
         return Transaksi.objects.values_list("status", flat=True).get(pk=self.transaksi.pk)
