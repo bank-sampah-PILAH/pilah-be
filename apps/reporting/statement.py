@@ -155,9 +155,7 @@ def export_statement_pdf(member: Nasabah, request: HttpRequest) -> tuple[bytes, 
 def build_statement(member: Nasabah, request: HttpRequest) -> StatementData:
     """Assemble the statement data; rows carry computed running saldo."""
     # A voided setoran is not part of the statement, nor of its running saldo (PIL-428).
-    setoran = Transaksi.objects.filter(
-        nasabah=member, bank_sampah=member.bank_sampah, status=Transaksi.Status.TERCATAT
-    )
+    setoran = Transaksi.objects.tercatat().filter(nasabah=member, bank_sampah=member.bank_sampah)
     setoran_qs = _filter_window(setoran, request)
     pencairan_qs = _filter_window(
         Pencairan.objects.filter(nasabah=member, bank_sampah=member.bank_sampah), request

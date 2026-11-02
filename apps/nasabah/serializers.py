@@ -5,7 +5,7 @@ from django.db.models import Model
 from django.utils import timezone
 from rest_framework import serializers
 
-from api.models import BankSampah, DetailTransaksi, Nasabah, NasabahApprovalLog, Saldo, Transaksi
+from api.models import BankSampah, DetailTransaksi, Nasabah, NasabahApprovalLog, Saldo
 from apps.nasabah.keanggotaan import profil_akun, profil_berbeda, punya_akun
 from shared_kernel.validators import normalize_indonesian_phone
 
@@ -125,7 +125,7 @@ class NasabahDetailSerializer(NasabahSerializer):
 
     def get_ringkasan_transaksi(self, obj: Any) -> Any:
         # A voided setoran (PIL-428) is no longer part of the nasabah's history totals.
-        setoran = obj.transaksi.filter(status=Transaksi.Status.TERCATAT)
+        setoran = obj.transaksi.tercatat()
         items = DetailTransaksi.objects.filter(transaksi__in=setoran)
         total_kg = sum((item.berat for item in items), Decimal(0))
         last_transaction = setoran.order_by("-tanggal").first()

@@ -9,7 +9,7 @@ api.models, other BCs -> reporting port).
 from django.db.models import QuerySet
 from django.http import HttpRequest
 
-from api.models import BankSampah, DraftPencairan, Nasabah, Pencairan, Transaksi
+from api.models import BankSampah, DraftPencairan, Nasabah, Pencairan, TransaksiQuerySet
 from apps.reporting import draft_export, exporter, statement
 from apps.reporting.operational import OperationalSummary, operational_queries, operational_summary
 from apps.reporting.snapshot import export_snapshot
@@ -30,7 +30,7 @@ def export_operational_report(bank: BankSampah, request: HttpRequest) -> tuple[b
     with export_snapshot():
         deposits, payouts = operational_queries(bank, request)
         # The feed lists voided setoran; the workbook is a laporan and leaves them out.
-        deposits = deposits.filter(status=Transaksi.Status.TERCATAT)
+        deposits = deposits.tercatat()
         if not deposits.exists() and not payouts.exists():
             return None
         return export_excel(
@@ -39,7 +39,7 @@ def export_operational_report(bank: BankSampah, request: HttpRequest) -> tuple[b
 
 
 def export_excel(
-    queryset: QuerySet[Transaksi],
+    queryset: TransaksiQuerySet,
     request: HttpRequest | None = None,
     *,
     payouts: QuerySet[Pencairan] | None = None,

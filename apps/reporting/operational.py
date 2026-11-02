@@ -5,7 +5,7 @@ from typing import TypedDict
 from django.db.models import Count, QuerySet, Sum
 from django.http import HttpRequest
 
-from api.models import BankSampah, DetailTransaksi, Pencairan, Transaksi
+from api.models import BankSampah, DetailTransaksi, Pencairan, TransaksiQuerySet
 from apps.ledger.api import activity_sources
 from apps.reporting.money import sum_full_rupiah
 
@@ -20,15 +20,15 @@ class OperationalSummary(TypedDict):
 
 def operational_queries(
     bank: BankSampah, request: HttpRequest
-) -> tuple[QuerySet[Transaksi], QuerySet[Pencairan]]:
+) -> tuple[TransaksiQuerySet, QuerySet[Pencairan]]:
     return activity_sources(bank, request)
 
 
 def operational_summary(
-    deposits: QuerySet[Transaksi], payouts: QuerySet[Pencairan]
+    deposits: TransaksiQuerySet, payouts: QuerySet[Pencairan]
 ) -> OperationalSummary:
     # A voided setoran stays in the riwayat rows but counts toward nothing (PIL-428).
-    deposits = deposits.filter(status=Transaksi.Status.TERCATAT)
+    deposits = deposits.tercatat()
     # Each ledger returns one row regardless of history size. Round per event,
     # not after summing, to preserve legacy full-Rupiah display rules.
     deposit_totals = deposits.aggregate(count=Count("id"), total=sum_full_rupiah("total_nilai"))

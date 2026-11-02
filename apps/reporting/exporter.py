@@ -12,14 +12,14 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.worksheet import Worksheet
 
-from api.models import DetailTransaksi, Pencairan, Transaksi
+from api.models import DetailTransaksi, Pencairan, Transaksi, TransaksiQuerySet
 from apps.reporting.money import sum_full_rupiah
 from apps.reporting.operational import OperationalSummary, operational_summary
 from shared_kernel.kalkulasi import bulatkan_rupiah
 
 
 def export_excel(
-    queryset: QuerySet[Transaksi],
+    queryset: TransaksiQuerySet,
     request: HttpRequest | None = None,
     *,
     payouts: QuerySet[Pencairan] | None = None,
@@ -213,11 +213,11 @@ def _saldo_after_by_transaction(queryset: QuerySet[Transaksi]) -> dict[UUID, Dec
     saldo_after = {}
 
     transactions = (
-        Transaksi.objects.filter(
+        Transaksi.objects.tercatat()
+        .filter(
             bank_sampah=bank_sampah,
             nasabah_id__in=nasabah_ids,
             tanggal__lte=latest_transaction.tanggal,
-            status=Transaksi.Status.TERCATAT,
         )
         .only("id", "nasabah_id", "total_nilai", "tanggal")
         .order_by("nasabah_id", "tanggal", "id")

@@ -6,7 +6,7 @@ from django.db.models import CharField, QuerySet, Value
 from django.http import HttpRequest
 from rest_framework import serializers
 
-from api.models import BankSampah, Nasabah, Pencairan, Transaksi
+from api.models import BankSampah, Nasabah, Pencairan, Transaksi, TransaksiQuerySet
 from apps.ledger.serializers import PencairanDetailSerializer, TransactionListSerializer
 from apps.ledger.services import PencairanService, TransactionFilterService
 
@@ -26,7 +26,7 @@ PERIODS = {
 
 def activity_sources(
     bank: BankSampah, request: HttpRequest, member: Nasabah | None = None
-) -> tuple[QuerySet[Transaksi], QuerySet[Pencairan]]:
+) -> tuple[TransaksiQuerySet, QuerySet[Pencairan]]:
     """One authorization/filter policy for history, totals and exports."""
     period = request.GET.get("periode", "semua")
     kind = request.GET.get("tipe", "semua")
@@ -52,7 +52,9 @@ def activity_sources(
     if search:
         deposits = deposits.filter(nasabah__nama__icontains=search)
         payouts = payouts.filter(nasabah__nama__icontains=search)
-    deposits = TransactionFilterService.apply_period(deposits, request, default=None)
+    deposits = cast(
+        TransaksiQuerySet, TransactionFilterService.apply_period(deposits, request, default=None)
+    )
     payouts = TransactionFilterService.apply_period(payouts, request, default=None)
     if kind == "pencairan":
         deposits = deposits.none()
