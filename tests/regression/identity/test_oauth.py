@@ -3,6 +3,7 @@
 import json
 from typing import Any
 from unittest.mock import Mock, patch
+from urllib.parse import parse_qs, urlparse
 
 import requests
 from django.core.signing import TimestampSigner
@@ -10,8 +11,20 @@ from django.test import override_settings
 
 from tests.regression.helpers import RegressionTestCase
 
+# Where the popup sends the browser when `next` is missing or not a local path.
+OAUTH_FALLBACK_PATH = "/api-test/"
+
 
 class OAuthRegressionTests(RegressionTestCase):
+    def _next_signed_into_state(self, next_url: str) -> str:
+        """The `next` the start view signs into `state`, which the callback later trusts."""
+        self.client.credentials()
+        with override_settings(GOOGLE_CLIENT_ID="cid", GOOGLE_CLIENT_SECRET="csec"):
+            response = self.client.get("/api/v1/auth/google/start", {"next": next_url})
+        self.assertEqual(response.status_code, 302)
+        state = parse_qs(urlparse(response["Location"]).query)["state"][0]
+        return str(TimestampSigner().unsign(state))
+
     def test_oauth_start_unconfigured_or_redirects(self) -> None:
         self.client.credentials()
         response = self.client.get("/api/v1/auth/google/start")
@@ -29,6 +42,12 @@ class OAuthRegressionTests(RegressionTestCase):
         with override_settings(GOOGLE_CLIENT_ID="cid", GOOGLE_CLIENT_SECRET="csec"):
             response = self.client.get("/api/v1/auth/google/start?next=https://evil.example/")
         self.assertEqual(response.status_code, 302)
+
+    def test_oauth_start_keeps_a_local_next_path(self) -> None:
+        self.assertEqual(self._next_signed_into_state("/dashboard?tab=1"), "/dashboard?tab=1")
+
+    def test_oauth_start_rejects_protocol_relative_next(self) -> None:
+        self.assertEqual(self._next_signed_into_state("//evil.example.com"), OAUTH_FALLBACK_PATH)
 
     def test_oauth_callback_error_param(self) -> None:
         self.client.credentials()
