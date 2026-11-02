@@ -1,4 +1,5 @@
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 from django.conf import settings
@@ -37,6 +38,13 @@ from shared_kernel.scoping import current_user
 
 # Local page a finished OAuth popup redirects to when no `next` URL survives.
 _OAUTH_FALLBACK_PATH = "/api-test/"
+
+
+def _local_next_path(value: str) -> str:
+    """`next` is only ever a path on this site; a value that could leave it falls back."""
+    if not value.startswith("/") or urlparse(value).netloc:
+        return _OAUTH_FALLBACK_PATH
+    return value
 
 
 class GoogleAuthView(APIView):
@@ -88,9 +96,7 @@ class GoogleOAuthStartView(APIView):
         redirect_uri = settings.GOOGLE_REDIRECT_URI or request.build_absolute_uri(
             "/api/v1/auth/google/callback"
         )
-        next_url = request.GET.get("next") or _OAUTH_FALLBACK_PATH
-        if not next_url.startswith("/"):
-            next_url = _OAUTH_FALLBACK_PATH
+        next_url = _local_next_path(request.GET.get("next") or _OAUTH_FALLBACK_PATH)
         state = TimestampSigner().sign(next_url)
         params = urlencode(
             {
