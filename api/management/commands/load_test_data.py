@@ -141,23 +141,7 @@ class Command(BaseCommand):
             return self.telemetry()
         if action == "audit":
             return self.audit(run_id, options["expected_writes"])
-        payouts = Q(bank_sampah_id=bank_id) | Q(nasabah__bank_sampah_id=bank_id)
-        if action == "cleanup":
-            user_ids = self.user_ids(run_id)
-            payouts |= Q(dicatat_oleh_id__in=user_ids)
-            if PencairanRevisi.objects.filter(diubah_oleh_id__in=user_ids).exists():
-                raise CommandError("Fixture bank has payouts; refusing cleanup")
-        if action in ("reset", "cleanup") and Pencairan.objects.filter(payouts).exists():
-            raise CommandError("Fixture bank has payouts; refusing reset or cleanup")
-        if action == "cleanup" and (
-            DraftPencairan.objects.filter(
-                Q(bank_sampah_id=bank_id)
-                | Q(dibuat_oleh_id__in=self.user_ids(run_id))
-                | Q(diubah_oleh_id__in=self.user_ids(run_id))
-            ).exists()
-            or DraftPencairanItem.objects.filter(nasabah__bank_sampah_id=bank_id).exists()
-        ):
-            raise CommandError("Fixture bank has payout drafts; refusing cleanup")
+        self._guard_payouts_and_drafts(run_id, bank_id, action)
         if action == "reset":
             if not BankSampah.objects.filter(pk=bank_id, is_active=True).exists():
                 raise CommandError("Fixture bank is archived; refusing reset")
@@ -178,6 +162,25 @@ class Command(BaseCommand):
             "retained_immutable_prices": retained_prices,
             "archived_bank_id": str(bank_id),
         }
+
+    def _guard_payouts_and_drafts(self, run_id: str, bank_id: UUID, action: str) -> None:
+        payouts = Q(bank_sampah_id=bank_id) | Q(nasabah__bank_sampah_id=bank_id)
+        if action == "cleanup":
+            user_ids = self.user_ids(run_id)
+            payouts |= Q(dicatat_oleh_id__in=user_ids)
+            if PencairanRevisi.objects.filter(diubah_oleh_id__in=user_ids).exists():
+                raise CommandError("Fixture bank has payouts; refusing cleanup")
+        if action in ("reset", "cleanup") and Pencairan.objects.filter(payouts).exists():
+            raise CommandError("Fixture bank has payouts; refusing reset or cleanup")
+        if action == "cleanup" and (
+            DraftPencairan.objects.filter(
+                Q(bank_sampah_id=bank_id)
+                | Q(dibuat_oleh_id__in=self.user_ids(run_id))
+                | Q(diubah_oleh_id__in=self.user_ids(run_id))
+            ).exists()
+            or DraftPencairanItem.objects.filter(nasabah__bank_sampah_id=bank_id).exists()
+        ):
+            raise CommandError("Fixture bank has payout drafts; refusing cleanup")
 
     @staticmethod
     def user_ids(run_id: str) -> list[UUID]:
