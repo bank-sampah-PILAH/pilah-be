@@ -458,8 +458,7 @@ class OnboardingService:
         check, and a role change sees whatever a finished registration
         linked. Call inside ``transaction.atomic()``.
         """
-        User.objects.select_for_update().only("pk").get(pk=user.pk)
-        user.refresh_from_db()
+        user.refresh_from_db(from_queryset=User.objects.select_for_update())
 
     @staticmethod
     @transaction.atomic
