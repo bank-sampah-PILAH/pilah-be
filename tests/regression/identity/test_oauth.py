@@ -14,6 +14,16 @@ from tests.regression.helpers import RegressionTestCase
 # Where the popup sends the browser when `next` is missing or not a local path.
 OAUTH_FALLBACK_PATH = "/api-test/"
 
+# Browsers read a backslash as a slash and drop tabs and line breaks, so each of
+# these still leaves the site even though it starts with a single "/".
+BROWSER_READS_AS_EXTERNAL = [
+    "/\\evil.example.com",
+    "/\\\\evil.example.com",
+    "/\t/evil.example.com",
+    "/\r\n/evil.example.com",
+    "///evil.example.com",
+]
+
 
 class OAuthRegressionTests(RegressionTestCase):
     def _next_signed_into_state(self, next_url: str) -> str:
@@ -71,6 +81,17 @@ class OAuthRegressionTests(RegressionTestCase):
         page = self._callback_page_for_signed_state("//evil.example.com")
         self.assertIn(f'window.location.href = "{OAUTH_FALLBACK_PATH}";', page)
         self.assertNotIn("evil.example.com", page)
+
+    def test_oauth_start_rejects_next_that_a_browser_reads_as_external(self) -> None:
+        for next_url in BROWSER_READS_AS_EXTERNAL:
+            with self.subTest(next_url=next_url):
+                self.assertEqual(self._next_signed_into_state(next_url), OAUTH_FALLBACK_PATH)
+
+    def test_oauth_callback_ignores_signed_state_that_a_browser_reads_as_external(self) -> None:
+        for next_url in BROWSER_READS_AS_EXTERNAL:
+            with self.subTest(next_url=next_url):
+                page = self._callback_page_for_signed_state(next_url)
+                self.assertIn(f'window.location.href = "{OAUTH_FALLBACK_PATH}";', page)
 
     def test_oauth_callback_error_param(self) -> None:
         self.client.credentials()
