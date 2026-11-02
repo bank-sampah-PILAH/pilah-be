@@ -49,6 +49,29 @@ class OAuthRegressionTests(RegressionTestCase):
     def test_oauth_start_rejects_protocol_relative_next(self) -> None:
         self.assertEqual(self._next_signed_into_state("//evil.example.com"), OAUTH_FALLBACK_PATH)
 
+    def _callback_page_for_signed_state(self, next_url: str) -> str:
+        """The popup page a successful login renders for a state signed with `next_url`."""
+        self.client.credentials()
+        state = TimestampSigner().sign(next_url)
+        token_response = Mock(status_code=200)
+        token_response.json = Mock(return_value={"id_token": "dev:baru@example.com:Baru"})
+        with patch("apps.authentication.views.requests.post", return_value=token_response):
+            response = self.client.get(
+                "/api/v1/auth/google/callback", {"code": "abc", "state": state}
+            )
+        self.assertEqual(response.status_code, 200)
+        body: bytes = response.content
+        return body.decode()
+
+    def test_oauth_callback_sends_the_browser_to_a_local_next_path(self) -> None:
+        page = self._callback_page_for_signed_state("/dashboard?tab=1")
+        self.assertIn('window.location.href = "/dashboard?tab=1";', page)
+
+    def test_oauth_callback_ignores_a_protocol_relative_signed_state(self) -> None:
+        page = self._callback_page_for_signed_state("//evil.example.com")
+        self.assertIn(f'window.location.href = "{OAUTH_FALLBACK_PATH}";', page)
+        self.assertNotIn("evil.example.com", page)
+
     def test_oauth_callback_error_param(self) -> None:
         self.client.credentials()
         response = self.client.get("/api/v1/auth/google/callback?error=access_denied")
