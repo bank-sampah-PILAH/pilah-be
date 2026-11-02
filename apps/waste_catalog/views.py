@@ -55,11 +55,12 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
     def create(self, request: Request) -> Response:
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        nomor = serializer.validated_data["nomor"]
         bank = current_bank(request)
+        nomor = serializer.validated_data.get("nomor") or JenisSampah.nomor_berikut(bank.id)
         if JenisSampah.objects.filter(bank_sampah=bank, nomor=nomor).exists():
             return Response({"errors": {"kode": ["Kode sampah sudah digunakan"]}}, status=422)
         data = dict(serializer.validated_data)
+        data["nomor"] = nomor
         harga = data.pop("harga_per_kg")
         jenis = buat_jenis_sampah(bank, harga_per_kg=harga, oleh=current_user(request), **data)
         return Response(self.get_serializer(jenis).data, status=status.HTTP_201_CREATED)

@@ -19,7 +19,10 @@ class NasabahApprovalLogSerializer(serializers.ModelSerializer[Model]):
 
 
 class NasabahSerializer(serializers.ModelSerializer[Model]):
-    kode = serializers.CharField(source="nomor", required=True, max_length=20)
+    # Kode boleh kosong: tanpa kirim, server menomori otomatis dari ID
+    # terbesar keanggotaan bank sampah ini (NAS-001 -> NAS-002, ...). Isi
+    # manual masih diterima agar data lama dari aplikasi lama tetap lolos.
+    kode = serializers.CharField(source="nomor", required=False, allow_blank=True, max_length=20)
     email = serializers.EmailField(required=True)
     total_saldo = serializers.SerializerMethodField()
     punya_akun = serializers.SerializerMethodField()
@@ -59,10 +62,9 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
         return value
 
     def validate_kode(self, value: Any) -> Any:
-        value = value.strip()
-        if not value:
-            raise serializers.ValidationError("ID Nasabah wajib diisi")
-        return value
+        # Kosong diizinkan: view menomori otomatis lantaran bank sampah baru
+        # diketahui di sana (current_bank), tidak pada level serializer.
+        return value.strip()
 
     def validate_nama(self, value: Any) -> Any:
         value = value.strip()

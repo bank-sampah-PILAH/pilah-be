@@ -65,9 +65,9 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
     def create(self, request: Request) -> Response:
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        nomor = serializer.validated_data["nomor"]
-        no_hp = serializer.validated_data["no_hp"]
         bank = current_bank(request)
+        nomor = serializer.validated_data.get("nomor") or Nasabah.nomor_berikut(bank.id)
+        no_hp = serializer.validated_data["no_hp"]
         if Nasabah.objects.filter(bank_sampah=bank, nomor=nomor).exists():
             return Response({"errors": {"kode": ["ID Nasabah sudah digunakan"]}}, status=422)
         if Nasabah.objects.filter(bank_sampah=bank, no_hp=no_hp).exists():
@@ -83,6 +83,7 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             )
         nasabah = serializer.save(
             bank_sampah=bank,
+            nomor=nomor,
         )
         Saldo.objects.create(nasabah=nasabah)
         return Response(self.get_serializer(nasabah).data, status=status.HTTP_201_CREATED)
