@@ -56,6 +56,20 @@ def harga_berlaku(jenis: JenisSampah, pada: datetime) -> Decimal | None:
     return versi.harga_per_kg if versi else None
 
 
+def harga_berlaku_bank(bank: BankSampah, pada: datetime) -> dict[UUID, Decimal]:
+    """Harga per kg yang berlaku pada ``pada`` untuk tiap jenis bank, dalam satu query.
+
+    Aturan pemilihannya sama dengan ``harga_berlaku``; jenis yang belum punya harga
+    pada saat itu tidak muncul.
+    """
+    harga: dict[UUID, Decimal] = {}
+    for versi in HargaSampah.objects.filter(bank_sampah=bank, berlaku_mulai__lte=pada).order_by(
+        "jenis_sampah_id", "-berlaku_mulai", "-id"
+    ):
+        harga.setdefault(versi.jenis_sampah_id, versi.harga_per_kg)
+    return harga
+
+
 def versi_berlaku(jenis: JenisSampah, pada: datetime) -> HargaSampah | None:
     """Versi harga ``jenis`` yang berlaku pada waktu ``pada``."""
     return (

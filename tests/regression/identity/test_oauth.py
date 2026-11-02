@@ -1,6 +1,9 @@
 """Identity contracts: Google OAuth start/callback and real-token verification."""
 
+import json
+from typing import Any
 from unittest.mock import Mock, patch
+from urllib.parse import parse_qs, urlparse
 
 import requests
 from django.core.signing import TimestampSigner
@@ -8,8 +11,30 @@ from django.test import override_settings
 
 from tests.regression.helpers import RegressionTestCase
 
+# Where the popup sends the browser when `next` is missing or not a local path.
+OAUTH_FALLBACK_PATH = "/api-test/"
+
+# Browsers read a backslash as a slash and drop tabs and line breaks, so each of
+# these still leaves the site even though it starts with a single "/".
+BROWSER_READS_AS_EXTERNAL = [
+    "/\\evil.example.com",
+    "/\\\\evil.example.com",
+    "/\t/evil.example.com",
+    "/\r\n/evil.example.com",
+    "///evil.example.com",
+]
+
 
 class OAuthRegressionTests(RegressionTestCase):
+    def _next_signed_into_state(self, next_url: str) -> str:
+        """The `next` the start view signs into `state`, which the callback later trusts."""
+        self.client.credentials()
+        with override_settings(GOOGLE_CLIENT_ID="cid", GOOGLE_CLIENT_SECRET="csec"):
+            response = self.client.get("/api/v1/auth/google/start", {"next": next_url})
+        self.assertEqual(response.status_code, 302)
+        state = parse_qs(urlparse(response["Location"]).query)["state"][0]
+        return str(TimestampSigner().unsign(state))
+
     def test_oauth_start_unconfigured_or_redirects(self) -> None:
         self.client.credentials()
         response = self.client.get("/api/v1/auth/google/start")
@@ -27,6 +52,46 @@ class OAuthRegressionTests(RegressionTestCase):
         with override_settings(GOOGLE_CLIENT_ID="cid", GOOGLE_CLIENT_SECRET="csec"):
             response = self.client.get("/api/v1/auth/google/start?next=https://evil.example/")
         self.assertEqual(response.status_code, 302)
+
+    def test_oauth_start_keeps_a_local_next_path(self) -> None:
+        self.assertEqual(self._next_signed_into_state("/dashboard?tab=1"), "/dashboard?tab=1")
+
+    def test_oauth_start_rejects_protocol_relative_next(self) -> None:
+        self.assertEqual(self._next_signed_into_state("//evil.example.com"), OAUTH_FALLBACK_PATH)
+
+    def _callback_page_for_signed_state(self, next_url: str) -> str:
+        """The popup page a successful login renders for a state signed with `next_url`."""
+        self.client.credentials()
+        state = TimestampSigner().sign(next_url)
+        token_response = Mock(status_code=200)
+        token_response.json = Mock(return_value={"id_token": "dev:baru@example.com:Baru"})
+        with patch("apps.authentication.views.requests.post", return_value=token_response):
+            response = self.client.get(
+                "/api/v1/auth/google/callback", {"code": "abc", "state": state}
+            )
+        self.assertEqual(response.status_code, 200)
+        body: bytes = response.content
+        return body.decode()
+
+    def test_oauth_callback_sends_the_browser_to_a_local_next_path(self) -> None:
+        page = self._callback_page_for_signed_state("/dashboard?tab=1")
+        self.assertIn('window.location.href = "/dashboard?tab=1";', page)
+
+    def test_oauth_callback_ignores_a_protocol_relative_signed_state(self) -> None:
+        page = self._callback_page_for_signed_state("//evil.example.com")
+        self.assertIn(f'window.location.href = "{OAUTH_FALLBACK_PATH}";', page)
+        self.assertNotIn("evil.example.com", page)
+
+    def test_oauth_start_rejects_next_that_a_browser_reads_as_external(self) -> None:
+        for next_url in BROWSER_READS_AS_EXTERNAL:
+            with self.subTest(next_url=next_url):
+                self.assertEqual(self._next_signed_into_state(next_url), OAUTH_FALLBACK_PATH)
+
+    def test_oauth_callback_ignores_signed_state_that_a_browser_reads_as_external(self) -> None:
+        for next_url in BROWSER_READS_AS_EXTERNAL:
+            with self.subTest(next_url=next_url):
+                page = self._callback_page_for_signed_state(next_url)
+                self.assertIn(f'window.location.href = "{OAUTH_FALLBACK_PATH}";', page)
 
     def test_oauth_callback_error_param(self) -> None:
         self.client.credentials()
@@ -153,3 +218,102 @@ class OAuthRegressionTests(RegressionTestCase):
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(verify.call_args.args[2], "web-client-id")
+
+
+class OAuthPopupEscapingTests(RegressionTestCase):
+    """Halaman popup OAuth menyusun HTML sendiri, jadi setiap nilai yang ikut
+    tercetak harus lolos dari konteksnya.
+
+    ``?error=`` sampai ke halaman tanpa autentikasi apa pun, dan ``json.dumps``
+    tidak meloloskan ``<``, ``>``, maupun ``/``. Nilai itu mendarat di dua
+    tempat dengan aturan lolos yang berbeda: badan ``<pre>`` (konteks HTML) dan
+    blok ``<script>`` (konteks skrip). Masing-masing dikunci terpisah, karena
+    memperbaiki satu tidak memperbaiki yang lain.
+    """
+
+    PEMBOBOL = "</pre><script>alert(document.domain)</script>"
+
+    def _popup(self, **params: str) -> str:
+        self.client.credentials()
+        response = self.client.get("/api/v1/auth/google/callback", params)
+        body: str = response.content.decode()
+        return body
+
+    @staticmethod
+    def _blok_pre(body: str) -> str:
+        awal = body.index("<pre>") + len("<pre>")
+        return body[awal : body.index("</pre>", awal)]
+
+    def test_blok_pre_tidak_bisa_ditutup_oleh_nilai_error(self) -> None:
+        blok = self._blok_pre(self._popup(error=self.PEMBOBOL))
+        self.assertNotIn("<", blok)
+        self.assertNotIn(">", blok)
+        self.assertIn("&lt;/pre&gt;", blok)
+
+    @staticmethod
+    def _blok_skrip(body: str) -> str:
+        """Tag pembukanya membawa atribut nonce, jadi dicari sampai `>`."""
+        awal = body.index(">", body.index("<script")) + 1
+        return body[awal : body.index("</script>", awal)]
+
+    def test_blok_skrip_tidak_bisa_ditutup_oleh_nilai_error(self) -> None:
+        blok = self._blok_skrip(self._popup(error=self.PEMBOBOL))
+        self.assertNotIn("</script", blok)
+        self.assertNotIn("<script", blok)
+
+    def test_next_url_bertanda_tangan_tidak_menambah_elemen_skrip(self) -> None:
+        """`next` hanya diperiksa berawalan "/" sebelum ditandatangani, jadi
+        tanda tangan justru meloloskan markup ke dalam blok skrip callback.
+
+        Nilai ini hanya terbaca pada jalur tukar-token, bukan pada cabang
+        `?error=`, jadi pertukaran tokennya distub di batas HTTP.
+
+        Pemeriksaannya menghitung elemen skrip pada seluruh dokumen, bukan
+        memotong blok pertama. Versi pertama test ini memotong, dan lulus
+        terhadap kode yang masih bocor: pemotong `</script>` justru berhenti
+        pada tag tutup milik penyerang, sehingga `<script>` suntikan berada di
+        luar potongan dan tidak pernah ikut diperiksa.
+        """
+        jahat = "/</script><script>alert(document.domain)</script>"
+        self.assertTrue(jahat.startswith("/"), "harus lolos satu-satunya validasi start")
+        state = TimestampSigner().sign(jahat)
+        token_response = Mock(status_code=400)
+        token_response.json = Mock(return_value={"error": "invalid_grant"})
+        self.client.credentials()
+        with patch("apps.authentication.views.requests.post", return_value=token_response):
+            response = self.client.get(
+                "/api/v1/auth/google/callback", {"code": "abc", "state": state}
+            )
+        body = response.content.decode()
+        self.assertIn("window.location.href", body)
+        self.assertEqual(body.count("<script"), 1)
+        self.assertEqual(body.count("</script"), 1)
+
+    @staticmethod
+    def _pesan_terparse(body: str) -> Any:
+        """Ambil literal `const message = …;` lalu parse sebagai JSON.
+
+        `\u003c` adalah escape JSON yang sah, jadi parser Python membacanya
+        sama seperti `JSON.parse` di browser. Test ini karena itu memeriksa
+        kontrak yang betul-betul dilihat klien, bukan tiruannya.
+        """
+        awal = body.index("const message = ") + len("const message = ")
+        return json.loads(body[awal : body.index(";\n", awal)])
+
+    def test_payload_wajar_tetap_terkirim_utuh(self) -> None:
+        """Meloloskan nilai tidak boleh mengubah kontrak `postMessage`."""
+        pesan = self._pesan_terparse(self._popup(error="access_denied"))
+        self.assertEqual(pesan["type"], "pilah-google-oauth")
+        self.assertFalse(pesan["ok"])
+        self.assertEqual(pesan["payload"], {"error": "access_denied"})
+
+    def test_payload_berbahaya_tetap_utuh_setelah_diparse(self) -> None:
+        """Meloloskan bukan menyaring: datanya tetap sama persis, yang hilang
+        hanya kemampuannya dieksekusi.
+
+        Kalau perbaikannya memotong atau membuang karakter, pengurus akan
+        membaca pesan galat Google yang sudah berubah — jadi kesamaan string
+        ini sengaja dikunci, bukan sekadar ketiadaan tag.
+        """
+        pesan = self._pesan_terparse(self._popup(error=self.PEMBOBOL))
+        self.assertEqual(pesan["payload"], {"error": self.PEMBOBOL})

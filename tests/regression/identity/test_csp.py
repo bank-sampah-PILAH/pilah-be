@@ -1,0 +1,295 @@
+"""Kontrak Content-Security-Policy: satu kebijakan per konteks respons.
+
+Temuan nyata dari pemindaian OWASP ZAP terotentikasi terhadap backend lokal
+(0 High, 2 Medium, 1 Low, 3 Informational) tinggal satu setelah ditriase:
+tidak ada header CSP sama sekali, padahal `SecurityMiddleware` sudah memasang
+X-Frame-Options, X-Content-Type-Options, Referrer-Policy dan COOP.
+"""
+
+import os
+import re
+from typing import cast
+
+from django.http import HttpResponse
+from django.test import SimpleTestCase, override_settings
+
+from tests.regression.helpers import RegressionTestCase
+
+
+class CspApiTests(RegressionTestCase):
+    def test_respons_api_membawa_kebijakan_paling_ketat(self) -> None:
+        """JSON tidak memuat subsumber apa pun, jadi tidak ada yang perlu
+        diizinkan — dan `default-src 'none'` tidak bisa merusak apa pun."""
+        self.client.credentials()
+        response = self.client.get("/api/v1/auth/google/start")
+        kebijakan = response.headers.get("Content-Security-Policy", "")
+        self.assertIn("default-src 'none'", kebijakan)
+        self.assertIn("frame-ancestors 'none'", kebijakan)
+        self.assertIn("base-uri 'none'", kebijakan)
+
+
+class CspPopupOAuthTests(RegressionTestCase):
+    """Satu-satunya halaman publik yang menjalankan skrip inline.
+
+    Halaman ini juga yang mencetak nilai dari luar, jadi di sinilah CSP
+    benar-benar berguna sebagai lapisan kedua. `script-src 'self'` akan
+    memblokir skripnya sendiri, jadi yang dipakai nonce per respons.
+    """
+
+    def _popup(self) -> HttpResponse:
+        self.client.credentials()
+        return cast(
+            HttpResponse,
+            self.client.get("/api/v1/auth/google/callback", {"error": "access_denied"}),
+        )
+
+    def test_kebijakan_mengizinkan_skrip_hanya_lewat_nonce(self) -> None:
+        response = self._popup()
+        kebijakan = response.headers.get("Content-Security-Policy", "")
+        self.assertIn("default-src 'none'", kebijakan)
+        self.assertIn("script-src 'nonce-", kebijakan)
+        self.assertNotIn("'unsafe-inline'", kebijakan)
+
+    def test_nonce_pada_header_sama_dengan_nonce_pada_tag_skrip(self) -> None:
+        """Nonce yang tidak cocok memblokir skripnya sendiri, dan tidak ada
+        test lain yang akan menyadarinya."""
+        response = self._popup()
+        kebijakan = response.headers["Content-Security-Policy"]
+        awal = kebijakan.index("'nonce-") + len("'nonce-")
+        nonce = kebijakan[awal : kebijakan.index("'", awal)]
+        self.assertIn(f'<script nonce="{nonce}">', response.content.decode())
+
+    def test_nonce_berbeda_untuk_setiap_respons(self) -> None:
+        """Nonce yang bisa diramalkan sama saja dengan 'unsafe-inline'."""
+        kebijakan = [self._popup().headers["Content-Security-Policy"] for _ in range(2)]
+        self.assertNotEqual(kebijakan[0], kebijakan[1])
+
+
+def _debug_saat_setelan_dimuat() -> bool:
+    """Nilai yang benar-benar memilih daftar renderer.
+
+    Bukan `settings.DEBUG`: Django memaksanya `False` selama test berjalan,
+    jadi di dalam test nilai itu tidak pernah mencerminkan konfigurasi yang
+    menyusun `DEFAULT_RENDERER_CLASSES` saat impor.
+    """
+    return os.getenv("DJANGO_DEBUG", "false").lower() == "true"
+
+
+class RendererProduksiTests(SimpleTestCase):
+    """API JSON tidak perlu melayani HTML di produksi.
+
+    `DEFAULT_RENDERER_CLASSES` tidak pernah diset, jadi bawaan DRF berlaku dan
+    `BrowsableAPIRenderer` ikut aktif. Artinya setiap endpoint API membalas
+    dokumen HTML begitu klien mengirim `Accept: text/html` — permukaan HTML
+    yang tidak dipakai klien Flutter, dan yang memaksa kebijakan CSP jauh
+    lebih longgar untuk seluruh API.
+
+    Test ini salah tiga kali sebelum benar, selalu karena `DEBUG` di dalam
+    test bukan `DEBUG` yang memilih renderer:
+
+    1. `override_settings(DEBUG=False)` — daftar renderer diturunkan saat
+       setelan dimuat dan tidak bisa diubah setelah impor, jadi test LULUS
+       hanya karena lingkungannya memang sudah produksi.
+    2. Membandingkan dengan `settings.DEBUG` dari dalam `RegressionTestCase` —
+       `tests/regression/helpers.py` membungkus kelas dasar itu dengan
+       `override_settings(DEBUG=True)` untuk alur token Google palsu.
+    3. Membandingkan dengan `settings.DEBUG` dari `SimpleTestCase` — runner
+       Django memaksa `DEBUG=False` selama test, apa pun konfigurasinya.
+
+    Yang dipakai sekarang variabel lingkungan yang benar-benar menyusun
+    daftarnya, dan invariannya dikunci pada KEDUA konfigurasi.
+    """
+
+    @staticmethod
+    def _nama_renderer() -> list[str]:
+        from rest_framework.settings import api_settings
+
+        kelas = list(api_settings.DEFAULT_RENDERER_CLASSES)
+        return [getattr(r, "__name__", str(r)) for r in kelas]
+
+    def test_json_selalu_menjadi_renderer_utama(self) -> None:
+        self.assertEqual(self._nama_renderer()[0], "JSONRenderer")
+
+    def test_browsable_renderer_mengikuti_debug(self) -> None:
+        """Satu-satunya alasan sah halaman itu ada adalah kenyamanan lokal."""
+        self.assertEqual(
+            "BrowsableAPIRenderer" in self._nama_renderer(),
+            _debug_saat_setelan_dimuat(),
+            "browsable API harus mengikuti DEBUG: aktif saat pengembangan, tidak ada di produksi",
+        )
+
+    # Tidak ada test HTTP "Accept: text/html tidak menghasilkan HTML" di sini,
+    # dan itu keputusan sadar. Tiga cara mencobanya semuanya cacat:
+    #
+    # 1. `skipTest` ketika `DJANGO_DEBUG` aktif — bentuk pertama test ini.
+    #    CI MENJALANKAN SUITE DENGAN `DJANGO_DEBUG: true`, jadi di CI test itu
+    #    selalu dilewati: `OK (skipped=1)`, dan `diff-cover` melaporkan dua
+    #    baris badannya sebagai tidak tercakup. Pemeriksaan yang tidak pernah
+    #    berjalan di tempat yang menjaga `staging` bukan pemeriksaan.
+    # 2. `override_settings(REST_FRAMEWORK=...)` — `api_settings` memang ikut
+    #    dimuat ulang, tetapi `APIView.renderer_classes` adalah atribut kelas
+    #    yang sudah mengikat tuple lamanya saat `rest_framework.views` diimpor.
+    #    Jadi view tetap memakai daftar lama dan browsable API tetap merender.
+    # 3. Membuat view sendiri dengan `renderer_classes` produksi — itu menguji
+    #    negosiasi konten DRF, bukan penyambungan di proyek ini.
+    #
+    # Yang tersisa dan benar-benar berlaku di CI adalah invarian konfigurasi di
+    # atas: dengan `DEBUG` mati, daftarnya hanya JSONRenderer. Bukti
+    # perilakunya ada di curl terhadap server sungguhan, dicatat di
+    # dokumentasi minggu ini, bukan di test yang tidak bisa berjalan di CI.
+
+
+@override_settings(
+    STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        # Penyimpanan bawaan proyek adalah CompressedManifestStaticFilesStorage,
+        # yang menuntut manifes hasil `collectstatic`. CI tidak menjalankan
+        # `collectstatic` sebelum test, jadi merender halaman admin di sana
+        # gagal dengan "Missing staticfiles manifest entry". Yang diuji di
+        # kelas ini kebijakan CSP-nya, bukan penamaan berkas statis, jadi
+        # penyimpanan non-manifes dipakai supaya `{% static %}` tidak lagi
+        # butuh manifes.
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    }
+)
+class CspHalamanDjangoTests(SimpleTestCase):
+    """Halaman HTML yang tersisa di produksi setelah browsable API dimatikan:
+    admin, dan popup OAuth yang punya kebijakannya sendiri.
+
+    Admin Django 6 ternyata bersih dari skrip dan gaya inline — ketiga
+    `<script id="django-admin-…-constants">` pada templatenya semua memakai
+    `src=` dengan atribut `data-*`, bukan JavaScript inline. Jadi halaman ini
+    tidak butuh `'unsafe-inline'` sama sekali, dan kebijakannya diperiksa
+    justru untuk memastikan tidak ada yang menambahkannya nanti.
+    """
+
+    def test_admin_membawa_kebijakan_tanpa_unsafe_inline(self) -> None:
+        response = self.client.get("/admin/login/")
+        self.assertEqual(response.status_code, 200)
+        kebijakan = response.headers.get("Content-Security-Policy", "")
+        self.assertIn("default-src 'self'", kebijakan)
+        self.assertIn("frame-ancestors 'none'", kebijakan)
+        self.assertIn("base-uri 'none'", kebijakan)
+        self.assertIn("form-action 'self'", kebijakan)
+        self.assertNotIn("'unsafe-inline'", kebijakan)
+
+    def test_admin_tidak_memuat_skrip_atau_gaya_inline(self) -> None:
+        """Alasan kebijakan di atas boleh seketat itu, dikunci sebagai fakta.
+
+        Kalau versi Django berikutnya memasukkan kembali skrip inline ke
+        admin, test ini gagal lebih dulu dan menjelaskan sebabnya — alih-alih
+        halaman admin yang rusak tanpa petunjuk di produksi.
+        """
+        body = self.client.get("/admin/login/").content.decode()
+        self.assertEqual(re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", body), [])
+        self.assertEqual(re.findall(r"<style[^>]*>", body), [])
+        self.assertEqual(re.findall(r'\sstyle="', body), [])
+
+
+TAG_INLINE_TANPA_NONCE = r"<(?:script|style)(?![^>]*\b(?:src=|nonce=))[^>]*>"
+"""Tag `<script>`/`<style>` yang bukan berkas luar dan tidak punya nonce.
+
+Tag seperti itu diblokir kebijakan halaman tanpa pesan apa pun di sisi server:
+halamannya tetap 200, hanya mati di peramban. Jadi yang diperiksa bentuk
+dokumennya, bukan status responsnya.
+"""
+
+
+@override_settings(DEBUG=True)
+class CspHalamanPengembangTests(SimpleTestCase):
+    """Dua halaman `debug_only` yang punya tag inline sendiri.
+
+    Keduanya bekerja sebelum ada CSP dan diam-diam berhenti bekerja setelahnya,
+    karena `kebijakan_halaman` tidak mengizinkan tag inline tanpa nonce.
+    Produksi tidak terpengaruh — `debug_only` membalas 404 di sana — tetapi
+    kegagalan yang hanya terlihat di peramban pengembang adalah kegagalan yang
+    tidak ada test lain akan menyadarinya.
+
+    `DEBUG=True` dipaksa di sini karena runner Django memaksanya `False`, yang
+    membuat kedua halaman ini 404 dan cabang CDN `kebijakan_halaman` tidak
+    pernah terpakai.
+    """
+
+    def _nonce_dari_header(self, response: HttpResponse) -> str:
+        kebijakan = response.headers["Content-Security-Policy"]
+        self.assertIn("'nonce-", kebijakan, kebijakan)
+        awal = kebijakan.index("'nonce-") + len("'nonce-")
+        return kebijakan[awal : kebijakan.index("'", awal)]
+
+    def test_api_test_memberi_nonce_pada_kedua_tag_inlinenya(self) -> None:
+        response = cast(HttpResponse, self.client.get("/api-test/"))
+        self.assertEqual(response.status_code, 200)
+        nonce = self._nonce_dari_header(response)
+        body = response.content.decode()
+        self.assertIn(f'<style nonce="{nonce}">', body)
+        self.assertIn(f'<script nonce="{nonce}">', body)
+
+    def test_api_test_tidak_memuat_tag_inline_tanpa_nonce(self) -> None:
+        body = self.client.get("/api-test/").content.decode()
+        self.assertEqual(re.findall(TAG_INLINE_TANPA_NONCE, body), [])
+
+    def test_api_test_tidak_memuat_atribut_style(self) -> None:
+        """Atribut `style="…"` tidak bisa diizinkan nonce, hanya
+        `'unsafe-inline'` — jadi satu atribut baru memaksa pilihan antara
+        halaman yang rusak dan kebijakan yang batal."""
+        body = self.client.get("/api-test/").content.decode()
+        self.assertEqual(re.findall(r'\sstyle="', body), [])
+
+    def test_docs_memberi_nonce_pada_gaya_inline_bawaan_swagger(self) -> None:
+        response = cast(HttpResponse, self.client.get("/api/docs/"))
+        self.assertEqual(response.status_code, 200)
+        nonce = self._nonce_dari_header(response)
+        self.assertIn(f'<style nonce="{nonce}">', response.content.decode())
+
+    def test_docs_menyajikan_skrip_inisialisasi_sebagai_berkas_luar(self) -> None:
+        """Inilah yang `SpectacularSwaggerSplitView` ada untuk melakukannya."""
+        body = self.client.get("/api/docs/").content.decode()
+        self.assertEqual(re.findall(TAG_INLINE_TANPA_NONCE, body), [])
+        self.assertIn("script=", body)
+
+    def test_berkas_skrip_swagger_bukan_dokumen_html(self) -> None:
+        """Cabang `?script=` menyajikan JavaScript, jadi ia mendapat kebijakan
+        API yang paling ketat dan tidak perlu nonce sama sekali."""
+        response = cast(HttpResponse, self.client.get("/api/docs/", {"script": ""}))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("javascript", response.headers["Content-Type"])
+        self.assertIn("default-src 'none'", response.headers["Content-Security-Policy"])
+
+    def test_halaman_pengembang_tetap_tanpa_unsafe_inline(self) -> None:
+        for path in ("/api-test/", "/api/docs/"):
+            with self.subTest(path=path):
+                kebijakan = self.client.get(path).headers["Content-Security-Policy"]
+                self.assertNotIn("'unsafe-inline'", kebijakan)
+                self.assertNotIn("'unsafe-eval'", kebijakan)
+
+
+class CspMiddlewarePalingLuarTests(SimpleTestCase):
+    """Respons yang tidak pernah mencapai view tetap membawa header.
+
+    Di posisi terakhir pada `MIDDLEWARE`, `CspMiddleware` tidak pernah
+    dijalankan untuk respons yang dibuat middleware di atasnya: preflight CORS,
+    pengalihan HTTPS, dan Host yang tidak diizinkan semuanya kembali sebelum
+    rantainya turun sejauh itu. Kontrak PR ini "setiap respons membawa
+    kebijakan", jadi ketiganya dikunci di sini — bukan karena salah satunya
+    bisa dieksploitasi, melainkan karena klaimnya harus benar seluruhnya.
+    """
+
+    def test_preflight_cors_membawa_kebijakan(self) -> None:
+        response = self.client.options(
+            "/api/v1/auth/google/start",
+            HTTP_ORIGIN="http://localhost:3000",
+            HTTP_ACCESS_CONTROL_REQUEST_METHOD="GET",
+        )
+        self.assertIn("Content-Security-Policy", response.headers)
+
+    @override_settings(SECURE_SSL_REDIRECT=True)
+    def test_pengalihan_ke_https_membawa_kebijakan(self) -> None:
+        response = self.client.get("/healthz")
+        self.assertEqual(response.status_code, 301)
+        self.assertIn("Content-Security-Policy", response.headers)
+
+    @override_settings(ALLOWED_HOSTS=["testserver"])
+    def test_host_yang_tidak_diizinkan_membawa_kebijakan(self) -> None:
+        response = self.client.get("/healthz", HTTP_HOST="penyerang.example")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Content-Security-Policy", response.headers)

@@ -1,0 +1,24 @@
+{% extends "drf_spectacular/swagger_ui.html" %}
+{% comment %}
+Salinan blok `head` drf-spectacular, satu-satunya perubahan: `<style>` bawaan
+mereka diberi nonce supaya tidak diblokir kebijakan CSP halaman. Sisa template
+(termasuk blok `body` yang memuat skrip inisialisasi sebagai berkas terpisah)
+tetap milik upstream dan ikut berubah saat drf-spectacular diperbarui.
+
+Isi `<style>` di bawah sama dengan drf_spectacular/swagger_ui.html pada versi
+0.29.0. Kalau upstream mengubah blok `head`-nya, halaman ini kehilangan
+perubahan itu — yang terlihat, karena `test_docs_tidak_memuat_tag_inline_tanpa_nonce`
+tetap menjaga bagian yang penting: tidak ada tag inline tanpa nonce.
+{% endcomment %}
+{% block head %}
+<title>{{ title|default:"Swagger" }}</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{% if favicon_href %}<link rel="icon" href="{{ favicon_href }}">{% endif %}
+<link rel="stylesheet" href="{{ swagger_ui_css }}">
+<style nonce="{{ csp_nonce }}">
+  html { box-sizing: border-box; overflow-y: scroll; }
+  *, *:after, *:before { box-sizing: inherit; }
+  body { background: #fafafa; margin: 0; }
+</style>
+{% endblock head %}

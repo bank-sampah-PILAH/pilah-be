@@ -124,16 +124,6 @@ _STYLES = {
 }
 
 
-def _p(text: str, style: ParagraphStyle) -> Paragraph:
-    """Dynamic text as a Paragraph: escaped.
-
-    Paragraph bodies parse as XML — a bank or nasabah named "A & B Sampah"
-    or one containing "<" aborts the whole export otherwise. Labels the code
-    writes itself stay literal (they carry ``<br/>`` in the header band).
-    """
-    return Paragraph(escape(text), style)
-
-
 class NumberedCanvas(Canvas):  # type: ignore[misc]  # reportlab has no stubs; Canvas resolves Any
     """Standard two-phase pattern: collect page states, draw footers on save."""
 
