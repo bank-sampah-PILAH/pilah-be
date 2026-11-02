@@ -21,9 +21,9 @@ from django.utils import timezone
 
 from api.models import (
     BankSampah,
+    DetailTransaksi,
     DraftPencairan,
     DraftPencairanItem,
-    DetailTransaksi,
     HargaSampah,
     JadwalKegiatan,
     JenisSampah,

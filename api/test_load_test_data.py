@@ -20,9 +20,9 @@ from rest_framework.test import APIClient
 from api.management.commands.load_test_data import CONFIRMATION, Command, fixture_id
 from api.models import (
     BankSampah,
+    DetailTransaksi,
     DraftPencairan,
     DraftPencairanItem,
-    DetailTransaksi,
     HargaSampah,
     JenisSampah,
     Nasabah,
@@ -131,7 +131,9 @@ class LoadTestDataTests(TestCase):
         ):
             Command._validate_request("run", "audit", None, {"confirm": CONFIRMATION})
 
-    def test_staging_guard_reads_host_allowlist_from_environment_without_updated_settings(self) -> None:
+    def test_staging_guard_reads_host_allowlist_from_environment_without_updated_settings(
+        self,
+    ) -> None:
         legacy_settings = SimpleNamespace(
             DATABASES={
                 "default": {
