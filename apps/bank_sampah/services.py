@@ -7,6 +7,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from api.models import BankSampah, BankSampahApprovalLog, User
+from apps.authentication.api import lock_for_onboarding
 from apps.notification.api import DEFAULT_WA_TEMPLATE
 
 
@@ -47,6 +48,7 @@ class BankOnboardingService:
     @staticmethod
     @transaction.atomic
     def register_bank_sampah(user: User, payload: Mapping[str, Any]) -> BankSampah:
+        lock_for_onboarding(user)
         if user.role != User.Role.PENGELOLA:
             raise PermissionError("Hanya pengelola yang dapat mendaftarkan bank sampah")
         bank = user.bank_sampah
@@ -71,7 +73,9 @@ class BankOnboardingService:
         return bank
 
     @staticmethod
+    @transaction.atomic
     def accept_invite(user: User, token: str) -> tuple[BankSampah, str]:
+        lock_for_onboarding(user)
         bank = BankSampah.objects.filter(
             invite_token=token, invite_token_expires__gt=timezone.now()
         ).first()

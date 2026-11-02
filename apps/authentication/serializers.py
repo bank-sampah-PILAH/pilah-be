@@ -102,3 +102,7 @@ class LogoutSerializer(serializers.Serializer[Any]):
 class GoogleRegistrationSerializer(serializers.Serializer[Any]):
     registration_token = serializers.CharField(required=True)
     role = serializers.ChoiceField(choices=User.GOOGLE_REGISTRATION_ROLES)
+
+
+class RoleChangeSerializer(serializers.Serializer[Any]):
+    role = serializers.ChoiceField(choices=User.GOOGLE_REGISTRATION_ROLES)

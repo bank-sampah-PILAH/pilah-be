@@ -11,7 +11,14 @@ from typing import Any, Mapping
 from api.models import Nasabah, User
 from apps.authentication.services import AuthService, OnboardingService
 
-__all__ = ["register_nasabah", "user_state_hint"]
+__all__ = ["lock_for_onboarding", "register_nasabah", "user_state_hint"]
+
+
+def lock_for_onboarding(user: User) -> None:
+    """Lock and reload the account row before an onboarding write checks its
+    role, so a concurrent role change can't slip in between (PIL-451).
+    Call inside ``transaction.atomic()``."""
+    OnboardingService.lock_account(user)
 
 
 def user_state_hint(user: User) -> str:
