@@ -1,13 +1,43 @@
 """Physical Postgres indexes must match Django's icontains expressions."""
 
+from types import SimpleNamespace
 from unittest import skipUnless
+from unittest.mock import Mock
 
 from django.db import connection
-from django.test import TestCase
+from django.db.migrations.loader import MigrationLoader
+from django.test import SimpleTestCase, TestCase
+
+
+@skipUnless(connection.vendor == "sqlite", "SQLite migration compatibility")
+class NasabahSearchSQLiteMigrationTests(SimpleTestCase):
+    def test_forward_and_reverse_never_execute_postgres_sql(self) -> None:
+        migration = MigrationLoader(None).disk_migrations[("api", "0028_nasabah_search_trigrams")]
+        operation = migration.operations[0]
+        editor = SimpleNamespace(connection=connection, execute=Mock())
+        operation.code(None, editor)
+        operation.reverse_code(None, editor)
+        editor.execute.assert_not_called()
 
 
 @skipUnless(connection.vendor == "postgresql", "Postgres-specific search indexes")
 class NasabahSearchIndexTests(TestCase):
+    def test_index_migration_can_be_reversed_and_reapplied(self) -> None:
+        loader = MigrationLoader(connection)
+        migration = loader.disk_migrations[("api", "0028_nasabah_search_trigrams")]
+        operation = migration.operations[0]
+        state = loader.project_state()
+        with connection.schema_editor() as editor:
+            operation.database_backwards("api", editor, state, state)
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT count(*) FROM pg_indexes "
+                    "WHERE tablename = 'nasabah' AND indexname LIKE 'nasabah_%%_trgm_idx'"
+                )
+                self.assertEqual(cursor.fetchone()[0], 0)
+            operation.database_forwards("api", editor, state, state)
+        self.test_all_search_fields_have_upper_trigram_indexes()
+
     def test_all_search_fields_have_upper_trigram_indexes(self) -> None:
         with connection.cursor() as cursor:
             cursor.execute("SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'nasabah'")
