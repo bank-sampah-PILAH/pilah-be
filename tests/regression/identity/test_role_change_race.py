@@ -13,7 +13,7 @@ from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
 from unittest import skipUnless
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
@@ -148,3 +148,44 @@ class RoleChangeRaceTests(TransactionTestCase):
 
         self._assert_role_kept(user, User.Role.PENGELOLA, outcome)
         self.assertEqual(user.bank_sampah_id, bank.id)
+
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
+    def test_a_role_change_waits_for_a_google_login_claiming_a_membership(
+        self, verify: Mock
+    ) -> None:
+        # Review on #137 (Tristan, Heraldo): Google login links a
+        # pengurus-entered membership, the fourth writer of the invariant.
+        bank = BankSampah.objects.create(
+            nama="Bank Data", alamat="Depok", no_hp_pic="+628111111111"
+        )
+        user = User.objects.create_user(
+            email="race-prefill@example.com",
+            nama="Ayu",
+            role=User.Role.NASABAH,
+            google_id="google-prefill",
+            email_verified=True,
+        )
+        Nasabah.objects.create(
+            bank_sampah=bank,
+            nomor="NAS-0001",
+            nama="Ayu",
+            no_hp="+628111111114",
+            email=user.email,
+            alamat="Jl. Mawar",
+        )
+        verify.return_value = {
+            "sub": "google-prefill",
+            "email": user.email,
+            "email_verified": True,
+            "name": "Ayu",
+        }
+
+        outcome = self._race(
+            user,
+            lambda _u: AuthService.login_with_google("t"),
+            (Nasabah, "save"),
+            User.Role.PENGELOLA,
+        )
+
+        self._assert_role_kept(user, User.Role.NASABAH, outcome)
+        self.assertTrue(Nasabah.objects.filter(user=user, bank_sampah=bank).exists())

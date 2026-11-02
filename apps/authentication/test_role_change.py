@@ -1,6 +1,8 @@
 """PIL-451: a Google account that picked the wrong role can pick again until
 onboarding has committed anything for that role."""
 
+from unittest.mock import Mock, patch
+
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import AccessToken
 
@@ -137,6 +139,47 @@ class RoleChangeTests(APITestCase):
         self.assertEqual(refused.exception.code, "role_locked")
         user.refresh_from_db()
         self.assertEqual(user.role, User.Role.PENGELOLA)
+
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
+    def test_a_login_loaded_before_a_role_change_claims_no_membership_and_signs_in(
+        self, verify: Mock
+    ) -> None:
+        # Review on #137: Google login claims a pengurus-entered membership.
+        # The login read the account as nasabah, then a role change committed.
+        # The claim must see the new role, link nothing, and still sign in,
+        # not surface Nasabah.clean's ValidationError as a 401.
+        user = User.objects.create_user(
+            email="stale-login@example.com",
+            nama="Ayu",
+            role=User.Role.NASABAH,
+            google_id="google-stale",
+            email_verified=True,
+        )
+        bank = BankSampah.objects.create(nama="Bank", alamat="Depok", no_hp_pic="+628111111111")
+        record = Nasabah.objects.create(
+            bank_sampah=bank,
+            nomor="NAS-0001",
+            nama="Ayu",
+            no_hp="+628111111113",
+            email=user.email,
+            alamat="Jl. Mawar",
+        )
+        stale = User.objects.get(pk=user.pk)
+        User.objects.filter(pk=user.pk).update(role=User.Role.PENGELOLA)
+        verify.return_value = {
+            "sub": "google-stale",
+            "email": user.email,
+            "email_verified": True,
+            "name": "Ayu",
+        }
+
+        with patch.object(AuthService, "_user_for_email", staticmethod(lambda _email: stale)):
+            response = self.client.post("/api/v1/auth/google", {"id_token": "t"}, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["user"]["role"], User.Role.PENGELOLA)
+        record.refresh_from_db()
+        self.assertIsNone(record.user_id)
 
     def test_each_change_is_recorded_and_nothing_else_is(self) -> None:
         user = self._fresh(User.Role.PENGELOLA)
