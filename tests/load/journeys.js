@@ -30,9 +30,35 @@ let selected = [
 if (mode === 'smoke' && __ENV.SMOKE_ROLE === 'nasabah') {
   selected = manifest.accounts.filter(a => a.role === 'nasabah').slice(0, 1);
 }
+const expectedRoleCounts = users === 1
+  ? { pengelola: __ENV.SMOKE_ROLE === 'nasabah' ? 0 : 1, nasabah: __ENV.SMOKE_ROLE === 'nasabah' ? 1 : 0 }
+  : { pengelola: staff, nasabah: users - staff };
+if (mode === 'smoke' && !['pengelola', 'nasabah'].includes(__ENV.SMOKE_ROLE || 'pengelola')) {
+  throw new Error('SMOKE_ROLE must be pengelola or nasabah');
+}
+function assertRoleMix(expected) {
+  const actual = { pengelola: 0, nasabah: 0 };
+  for (const account of selected) {
+    if (!['pengelola', 'nasabah'].includes(account.role)) {
+      throw new Error(`Unexpected selected account role: ${account.role}`);
+    }
+    actual[account.role] += 1;
+  }
+  if (actual.pengelola !== expected.pengelola || actual.nasabah !== expected.nasabah) {
+    throw new Error(`Selected role mix is ${actual.pengelola} Pengurus/${actual.nasabah} Nasabah; expected ${expected.pengelola}/${expected.nasabah}`);
+  }
+  const accountIds = selected.map(account => account.id);
+  if (accountIds.some(id => typeof id !== 'string' || !id) || new Set(accountIds).size !== selected.length) {
+    throw new Error('Selected account IDs must be present and unique');
+  }
+}
+assertRoleMix(expectedRoleCounts);
 if (probe) {
   const index = selected.map(a => a.role).lastIndexOf(probe);
+  if (index < 0) throw new Error(`Cannot reserve probe account: no selected ${probe} account`);
   selected.splice(index, 1);
+  expectedRoleCounts[probe] -= 1;
+  assertRoleMix(expectedRoleCounts);
 }
 const vus = selected.length;
 const burst = mode === 'burst';

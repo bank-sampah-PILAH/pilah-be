@@ -1,19 +1,37 @@
 import json
+import os
 import stat
+from datetime import timedelta
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import connection as db_connection
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from api.management.commands.load_test_data import CONFIRMATION, Command, fixture_id
-from api.models import BankSampah, DetailTransaksi, Nasabah, Saldo, Transaksi, User
+from api.models import (
+    BankSampah,
+    DraftPencairan,
+    DraftPencairanItem,
+    DetailTransaksi,
+    HargaSampah,
+    JenisSampah,
+    Nasabah,
+    Pencairan,
+    PencairanRevisi,
+    Saldo,
+    Transaksi,
+    User,
+)
 
 
 @override_settings(DEBUG=True, PILAH_ENVIRONMENT="local")
@@ -45,6 +63,90 @@ class LoadTestDataTests(TestCase):
         with self.assertRaises(CommandError):
             self.command("seed")
         self.assertEqual(BankSampah.objects.count(), 0)
+
+    def test_database_target_validation_allows_only_local_targets_or_staging_neon(self) -> None:
+        base = {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": ":memory:",
+            "HOST": "",
+        }
+        for engine, host in (
+            ("django.db.backends.sqlite3", ""),
+            ("django.db.backends.sqlite3", "localhost"),
+            ("django.db.backends.postgresql", "127.0.0.1"),
+            ("django.db.backends.postgresql", "::1"),
+            ("django.db.backends.postgresql", "db"),
+        ):
+            with (
+                self.subTest(engine=engine, host=host),
+                override_settings(DATABASES={"default": {**base, "ENGINE": engine, "HOST": host}}),
+            ):
+                Command._validate_request("run", "audit", None, {"confirm": CONFIRMATION})
+        for engine, host, environment, debug in (
+            ("django.db.backends.postgresql", "remote.example.com", "local", True),
+            ("django.db.backends.postgresql", "10.0.0.1", "local", True),
+            ("django.db.backends.mysql", "localhost", "local", True),
+            ("django.db.backends.postgresql", "remote.example.com", "staging", False),
+        ):
+            with (
+                self.subTest(host=host),
+                override_settings(
+                    DATABASES={"default": {**base, "ENGINE": engine, "HOST": host}},
+                    PILAH_ENVIRONMENT=environment,
+                    PILAH_STAGING_DB_HOST="",
+                    DEBUG=debug,
+                ),
+                self.assertRaises(CommandError),
+            ):
+                Command._validate_request("run", "audit", None, {"confirm": CONFIRMATION})
+        for staging_host in ("", "other.example.neon.tech"):
+            with (
+                self.subTest(staging_host=staging_host),
+                override_settings(
+                    DATABASES={
+                        "default": {
+                            **base,
+                            "ENGINE": "django.db.backends.postgresql",
+                            "HOST": "db.example.neon.tech",
+                        }
+                    },
+                    PILAH_ENVIRONMENT="staging",
+                    PILAH_STAGING_DB_HOST=staging_host,
+                    DEBUG=False,
+                ),
+                self.assertRaises(CommandError),
+            ):
+                Command._validate_request("run", "audit", None, {"confirm": CONFIRMATION})
+        with override_settings(
+            DATABASES={
+                "default": {
+                    **base,
+                    "ENGINE": "django.db.backends.postgresql",
+                    "HOST": "db.example.neon.tech",
+                }
+            },
+            PILAH_ENVIRONMENT="staging",
+            PILAH_STAGING_DB_HOST="db.example.neon.tech",
+            DEBUG=False,
+        ):
+            Command._validate_request("run", "audit", None, {"confirm": CONFIRMATION})
+
+    def test_staging_guard_reads_host_allowlist_from_environment_without_updated_settings(self) -> None:
+        legacy_settings = SimpleNamespace(
+            DATABASES={
+                "default": {
+                    "ENGINE": "django.db.backends.postgresql",
+                    "HOST": "db.example.neon.tech",
+                }
+            },
+            DEBUG=False,
+            PILAH_ENVIRONMENT="staging",
+        )
+        with (
+            patch("api.management.commands.load_test_data.settings", legacy_settings),
+            patch.dict(os.environ, {"PILAH_STAGING_DB_HOST": "db.example.neon.tech"}),
+        ):
+            Command._validate_request("run", "audit", None, {"confirm": CONFIRMATION})
 
     def test_seed_refuses_credentials_manifest_inside_git_worktree(self) -> None:
         with TemporaryDirectory() as folder:
@@ -89,10 +191,21 @@ class LoadTestDataTests(TestCase):
             manifest = json.loads(path.read_text())
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
             self.assertEqual(baseline["customers"], 1000)
+            price = HargaSampah.objects.get(bank_sampah_id=fixture_id("test-pil-393", "bank"))
+            self.assertLessEqual(price.berlaku_mulai, timezone.now())
+            self.assertGreater(price.berlaku_mulai, timezone.now() - timedelta(days=1))
             self.assertEqual(Transaksi.objects.count(), 10000)
             self.assertEqual(User.objects.count(), 30)
             self.assertEqual(Saldo.objects.filter(total_saldo=25000).count(), 1000)
-            self.assertTrue(self.command("telemetry"))
+            telemetry = self.command("telemetry")
+            if db_connection.vendor == "postgresql":
+                self.assertEqual(set(telemetry), {"connections", "active", "waiting_for_lock"})
+                self.assertTrue(all(isinstance(value, int) for value in telemetry.values()))
+            else:
+                self.assertEqual(
+                    telemetry,
+                    {"database_metrics": "unavailable for non-PostgreSQL database"},
+                )
             with self.assertRaises(CommandError):
                 self.command("seed", manifest=Path(folder) / "accounts-again.json")
             client = APIClient()
@@ -147,8 +260,19 @@ class LoadTestDataTests(TestCase):
                     manifest["accounts"][0]["password"],
                 )
             )
-            self.command("cleanup")
-            self.assertEqual(list(BankSampah.objects.values_list("id", flat=True)), [other.id])
+            cleanup = self.command("cleanup")
+            with self.assertRaisesMessage(CommandError, "Fixture bank is archived"):
+                self.command("reset")
+            self.assertEqual(cleanup["retained_immutable_prices"], 1)
+            self.assertSetEqual(
+                set(BankSampah.objects.values_list("id", flat=True)),
+                {other.id, fixture_id("test-pil-393", "bank")},
+            )
+            archived_bank = BankSampah.objects.get(pk=fixture_id("test-pil-393", "bank"))
+            self.assertFalse(archived_bank.is_active)
+            jenis = JenisSampah.objects.get(pk=fixture_id("test-pil-393", "jenis"))
+            self.assertFalse(jenis.is_active)
+            self.assertEqual(HargaSampah.objects.filter(bank_sampah=archived_bank).count(), 1)
             self.assertFalse(User.objects.exists())
             self.assertFalse(Transaksi.objects.exists())
 
@@ -241,6 +365,112 @@ class LoadTestDataTests(TestCase):
                 {"database_metrics": "unavailable for non-PostgreSQL database"},
             )
         connection.cursor.assert_not_called()
+
+    def test_reset_and_cleanup_refuse_fixture_bank_with_payouts(self) -> None:
+        with TemporaryDirectory() as folder:
+            self.command("seed", manifest=Path(folder) / "accounts.json")
+        bank = BankSampah.objects.get(pk=fixture_id("test-pil-393", "bank"))
+        member = Nasabah.objects.filter(bank_sampah=bank).first()
+        assert member is not None
+        user = User.objects.get(pk=fixture_id("test-pil-393", "user", 0))
+        Pencairan.objects.create(
+            bank_sampah=bank,
+            nasabah=member,
+            dicatat_oleh=user,
+            nominal=1,
+            metode=Pencairan.Metode.TUNAI,
+            saldo_sebelum=25000,
+            saldo_sesudah=24999,
+        )
+        for action in ("reset", "cleanup"):
+            with (
+                self.subTest(action=action),
+                self.assertRaisesMessage(CommandError, "Fixture bank has payouts"),
+            ):
+                self.command(action)
+        self.assertEqual(Transaksi.objects.filter(bank_sampah=bank).count(), 10000)
+        self.assertTrue(BankSampah.objects.filter(pk=bank.pk).exists())
+
+    def test_cleanup_refuses_payout_referencing_fixture_user_from_other_bank(self) -> None:
+        with TemporaryDirectory() as folder:
+            self.command("seed", manifest=Path(folder) / "accounts.json")
+        fixture_user = User.objects.get(pk=fixture_id("test-pil-393", "user", 0))
+        other_bank = BankSampah.objects.create(nama="Other bank", no_hp_pic="")
+        other_member = Nasabah.objects.create(
+            bank_sampah=other_bank,
+            nomor="OTHER-1",
+            nama="Other member",
+            no_hp="",
+            email="other@example.invalid",
+        )
+        Pencairan.objects.create(
+            bank_sampah=other_bank,
+            nasabah=other_member,
+            dicatat_oleh=fixture_user,
+            nominal=1,
+            metode=Pencairan.Metode.TUNAI,
+            saldo_sebelum=1,
+            saldo_sesudah=0,
+        )
+
+        with self.assertRaisesMessage(CommandError, "Fixture bank has payouts"):
+            self.command("cleanup")
+        self.assertTrue(User.objects.filter(pk=fixture_user.pk).exists())
+
+    def test_cleanup_refuses_revision_referencing_fixture_user_from_other_bank(self) -> None:
+        with TemporaryDirectory() as folder:
+            self.command("seed", manifest=Path(folder) / "accounts.json")
+        fixture_user = User.objects.get(pk=fixture_id("test-pil-393", "user", 0))
+        other_bank = BankSampah.objects.create(nama="Other bank", no_hp_pic="")
+        other_user = User.objects.create_user(
+            email="other@example.invalid", nama="Other user", bank_sampah=other_bank
+        )
+        other_member = Nasabah.objects.create(
+            bank_sampah=other_bank,
+            nomor="OTHER-1",
+            nama="Other member",
+            no_hp="",
+            email="other@example.invalid",
+        )
+        payout = Pencairan.objects.create(
+            bank_sampah=other_bank,
+            nasabah=other_member,
+            dicatat_oleh=other_user,
+            nominal=1,
+            metode=Pencairan.Metode.TUNAI,
+            saldo_sebelum=1,
+            saldo_sesudah=0,
+        )
+        PencairanRevisi.objects.create(
+            pencairan=payout,
+            versi=1,
+            tanggal=timezone.now(),
+            nominal=1,
+            metode=Pencairan.Metode.TUNAI,
+            saldo_sebelum=1,
+            saldo_sesudah=0,
+            alasan="Fixture cleanup guard test",
+            diubah_oleh=fixture_user,
+        )
+
+        with self.assertRaisesMessage(CommandError, "Fixture bank has payouts"):
+            self.command("cleanup")
+        self.assertTrue(User.objects.filter(pk=fixture_user.pk).exists())
+
+    def test_cleanup_refuses_fixture_with_payout_drafts(self) -> None:
+        with TemporaryDirectory() as folder:
+            self.command("seed", manifest=Path(folder) / "accounts.json")
+        bank = BankSampah.objects.get(pk=fixture_id("test-pil-393", "bank"))
+        member = Nasabah.objects.filter(bank_sampah=bank).first()
+        user = User.objects.get(pk=fixture_id("test-pil-393", "user", 0))
+        assert member is not None
+        draft = DraftPencairan.objects.create(bank_sampah=bank, dibuat_oleh=user, diubah_oleh=user)
+        DraftPencairanItem.objects.create(draft=draft, nasabah=member, nominal=1)
+
+        with self.assertRaisesMessage(CommandError, "Fixture bank has payout drafts"):
+            self.command("cleanup")
+        self.assertTrue(Nasabah.objects.filter(pk=member.pk).exists())
+        self.assertTrue(User.objects.filter(pk=user.pk).exists())
 
     def test_cleanup_refuses_missing_owned_fixture(self) -> None:
         with self.assertRaisesMessage(CommandError, "Owned fixture bank not found"):

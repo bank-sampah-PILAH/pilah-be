@@ -15,17 +15,21 @@ from django.conf import settings
 from django.contrib.auth.hashers import make_password
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection, transaction
-from django.db.models import Count, F, Sum
+from django.db.models import Count, F, Q, Sum
 from django.db.models.functions import Floor
 from django.utils import timezone
 
 from api.models import (
     BankSampah,
+    DraftPencairan,
+    DraftPencairanItem,
     DetailTransaksi,
     HargaSampah,
     JadwalKegiatan,
     JenisSampah,
     Nasabah,
+    Pencairan,
+    PencairanRevisi,
     Saldo,
     Transaksi,
     User,
@@ -76,13 +80,36 @@ class Command(BaseCommand):
         if options["confirm"] != CONFIRMATION:
             raise CommandError(f"Pass --confirm={CONFIRMATION}")
         database = settings.DATABASES["default"]
-        host = database["HOST"]
-        local = settings.DEBUG and settings.PILAH_ENVIRONMENT in ("", "local")
-        staging = settings.PILAH_ENVIRONMENT == "staging"
+        engine = database.get("ENGINE")
+        host = database.get("HOST", "")
+        staging_db_host = getattr(
+            settings, "PILAH_STAGING_DB_HOST", os.getenv("PILAH_STAGING_DB_HOST", "")
+        )
+        local = (
+            settings.DEBUG
+            and settings.PILAH_ENVIRONMENT in ("", "local")
+            and (
+                (
+                    engine == "django.db.backends.sqlite3"
+                    and host in ("", "localhost", "127.0.0.1", "::1")
+                )
+                or (
+                    engine == "django.db.backends.postgresql"
+                    and isinstance(host, str)
+                    and host.lower() in ("localhost", "127.0.0.1", "::1", "db")
+                )
+            )
+        )
+        staging = (
+            settings.PILAH_ENVIRONMENT == "staging"
+            and engine == "django.db.backends.postgresql"
+            and isinstance(host, str)
+            and host.lower().endswith(".neon.tech")
+            and isinstance(staging_db_host, str)
+            and host.lower() == staging_db_host.lower()
+        )
         # Production uses a Cloud SQL socket. Fly staging uses its separate Neon DB.
-        if not (local or staging) or (
-            staging and (not isinstance(host, str) or not host.endswith(".neon.tech"))
-        ):
+        if not (local or staging):
             raise CommandError("Only a local database or staging's separate Neon DB is allowed")
         if action == "seed" and (
             manifest_path is None or not manifest_path.is_absolute() or manifest_path.exists()
@@ -114,16 +141,43 @@ class Command(BaseCommand):
             return self.telemetry()
         if action == "audit":
             return self.audit(run_id, options["expected_writes"])
+        payouts = Q(bank_sampah_id=bank_id) | Q(nasabah__bank_sampah_id=bank_id)
+        if action == "cleanup":
+            user_ids = self.user_ids(run_id)
+            payouts |= Q(dicatat_oleh_id__in=user_ids)
+            if PencairanRevisi.objects.filter(diubah_oleh_id__in=user_ids).exists():
+                raise CommandError("Fixture bank has payouts; refusing cleanup")
+        if action in ("reset", "cleanup") and Pencairan.objects.filter(payouts).exists():
+            raise CommandError("Fixture bank has payouts; refusing reset or cleanup")
+        if action == "cleanup" and (
+            DraftPencairan.objects.filter(
+                Q(bank_sampah_id=bank_id)
+                | Q(dibuat_oleh_id__in=self.user_ids(run_id))
+                | Q(diubah_oleh_id__in=self.user_ids(run_id))
+            ).exists()
+            or DraftPencairanItem.objects.filter(nasabah__bank_sampah_id=bank_id).exists()
+        ):
+            raise CommandError("Fixture bank has payout drafts; refusing cleanup")
         if action == "reset":
+            if not BankSampah.objects.filter(pk=bank_id, is_active=True).exists():
+                raise CommandError("Fixture bank is archived; refusing reset")
             self.history(run_id)
             return self.audit(run_id, 0)
         Transaksi.objects.filter(bank_sampah_id=bank_id).delete()
-        HargaSampah.objects.filter(bank_sampah_id=bank_id).delete()
         JadwalKegiatan.objects.filter(bank_sampah_id=bank_id).delete()
         Nasabah.objects.filter(bank_sampah_id=bank_id).delete()
         User.objects.filter(pk__in=self.user_ids(run_id)).delete()
-        BankSampah.objects.get(pk=bank_id).delete()
-        return {"run_id": run_id, "cleaned": True}
+        # Price versions are append-only and PROTECT their fixture bank/type.
+        # Keep those rows with explicitly inactive archival parents.
+        JenisSampah.objects.filter(bank_sampah_id=bank_id).update(is_active=False)
+        BankSampah.objects.filter(pk=bank_id).update(is_active=False)
+        retained_prices = HargaSampah.objects.filter(bank_sampah_id=bank_id).count()
+        return {
+            "run_id": run_id,
+            "cleaned": True,
+            "retained_immutable_prices": retained_prices,
+            "archived_bank_id": str(bank_id),
+        }
 
     @staticmethod
     def user_ids(run_id: str) -> list[UUID]:
@@ -211,7 +265,7 @@ class Command(BaseCommand):
             nomor="LOAD01",
             nama_sampah="Load Plastik",
         )
-        catat_harga(jenis, PRICE, timezone.now() - timedelta(days=400), users[0])
+        catat_harga(jenis, PRICE, timezone.now(), users[0])
         start = timezone.now() + timedelta(days=1)
         JadwalKegiatan.objects.create(
             bank_sampah=bank,

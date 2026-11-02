@@ -151,12 +151,17 @@ def snapshot(output: Path) -> None:
         "runner": platform.platform(),
         "cpu_count": os.cpu_count(),
         "runner_load_average": os.getloadavg(),
+        "runner_revision": None,
+        "deployed_source_revision": None,
+        "deployed_source_revision_status": (
+            "unavailable: Fly machine metadata does not identify the deployed source revision"
+        ),
     }
     try:
-        data["source_revision"] = subprocess.check_output(
+        data["runner_revision"] = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], text=True
         ).strip()
-        data["source_sha256"] = {
+        data["runner_source_sha256"] = {
             str(p): hashlib.sha256(p.read_bytes()).hexdigest()
             for p in [
                 Path("api/management/commands/load_test_data.py"),
@@ -164,7 +169,7 @@ def snapshot(output: Path) -> None:
                 Path("tests/load/journeys.js"),
             ]
         }
-        data["working_diff_sha256"] = hashlib.sha256(
+        data["runner_working_diff_sha256"] = hashlib.sha256(
             subprocess.check_output(["git", "diff", "HEAD"])
         ).hexdigest()
         machines = json.loads(
@@ -218,45 +223,51 @@ def run_trial(
     }
     telemetry_file = (folder / "telemetry.jsonl").open("w")
     monitor = None
-    if args.base_url == STAGING:
-        monitor_path = Path(__file__).with_name("monitor.py")
-        monitor_source = monitor_path.read_text()
-        # This checked-in source is shell-quoted before Fly receives it.
-        monitor = subprocess.Popen(
+    try:
+        if args.base_url == STAGING:
+            monitor_path = Path(__file__).with_name("monitor.py")
+            monitor_source = monitor_path.read_text()
+            # This checked-in source is shell-quoted before Fly receives it.
+            monitor = subprocess.Popen(
+                [
+                    "flyctl",
+                    "ssh",
+                    "console",
+                    "--app",
+                    APP,
+                    "-C",
+                    shlex.join(["python", "-u", "-c", monitor_source]),  # NOSONAR(S6350)
+                ],
+                stdout=telemetry_file,
+                stderr=subprocess.DEVNULL,
+                shell=False,
+            )
+        result = subprocess.run(
             [
-                "flyctl",
-                "ssh",
-                "console",
-                "--app",
-                APP,
-                "-C",
-                shlex.join(["python", "-u", "-c", monitor_source]),  # NOSONAR(S6350)
+                "k6",
+                "run",
+                "--quiet",
+                "--out",
+                f"json={folder.resolve() / 'samples.json'}",
+                str(Path(__file__).with_name("journeys.js")),
             ],
-            stdout=telemetry_file,
-            stderr=subprocess.DEVNULL,
+            env=environment,
+            check=False,
             shell=False,
         )
-    result = subprocess.run(
-        [
-            "k6",
-            "run",
-            "--quiet",
-            "--out",
-            f"json={folder.resolve() / 'samples.json'}",
-            str(Path(__file__).with_name("journeys.js")),
-        ],
-        env=environment,
-        check=False,
-        shell=False,
-    )
-    if monitor:
-        monitor.send_signal(signal.SIGINT)
+    finally:
         try:
-            monitor.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            monitor.terminate()
-            monitor.wait(timeout=10)
-    telemetry_file.close()
+            if monitor:
+                try:
+                    monitor.send_signal(signal.SIGINT)
+                finally:
+                    try:
+                        monitor.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        monitor.terminate()
+                        monitor.wait(timeout=10)
+        finally:
+            telemetry_file.close()
     metrics = json.loads(summary.read_text())["metrics"] if summary.exists() else {}
     expected = (
         int(metrics.get("new_writes", {}).get("values", {}).get("count", 0)) + args.probe_writes

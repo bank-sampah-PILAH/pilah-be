@@ -31,8 +31,11 @@ Use Python/backend dependencies, k6 **2.3.0**, and authenticated `flyctl`.
 Download k6 from Grafana's official GitHub release and verify its release checksum.
 Run the commands below from the backend repository. Use a fresh lowercase run ID.
 
-The command refuses production, allows only local development or staging's Neon
-database, creates a dedicated named bank, and never invokes global reset/flush.
+The command refuses production, allows local development targets, and permits
+staging writes only when `PILAH_STAGING_DB_HOST` exactly matches `DB_HOST` (both
+must identify the staging Neon database). Configure that non-secret allowlist
+independently in the staging environment; a generic `.neon.tech` host is not enough.
+It creates a dedicated named bank and never invokes global reset/flush.
 It creates 21 Pengurus accounts, 9 Nasabah accounts, 1,000 memberships, and
 10,000 historical setoran. The first nine memberships belong to Nasabah users.
 Each baseline transaction is 1 kg at Rp 2,500, yielding Rp 25,000 per membership.
@@ -112,8 +115,13 @@ until its evidence has been preserved. The audit fails closed; no result is a pa
 without a successful audit. Reset/cleanup refuse unexpected users or memberships.
 
 Each folder contains raw tagged samples, k6 summary/exit status, reconciliation,
-source checksums, deployment snapshots, and CPU/memory/DB telemetry. Ramp, steady,
-and drain samples are tagged separately. Count/minute for completed journeys is
+runner source checksums, deployment snapshots, and CPU/memory/DB telemetry. The
+snapshot labels the checked-out runner revision separately from
+`deployed_source_revision`; the latter is explicitly unavailable because Fly
+machine metadata does not prove which source revision produced the deployed
+image. Machine image digests and machine events are retained as deployment
+evidence, but are not a substitute for a source revision. Ramp, steady, and
+drain samples are tagged separately. Count/minute for completed journeys is
 steady journey count divided by five; requests/sec uses steady request count divided
 by 300. Report p50/p95/p99 and sample counts per action. Do not pool trials.
 
@@ -167,8 +175,13 @@ python tests/load/run.py audit --accounts /tmp/pil393-private/accounts.json --ru
 python tests/load/run.py cleanup --accounts /tmp/pil393-private/accounts.json --run-id example-run --output /tmp/pil393-results
 ```
 
-Remove the private manifests and test browser/device sessions after cleanup. Do not
-commit credentials, raw artifacts, local databases, or temporary helper uploads.
+Cleanup removes the run's synthetic accounts, memberships, schedules, transactions
+and balances, but preserves its immutable inactive fixture bank, waste types and price
+history. This is intentional fixture-safety behavior: these reference/history records
+are not recycled or deleted by cleanup. An archived run cannot be reset; use a fresh
+run ID for another trial. Remove the private manifests and test browser/device sessions
+after cleanup. Do not commit credentials, raw artifacts, local databases, or temporary
+helper uploads.
 For local validation, set DJANGO_DEBUG=true, PILAH_ENVIRONMENT=local and a disposable DB;
 run the harness with that environment's Python interpreter and use the loopback API
 URL. Local fixture actions use the same Python interpreter as the harness.

@@ -477,6 +477,39 @@ class LoadRunnerTests(SimpleTestCase):
                 self.assertTrue(result["passed"])
                 self.assertIs(popen.call_args.kwargs["shell"], False)
 
+    def test_k6_launch_failure_stops_monitor_and_closes_telemetry(self) -> None:
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            args = argparse.Namespace(
+                output=root / "results",
+                base_url=runner.STAGING,
+                accounts=root / "accounts.json",
+                probe_role=None,
+                probe_writes=0,
+            )
+            monitor_process = MagicMock()
+            telemetry = MagicMock()
+            path_open = Path.open
+
+            def open_telemetry(path: Path, *values: Any, **options: Any) -> Any:
+                if path.name == "telemetry.jsonl":
+                    return telemetry
+                return path_open(path, *values, **options)
+
+            with (
+                patch.object(runner, "fixture", return_value={"integrity_errors": 0}),
+                patch.object(runner, "snapshot"),
+                patch.object(Path, "open", autospec=True, side_effect=open_telemetry),
+                patch.object(runner.subprocess, "Popen", return_value=monitor_process),
+                patch.object(runner.subprocess, "run", side_effect=FileNotFoundError("k6")),
+            ):
+                with self.assertRaises(FileNotFoundError):
+                    runner.run_trial(args, "realistic", 10, "missing-k6")
+
+            monitor_process.send_signal.assert_called_once_with(runner.signal.SIGINT)
+            monitor_process.wait.assert_called_once_with(timeout=10)
+            telemetry.close.assert_called_once()
+
     def test_snapshot_records_machine_details_and_unavailable_reason(self) -> None:
         with TemporaryDirectory() as folder:
             output = Path(folder) / "snapshot.json"
@@ -503,15 +536,19 @@ class LoadRunnerTests(SimpleTestCase):
             ):
                 runner.snapshot(output)
             saved = json.loads(output.read_text())
-            self.assertEqual(saved["source_revision"], "revision")
+            self.assertEqual(saved["runner_revision"], "revision")
+            self.assertIsNone(saved["deployed_source_revision"])
+            self.assertIn("unavailable", saved["deployed_source_revision_status"])
             self.assertEqual(saved["machines"][0]["id"], "machine-1")
-            self.assertTrue(saved["source_sha256"])
+            self.assertEqual(saved["machines"][0]["image"], "image@sha256:abc")
+            self.assertTrue(saved["runner_source_sha256"])
 
             with patch.object(runner.subprocess, "check_output", side_effect=FileNotFoundError):
                 runner.snapshot(output)
-            self.assertEqual(
-                json.loads(output.read_text())["snapshot_unavailable"], "FileNotFoundError"
-            )
+            unavailable = json.loads(output.read_text())
+            self.assertEqual(unavailable["snapshot_unavailable"], "FileNotFoundError")
+            self.assertIsNone(unavailable["deployed_source_revision"])
+            self.assertIn("unavailable", unavailable["deployed_source_revision_status"])
 
     def test_validation_errors_stop_invalid_cli_arguments_before_any_work(self) -> None:
         with TemporaryDirectory() as folder:
