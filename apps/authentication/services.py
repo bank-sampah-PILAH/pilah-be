@@ -341,16 +341,26 @@ class AuthService:
         Gated on role because a pengurus-entered email can coincidentally
         match an account that registered as something other than nasabah,
         and that account must not be silently turned into a member.
+
+        Linking a membership is one of the onboarding writes a role change
+        must not overlap (PIL-451), so the claim takes the same account row
+        lock and decides on the role it reads under it. Logins with nothing
+        to claim skip the lock.
         """
-        if user.role != User.Role.NASABAH:
-            return
-        nasabah = Nasabah.objects.filter(
+        unclaimed = Nasabah.objects.filter(
             email__iexact=user.email, is_active=True, user__isnull=True
-        ).first()
-        if nasabah is None:
+        )
+        if user.role != User.Role.NASABAH or not unclaimed.exists():
             return
-        nasabah.user = user
-        nasabah.save(update_fields=["user", "updated_at"])
+        with transaction.atomic():
+            OnboardingService.lock_account(user)
+            if user.role != User.Role.NASABAH:
+                return
+            nasabah = unclaimed.first()
+            if nasabah is None:
+                return
+            nasabah.user = user
+            nasabah.save(update_fields=["user", "updated_at"])
 
     @staticmethod
     def user_state(user: User) -> str:
