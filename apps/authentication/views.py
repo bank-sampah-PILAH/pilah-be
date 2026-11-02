@@ -125,8 +125,7 @@ class GoogleOAuthCallbackView(APIView):
             next_url = TimestampSigner().unsign(raw_state, max_age=600)
         except (BadSignature, SignatureExpired):
             next_url = _OAUTH_FALLBACK_PATH
-        if not next_url.startswith("/"):
-            next_url = _OAUTH_FALLBACK_PATH
+        next_url = _local_next_path(next_url)
 
         redirect_uri = settings.GOOGLE_REDIRECT_URI or request.build_absolute_uri(
             "/api/v1/auth/google/callback"
