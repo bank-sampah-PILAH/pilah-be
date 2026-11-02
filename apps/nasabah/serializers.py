@@ -170,9 +170,13 @@ class NasabahSelfBankSampahSerializer(serializers.ModelSerializer[Model]):
     details, only enough to identify which bank the row belongs to.
     """
 
+    # `foto_logo` is the same logo the pengurus edits on their profile page;
+    # without it the nasabah's beranda keeps showing initials after the logo
+    # changes.
+
     class Meta:
         model = BankSampah
-        fields = ["id", "nama", "kota", "alamat"]
+        fields = ["id", "nama", "kota", "alamat", "foto_logo"]
         read_only_fields = fields
 
 
