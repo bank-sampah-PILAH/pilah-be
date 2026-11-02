@@ -1,6 +1,7 @@
 """UAT 2026-11: kode keanggotaan ternomori otomatis, dan akun pendaftaran
 yang belum lengkap boleh dihapus agar perannya dapat dipilih ulang."""
 
+from rest_framework.response import Response
 from rest_framework.test import APITestCase
 
 from api.models import BankSampah, Nasabah, User
@@ -19,7 +20,7 @@ class NomorOtomatisNasabahTests(APITestCase):
         )
         self.client.force_authenticate(self.pengelola)
 
-    def _post_nasabah(self, kode: str | None = None):
+    def _post_nasabah(self, kode: str | None = None) -> Response:
         body = {
             "nama": "Nasabah Nomor",
             "email": "nasabah-nomor@example.test",
