@@ -40,7 +40,7 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
 
     def get_queryset(self) -> QuerySet[Nasabah]:
         qs = Nasabah.objects.filter(bank_sampah=current_bank(self.request)).select_related("saldo")
-        search = self.request.query_params.get("search", "")
+        search = self.request.query_params.get("search", "").strip()
         status_filter = self.request.query_params.get("status", "aktif")
         if self.action == "list" and len(search) >= 2:
             search_filter = Q(nama__icontains=search)

@@ -64,6 +64,17 @@ class NasabahSearchTests(RegressionTestCase):
     def test_two_character_id_fragment_is_searched(self) -> None:
         self.assert_search("ZX", [self.dewi])
 
+    def test_search_trims_surrounding_whitespace_before_matching_and_length_gate(self) -> None:
+        self.assert_search(" 000123 \t", [self.budi])
+        for query in ("  ", " x "):
+            with self.subTest(query=query):
+                self.assert_search(query, [self.budi, self.siti, self.dewi])
+
+    def test_search_shape_does_not_exclude_other_searchable_fields(self) -> None:
+        self.customer("OTHER", "Studio 123", "081211110009", "hello@other.test")
+        self.assert_search("123", [self.budi, Nasabah.objects.get(nomor="OTHER")])
+        self.assert_search("example", [self.budi, self.siti, self.dewi])
+
     def test_type_unknown_or_special_input_returns_no_matches(self) -> None:
         for query in ("unknown-id", "' OR 1=1 --", "%%", "__", "x" * 1000):
             with self.subTest(query=query):
