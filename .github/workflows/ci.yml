@@ -172,7 +172,7 @@ jobs:
       # calls api.sonarcloud.io/analysis/jres (GitHub runner IPs get a
       # deterministic 403 from SonarCloud's CDN), it just runs on this JDK.
       - name: Set up Java 21 (scanner engine)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "21"
