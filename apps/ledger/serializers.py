@@ -37,6 +37,7 @@ class TransactionListSerializer(serializers.ModelSerializer[Model]):
     nasabah_inisial = serializers.SerializerMethodField()
     jenis_sampah_utama = serializers.SerializerMethodField()
     total_berat_kg = serializers.SerializerMethodField()
+    jumlah_item = serializers.SerializerMethodField()
     dicatat_oleh = serializers.UUIDField(source=_DICATAT_OLEH_ID)
 
     class Meta:
@@ -48,6 +49,7 @@ class TransactionListSerializer(serializers.ModelSerializer[Model]):
             "nasabah_inisial",
             "jenis_sampah_utama",
             "total_berat_kg",
+            "jumlah_item",
             "total_nilai",
             "tanggal",
             "status_wa",
@@ -63,6 +65,9 @@ class TransactionListSerializer(serializers.ModelSerializer[Model]):
 
     def get_total_berat_kg(self, obj: Any) -> Any:
         return sum((item.berat for item in obj.items.all()), Decimal(0))
+
+    def get_jumlah_item(self, obj: Any) -> int:
+        return len(obj.items.all())
 
 
 BERAT_MAKS_PER_ITEM = Decimal(500)
