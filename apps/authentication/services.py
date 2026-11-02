@@ -347,17 +347,18 @@ class AuthService:
         lock and decides on the role it reads under it. Logins with nothing
         to claim skip the lock.
         """
-        unclaimed = Nasabah.objects.filter(
-            email__iexact=user.email, is_active=True, user__isnull=True
-        )
-        if user.role != User.Role.NASABAH or not unclaimed.exists():
+        if user.role != User.Role.NASABAH:
             return
+        nasabah = Nasabah.objects.filter(
+            email__iexact=user.email, is_active=True, user__isnull=True
+        ).first()
+        if nasabah is None:
+            return
+        # Read before the lock: email is unique, so only this same account can
+        # claim the record meanwhile, and linking it to itself again is harmless.
         with transaction.atomic():
             OnboardingService.lock_account(user)
             if user.role != User.Role.NASABAH:
-                return
-            nasabah = unclaimed.first()
-            if nasabah is None:
                 return
             nasabah.user = user
             nasabah.save(update_fields=["user", "updated_at"])
