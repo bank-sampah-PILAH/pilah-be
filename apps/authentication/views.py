@@ -1,12 +1,11 @@
 from typing import Any
-from urllib.parse import urlparse
 
 import requests
 from django.conf import settings
 from django.core.cache import caches
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.http import HttpResponse, HttpResponseRedirect
-from django.utils.http import urlencode
+from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -42,7 +41,7 @@ _OAUTH_FALLBACK_PATH = "/api-test/"
 
 def _local_next_path(value: str) -> str:
     """`next` is only ever a path on this site; a value that could leave it falls back."""
-    if not value.startswith("/") or urlparse(value).netloc:
+    if not value.startswith("/") or not url_has_allowed_host_and_scheme(value, allowed_hosts=None):
         return _OAUTH_FALLBACK_PATH
     return value
 
