@@ -3,13 +3,15 @@
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any
+from unittest.mock import patch
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from api.models import BankSampah, Nasabah, Pencairan, Saldo, Transaksi, User
-from apps.ledger.services import PencairanService
+from apps.ledger.services import PencairanService, TransactionService
+from apps.ledger.views import TransaksiViewSet
 from apps.waste_catalog.api import buat_jenis_sampah
 
 
@@ -143,6 +145,32 @@ class SetoranVoidTests(APITestCase):
         response = self.client.post(f"/api/v1/transaksi/{self.transaksi.id}/notify-wa")
 
         self.assertEqual(response.status_code, 409)
+
+    def test_a_void_committed_after_the_receipt_request_read_the_row_sends_nothing(
+        self,
+    ) -> None:
+        # Review on #145 (Rifqi, P2): notify-wa read the setoran, then a void
+        # committed, and the stale "tercatat" check let the receipt go out.
+        get_object = TransaksiViewSet.get_object
+
+        def read_then_void(view: TransaksiViewSet) -> Transaksi:
+            transaksi = get_object(view)
+            TransactionService.batalkan_setoran(
+                self.pengelola, Transaksi.objects.get(pk=transaksi.pk), "Salah nasabah"
+            )
+            return transaksi
+
+        with (
+            patch.object(TransaksiViewSet, "get_object", read_then_void),
+            patch(
+                "apps.ledger.views.send_setoran_receipt",
+                return_value={"success": True, "status_wa": "terkirim"},
+            ) as send,
+        ):
+            response = self.client.post(f"/api/v1/transaksi/{self.transaksi.id}/notify-wa")
+
+        self.assertEqual(response.status_code, 409)
+        send.assert_not_called()
 
     def _cairkan(self, nominal: int, tanggal: Any) -> Pencairan:
         return PencairanService.realisasi(
