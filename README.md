@@ -150,7 +150,19 @@ DB_USER=pilah
 DB_PASSWORD=pilah
 DB_HOST=db
 DB_PORT=5432
+DB_CONN_MAX_AGE=60
 ```
+
+Database connections are reused for up to 60 seconds, with a health check before
+reuse. Set `DB_CONN_MAX_AGE=0` to restore a new connection for each request.
+Gunicorn defaults to four threads per worker so requests can make progress while
+others wait for database I/O. Native `WEB_CONCURRENCY` and `GUNICORN_CMD_ARGS`
+overrides still apply; `GUNICORN_CMD_ARGS="--threads 1"` restores synchronous
+workers. Budget up to workers × threads × maximum instances database connections,
+plus connections for jobs and administration.
+
+The [PIL-448 investigation](https://linear.app/pilah-2/document/pil-448-burst-latency-investigation-a6d1f9ee57df)
+records the controlled comparisons and rollout checks.
 
 Auth and app variables:
 
