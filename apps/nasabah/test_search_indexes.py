@@ -1,22 +1,29 @@
 """Physical Postgres indexes must match Django's icontains expressions."""
 
-from types import SimpleNamespace
 from unittest import skipUnless
 from unittest.mock import Mock
 
 from django.db import connection
+from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 from django.db.migrations.loader import MigrationLoader
+from django.db.migrations.operations.special import RunPython
 from django.test import SimpleTestCase, TestCase
 
 
 @skipUnless(connection.vendor == "sqlite", "SQLite migration compatibility")
 class NasabahSearchSQLiteMigrationTests(SimpleTestCase):
     def test_forward_and_reverse_never_execute_postgres_sql(self) -> None:
-        migration = MigrationLoader(None).disk_migrations[("api", "0028_nasabah_search_trigrams")]
+        loader = MigrationLoader(None)
+        migration = loader.disk_migrations[("api", "0028_nasabah_search_trigrams")]
         operation = migration.operations[0]
-        editor = SimpleNamespace(connection=connection, execute=Mock())
-        operation.code(None, editor)
-        operation.reverse_code(None, editor)
+        assert isinstance(operation, RunPython)
+        reverse_code = operation.reverse_code
+        assert reverse_code is not None
+        editor = Mock(spec=BaseDatabaseSchemaEditor)
+        editor.connection = connection
+        apps = loader.project_state().apps
+        operation.code(apps, editor)
+        reverse_code(apps, editor)
         editor.execute.assert_not_called()
 
 

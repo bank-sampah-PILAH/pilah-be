@@ -6,11 +6,13 @@ icontains compiles to UPPER(column::text) LIKE UPPER(parameter) on Postgres.
 """
 
 from django.db import migrations
+from django.db.backends.base.schema import BaseDatabaseSchemaEditor
+from django.db.migrations.state import StateApps
 
 SEARCH_FIELDS = ("nomor", "nama", "no_hp", "email")
 
 
-def create_indexes(apps, schema_editor):
+def create_indexes(apps: StateApps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     if schema_editor.connection.vendor != "postgresql":
         return
     schema_editor.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
@@ -21,7 +23,7 @@ def create_indexes(apps, schema_editor):
         )
 
 
-def drop_indexes(apps, schema_editor):
+def drop_indexes(apps: StateApps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     if schema_editor.connection.vendor != "postgresql":
         return
     for field in SEARCH_FIELDS:
