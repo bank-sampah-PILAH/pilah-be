@@ -8,6 +8,7 @@ aborted one with "deadlock detected" (a 500). Real row locks need PostgreSQL.
 """
 
 import threading
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any
@@ -75,47 +76,48 @@ class LedgerLockOrderTests(TransactionTestCase):
     def test_a_void_and_a_pencairan_edit_on_one_ledger_do_not_deadlock(self) -> None:
         reached, proceed = threading.Event(), threading.Event()
         original = PencairanService._hitung_ulang_saldo
-        errors: dict[str, BaseException] = {}
 
         def paused(*args: Any, **kwargs: Any) -> Any:
             # The edit has taken its first locks; hold here while the void starts.
-            if threading.current_thread().name == "edit":
+            if threading.current_thread().name.startswith("edit"):
                 reached.set()
                 proceed.wait(WAIT)
             return original(*args, **kwargs)
 
-        def run(name: str, work: Any) -> None:
+        def edit() -> None:
             try:
-                work()
-            except BaseException as exc:  # recorded, then asserted on below
-                errors[name] = exc
+                PencairanService.edit_pencairan(
+                    self.pengelola,
+                    Pencairan.objects.get(pk=self.pencairan.pk),
+                    {"nominal": Decimal(2000), "alasan": "Salah nominal"},
+                )
             finally:
                 connection.close()
 
-        def edit() -> None:
-            PencairanService.edit_pencairan(
-                self.pengelola,
-                Pencairan.objects.get(pk=self.pencairan.pk),
-                {"nominal": Decimal(2000), "alasan": "Salah nominal"},
-            )
-
         def void() -> None:
-            TransactionService.batalkan_setoran(
-                self.pengelola, Transaksi.objects.get(pk=self.dibatalkan.pk), "Salah nasabah"
-            )
+            try:
+                TransactionService.batalkan_setoran(
+                    self.pengelola, Transaksi.objects.get(pk=self.dibatalkan.pk), "Salah nasabah"
+                )
+            finally:
+                connection.close()
 
-        with patch.object(PencairanService, "_hitung_ulang_saldo", staticmethod(paused)):
-            a = threading.Thread(target=run, args=("edit", edit), name="edit")
-            a.start()
+        # Each writer runs in its own thread and connection; a future keeps any
+        # exception (the deadlock, before the fix) for the assertion below.
+        with (
+            patch.object(PencairanService, "_hitung_ulang_saldo", staticmethod(paused)),
+            ThreadPoolExecutor(1, thread_name_prefix="edit") as editor,
+            ThreadPoolExecutor(1, thread_name_prefix="void") as voider,
+        ):
+            edited = editor.submit(edit)
             self.assertTrue(reached.wait(WAIT), "the edit never reached its replay")
-            b = threading.Thread(target=run, args=("void", void), name="void")
-            b.start()
-            b.join(1.0)
+            voided = voider.submit(void)
+            # Give the void time to take its locks and queue behind the edit's.
+            wait([voided], timeout=1.0)
             proceed.set()
-            a.join(WAIT)
-            b.join(WAIT)
+            errors = {"edit": edited.exception(WAIT), "void": voided.exception(WAIT)}
 
-        self.assertEqual(errors, {}, "one of the two writers failed")
+        self.assertEqual(errors, {"edit": None, "void": None}, "one of the two writers failed")
         self.pencairan.refresh_from_db()
         self.assertEqual(self.pencairan.nominal, Decimal(2000))
         self.assertEqual(
