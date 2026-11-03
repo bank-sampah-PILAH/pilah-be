@@ -154,7 +154,7 @@ class SetoranVoidTests(APITestCase):
         get_object = TransaksiViewSet.get_object
 
         def read_then_void(view: TransaksiViewSet) -> Transaksi:
-            transaksi = get_object(view)
+            transaksi: Transaksi = get_object(view)
             TransactionService.batalkan_setoran(
                 self.pengelola, Transaksi.objects.get(pk=transaksi.pk), "Salah nasabah"
             )
