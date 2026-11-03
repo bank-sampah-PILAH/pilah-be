@@ -345,7 +345,10 @@ class PencairanService:
         """Apply a pengurus correction, keeping the replaced version as a PencairanRevisi.
 
         `pencairan` comes from the caller's bank-scoped queryset; it is re-read under lock.
+        Every writer of a nasabah's ledger locks Saldo first, then setoran, then pencairan,
+        so an edit can't deadlock with a setoran edit or void touching the same pencairan.
         """
+        Saldo.objects.select_for_update().get(nasabah_id=pencairan.nasabah_id)
         pencairan = Pencairan.objects.select_for_update().get(pk=pencairan.pk)
         nominal = payload.get("nominal", pencairan.nominal)
         tanggal = payload.get("tanggal", pencairan.tanggal)
