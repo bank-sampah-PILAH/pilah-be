@@ -142,7 +142,7 @@ class TransactionService:
         never reprices a setoran.
         """
         saldo = Saldo.objects.select_for_update().get(nasabah_id=transaksi.nasabah_id)
-        transaksi = TransactionService._kunci_tercatat(transaksi)
+        transaksi = TransactionService.kunci_tercatat(transaksi)
         lama = list(transaksi.items.all())
         catatan = payload["catatan"] or "" if "catatan" in payload else transaksi.catatan
 
@@ -215,7 +215,7 @@ class TransactionService:
         `transaksi` comes from the caller's bank-scoped queryset; it is re-read under lock.
         """
         saldo = Saldo.objects.select_for_update().get(nasabah_id=transaksi.nasabah_id)
-        transaksi = TransactionService._kunci_tercatat(transaksi)
+        transaksi = TransactionService.kunci_tercatat(transaksi)
         saldo_baru = bulatkan_rupiah(saldo.total_saldo - transaksi.total_nilai)
         sesudahnya = TransactionService._geser_pencairan(transaksi, -transaksi.total_nilai)
         if saldo_baru < 0 or any(cair.saldo_sesudah < 0 for cair in sesudahnya):
@@ -241,8 +241,12 @@ class TransactionService:
         return transaksi
 
     @staticmethod
-    def _kunci_tercatat(transaksi: Transaksi) -> Transaksi:
-        """Re-read under lock and refuse a setoran that was voided meanwhile."""
+    def kunci_tercatat(transaksi: Transaksi) -> Transaksi:
+        """Re-read under lock and refuse a setoran that was voided meanwhile.
+
+        Edit, void and the WhatsApp receipt all hold this row lock while they act, so a
+        void can't commit between their status check and what they do next.
+        """
         transaksi = Transaksi.objects.select_for_update().get(pk=transaksi.pk)
         if transaksi.status == Transaksi.Status.DIBATALKAN:
             raise SetoranDibatalkan

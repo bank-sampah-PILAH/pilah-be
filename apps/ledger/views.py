@@ -272,9 +272,15 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
     @action(detail=True, methods=["post"], url_path="notify-wa")
     def notify_wa(self, request: Request, pk: str | None = None) -> Response:
         transaksi = self.get_object()
-        if transaksi.status == Transaksi.Status.DIBATALKAN:
-            return Response({"error": str(SetoranDibatalkan())}, status=status.HTTP_409_CONFLICT)
-        result = send_setoran_receipt(transaksi)
+        # The void's own row lock, held through the send (the gateway call is capped by
+        # WHATSAPP_GATEWAY_TIMEOUT): a void waits for a receipt in flight, and a receipt
+        # requested after a void sees it.
+        with transaction.atomic():
+            try:
+                transaksi = TransactionService.kunci_tercatat(transaksi)
+            except SetoranDibatalkan as exc:
+                return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+            result = send_setoran_receipt(transaksi)
         return Response(result, status=200 if result["success"] else 400)
 
 
