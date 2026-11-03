@@ -14,7 +14,8 @@ class DatabaseConnectionSettingsTests(SimpleTestCase):
             if max_age is not None:
                 os.environ["DB_CONN_MAX_AGE"] = max_age
             loaded = runpy.run_path(str(Path(__file__).resolve().parents[1] / "config/settings.py"))
-            return loaded["DATABASES"]["default"]
+            database: dict[str, Any] = loaded["DATABASES"]["default"]
+            return database
 
     def test_default_reuses_connections_for_a_bounded_minute_with_health_checks(self) -> None:
         database = self.database_settings()
