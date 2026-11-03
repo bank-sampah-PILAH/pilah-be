@@ -16,3 +16,16 @@ class GunicornRuntimeTests(SimpleTestCase):
         self.assertEqual(application.cfg.workers, 1)
         self.assertEqual(application.cfg.threads, 4)
         self.assertEqual(application.cfg.worker_class.__name__, "ThreadWorker")
+
+    def test_operator_can_restore_sync_workers_using_native_gunicorn_options(self) -> None:
+        with (
+            patch.object(sys, "argv", ["gunicorn", "config.wsgi:application"]),
+            patch.dict(
+                os.environ,
+                {"GUNICORN_CMD_ARGS": "--threads 1 --workers 2", "WEB_CONCURRENCY": "1"},
+            ),
+        ):
+            application = WSGIApplication()
+        self.assertEqual(application.cfg.workers, 2)
+        self.assertEqual(application.cfg.threads, 1)
+        self.assertEqual(application.cfg.worker_class.__name__, "SyncWorker")
