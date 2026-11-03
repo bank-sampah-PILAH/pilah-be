@@ -26,6 +26,13 @@ class Saldo(models.Model):
         db_table = "saldo"
 
 
+class StatusTransaksi(models.TextChoices):
+    """Transaksi.Status. Module-level so Meta.constraints can name its values (PIL-428)."""
+
+    TERCATAT = "tercatat", "Tercatat"
+    DIBATALKAN = "dibatalkan", "Dibatalkan"
+
+
 class TransaksiQuerySet(models.QuerySet["Transaksi"]):
     def tercatat(self) -> "TransaksiQuerySet":
         """Setoran that still count: everything but a void (PIL-428).
@@ -46,9 +53,7 @@ class Transaksi(TimestampedModel):
         TERKIRIM = "terkirim", "Terkirim"
         GAGAL = "gagal", "Gagal"
 
-    class Status(models.TextChoices):
-        TERCATAT = "tercatat", "Tercatat"
-        DIBATALKAN = "dibatalkan", "Dibatalkan"
+    Status = StatusTransaksi
 
     objects = TransaksiQuerySet.as_manager()
 
@@ -101,14 +106,14 @@ class Transaksi(TimestampedModel):
             models.CheckConstraint(
                 condition=(
                     models.Q(
-                        status="tercatat",
+                        status=StatusTransaksi.TERCATAT,
                         alasan_batal="",
                         dibatalkan_oleh__isnull=True,
                         dibatalkan_pada__isnull=True,
                     )
                     | (
                         models.Q(
-                            status="dibatalkan",
+                            status=StatusTransaksi.DIBATALKAN,
                             dibatalkan_oleh__isnull=False,
                             dibatalkan_pada__isnull=False,
                         )
