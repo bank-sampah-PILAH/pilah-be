@@ -6,6 +6,7 @@ from typing import Any
 from unittest.mock import patch
 
 from django.db import IntegrityError, transaction
+from django.db.models import CheckConstraint, Q
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -279,6 +280,28 @@ class SetoranVoidTests(APITestCase):
             with self.subTest(fields=fields), self.assertRaises(IntegrityError):
                 with transaction.atomic():
                     Transaksi.objects.filter(pk=self.transaksi.pk).update(**fields)
+
+    def test_the_void_constraint_names_exactly_the_status_choices(self) -> None:
+        # Review on #145 (Gabriel): the constraint spells the states as strings,
+        # so a renamed Transaksi.Status choice must fail here, not in production.
+        constraint = next(
+            c
+            for c in Transaksi._meta.constraints
+            if isinstance(c, CheckConstraint) and c.name == "transaksi_batal_lengkap"
+        )
+
+        def states(node: Q) -> set[str]:
+            found: set[str] = set()
+            for child in node.children:
+                if isinstance(child, Q):
+                    found |= states(child)
+                elif isinstance(child, tuple) and child[0] == "status":
+                    found.add(child[1])
+            return found
+
+        condition = constraint.condition
+        assert isinstance(condition, Q)
+        self.assertEqual(states(condition), set(Transaksi.Status.values))
 
     def _status(self) -> str:
         return Transaksi.objects.values_list("status", flat=True).get(pk=self.transaksi.pk)
