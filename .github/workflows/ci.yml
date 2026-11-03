@@ -104,7 +104,9 @@ jobs:
       # Match Sonar's source roots, including shared regression fixtures in
       # tests/: otherwise executed helpers are incorrectly reported as untested.
       - name: Run tests with coverage
-        run: coverage run --source=api,apps,config,shared_kernel,tests manage.py test -v 2
+        run: |
+          coverage run --source=api,apps,config,shared_kernel,tests manage.py test -v 2
+          coverage run --append --include=gunicorn.conf.py manage.py test tests.test_gunicorn_runtime
 
       - name: Coverage report (fail under 80%)
         run: coverage report --show-missing --skip-covered --fail-under=80
@@ -193,7 +195,7 @@ jobs:
           args: >
             -Dsonar.organization=bank-sampah-pilah
             -Dsonar.projectKey=bank-sampah-PILAH_pilah-be
-            -Dsonar.sources=api,apps,config,shared_kernel,tests
+            -Dsonar.sources=api,apps,config,shared_kernel,tests,gunicorn.conf.py
             -Dsonar.tests=api,apps,tests
             -Dsonar.test.inclusions=**/tests.py,**/test_*.py
             -Dsonar.python.coverage.reportPaths=coverage.xml
@@ -211,7 +213,7 @@ jobs:
           args: >
             -Dsonar.organization=bank-sampah-pilah
             -Dsonar.projectKey=bank-sampah-PILAH_pilah-be
-            -Dsonar.sources=api,apps,config,shared_kernel,tests
+            -Dsonar.sources=api,apps,config,shared_kernel,tests,gunicorn.conf.py
             -Dsonar.tests=api,apps,tests
             -Dsonar.test.inclusions=**/tests.py,**/test_*.py
             -Dsonar.python.coverage.reportPaths=coverage.xml
