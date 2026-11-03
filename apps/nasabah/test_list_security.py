@@ -236,6 +236,7 @@ class NasabahListSecurityTests(APITestCase):
                 self.assertNotIn("db secret", str(response.data))
                 self.assert_private(response)
 
+    @override_settings(DEBUG=False)
     def test_programming_errors_are_not_disguised_as_retryable_outages(self) -> None:
         with (
             patch(
@@ -245,6 +246,18 @@ class NasabahListSecurityTests(APITestCase):
             self.assertRaises(ProgrammingError),
         ):
             self.client.get("/api/v1/nasabah")
+        self.client.raise_request_exception = False
+        with (
+            patch(
+                "apps.nasabah.views.NasabahViewSet.get_queryset",
+                side_effect=ProgrammingError("missing ordering column"),
+            ),
+            self.assertLogs("django.request", level="ERROR") as captured,
+        ):
+            response = self.client.get("/api/v1/nasabah")
+        self.assertEqual(response.status_code, 500)
+        self.assertNotIn(b"missing ordering column", response.content)
+        self.assertTrue(any(record.exc_info for record in captured.records))
 
     def test_schema_documents_bounded_search_status_and_ordering_contract(self) -> None:
         generator = SchemaGenerator(  # type: ignore[no-untyped-call]  # drf-spectacular has no constructor annotations
