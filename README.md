@@ -151,15 +151,18 @@ DB_PASSWORD=pilah
 DB_HOST=db
 DB_PORT=5432
 DB_CONN_MAX_AGE=60
+GUNICORN_THREADS=4
 ```
 
 Database connections are reused for up to 60 seconds, with a health check before
 reuse. Set `DB_CONN_MAX_AGE=0` to restore a new connection for each request.
 Gunicorn defaults to four threads per worker so requests can make progress while
-others wait for database I/O. Native `WEB_CONCURRENCY` and `GUNICORN_CMD_ARGS`
-overrides still apply; `GUNICORN_CMD_ARGS="--threads 1"` restores synchronous
-workers. Budget up to workers × threads × maximum instances database connections,
-plus connections for jobs and administration.
+others wait for database I/O. Set `GUNICORN_THREADS=1` to restore synchronous
+workers; native `WEB_CONCURRENCY` and `GUNICORN_CMD_ARGS` overrides still apply.
+Fly staging opts into four threads and 60-second reuse. Both Cloud Run production
+deploy paths explicitly keep one thread and `DB_CONN_MAX_AGE=0` until the
+production database connection budget is sized. Budget up to workers × threads ×
+maximum instances database connections, plus connections for jobs and administration.
 
 The [PIL-448 investigation](https://linear.app/pilah-2/document/pil-448-burst-latency-investigation-a6d1f9ee57df)
 records the controlled comparisons and rollout checks.

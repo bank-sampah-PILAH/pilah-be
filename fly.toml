@@ -17,6 +17,8 @@ primary_region = "sin"
   PILAH_WEB_ORIGIN = "https://pilah-web-staging.fly.dev"
   DB_ENGINE = "django.db.backends.postgresql"
   DB_PORT = "5432"
+  DB_CONN_MAX_AGE = "60"
+  GUNICORN_THREADS = "4"
   DB_SSLMODE = "require"
   DB_CHANNEL_BINDING = "require"
 

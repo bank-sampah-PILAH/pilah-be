@@ -1,1 +1,3 @@
-threads = 4
+import os
+
+threads = int(os.getenv("GUNICORN_THREADS", "4"))
