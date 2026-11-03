@@ -6,7 +6,7 @@ from uuid import UUID
 from django.db import IntegrityError, transaction
 from django.db.models import Prefetch, QuerySet
 from django.http import HttpResponse
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ParseError
@@ -255,6 +255,22 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
             return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
         return Response(TransactionDetailSerializer(self.get_queryset().get(pk=transaksi.pk)).data)
 
+    @extend_schema(
+        request=TransactionBatalSerializer,
+        responses={
+            200: TransactionDetailSerializer,
+            404: OpenApiResponse(description="No such setoran in the caller's bank sampah."),
+            409: OpenApiResponse(
+                description='Already voided, or its money was already paid out: `{"error": "..."}`.'
+            ),
+            422: OpenApiResponse(
+                description=(
+                    "The alasan is missing, blank or over 255 characters: "
+                    '`{"errors": {"alasan": [...]}}`.'
+                )
+            ),
+        },
+    )
     @action(detail=True, methods=["post"], url_path="batalkan")
     def batalkan(self, request: Request, pk: str | None = None) -> Response:
         """Void ("hapus") a setoran: it stays in the riwayat, marked cancelled."""
