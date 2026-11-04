@@ -50,6 +50,7 @@ class MembershipRegressionTests(RegressionTestCase):
             "/api/v1/invites/accept", {"token": original.data["token"]}, format="json"
         )
         self.assertEqual(response.status_code, 400)
+        self.assertIn("tidak valid", response.data["error"].lower())
 
     def test_inactive_bank_cannot_create_invite_or_accept_invite(self) -> None:
         generated = self.client.post("/api/v1/team/invite", {}, format="json")
@@ -155,6 +156,7 @@ class MembershipRegressionTests(RegressionTestCase):
             "/api/v1/invites/accept", {"token": generated.data["token"]}, format="json"
         )
         self.assertEqual(response.status_code, 400)
+        self.assertIn("kedaluwarsa", response.data["error"].lower())
 
     def test_invite_accept_rejects_bogus_token(self) -> None:
         for path in ("/api/v1/invites/accept", "/api/v1/bank-sampah/invite/join"):
