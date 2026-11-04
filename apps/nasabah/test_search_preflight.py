@@ -5,10 +5,10 @@ from unittest.mock import patch
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection
-from django.test import SimpleTestCase
+from django.test import TestCase
 
 
-class SearchPreflightTests(SimpleTestCase):
+class SearchPreflightTests(TestCase):
     def test_missing_extension_fails_with_bootstrap_instructions(self) -> None:
         with patch.object(connection, "vendor", "postgresql"), patch.object(
             connection, "cursor"
