@@ -7,7 +7,7 @@ from django.db import connection
 from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 from django.db.migrations.loader import MigrationLoader
 from django.db.migrations.operations.special import RunPython
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TransactionTestCase
 
 
 @skipUnless(connection.vendor == "sqlite", "SQLite migration compatibility")
@@ -28,7 +28,7 @@ class NasabahSearchSQLiteMigrationTests(SimpleTestCase):
 
 
 @skipUnless(connection.vendor == "postgresql", "Postgres-specific search indexes")
-class NasabahSearchIndexTests(TestCase):
+class NasabahSearchIndexTests(TransactionTestCase):
     def test_search_index_build_is_non_atomic(self) -> None:
         migration = MigrationLoader(connection).disk_migrations[
             ("api", "0028_nasabah_search_trigrams")
@@ -40,7 +40,7 @@ class NasabahSearchIndexTests(TestCase):
         migration = loader.disk_migrations[("api", "0028_nasabah_search_trigrams")]
         operation = migration.operations[0]
         state = loader.project_state()
-        with connection.schema_editor() as editor:
+        with connection.schema_editor(atomic=False) as editor:
             operation.database_backwards("api", editor, state, state)
             with connection.cursor() as cursor:
                 cursor.execute(
