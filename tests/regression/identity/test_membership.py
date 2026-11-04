@@ -37,7 +37,7 @@ class MembershipRegressionTests(RegressionTestCase):
         self.assertEqual(response.data, generated.data)
         self.bank.refresh_from_db()
         self.assertEqual(self.bank.invite_token, generated.data["token"])
-        self.assertEqual(self.bank.invite_token_expires.isoformat(), expiry.isoformat())
+        self.assertEqual(self.bank.invite_token_expires, expiry)
 
     def test_invite_replacement_invalidates_previous_token(self) -> None:
         original = self.client.post("/api/v1/team/invite", {}, format="json")
