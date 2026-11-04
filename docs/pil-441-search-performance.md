@@ -1,12 +1,16 @@
 # PIL-441 search performance review
 
-The search keeps case-insensitive substring matching across name, customer ID, phone, and email. Numeric text can appear in a name and alphabetic text can appear in an email, so query-shape routing would change existing behavior. Surrounding whitespace is trimmed before the two-character gate.
+The search keeps case-insensitive substring matching across name, customer ID, phone, and email. Numeric text can appear in a name and alphabetic text can appear in an email, so query-shape routing would change existing behavior. Surrounding whitespace is trimmed before the two-character gate. Normalized searches longer than 100 characters return HTTP 422 with a search-field error; exactly 100 characters remains supported.
 
 ## PostgreSQL indexes
 
 Migration `0028_nasabah_search_trigrams` adds `pg_trgm` and four GIN expression indexes on `UPPER(column::text)`, matching Django PostgreSQL `icontains`. It intentionally changes physical PostgreSQL indexes only; SQLite remains supported without PostgreSQL opclasses in model state. The migration is reversible, but leaves the potentially shared extension installed. `0029_merge_search_and_transaksi` joins the current staging migration branch.
 
-Deployment requires permission to install pg_trgm. Index creation is transactional and takes a table write lock while building; schedule migration appropriately for a large bank dataset. Indexes add storage and write overhead.
+Deployment runs `python manage.py check_search_prerequisites` before `migrate`. This check is read-only and fails early if pg_trgm is missing. Before deploying, a database owner or another authorized role must run `python manage.py check_search_prerequisites --install-extension` against each target database. No production role or table size has been inspected by this change. PostgreSQL documents pg_trgm as trusted, so installation privileges depend on the database and managed-provider configuration; do not assume every application role can install it.
+
+The migration uses `atomic = False` and `CREATE INDEX CONCURRENTLY` / `DROP INDEX CONCURRENTLY`. Concurrent builds permit customer writes but can wait for old transactions and still consume CPU, I/O, and storage. Do not put the migration inside an external transaction. If an unapplied build fails partway, inspect `pg_indexes` and `pg_index.indisvalid`; remove only this migration's partial indexes concurrently after checking their definitions, then rerun the migration. Never drop the shared extension during rollback.
+
+The migration's `CREATE EXTENSION IF NOT EXISTS` is retained so Django can provision disposable test databases. In the deployment path the prerequisite check ensures the extension is already installed before migrations run. CI explicitly bootstraps its disposable database before applying migrations.
 
 The two-character minimum is preserved for compatibility. Terms without an extractable trigram, including many two-character queries, can still scan. Pagination still executes a filtered count and a page query; cancelling the frontend HTTP request does not guarantee cancellation of an already executing Django/PostgreSQL query.
 
@@ -754,3 +758,19 @@ This plan shows actual index selection for the 10,000-row `0012` count; indexes 
   "Execution Time": 0.106
 }
 ```
+
+## Review follow-up and test evidence
+
+The following incremental cycles were recorded locally. No after-the-fact test is claimed as a RED cycle.
+
+| Behavior | RED commit and observed failure | GREEN commit |
+|---|---|---|
+| Reject 101-character search | `55e4e37`: HTTP 200 instead of 422 | `d08074a` |
+| Non-atomic concurrent index migration | `8befad3`: migration.atomic was True | `5bf8d4a` |
+| Missing-extension deployment preflight | `aa661af`: command missing instead of actionable pg_trgm bootstrap error | `53eb9f2` |
+
+The first preflight attempt (`f8cddd5`) also had an unrelated database-mock teardown error. It was corrected before implementation; only the clean failure at `aa661af` is the demonstrated RED evidence.
+
+Regression tests additionally cover the 100-character accepted boundary, read-only installed-extension checks, explicit bootstrap, permission failure instructions, and SQLite no-op behavior. The migration assertions now use `_assert_trigram_indexes()` rather than calling a test method as a helper.
+
+References: [PostgreSQL pg_trgm privileges](https://www.postgresql.org/docs/current/pgtrgm.html), [concurrent index behavior](https://www.postgresql.org/docs/current/sql-createindex.html).

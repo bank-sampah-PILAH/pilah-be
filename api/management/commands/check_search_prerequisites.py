@@ -21,7 +21,9 @@ class Command(BaseCommand):
             with connection.cursor() as cursor:
                 if options["install_extension"]:
                     cursor.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
-                cursor.execute("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm')")
+                cursor.execute(
+                    "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm')"
+                )
                 installed = cursor.fetchone()
         except DatabaseError as exc:
             raise CommandError(
