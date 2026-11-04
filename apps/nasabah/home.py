@@ -44,6 +44,8 @@ class ActivitySerializer(serializers.Serializer[Any]):
     tanggal = serializers.DateTimeField()
     tipe = serializers.CharField()
     total_nilai = serializers.DecimalField(max_digits=14, decimal_places=2)
+    # "dibatalkan" for a voided setoran (PIL-428); it stays listed but counts for nothing.
+    status = serializers.CharField()
 
 
 class NasabahTransactionDetailSerializer(TransactionDetailSerializer):
@@ -56,6 +58,7 @@ class NasabahTransactionDetailSerializer(TransactionDetailSerializer):
             "catatan",
             "items",
             "saldo_setelah_transaksi",
+            "status",
         ]
 
 
@@ -225,17 +228,19 @@ class NasabahHistoryView(ListAPIView[Transaksi]):
                 )
             }
             for row in page:
-                value = (
-                    deposits[row["id"]].total_nilai
-                    if row["tipe_aktivitas"] == "setoran"
-                    else payouts[row["id"]].nominal
-                )
+                if row["tipe_aktivitas"] == "setoran":
+                    setoran = deposits[row["id"]]
+                    value, status = setoran.total_nilai, setoran.status
+                else:
+                    pencairan = payouts[row["id"]]
+                    value, status = pencairan.nominal, pencairan.status
                 payloads.append(
                     {
                         "id": row["id"],
                         "tanggal": row["tanggal"],
                         "tipe": row["tipe_aktivitas"],
                         "total_nilai": value,
+                        "status": status,
                     }
                 )
             return self.get_paginated_response(self.get_serializer(payloads, many=True).data)

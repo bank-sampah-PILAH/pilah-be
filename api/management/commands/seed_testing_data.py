@@ -408,7 +408,8 @@ class Command(BaseCommand):
         )
 
         for customer in (customer_one, customer_two):
-            setoran = Transaksi.objects.filter(nasabah=customer).aggregate(
+            # A voided setoran stays in the table but not in the saldo (PIL-428).
+            setoran = Transaksi.objects.tercatat().filter(nasabah=customer).aggregate(
                 total=Sum("total_nilai")
             )["total"] or Decimal("0.00")
             pencairan = Pencairan.objects.filter(nasabah=customer).aggregate(

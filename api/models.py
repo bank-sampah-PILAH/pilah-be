@@ -13,6 +13,7 @@ from apps.ledger.models import (  # noqa: F401
     PencairanRevisi,
     Saldo,
     Transaksi,
+    TransaksiQuerySet,
     TransaksiRevisi,
 )
 from apps.nasabah.models import Nasabah, NasabahApprovalLog  # noqa: F401
@@ -38,6 +39,7 @@ __all__ = [
     "Saldo",
     "TimestampedModel",
     "Transaksi",
+    "TransaksiQuerySet",
     "User",
     "UserManager",
 ]

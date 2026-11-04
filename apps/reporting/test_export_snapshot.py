@@ -11,7 +11,7 @@ from django.db import DatabaseError, connection, connections, transaction
 from django.db.models import QuerySet
 from django.test import TestCase
 
-from api.models import DetailTransaksi, Pencairan, Transaksi
+from api.models import DetailTransaksi, Pencairan, Transaksi, TransaksiQuerySet
 from apps.reporting.operational import OperationalSummary, operational_summary
 from apps.reporting.snapshot import export_snapshot
 from apps.reporting.test_operational_report import OperationalReportFixture
@@ -45,7 +45,7 @@ class ExportSnapshotTests(OperationalReportFixture):
         with ThreadPoolExecutor(max_workers=1) as executor:
 
             def after_summary(
-                deposits: QuerySet[Transaksi], payouts: QuerySet[Pencairan]
+                deposits: TransaksiQuerySet, payouts: QuerySet[Pencairan]
             ) -> OperationalSummary:
                 summary = operational_summary(deposits, payouts)
                 executor.submit(writer).result(timeout=10)
