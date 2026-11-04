@@ -54,6 +54,22 @@ class NomorOtomatisNasabahTests(APITestCase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["kode"], "NAS-042")
 
+    def test_dua_tanpa_kode_berturut_mendapat_nomor_berbeda(self) -> None:
+        first = self._post_nasabah()
+        self.assertEqual(first.status_code, 201, first.data)
+        body = {
+            "nama": "Nasabah Kedua",
+            "email": "nasabah-kedua@example.test",
+            "jenis_kelamin": "perempuan",
+            "tanggal_lahir": "1991-02-02",
+            "no_hp": "081234567899",
+            "alamat": "Jl. Kedua No. 2",
+        }
+        second = self.client.post("/api/v1/nasabah", body, format="json")
+        self.assertEqual(second.status_code, 201, second.data)
+        self.assertEqual(first.data["kode"], "NAS-001")
+        self.assertEqual(second.data["kode"], "NAS-002")
+
 
 class HapusPendaftaranBelumLengkapTests(APITestCase):
     """DELETE /onboarding/discard-registration: akun yang belum lengkap boleh

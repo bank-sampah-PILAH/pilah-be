@@ -8,7 +8,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.models import Nasabah, Saldo, User
+from api.models import BankSampah, Nasabah, Saldo, User
 from apps.authentication.api import register_nasabah, user_state_hint
 from apps.bank_sampah.serializers import ApprovalDecisionSerializer
 from apps.nasabah.keanggotaan import email_terkunci, profil_akun, sinkronkan_dari_akun
@@ -66,10 +66,7 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         bank = current_bank(request)
-        nomor = serializer.validated_data.get("nomor") or Nasabah.nomor_berikut(bank.id)
         no_hp = serializer.validated_data["no_hp"]
-        if Nasabah.objects.filter(bank_sampah=bank, nomor=nomor).exists():
-            return Response({"errors": {"kode": ["ID Nasabah sudah digunakan"]}}, status=422)
         if Nasabah.objects.filter(bank_sampah=bank, no_hp=no_hp).exists():
             return Response({"errors": {"no_hp": [_NO_HP_TERPAKAI]}}, status=422)
         email = serializer.validated_data.get("email")
@@ -81,11 +78,15 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
                 {"errors": {"email": ["Email sudah terdaftar sebagai nasabah di bank sampah ini"]}},
                 status=422,
             )
-        nasabah = serializer.save(
-            bank_sampah=bank,
-            nomor=nomor,
-        )
-        Saldo.objects.create(nasabah=nasabah)
+        with transaction.atomic():
+            # Lock the bank so two concurrent blank-kode creates cannot read the
+            # same maximum: the second waits, then numbers from the committed row.
+            BankSampah.objects.select_for_update().get(pk=bank.pk)
+            nomor = serializer.validated_data.get("nomor") or Nasabah.nomor_berikut(bank.id)
+            if Nasabah.objects.filter(bank_sampah=bank, nomor=nomor).exists():
+                return Response({"errors": {"kode": ["ID Nasabah sudah digunakan"]}}, status=422)
+            nasabah = serializer.save(bank_sampah=bank, nomor=nomor)
+            Saldo.objects.create(nasabah=nasabah)
         return Response(self.get_serializer(nasabah).data, status=status.HTTP_201_CREATED)
 
     def update(self, request: Request, *args: Any, **kwargs: Any) -> Response:

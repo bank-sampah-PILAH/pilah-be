@@ -9,7 +9,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.serializers import BaseSerializer
 
-from api.models import JenisSampah
+from api.models import BankSampah, JenisSampah
 from apps.nasabah.serializers import StatusSerializer
 from apps.waste_catalog.api import buat_jenis_sampah, harga_berlaku, susun_riwayat_harga
 from apps.waste_catalog.serializers import (
@@ -56,13 +56,17 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         bank = current_bank(request)
-        nomor = serializer.validated_data.get("nomor") or JenisSampah.nomor_berikut(bank.id)
-        if JenisSampah.objects.filter(bank_sampah=bank, nomor=nomor).exists():
-            return Response({"errors": {"kode": ["Kode sampah sudah digunakan"]}}, status=422)
         data = dict(serializer.validated_data)
-        data["nomor"] = nomor
         harga = data.pop("harga_per_kg")
-        jenis = buat_jenis_sampah(bank, harga_per_kg=harga, oleh=current_user(request), **data)
+        with transaction.atomic():
+            # Lock the bank so two concurrent blank-kode creates cannot read the
+            # same maximum: the second waits, then numbers from the committed row.
+            BankSampah.objects.select_for_update().get(pk=bank.pk)
+            nomor = data.get("nomor") or JenisSampah.nomor_berikut(bank.id)
+            if JenisSampah.objects.filter(bank_sampah=bank, nomor=nomor).exists():
+                return Response({"errors": {"kode": ["Kode sampah sudah digunakan"]}}, status=422)
+            data["nomor"] = nomor
+            jenis = buat_jenis_sampah(bank, harga_per_kg=harga, oleh=current_user(request), **data)
         return Response(self.get_serializer(jenis).data, status=status.HTTP_201_CREATED)
 
     def update(self, request: Request, *args: Any, **kwargs: Any) -> Response:

@@ -30,3 +30,14 @@ class KodeJenisOtomatisTests(APITestCase):
     def test_nomor_berikut_jenis_menambah(self) -> None:
         JenisSampah.objects.create(bank_sampah=self.bank, nomor="SM-012", nama_sampah="Kaca")
         self.assertEqual(JenisSampah.nomor_berikut(self.bank.id), "SM-013")
+
+    def test_dua_tanpa_kode_berturut_mendapat_kode_berbeda(self) -> None:
+        body = {"nama_sampah": "Kertas Uji", "kategori": "kertas", "harga_per_kg": "800"}
+        first = self.client.post("/api/v1/jenis-sampah", body, format="json")
+        second = self.client.post(
+            "/api/v1/jenis-sampah", {**body, "nama_sampah": "Logam Uji"}, format="json"
+        )
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertEqual(second.status_code, 201, second.data)
+        self.assertEqual(first.data["kode"], "SM-001")
+        self.assertEqual(second.data["kode"], "SM-002")
