@@ -75,6 +75,11 @@ class MembershipRegressionTests(RegressionTestCase):
         self.bank.is_active = False
         self.bank.save(update_fields=["status", "is_active"])
 
+        self.assertEqual(
+            self.client.post("/api/v1/team/invite", {}, format="json").status_code, 403
+        )
+        self.assertEqual(self.client.get("/api/v1/team/invite").status_code, 403)
+
         newcomer = self.fresh_pengelola("pending-bank@example.com")
         self.auth_as(newcomer)
         response = self.client.post(
