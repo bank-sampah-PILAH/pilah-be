@@ -29,6 +29,12 @@ class NasabahSearchSQLiteMigrationTests(SimpleTestCase):
 
 @skipUnless(connection.vendor == "postgresql", "Postgres-specific search indexes")
 class NasabahSearchIndexTests(TestCase):
+    def test_search_index_build_is_non_atomic(self) -> None:
+        migration = MigrationLoader(connection).disk_migrations[
+            ("api", "0028_nasabah_search_trigrams")
+        ]
+        self.assertFalse(migration.atomic)
+
     def test_index_migration_can_be_reversed_and_reapplied(self) -> None:
         loader = MigrationLoader(connection)
         migration = loader.disk_migrations[("api", "0028_nasabah_search_trigrams")]
