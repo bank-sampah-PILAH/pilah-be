@@ -49,9 +49,12 @@ class NasabahSearchIndexTests(TransactionTestCase):
                 )
                 self.assertEqual(cursor.fetchone()[0], 0)
             operation.database_forwards("api", editor, state, state)
-        self.test_all_search_fields_have_upper_trigram_indexes()
+        self._assert_trigram_indexes()
 
     def test_all_search_fields_have_upper_trigram_indexes(self) -> None:
+        self._assert_trigram_indexes()
+
+    def _assert_trigram_indexes(self) -> None:
         with connection.cursor() as cursor:
             cursor.execute("SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'nasabah'")
             indexes = dict(cursor.fetchall())
