@@ -64,6 +64,11 @@ class NasabahSearchTests(RegressionTestCase):
     def test_two_character_id_fragment_is_searched(self) -> None:
         self.assert_search("ZX", [self.dewi])
 
+    def test_search_over_100_characters_is_rejected(self) -> None:
+        response = self.client.get(self.url, {"search": "x" * 101})
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("search", response.data["errors"])
+
     def test_search_trims_surrounding_whitespace_before_matching_and_length_gate(self) -> None:
         self.assert_search(" 000123 \t", [self.budi])
         for query in ("  ", " x "):
