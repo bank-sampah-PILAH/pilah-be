@@ -4,6 +4,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Q, QuerySet
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -26,6 +27,7 @@ from shared_kernel.permissions import IsActivePengelola, IsNasabah, IsNasabahRol
 from shared_kernel.scoping import current_bank, current_user
 
 _NO_HP_TERPAKAI = "Nomor HP nasabah sudah digunakan"
+MAX_SEARCH_LENGTH = 100
 
 
 def _user(request: Request) -> User:
@@ -41,6 +43,8 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
     def get_queryset(self) -> QuerySet[Nasabah]:
         qs = Nasabah.objects.filter(bank_sampah=current_bank(self.request)).select_related("saldo")
         search = self.request.query_params.get("search", "").strip()
+        if self.action == "list" and len(search) > MAX_SEARCH_LENGTH:
+            raise ValidationError({"search": "Pencarian maksimal 100 karakter"})
         status_filter = self.request.query_params.get("status", "aktif")
         if self.action == "list" and len(search) >= 2:
             search_filter = Q(nama__icontains=search)

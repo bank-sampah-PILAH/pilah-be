@@ -81,7 +81,7 @@ class NasabahSearchTests(RegressionTestCase):
         self.assert_search("example", [self.budi, self.siti, self.dewi])
 
     def test_type_unknown_or_special_input_returns_no_matches(self) -> None:
-        for query in ("unknown-id", "' OR 1=1 --", "%%", "__", "x" * 1000):
+        for query in ("unknown-id", "' OR 1=1 --", "%%", "__", "x" * 100):
             with self.subTest(query=query):
                 self.assert_search(query, [])
 
