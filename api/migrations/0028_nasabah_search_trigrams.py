@@ -15,6 +15,8 @@ SEARCH_FIELDS = ("nomor", "nama", "no_hp", "email")
 def create_indexes(apps: StateApps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     if schema_editor.connection.vendor != "postgresql":
         return
+    # Deployment checks for an existing extension before reaching this migration.
+    # IF NOT EXISTS also permits Django to provision fresh, disposable test DBs.
     schema_editor.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
     for field in SEARCH_FIELDS:
         schema_editor.execute(
