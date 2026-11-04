@@ -24,7 +24,7 @@ class MembershipRegressionTests(RegressionTestCase):
             {"token": None, "invite_url": None, "expires_at": None},
         )
         self.bank.refresh_from_db()
-        self.assertIsNone(self.bank.invite_token)
+        self.assertFalse(self.bank.invite_token)
         self.assertIsNone(self.bank.invite_token_expires)
 
     def test_invite_get_reads_current_link_without_rotating_or_extending(self) -> None:
@@ -37,7 +37,7 @@ class MembershipRegressionTests(RegressionTestCase):
         self.assertEqual(response.data, generated.data)
         self.bank.refresh_from_db()
         self.assertEqual(self.bank.invite_token, generated.data["token"])
-        self.assertEqual(self.bank.invite_token_expires.isoformat(), expiry)
+        self.assertEqual(self.bank.invite_token_expires.isoformat(), expiry.isoformat())
 
     def test_invite_replacement_invalidates_previous_token(self) -> None:
         original = self.client.post("/api/v1/team/invite", {}, format="json")
@@ -60,6 +60,20 @@ class MembershipRegressionTests(RegressionTestCase):
         self.assertEqual(self.client.get("/api/v1/team/invite").status_code, 403)
 
         newcomer = self.fresh_pengelola("inactive@example.com")
+        self.auth_as(newcomer)
+        response = self.client.post(
+            "/api/v1/invites/accept", {"token": generated.data["token"]}, format="json"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("tidak aktif", response.data["error"].lower())
+
+    def test_pending_bank_invite_cannot_be_accepted(self) -> None:
+        generated = self.client.post("/api/v1/team/invite", {}, format="json")
+        self.bank.status = "pending"
+        self.bank.is_active = False
+        self.bank.save(update_fields=["status", "is_active"])
+
+        newcomer = self.fresh_pengelola("pending-bank@example.com")
         self.auth_as(newcomer)
         response = self.client.post(
             "/api/v1/invites/accept", {"token": generated.data["token"]}, format="json"
