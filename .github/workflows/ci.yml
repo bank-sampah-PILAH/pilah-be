@@ -96,6 +96,9 @@ jobs:
       - name: Check for missing migrations
         run: python manage.py makemigrations --check --dry-run
 
+      - name: Bootstrap search prerequisites in the disposable CI database
+        run: python manage.py check_search_prerequisites --install-extension
+
       - name: Apply migrations
         run: python manage.py migrate --noinput
 

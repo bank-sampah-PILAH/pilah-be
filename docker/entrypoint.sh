@@ -6,6 +6,7 @@ if [ "$(id -u)" -eq 0 ]; then
     exec setpriv --reuid=appuser --regid=appuser --init-groups "$0" "$@"
 fi
 
+python manage.py check_search_prerequisites
 python manage.py migrate --noinput
 python manage.py collectstatic --noinput
 
