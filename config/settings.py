@@ -280,6 +280,7 @@ PILAH_ALLOW_FAKE_GOOGLE_TOKEN = (
 if PILAH_ALLOW_FAKE_GOOGLE_TOKEN and not DEBUG:
     raise ImproperlyConfigured("PILAH_ALLOW_FAKE_GOOGLE_TOKEN requires DJANGO_DEBUG=true")
 PILAH_ENVIRONMENT = os.getenv("PILAH_ENVIRONMENT", "")
+PILAH_STAGING_DB_HOST = os.getenv("PILAH_STAGING_DB_HOST", "")
 PILAH_SUPERADMIN_EMAILS = tuple(
     email.strip().lower()
     for email in os.getenv("PILAH_SUPERADMIN_EMAILS", "").split(",")

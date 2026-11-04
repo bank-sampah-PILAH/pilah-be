@@ -5,7 +5,7 @@ from django.conf import settings
 from django.core.cache import caches
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.http import HttpResponse, HttpResponseRedirect
-from django.utils.http import urlencode
+from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -37,6 +37,13 @@ from shared_kernel.scoping import current_user
 
 # Local page a finished OAuth popup redirects to when no `next` URL survives.
 _OAUTH_FALLBACK_PATH = "/api-test/"
+
+
+def _local_next_path(value: str) -> str:
+    """`next` is only ever a path on this site; a value that could leave it falls back."""
+    if not value.startswith("/") or not url_has_allowed_host_and_scheme(value, allowed_hosts=None):
+        return _OAUTH_FALLBACK_PATH
+    return value
 
 
 class GoogleAuthView(APIView):
@@ -88,9 +95,7 @@ class GoogleOAuthStartView(APIView):
         redirect_uri = settings.GOOGLE_REDIRECT_URI or request.build_absolute_uri(
             "/api/v1/auth/google/callback"
         )
-        next_url = request.GET.get("next") or _OAUTH_FALLBACK_PATH
-        if not next_url.startswith("/"):
-            next_url = _OAUTH_FALLBACK_PATH
+        next_url = _local_next_path(request.GET.get("next") or _OAUTH_FALLBACK_PATH)
         state = TimestampSigner().sign(next_url)
         params = urlencode(
             {
@@ -119,8 +124,7 @@ class GoogleOAuthCallbackView(APIView):
             next_url = TimestampSigner().unsign(raw_state, max_age=600)
         except (BadSignature, SignatureExpired):
             next_url = _OAUTH_FALLBACK_PATH
-        if not next_url.startswith("/"):
-            next_url = _OAUTH_FALLBACK_PATH
+        next_url = _local_next_path(next_url)
 
         redirect_uri = settings.GOOGLE_REDIRECT_URI or request.build_absolute_uri(
             "/api/v1/auth/google/callback"

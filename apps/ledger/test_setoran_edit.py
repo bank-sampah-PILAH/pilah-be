@@ -60,6 +60,37 @@ class SetoranEditTests(APITestCase):
     def _saldo(self) -> Decimal:
         return Saldo.objects.get(nasabah=self.nasabah).total_saldo
 
+    def test_item_row_count_is_returned_in_transaction_activity_and_dashboard_lists(self) -> None:
+        response = self.client.post(
+            "/api/v1/transaksi",
+            {
+                "nasabah_id": str(self.nasabah.id),
+                "items": [
+                    {"jenis_sampah_id": str(self.pet.id), "berat": "1.000"},
+                    {"jenis_sampah_id": str(self.kardus.id), "berat": "2.000"},
+                ],
+            },
+            format="json",
+        )
+        transaction_id = response.data["id"]
+
+        listed = self.client.get("/api/v1/transaksi")
+        list_row = next(row for row in listed.data["results"] if row["id"] == transaction_id)
+        history = self.client.get("/api/v1/aktivitas")
+        activity = next(
+            row["data"] for row in history.data["results"] if row["data"]["id"] == transaction_id
+        )
+        recent = self.client.get("/api/v1/dashboard/recent-transactions")
+        dashboard_row = next(
+            row for row in recent.data["transactions"] if row["id"] == transaction_id
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(len(response.data["items"]), 2)
+        self.assertEqual(list_row["jumlah_item"], 2)
+        self.assertEqual(activity["jumlah_item"], 2)
+        self.assertEqual(dashboard_row["jumlah_item"], 2)
+
     def test_changing_weight_recalculates_total_and_saldo(self) -> None:
         response = self._patch(items=[{"jenis_sampah_id": str(self.pet.id), "berat": "3.000"}])
 
