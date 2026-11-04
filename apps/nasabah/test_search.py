@@ -51,6 +51,11 @@ class NasabahSearchTests(RegressionTestCase):
     def test_type_id_with_different_case(self) -> None:
         self.assert_search("zx-999", [self.dewi])
 
+    def test_type_name_phone_or_email_still_finds_customer(self) -> None:
+        for query in ("bUdI", "11110001", "budi@example.test"):
+            with self.subTest(query=query):
+                self.assert_search(query, [self.budi])
+
     def test_query_matching_several_fields_lists_each_customer_once(self) -> None:
         by_id = self.customer("BUDI-ID", "Rani Maharani", "081211110005", "rani@example.test")
         # Budi matches by name and email, Rani only by her ID.
@@ -58,6 +63,11 @@ class NasabahSearchTests(RegressionTestCase):
 
     def test_two_character_id_fragment_is_searched(self) -> None:
         self.assert_search("ZX", [self.dewi])
+
+    def test_unknown_or_special_input_returns_no_matches(self) -> None:
+        for query in ("unknown-id", "' OR 1=1 --", "%%", "__"):
+            with self.subTest(query=query):
+                self.assert_search(query, [])
 
     def test_search_never_exposes_other_bank_even_with_same_id(self) -> None:
         other_bank = BankSampah.objects.create(nama="Other bank", no_hp_pic="081299990001")
@@ -73,6 +83,11 @@ class NasabahSearchTests(RegressionTestCase):
 
     def test_search_by_id_filters_before_pagination(self) -> None:
         self.assert_search("ZX-999", [self.dewi], page_size=1)
+
+    def test_clear_search_restores_list_and_single_character_rule(self) -> None:
+        for query in ("", "x"):
+            with self.subTest(query=query):
+                self.assert_search(query, [self.budi, self.siti, self.dewi])
 
     def test_search_by_longest_id(self) -> None:
         code = "MEMBER-" + "0" * 23  # `Nasabah.nomor` allows 30 characters
