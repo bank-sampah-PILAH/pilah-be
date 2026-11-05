@@ -247,6 +247,18 @@ class CompleteProfileView(APIView):
         return Response(data)
 
 
+class DiscardRegistrationView(APIView):
+    """Deletes the caller's own profile-incomplete account so they can sign
+    up again and pick a different role (CPBI-21 UAT finding)."""
+
+    def delete(self, request: Request) -> Response:
+        try:
+            AuthService.discard_incomplete_registration(current_user(request))
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
+        return Response({"message": "Pendaftaran dihapus. Silakan daftar ulang."})
+
+
 def _auth_service_error_response(error: AuthServiceError) -> Response:
     return Response({"error": str(error), "code": error.code}, status=error.status_code)
 
