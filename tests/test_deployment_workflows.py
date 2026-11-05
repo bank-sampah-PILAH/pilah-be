@@ -54,8 +54,12 @@ class DeploymentWorkflowTests(SimpleTestCase):
         )
         deploy = steps[names.index("Deploy Cloud Run")]["run"]
         self.assertIn("CORS_ALLOW_ALL_ORIGINS=false", deploy)
-        self.assertIn("CORS_ALLOWED_ORIGINS=${PILAH_WEB_ORIGIN}", deploy)
-        self.assertIn("CSRF_TRUSTED_ORIGINS=${PILAH_WEB_ORIGIN}", deploy)
+        self.assertEqual(
+            workflow["env"]["PILAH_WEB_ALLOWED_ORIGINS"],
+            "${{ vars.PILAH_WEB_ALLOWED_ORIGINS || vars.PILAH_WEB_ORIGIN }}",
+        )
+        self.assertIn("CORS_ALLOWED_ORIGINS=${PILAH_WEB_ALLOWED_ORIGINS}", deploy)
+        self.assertIn("CSRF_TRUSTED_ORIGINS=${PILAH_WEB_ALLOWED_ORIGINS}", deploy)
         self.assertIn("PILAH_ENVIRONMENT=production", deploy)
         self.assertIn("PILAH_ALLOW_FAKE_GOOGLE_TOKEN=false", deploy)
         self.assertIn("PILAH_REVIEW_SUPERADMIN_EMAILS=${PILAH_REVIEW_SUPERADMIN_EMAILS}", deploy)
