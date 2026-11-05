@@ -751,7 +751,8 @@ class Command(BaseCommand):
 
     @staticmethod
     def _recalculate_balance(membership: Nasabah) -> None:
-        setoran = Transaksi.objects.filter(
+        # A voided setoran stays in the table but not in the saldo (PIL-428).
+        setoran = Transaksi.objects.tercatat().filter(
             nasabah=membership, tipe=Transaksi.Tipe.SETORAN
         ).aggregate(total=Sum("total_nilai"))["total"] or Decimal("0.00")
         pencairan = Pencairan.objects.filter(nasabah=membership).aggregate(

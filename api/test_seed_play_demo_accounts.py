@@ -983,3 +983,22 @@ class SeedPlayDemoAccountsTests(TestCase):
 
         self.assertFalse(BankSampah.objects.exists())
         self.assertFalse(User.objects.exists())
+
+    def test_reseed_leaves_a_voided_setoran_out_of_the_saldo(self) -> None:
+        # PIL-428: a voided setoran is kept but no longer counts toward the saldo.
+        call_command("seed_play_demo_accounts", confirm_production=True, stdout=StringIO())
+        membership = Nasabah.objects.get(email=DEMO_NASABAH_EMAIL)
+        voided = Transaksi.objects.get(pk=TRANSACTION_IDS[0])
+        Transaksi.objects.filter(pk=voided.pk).update(
+            status=Transaksi.Status.DIBATALKAN,
+            alasan_batal="Tercatat dua kali",
+            dibatalkan_oleh=User.objects.get(email="pilah.pengurus@pilah.com"),
+            dibatalkan_pada=timezone.now(),
+        )
+
+        call_command("seed_play_demo_accounts", confirm_production=True, stdout=StringIO())
+
+        self.assertEqual(
+            Saldo.objects.get(nasabah=membership).total_saldo,
+            Decimal(21250) - voided.total_nilai,
+        )

@@ -436,6 +436,18 @@ Nasabah:
 - `PATCH /api/v1/nasabah/:id/status`
 - `GET /api/v1/nasabah/:id/saldo`
 
+Daftar nasabah menerima `urutan=nomor|nama|terbaru|saldo_terbesar|saldo_terkecil`.
+Bawaan (termasuk nilai kosong atau tidak dikenal) adalah `nomor` menaik. `nama`
+mengurutkan A–Z tanpa membedakan huruf besar/kecil; `terbaru` memakai
+`tanggal_daftar` menurun; saldo diurutkan sesuai pilihan, dengan saldo yang
+belum ada dianggap nol. Semua pilihan memakai `nomor` menaik sebagai pemutus
+seri. Pertahankan `urutan`, `search`, dan `status` saat berpindah halaman
+(`page` / `page_size`) agar urutan stabil selama datanya tidak berubah.
+
+`search` (minimal 2 karakter) mencocokkan sebagian atau seluruh nama, ID nasabah
+(`nomor`, tampil sebagai `kode`), nomor HP, atau email, tanpa membedakan huruf
+besar/kecil, dan hanya di bank sampah pemanggil.
+
 Jenis sampah:
 
 - `GET /api/v1/jenis-sampah`

@@ -26,6 +26,17 @@ class Saldo(models.Model):
         db_table = "saldo"
 
 
+class TransaksiQuerySet(models.QuerySet["Transaksi"]):
+    def tercatat(self) -> "TransaksiQuerySet":
+        """Setoran that still count: everything but a void (PIL-428).
+
+        Saldo, laporan, exports and summaries read through this, so a new
+        report cannot forget to leave voided setoran out. The riwayat feeds
+        list voided rows on purpose and do not.
+        """
+        return self.filter(status=Transaksi.Status.TERCATAT)
+
+
 class Transaksi(TimestampedModel):
     class Tipe(models.TextChoices):
         SETORAN = "setoran", "Setoran"
@@ -34,6 +45,12 @@ class Transaksi(TimestampedModel):
         BELUM_DIKIRIM = "belum_dikirim", "Belum Dikirim"
         TERKIRIM = "terkirim", "Terkirim"
         GAGAL = "gagal", "Gagal"
+
+    class Status(models.TextChoices):
+        TERCATAT = "tercatat", "Tercatat"
+        DIBATALKAN = "dibatalkan", "Dibatalkan"
+
+    objects = TransaksiQuerySet.as_manager()
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     nasabah = models.ForeignKey(_NASABAH_API, on_delete=models.PROTECT, related_name="transaksi")
@@ -57,6 +74,17 @@ class Transaksi(TimestampedModel):
     # S6553: "" instead of NULL for rows without the header. Comparisons stay
     # correct because a setoran with a header always writes a real digest.
     idempotency_request_hash = models.CharField(max_length=64, blank=True, default="")
+    # PIL-428: "hapus" is a void. The row stays, marked cancelled, with who, when and why.
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.TERCATAT)
+    alasan_batal = models.CharField(max_length=255, blank=True, default="")
+    dibatalkan_oleh = models.ForeignKey(
+        _USER_API,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="transaksi_dibatalkan",
+    )
+    dibatalkan_pada = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         # ponytail: single Django app label until the squash migration; db_table
@@ -68,6 +96,26 @@ class Transaksi(TimestampedModel):
             models.UniqueConstraint(
                 fields=["bank_sampah", "idempotency_key"],
                 name="transaksi_bank_idempotency_key_unique",
+            ),
+            # A void always carries who, when and why; a tercatat setoran carries none of it.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        status="tercatat",
+                        alasan_batal="",
+                        dibatalkan_oleh__isnull=True,
+                        dibatalkan_pada__isnull=True,
+                    )
+                    | (
+                        models.Q(
+                            status="dibatalkan",
+                            dibatalkan_oleh__isnull=False,
+                            dibatalkan_pada__isnull=False,
+                        )
+                        & ~models.Q(alasan_batal="")
+                    )
+                ),
+                name="transaksi_batal_lengkap",
             ),
         ]
 

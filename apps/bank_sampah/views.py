@@ -1,4 +1,5 @@
 import mimetypes
+from typing import Any
 
 from django.conf import settings
 from django.core.files.storage import default_storage
@@ -194,20 +195,24 @@ class GenerateInviteView(APIView):
     permission_classes = [IsPrimaryPengelola]
     serializer_class = InviteAcceptSerializer
 
+    def get(self, request: Request) -> Response:
+        return Response(self._invite_data(request, current_bank(request)))
+
     def post(self, request: Request) -> Response:
         bank = current_bank(request)
-        token = TeamService.generate_invite(bank)
-        invite_path = f"/invite/{token}"
+        TeamService.generate_invite(bank)
+        return Response(self._invite_data(request, bank), status=201)
+
+    @staticmethod
+    def _invite_data(request: Request, bank: BankSampah) -> dict[str, Any]:
+        token = bank.invite_token or None
         base_url = request.build_absolute_uri("/")[:-1]
         public_base = getattr(settings, "PILAH_PUBLIC_APP_URL", "") or base_url
-        return Response(
-            {
-                "token": token,
-                "invite_url": f"{public_base}{invite_path}",
-                "expires_at": bank.invite_token_expires,
-            },
-            status=201,
-        )
+        return {
+            "token": token,
+            "invite_url": f"{public_base}/invite/{token}" if token else None,
+            "expires_at": bank.invite_token_expires if token else None,
+        }
 
 
 class BankSampahDirectoryView(APIView):

@@ -22,7 +22,9 @@ class DashboardService:
         start_dt = timezone.make_aware(datetime.combine(start, time.min), tz)
         end_dt = timezone.make_aware(datetime.combine(end, time.max), tz)
 
-        transaksi = Transaksi.objects.filter(bank_sampah=bank, tanggal__range=(start_dt, end_dt))
+        transaksi = Transaksi.objects.tercatat().filter(
+            bank_sampah=bank, tanggal__range=(start_dt, end_dt)
+        )
         totals = DetailTransaksi.objects.filter(transaksi__in=transaksi).aggregate(
             total_kg=Coalesce(Sum("berat"), Decimal(0)),
         )
@@ -58,7 +60,8 @@ class DashboardService:
 
         start_dt, end_dt = _date_bounds(start, end)
         setoran = (
-            Transaksi.objects.filter(
+            Transaksi.objects.tercatat()
+            .filter(
                 bank_sampah=bank,
                 tipe=Transaksi.Tipe.SETORAN,
                 tanggal__range=(start_dt, end_dt),
@@ -94,6 +97,7 @@ class DashboardService:
             DetailTransaksi.objects.filter(
                 transaksi__bank_sampah=bank,
                 transaksi__tipe=Transaksi.Tipe.SETORAN,
+                transaksi__status=Transaksi.Status.TERCATAT,
                 transaksi__tanggal__range=(start_dt, end_dt),
             )
             .values("kategori_snapshot")

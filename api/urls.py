@@ -13,6 +13,7 @@ from apps.announcement.views import (
 from apps.authentication.views import (
     AuthMeView,
     CompleteProfileView,
+    DiscardRegistrationView,
     GoogleAuthView,
     GoogleOAuthCallbackView,
     GoogleOAuthStartView,
@@ -113,6 +114,11 @@ urlpatterns = [
     path("auth/logout", LogoutView.as_view(), name="auth-logout"),
     path("auth/me", AuthMeView.as_view(), name="auth-me"),
     path("onboarding/profile", CompleteProfileView.as_view(), name="onboarding-profile"),
+    path(
+        "onboarding/discard-registration",
+        DiscardRegistrationView.as_view(),
+        name="onboarding-discard-registration",
+    ),
     path("onboarding/bank-sampah", RegisterBankSampahView.as_view(), name="onboarding-bank-sampah"),
     path("onboarding/nasabah", RegisterNasabahView.as_view(), name="onboarding-nasabah"),
     path("invites/accept", AcceptInviteView.as_view(), name="invite-accept"),

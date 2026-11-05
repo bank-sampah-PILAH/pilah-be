@@ -75,8 +75,10 @@ class BankOnboardingService:
         bank = BankSampah.objects.filter(
             invite_token=token, invite_token_expires__gt=timezone.now()
         ).first()
-        if not bank or bank.status != BankSampah.Status.ACTIVE:
+        if not bank:
             raise ValueError("Tautan undangan tidak valid atau sudah kedaluwarsa")
+        if bank.status != BankSampah.Status.ACTIVE or not bank.is_active:
+            raise ValueError("Undangan tidak dapat digunakan karena bank sampah tidak aktif")
         if user.role != User.Role.PENGELOLA:
             raise PermissionError("Hanya pengelola yang dapat menerima undangan")
         if user.bank_sampah_id == bank.id:

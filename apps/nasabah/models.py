@@ -78,6 +78,23 @@ class Nasabah(TimestampedModel):
     def __str__(self) -> str:
         return f"{self.nomor} - {self.nama}"
 
+    @classmethod
+    def nomor_berikut(cls, bank_sampah_id: "uuid.UUID | None") -> str:
+        """ID anggota baru untuk satu bank sampah: nomor terbesar yang ada + 1.
+
+        Format NAS-<3 digit>. Pengurus tidak lagi membaca daftar untuk
+        mencari angka yang belum terpakai (UAT 2026-11). Panggil dalam
+        transaksi yang sama dengan pembuatan barisnya agar dua penambahan
+        serentak tidak memakai nomor kembar.
+        """
+        angka = [
+            int(str(n).split("-")[1])
+            for n in cls.objects.filter(
+                bank_sampah_id=bank_sampah_id, nomor__regex=r"^NAS-\d+$"
+            ).values_list("nomor", flat=True)
+        ]
+        return f"NAS-{(max(angka) if angka else 0) + 1:03d}"
+
 
 class NasabahApprovalLog(models.Model):
     class Status(models.TextChoices):
