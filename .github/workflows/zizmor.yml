@@ -1,0 +1,32 @@
+name: Zizmor
+
+on:
+  pull_request:
+  push:
+    branches:
+      - staging
+      - main
+      - feature/**
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  zizmor:
+    name: Scan GitHub Actions workflows
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Run Zizmor
+        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+        with:
+          inputs: .github
+          version: v1.31.1
+          online-audits: true
+          advanced-security: false
