@@ -15,6 +15,80 @@ class MembershipRegressionTests(RegressionTestCase):
         self.assertIn("members", response.data)
         self.assertEqual(len(response.data["members"]), 1)
 
+    def test_invite_get_is_read_only_and_returns_null_without_token(self) -> None:
+        response = self.client.get("/api/v1/team/invite")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {"token": None, "invite_url": None, "expires_at": None},
+        )
+        self.bank.refresh_from_db()
+        self.assertFalse(self.bank.invite_token)
+        self.assertIsNone(self.bank.invite_token_expires)
+
+    def test_invite_get_reads_current_link_without_rotating_or_extending(self) -> None:
+        generated = self.client.post("/api/v1/team/invite", {}, format="json")
+        expiry = generated.data["expires_at"]
+
+        response = self.client.get("/api/v1/team/invite")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, generated.data)
+        self.bank.refresh_from_db()
+        self.assertEqual(self.bank.invite_token, generated.data["token"])
+        self.assertEqual(self.bank.invite_token_expires, expiry)
+
+    def test_invite_replacement_invalidates_previous_token(self) -> None:
+        original = self.client.post("/api/v1/team/invite", {}, format="json")
+        replacement = self.client.post("/api/v1/team/invite", {}, format="json")
+        self.assertNotEqual(replacement.data["token"], original.data["token"])
+
+        newcomer = self.fresh_pengelola("replaced@example.com")
+        self.auth_as(newcomer)
+        response = self.client.post(
+            "/api/v1/invites/accept", {"token": original.data["token"]}, format="json"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("tidak valid", response.data["error"].lower())
+
+    def test_inactive_bank_cannot_create_invite_or_accept_invite(self) -> None:
+        generated = self.client.post("/api/v1/team/invite", {}, format="json")
+        self.bank.is_active = False
+        self.bank.save(update_fields=["is_active"])
+
+        self.assertEqual(
+            self.client.post("/api/v1/team/invite", {}, format="json").status_code, 403
+        )
+        self.assertEqual(self.client.get("/api/v1/team/invite").status_code, 403)
+
+        newcomer = self.fresh_pengelola("inactive@example.com")
+        self.auth_as(newcomer)
+        response = self.client.post(
+            "/api/v1/invites/accept", {"token": generated.data["token"]}, format="json"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("tidak aktif", response.data["error"].lower())
+
+    def test_pending_bank_invite_cannot_be_accepted(self) -> None:
+        generated = self.client.post("/api/v1/team/invite", {}, format="json")
+        self.bank.status = "pending"
+        self.bank.is_active = False
+        self.bank.save(update_fields=["status", "is_active"])
+
+        self.assertEqual(
+            self.client.post("/api/v1/team/invite", {}, format="json").status_code, 403
+        )
+        self.assertEqual(self.client.get("/api/v1/team/invite").status_code, 403)
+
+        newcomer = self.fresh_pengelola("pending-bank@example.com")
+        self.auth_as(newcomer)
+        response = self.client.post(
+            "/api/v1/invites/accept", {"token": generated.data["token"]}, format="json"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("tidak aktif", response.data["error"].lower())
+
     def test_invite_generate_accept_and_roster(self) -> None:
         generated = self.client.post("/api/v1/team/invite", {}, format="json")
         self.assertEqual(generated.status_code, 201)
@@ -82,6 +156,7 @@ class MembershipRegressionTests(RegressionTestCase):
             "/api/v1/invites/accept", {"token": generated.data["token"]}, format="json"
         )
         self.assertEqual(response.status_code, 400)
+        self.assertIn("kedaluwarsa", response.data["error"].lower())
 
     def test_invite_accept_rejects_bogus_token(self) -> None:
         for path in ("/api/v1/invites/accept", "/api/v1/bank-sampah/invite/join"):
