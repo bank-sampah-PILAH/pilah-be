@@ -324,7 +324,11 @@ class OperationalReportTests(OperationalReportFixture):
         wb = self.workbook(tipe="pencairan")
         self.assertEqual(wb["Laporan"]["E2"].value, 0)
 
-    def test_export_metadata_names_the_actual_selected_period(self) -> None:
+    @patch(
+        "django.utils.timezone.now",
+        return_value=datetime.fromisoformat("2026-10-08T12:00:00+07:00"),
+    )
+    def test_export_metadata_names_the_actual_selected_period(self, _now: Any) -> None:
         for months in (1, 3, 6, 12):
             with self.subTest(months=months):
                 label = self.workbook(periode=f"{months}_bulan")["Riwayat Transaksi"]["A2"].value
