@@ -44,7 +44,7 @@ RUN adduser --disabled-password --gecos "" --home /app appuser
 WORKDIR /app
 
 COPY --chown=appuser:appuser . .
-RUN chmod +x /app/docker/entrypoint.sh \
+RUN chmod +x /app/docker/entrypoint.sh /app/docker/push-entrypoint.sh \
     && mkdir -p /app/staticfiles /app/media \
     && chown -R appuser:appuser /app
 
