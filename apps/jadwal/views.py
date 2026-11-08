@@ -18,6 +18,7 @@ from rest_framework.response import Response
 
 from api.models import BankSampah, JadwalKegiatan, Nasabah, User
 from apps.jadwal.serializers import JadwalKegiatanSerializer
+from apps.notification.api import queue_push
 from shared_kernel.permissions import IsActivePengelola, IsJadwalViewer
 
 
@@ -30,6 +31,27 @@ def _bank_sampah(request: Request) -> BankSampah:
     bank = _user(request).bank_sampah
     assert bank is not None  # ponytail: IsActivePengelola guarantees bank membership
     return bank
+
+
+def _schedule_recipients(jadwal: JadwalKegiatan) -> set[User]:
+    if jadwal.selesai_pada < timezone.now():
+        return set()
+    members = Nasabah.objects.filter(
+        bank_sampah=jadwal.bank_sampah,
+        bank_sampah__status=BankSampah.Status.ACTIVE,
+        bank_sampah__is_active=True,
+        status=Nasabah.Status.APPROVED,
+        is_active=True,
+        user__is_active=True,
+    )
+    if jadwal.cakupan_penerima == JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH:
+        members = members.filter(jadwal_kegiatan=jadwal)
+    return set(User.objects.filter(pk__in=members.values("user_id")))
+
+
+def _notify_schedule(recipients: set[User], title: str, body: str) -> None:
+    for recipient in recipients:
+        queue_push(recipient, title=title, body=body)
 
 
 class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
@@ -161,13 +183,47 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        published = instance.status == JadwalKegiatan.Status.DITERBITKAN
+        previous_recipients = _schedule_recipients(instance) if published else set()
+        previous_values = (
+            instance.jenis_kegiatan,
+            instance.mulai_pada,
+            instance.selesai_pada,
+            instance.lokasi,
+            instance.keterangan,
+            instance.cakupan_penerima,
+            frozenset(instance.penerima.values_list("pk", flat=True)),
+        )
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
+        instance = serializer.instance
+        new_values = (
+            instance.jenis_kegiatan,
+            instance.mulai_pada,
+            instance.selesai_pada,
+            instance.lokasi,
+            instance.keterangan,
+            instance.cakupan_penerima,
+            frozenset(instance.penerima.values_list("pk", flat=True)),
+        )
+        if published and previous_values != new_values:
+            current_recipients = _schedule_recipients(instance)
+            _notify_schedule(
+                current_recipients,
+                "Jadwal berubah",
+                f"Jadwal di {instance.bank_sampah.nama} berubah. Periksa kembali detailnya.",
+            )
+            _notify_schedule(
+                previous_recipients - current_recipients,
+                "Jadwal tidak lagi untuk Anda",
+                f"Jadwal di {instance.bank_sampah.nama} tidak lagi ditujukan untuk Anda.",
+            )
         if getattr(instance, "_prefetched_objects_cache", None):
             instance._prefetched_objects_cache = {}
         return Response(serializer.data)
 
+    @transaction.atomic
     def _transition(
         self,
         jadwal: JadwalKegiatan,
@@ -182,6 +238,22 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
             return Response(
                 {"error": "Perubahan status jadwal tidak diizinkan"},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+        if (
+            target == JadwalKegiatan.Status.DIBATALKAN
+            and jadwal.status == JadwalKegiatan.Status.DITERBITKAN
+        ):
+            _notify_schedule(
+                _schedule_recipients(jadwal),
+                "Jadwal dibatalkan",
+                f"Jadwal di {jadwal.bank_sampah.nama} dibatalkan.",
+            )
+        if target == JadwalKegiatan.Status.DITERBITKAN:
+            _notify_schedule(
+                _schedule_recipients(jadwal),
+                "Jadwal baru",
+                f"{jadwal.bank_sampah.nama}: "
+                f"{timezone.localtime(jadwal.mulai_pada):%d/%m/%Y %H:%M} WIB, {jadwal.lokasi}.",
             )
         return Response(self.get_serializer(self.get_object()).data)
 
