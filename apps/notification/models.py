@@ -19,6 +19,7 @@ class PushNotification(models.Model):
     body = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
     read_at = models.DateTimeField(null=True, blank=True)
+    hidden_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         app_label = "api"

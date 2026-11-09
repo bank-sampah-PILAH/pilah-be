@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 from apps.notification.models import DeviceToken, PushNotification
 from apps.notification.serializers import WATemplateSerializer
 from apps.notification.services import WhatsAppService
+from shared_kernel.pagination import StandardPagination
 from shared_kernel.permissions import IsActivePengelola
 from shared_kernel.scoping import current_bank, current_user
 
@@ -73,12 +74,28 @@ class DeviceTokenView(APIView):
 
 class NotificationView(APIView):
     permission_classes = [IsAuthenticated]
+    pagination_class = StandardPagination
 
     def get(self, request: Request) -> Response:
-        notifications = PushNotification.objects.filter(user=current_user(request)).order_by(
-            "-created_at", "-pk"
+        notifications = (
+            PushNotification.objects.filter(user=current_user(request), hidden_at__isnull=True)
+            .order_by("-created_at", "-pk")
+            .values("id", "title", "body", "created_at", "read_at")
         )
-        return Response(list(notifications.values("id", "title", "body", "created_at", "read_at")))
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(notifications, request, view=self)
+        assert page is not None  # StandardPagination always returns a page.
+        return paginator.get_paginated_response(page)
+
+
+class NotificationClearView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request: Request) -> Response:
+        hidden_count = PushNotification.objects.filter(
+            user=current_user(request), hidden_at__isnull=True
+        ).update(hidden_at=timezone.now())
+        return Response({"hidden_count": hidden_count})
 
 
 class NotificationReadView(APIView):
