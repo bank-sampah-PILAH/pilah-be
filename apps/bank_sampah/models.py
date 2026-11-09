@@ -40,6 +40,12 @@ class BankSampah(TimestampedModel):
     foto_logo = models.FileField(upload_to="bank_sampah/logo/", blank=True)
     foto_kegiatan = models.FileField(upload_to="bank_sampah/kegiatan/", blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    # Nullable: existing banks are backfilled by their pengelola (PIL-326),
+    # not migrated — banks without coordinates must never break an endpoint.
+    # Deliberately not GIS/PointField: nothing here needs spatial queries, and
+    # plain decimals keep the SQLite default engine working (PIL-308/329).
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True)
     invite_token = models.CharField(max_length=120, blank=True)
     invite_token_expires = models.DateTimeField(blank=True, null=True)
     is_active = models.BooleanField(default=True)

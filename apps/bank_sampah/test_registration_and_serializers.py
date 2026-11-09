@@ -1,3 +1,6 @@
+from collections.abc import Mapping
+from decimal import Decimal
+from typing import Any
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
@@ -9,6 +12,7 @@ from rest_framework.test import APITestCase
 from api.models import BankSampah, User
 from apps.bank_sampah.serializers import (
     BankSampahApprovalListSerializer,
+    BankSampahDirectorySerializer,
     BankSampahRegistrationSerializer,
     BankSampahSerializer,
 )
@@ -77,6 +81,176 @@ class BankRegistrationApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 403)  # type: ignore[attr-defined]
         self.assertEqual(response.data, {"error": "ditolak"})  # type: ignore[attr-defined]
+
+
+class BankCoordinateApiTests(APITestCase):
+    # Registration and the pengelola profile both carry coordinates now; the
+    # range rules live on the serializers, the storage on the model.
+    def setUp(self) -> None:
+        self.pengelola = User.objects.create_user(
+            email="petani@example.test", nama="Ibu Petani", role=User.Role.PENGELOLA
+        )
+        self.client.force_authenticate(self.pengelola)
+
+    @staticmethod
+    def _make_pengelola(email: str, bank: BankSampah) -> User:
+        return User.objects.create_user(
+            email=email,
+            nama="Pengelola " + bank.nama,
+            role=User.Role.PENGELOLA,
+            bank_sampah=bank,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+        )
+
+    def test_registration_accepts_coordinates(self) -> None:
+        self.client.force_authenticate(self.pengelola)
+        response = self.client.post(
+            "/api/v1/onboarding/bank-sampah",
+            {
+                **REGISTRATION,
+                "latitude": "-6.362829",
+                "longitude": "106.828655",
+                "foto_kegiatan": _photo(),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        bank = BankSampah.objects.get(nama="Bank Sampah Baru")
+        self.assertEqual(bank.latitude, Decimal("-6.362829"))
+        self.assertEqual(bank.longitude, Decimal("106.828655"))
+
+    def test_registration_without_coordinates_stores_null(self) -> None:
+        self.client.force_authenticate(self.pengelola)
+        response = self.client.post(
+            "/api/v1/onboarding/bank-sampah",
+            {**REGISTRATION, "foto_kegiatan": _photo()},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        bank = BankSampah.objects.get(nama="Bank Sampah Baru")
+        self.assertIsNone(bank.latitude)
+        self.assertIsNone(bank.longitude)
+
+    def test_registration_rejects_out_of_range_coordinates(self) -> None:
+        cases = [("latitude", "91"), ("longitude", "181")]
+        for field, value in cases:
+            with self.subTest(field=field, value=value):
+                self.client.force_authenticate(self.pengelola)
+                response = self.client.post(
+                    "/api/v1/onboarding/bank-sampah",
+                    {**REGISTRATION, field: value, "foto_kegiatan": _photo()},
+                    format="multipart",
+                )
+
+                self.assertEqual(response.status_code, 422)
+                self.assertIn("harus di antara", response.data["errors"][field][0])
+
+    def test_me_put_updates_coordinates(self) -> None:
+        bank = BankSampah.objects.create(nama="Bank Lestari", alamat="Depok", kota="Depok")
+        pengelola = self._pengelola_of(bank)
+        self.client.force_authenticate(pengelola)
+
+        response = self.client.put(
+            "/api/v1/bank-sampah/me",
+            {"latitude": "-6.362829", "longitude": "106.828655"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        bank.refresh_from_db()
+        self.assertEqual(bank.latitude, Decimal("-6.362829"))
+        self.assertEqual(bank.longitude, Decimal("106.828655"))
+
+    def test_me_put_rejects_out_of_range_longitude(self) -> None:
+        bank = BankSampah.objects.create(nama="Bank BTH", alamat="Depok", kota="Depok")
+        self.client.force_authenticate(self._pengelola_of(bank))
+
+        response = self.client.put("/api/v1/bank-sampah/me", {"longitude": "181"}, format="json")
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data["errors"]["longitude"], ["Bujur harus di antara -180 dan 180"]
+        )
+
+    def test_me_put_can_clear_coordinates(self) -> None:
+        bank = BankSampah.objects.create(
+            nama="Bank Pindah",
+            alamat="Depok",
+            kota="Depok",
+            latitude=Decimal("-6.200000"),
+            longitude=Decimal("106.900000"),
+        )
+        self.client.force_authenticate(self._pengelola_of(bank))
+
+        response = self.client.put(
+            "/api/v1/bank-sampah/me", {"latitude": None, "longitude": None}, format="json"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        bank.refresh_from_db()
+        self.assertIsNone(bank.latitude)
+        self.assertIsNone(bank.longitude)
+
+    def test_me_is_only_for_this_bank_active_pengelola(self) -> None:
+        # The new fields must not smuggle a bypass past IsActivePengelola.
+        bank = BankSampah.objects.create(nama="Bank Ujung", alamat="Depok", kota="Depok")
+        outsider = User.objects.create_user(
+            email="orang@example.test", nama="Orang Lain", role=User.Role.PENGELOLA
+        )
+        self.client.force_authenticate(outsider)
+
+        response = self.client.put(
+            "/api/v1/bank-sampah/me",
+            {"latitude": "-6.362829", "longitude": "106.828655"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        bank.refresh_from_db()
+        self.assertIsNone(bank.latitude)
+
+    @staticmethod
+    def _pengelola_of(bank: BankSampah) -> User:
+        return BankCoordinateApiTests._make_pengelola("suki@example.test", bank)
+
+
+class BankDirectoryCoordinateTests(APITestCase):
+    url = "/api/v1/bank-sampah"
+
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(email="cari@example.test", nama="Pencari")
+        self.client.force_authenticate(self.user)
+        self.mandiri = BankSampah.objects.create(
+            nama="Bank Garis",
+            alamat="Jl. Garis No. 1",
+            kota="Depok",
+            latitude=Decimal("-6.362829"),
+            longitude=Decimal("106.828655"),
+        )
+        BankSampah.objects.create(nama="Bank Kosong", alamat="Jl. Kosong No. 2", kota="Depok")
+
+    def _data(self, nama: str) -> Mapping[str, Any]:
+        response = self.client.get(self.url)
+        return {item["nama"]: item for item in response.data}[nama]  # type: ignore[no-any-return]
+
+    def test_directory_exposes_coordinates(self) -> None:
+        item = self._data("Bank Garis")
+        self.assertEqual(item["latitude"], "-6.362829")
+        self.assertEqual(item["longitude"], "106.828655")
+
+    def test_directory_keeps_banks_without_coordinates_visible_as_null(self) -> None:
+        item = self._data("Bank Kosong")
+        self.assertIsNone(item["latitude"])
+        self.assertIsNone(item["longitude"])
+
+    def test_directory_serialization_preserves_stored_precision(self) -> None:
+        # The value the client reads must be the stored decimal, not a float.
+        data = BankSampahDirectorySerializer(self.mandiri).data
+        self.assertEqual(data["latitude"], "-6.362829")
+        self.assertEqual(data["longitude"], "106.828655")
 
 
 class BankProfileApiTests(APITestCase):
