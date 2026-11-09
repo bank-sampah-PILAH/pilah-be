@@ -7,6 +7,41 @@ from api.models import BankSampah, JadwalKegiatan, Nasabah, PushNotification, Us
 
 
 class SchedulePushTests(APITestCase):
+    def test_publishing_expired_schedule_does_not_notify_members(self) -> None:
+        bank = BankSampah.objects.create(nama="Melati", alamat="Depok", kota="Depok")
+        manager = User.objects.create_user(
+            email="expired-manager@example.test",
+            nama="Manager",
+            bank_sampah=bank,
+            is_profile_complete=True,
+        )
+        member = User.objects.create_user(
+            email="expired-member@example.test", nama="Member", role=User.Role.NASABAH
+        )
+        Nasabah.objects.create(
+            bank_sampah=bank,
+            user=member,
+            nomor="1",
+            nama="Member",
+            email="expired-member@example.test",
+            no_hp="08123",
+        )
+        start = timezone.now() - timedelta(hours=2)
+        schedule = JadwalKegiatan.objects.create(
+            bank_sampah=bank,
+            dibuat_oleh=manager,
+            jenis_kegiatan="penimbangan",
+            mulai_pada=start,
+            selesai_pada=start + timedelta(hours=1),
+            lokasi="Balai",
+        )
+        self.client.force_authenticate(manager)
+
+        response = self.client.post(f"/api/v1/jadwal/{schedule.pk}/terbitkan")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertFalse(PushNotification.objects.filter(user=member).exists())
+
     def test_publication_notifies_only_selected_active_members(self) -> None:
         bank = BankSampah.objects.create(nama="Melati", alamat="Depok", kota="Depok")
         manager = User.objects.create_user(
