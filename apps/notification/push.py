@@ -21,6 +21,7 @@ def _handle_failure(delivery: PushDelivery, exc: Exception) -> None:
         except ValueError:
             details = []
         if any(item.get("errorCode") == "UNREGISTERED" for item in details):
+            assert delivery.device is not None
             delivery.device.delete()
             delivery.device = None
             delivery.status = "invalid"
