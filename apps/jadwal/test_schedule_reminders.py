@@ -123,6 +123,16 @@ class ScheduleReminderTests(TestCase):
         self.assertEqual(schedule.reminder_queued_at, self.now)
         self.assertFalse(PushNotification.objects.filter(title="Pengingat jadwal").exists())
 
+    def test_schedule_locked_by_another_worker_is_left_for_that_worker(self) -> None:
+        from unittest.mock import patch
+
+        schedule = self.make_schedule()
+        with patch("apps.jadwal.api.JadwalKegiatan.objects.select_for_update") as lock_query:
+            lock_query.return_value.select_related.return_value.filter.return_value.first.return_value = None
+            self.assertEqual(queue_due_schedule_reminders(self.now), 0)
+        schedule.refresh_from_db()
+        self.assertIsNone(schedule.reminder_queued_at)
+
     def test_rescheduling_to_a_future_reminder_window_resets_marker(self) -> None:
         schedule = self.make_schedule(start=timedelta(hours=1), reminder_queued_at=self.now)
         client = APIClient()
