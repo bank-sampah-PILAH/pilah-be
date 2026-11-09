@@ -34,9 +34,59 @@ class PushTests(TestCase):
         user = User.objects.create_user(email="delivery@example.test", nama="Delivery")
         token = DeviceToken.objects.create(user=user, token="device", platform="android")
         notification = queue_push(user, title="Jadwal baru", body="Lihat jadwal terbaru.")
-        self.assertTrue(
-            PushDelivery.objects.filter(notification=notification, device=token).exists()
+        delivery = PushDelivery.objects.get(notification=notification)
+        self.assertEqual(delivery.device_id, token.pk)
+
+    def test_send_fcm_uses_firebase_project_and_requires_project_id(self) -> None:
+        from unittest.mock import Mock, patch
+
+        from apps.notification.models import DeviceToken, PushDelivery
+        from apps.notification.push import send_fcm
+
+        user = User.objects.create_user(email="fcm@example.test", nama="FCM")
+        device = DeviceToken.objects.create(user=user, token="fcm-token", platform="android")
+        notification = queue_push(user, title="Jadwal", body="Lihat jadwal.")
+        delivery = PushDelivery.objects.get(notification=notification, device=device)
+        credentials = object()
+        session = Mock()
+        response = Mock()
+        session.post.return_value = response
+
+        with (
+            patch(
+                "apps.notification.push.google.auth.default",
+                side_effect=[(credentials, "default-project"), (credentials, None)],
+            ) as auth_default,
+            patch(
+                "apps.notification.push.AuthorizedSession", return_value=session
+            ) as session_factory,
+            patch.dict("os.environ", {"FIREBASE_PROJECT_ID": "configured-project"}),
+        ):
+            send_fcm(delivery)
+            with patch.dict("os.environ", {"FIREBASE_PROJECT_ID": ""}):
+                with self.assertRaisesRegex(RuntimeError, "Firebase project ID is unavailable"):
+                    send_fcm(delivery)
+
+        auth_default.assert_called_with(
+            scopes=["https://www.googleapis.com/auth/firebase.messaging"]
         )
+        self.assertEqual(auth_default.call_count, 2)
+        session_factory.assert_called_once_with(credentials)
+        args, kwargs = session.post.call_args
+        self.assertEqual(
+            args, ("https://fcm.googleapis.com/v1/projects/configured-project/messages:send",)
+        )
+        self.assertEqual(
+            kwargs["json"],
+            {
+                "message": {
+                    "token": "fcm-token",
+                    "notification": {"title": "Jadwal", "body": "Lihat jadwal."},
+                }
+            },
+        )
+        self.assertEqual(kwargs["timeout"], 10)
+        response.raise_for_status.assert_called_once_with()
 
     def test_delivery_sends_once_and_records_success(self) -> None:
         from unittest.mock import patch
@@ -72,6 +122,29 @@ class PushTests(TestCase):
         ):
             call_command("deliver_push")
         self.assertFalse(DeviceToken.objects.filter(token="invalid").exists())
+
+    def test_non_json_fcm_error_is_retried(self) -> None:
+        from unittest.mock import Mock, patch
+
+        import requests
+        from django.core.management import call_command
+
+        from apps.notification.models import DeviceToken, PushDelivery
+
+        user = User.objects.create_user(email="invalid-json@example.test", nama="Invalid JSON")
+        device = DeviceToken.objects.create(user=user, token="invalid-json", platform="android")
+        notification = queue_push(user, title="Jadwal", body="Lihat jadwal.")
+        response = Mock()
+        response.json.side_effect = ValueError
+        with patch(
+            "apps.notification.push.send_fcm", side_effect=requests.HTTPError(response=response)
+        ):
+            call_command("deliver_push")
+
+        delivery = PushDelivery.objects.get(notification=notification, device=device)
+        self.assertEqual(delivery.status, "pending")
+        self.assertEqual(delivery.last_error, "HTTPError")
+        self.assertTrue(DeviceToken.objects.filter(pk=device.pk).exists())
 
     def test_temporary_failure_waits_before_retry(self) -> None:
         from unittest.mock import patch
