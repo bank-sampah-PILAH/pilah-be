@@ -44,7 +44,7 @@ class ActivitySerializer(serializers.Serializer[Any]):
     tanggal = serializers.DateTimeField()
     tipe = serializers.CharField()
     total_nilai = serializers.DecimalField(max_digits=14, decimal_places=2)
-    # "dibatalkan" for a voided setoran (PIL-428); it stays listed but counts for nothing.
+    # "dibatalkan" only reaches the detail of a voided setoran (PIL-428); the lists leave it out (PIL-481).
     status = serializers.CharField()
 
 
