@@ -15,7 +15,15 @@ from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from api.models import BankSampah, DraftPencairan, DraftPencairanItem, Pencairan, Transaksi, User
+from api.models import (
+    BankSampah,
+    DraftPencairan,
+    DraftPencairanItem,
+    Pencairan,
+    Transaksi,
+    TransaksiQuerySet,
+    User,
+)
 from apps.ledger.activity import activity_rows, serialize_activity_page
 from apps.ledger.schema import ACTIVITY_PARAMETERS, ACTIVITY_RESPONSE, ActivityPagination
 from apps.ledger.serializers import (
@@ -150,7 +158,7 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
             return TransactionBatalSerializer
         return TransactionListSerializer
 
-    def get_queryset(self) -> QuerySet[Transaksi]:
+    def get_queryset(self) -> TransaksiQuerySet:
         qs = (
             Transaksi.objects.filter(bank_sampah=current_bank(self.request))
             .select_related("nasabah", "bank_sampah", "dicatat_oleh", "dibatalkan_oleh")
@@ -168,9 +176,11 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         return qs
 
     def list(self, request: Request) -> Response:
-        qs = self.get_queryset()
+        # PIL-481: the list leaves a voided setoran out. get_queryset stays unfiltered
+        # because detail, edit and void must still find it.
+        counted = self.get_queryset().tercatat()
         try:
-            qs = TransactionFilterService.apply_period(qs, request)
+            qs = TransactionFilterService.apply_period(counted, request)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         page = self.paginate_queryset(qs)
