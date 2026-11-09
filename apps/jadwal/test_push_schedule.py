@@ -7,7 +7,7 @@ from api.models import BankSampah, JadwalKegiatan, Nasabah, PushNotification, Us
 
 
 class SchedulePushTests(APITestCase):
-    def test_publication_notifies_only_selected_active_members(self):
+    def test_publication_notifies_only_selected_active_members(self) -> None:
         bank = BankSampah.objects.create(nama="Melati", alamat="Depok", kota="Depok")
         manager = User.objects.create_user(
             email="manager@example.test", nama="Manager", bank_sampah=bank, is_profile_complete=True
@@ -65,7 +65,7 @@ class SchedulePushTests(APITestCase):
         )
         self.assertFalse(PushNotification.objects.filter(user=other).exists())
 
-    def test_removed_recipient_is_not_asked_to_open_inaccessible_schedule(self):
+    def test_removed_recipient_is_not_asked_to_open_inaccessible_schedule(self) -> None:
         bank = BankSampah.objects.create(nama="Melati", alamat="Depok", kota="Depok")
         manager = User.objects.create_user(
             email="manager2@example.test",

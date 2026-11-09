@@ -198,6 +198,7 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         instance = serializer.instance
+        assert isinstance(instance, JadwalKegiatan)
         new_values = (
             instance.jenis_kegiatan,
             instance.mulai_pada,
@@ -220,7 +221,7 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
                 f"Jadwal di {instance.bank_sampah.nama} tidak lagi ditujukan untuk Anda.",
             )
         if getattr(instance, "_prefetched_objects_cache", None):
-            instance._prefetched_objects_cache = {}
+            setattr(instance, "_prefetched_objects_cache", {})
         return Response(serializer.data)
 
     @transaction.atomic
