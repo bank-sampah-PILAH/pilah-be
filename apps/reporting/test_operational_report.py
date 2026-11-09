@@ -336,6 +336,34 @@ class OperationalReportTests(OperationalReportFixture):
             label = load_workbook(BytesIO(response.content))["Riwayat Transaksi"]["A2"].value
             self.assertIn("Semua Periode", label)
 
+    def test_raw_sheet_leaves_out_the_activity_id_and_keeps_the_other_columns(self) -> None:
+        # PIL-480: the pengurus has no use for the internal id of a setoran or pencairan.
+        sheet = self.workbook()["Riwayat Transaksi"]
+
+        self.assertEqual(
+            [cell.value for cell in sheet[4]],
+            [
+                "No",
+                "Tanggal",
+                "Waktu",
+                "Nama Nasabah",
+                "ID Nasabah",
+                "Jenis Sampah",
+                "Berat (kg)",
+                "Harga/kg (Rp)",
+                "Subtotal (Rp)",
+                "Saldo Setelah Transaksi (Rp)",
+                "Tipe",
+                "Nilai Setoran (Rp)",
+                "Pencairan (Rp)",
+            ],
+        )
+        self.assertEqual(sheet.max_column, 13)
+        self.assertEqual({str(span) for span in sheet.merged_cells.ranges}, {"A1:M1", "A2:M2"})
+        event_ids = {str(self.first.id), str(self.second.id), str(self.payout.id)}
+        cells = {str(cell) for row in sheet.iter_rows(min_row=5, values_only=True) for cell in row}
+        self.assertTrue(event_ids.isdisjoint(cells))
+
     def test_member_filter_scopes_both_ledgers_summary_and_category_sheet(self) -> None:
         other = Nasabah.objects.create(
             bank_sampah=self.bank, nomor="002", nama="Ani", no_hp="081299", email="ani@example.test"
