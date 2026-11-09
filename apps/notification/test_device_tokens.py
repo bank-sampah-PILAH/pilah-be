@@ -19,6 +19,14 @@ class DeviceTokenTests(APITestCase):
         self.assertEqual(self.client.delete(url, {"token": "abc"}, format="json").status_code, 204)
         self.assertFalse(DeviceToken.objects.filter(token="abc").exists())
 
+    def test_remove_rejects_missing_token(self) -> None:
+        user = User.objects.create_user(email="missing-token@example.test", nama="Missing Token")
+        self.client.force_authenticate(user)
+
+        response = self.client.delete("/api/v1/device-tokens/", {}, format="json")
+
+        self.assertEqual(response.status_code, 422)
+
     def test_token_is_reassigned_and_cannot_be_removed_by_previous_user(self) -> None:
         first = User.objects.create_user(email="first@example.test", nama="First")
         second = User.objects.create_user(email="second@example.test", nama="Second")

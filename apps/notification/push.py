@@ -14,6 +14,26 @@ from apps.notification.models import DeviceToken, PushDelivery
 logger = logging.getLogger(__name__)
 
 
+def _handle_failure(delivery: PushDelivery, exc: Exception) -> None:
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        try:
+            details = exc.response.json().get("error", {}).get("details", [])
+        except ValueError:
+            details = []
+        if any(item.get("errorCode") == "UNREGISTERED" for item in details):
+            delivery.device.delete()
+            delivery.device = None
+            delivery.status = "invalid"
+            delivery.last_error = "UNREGISTERED"
+            delivery.save(update_fields=["attempts", "status", "last_error"])
+            return
+    logger.warning("Push delivery %s failed: %s", delivery.pk, type(exc).__name__)
+    delivery.last_error = type(exc).__name__
+    delivery.status = "failed" if delivery.attempts >= 5 else "pending"
+    delivery.next_attempt_at = timezone.now() + timedelta(minutes=2**delivery.attempts)
+    delivery.save(update_fields=["attempts", "status", "last_error", "next_attempt_at"])
+
+
 def send_fcm(delivery: PushDelivery) -> None:
     assert delivery.device is not None
     credentials, project = google.auth.default(
@@ -64,22 +84,8 @@ def deliver_pending() -> None:
             try:
                 send_fcm(delivery)
             except Exception as exc:
-                if isinstance(exc, requests.HTTPError) and exc.response is not None:
-                    try:
-                        details = exc.response.json().get("error", {}).get("details", [])
-                    except ValueError:
-                        details = []
-                    if any(item.get("errorCode") == "UNREGISTERED" for item in details):
-                        delivery.device.delete()
-                        delivery.device = None
-                        delivery.status = "invalid"
-                        delivery.last_error = "UNREGISTERED"
-                        delivery.save(update_fields=["attempts", "status", "last_error"])
-                        continue
-                logger.warning("Push delivery %s failed: %s", delivery.pk, type(exc).__name__)
-                delivery.last_error = type(exc).__name__
-                delivery.status = "failed" if delivery.attempts >= 5 else "pending"
-                delivery.next_attempt_at = timezone.now() + timedelta(minutes=2**delivery.attempts)
+                _handle_failure(delivery, exc)
+                continue
             else:
                 delivery.status = "sent"
                 delivery.last_error = ""
