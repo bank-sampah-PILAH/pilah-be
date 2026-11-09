@@ -77,12 +77,29 @@ class VoidedSetoranNasabahTests(APITestCase):
         self.assertNotIn(str(self.batal.id), statuses)
         self.assertEqual(list(statuses.values()), ["tercatat"])
 
-    def test_nasabah_beranda_and_detail_show_the_void(self) -> None:
+    def test_nasabah_riwayat_without_a_type_filter_leaves_the_voided_setoran_out(self) -> None:
+        self.client.force_authenticate(self.akun)
+
+        response = self.client.get("/api/v1/nasabah/me/riwayat")
+
+        statuses = self._status_per_id(response.data["results"])
+        self.assertNotIn(str(self.batal.id), statuses)
+        self.assertEqual(list(statuses.values()), ["tercatat"])
+
+    def test_nasabah_beranda_leaves_the_voided_setoran_out(self) -> None:
         self.client.force_authenticate(self.akun)
 
         beranda = self.client.get("/api/v1/nasabah/me/beranda")
-        detail = self.client.get(f"/api/v1/nasabah/me/riwayat/{self.batal.id}")
 
         terbaru = self._status_per_id(beranda.data["aktivitas_terbaru"])
-        self.assertEqual(terbaru[str(self.batal.id)], "dibatalkan")
+        self.assertNotIn(str(self.batal.id), terbaru)
+        self.assertEqual(list(terbaru.values()), ["tercatat"])
+
+    def test_nasabah_can_still_open_the_voided_setoran_by_its_id(self) -> None:
+        # Hidden from the lists only (PIL-481): the detail keeps showing the void.
+        self.client.force_authenticate(self.akun)
+
+        detail = self.client.get(f"/api/v1/nasabah/me/riwayat/{self.batal.id}")
+
+        self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.data["status"], "dibatalkan")
