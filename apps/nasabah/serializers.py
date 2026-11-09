@@ -2,12 +2,14 @@ from decimal import Decimal
 from typing import Any
 
 from django.db.models import Model
-from django.utils import timezone
 from rest_framework import serializers
 
 from api.models import BankSampah, DetailTransaksi, Nasabah, NasabahApprovalLog, Saldo
 from apps.nasabah.keanggotaan import profil_akun, profil_berbeda, punya_akun
-from shared_kernel.validators import normalize_indonesian_phone
+from shared_kernel.validators import (
+    normalize_indonesian_phone,
+    tanggal_lahir_valid,
+)
 
 
 class NasabahApprovalLogSerializer(serializers.ModelSerializer[Model]):
@@ -81,9 +83,7 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
         return value
 
     def validate_tanggal_lahir(self, value: Any) -> Any:
-        if value > timezone.localdate():
-            raise serializers.ValidationError("Tanggal lahir tidak boleh di masa depan")
-        return value
+        return tanggal_lahir_valid(value)
 
     def validate_alamat(self, value: Any) -> Any:
         value = value.strip()

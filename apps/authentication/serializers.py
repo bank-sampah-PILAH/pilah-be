@@ -1,11 +1,13 @@
 from typing import Any
 
 from django.db.models import Model
-from django.utils import timezone
 from rest_framework import serializers
 
 from api.models import User
-from shared_kernel.validators import normalize_indonesian_phone
+from shared_kernel.validators import (
+    normalize_indonesian_phone,
+    tanggal_lahir_valid,
+)
 
 
 class AuthUserSerializer(serializers.ModelSerializer[Model]):
@@ -65,9 +67,7 @@ class UserProfileSerializer(serializers.ModelSerializer[Model]):
         return value
 
     def validate_tanggal_lahir(self, value: Any) -> Any:
-        if value > timezone.localdate():
-            raise serializers.ValidationError("Tanggal lahir tidak boleh di masa depan")
-        return value
+        return tanggal_lahir_valid(value)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         # alamat is only meaningful (and required) for nasabah accounts —
