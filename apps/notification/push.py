@@ -20,7 +20,11 @@ def _handle_failure(delivery: PushDelivery, exc: Exception) -> None:
             details = exc.response.json().get("error", {}).get("details", [])
         except ValueError:
             details = []
-        if any(item.get("errorCode") == "UNREGISTERED" for item in details):
+        if any(
+            item.get("@type") == "type.googleapis.com/google.firebase.fcm.v1.FcmError"
+            and item.get("errorCode") in {"UNREGISTERED", "INVALID_ARGUMENT"}
+            for item in details
+        ):
             assert delivery.device is not None
             delivery.device.delete()
             delivery.device = None
@@ -35,15 +39,20 @@ def _handle_failure(delivery: PushDelivery, exc: Exception) -> None:
     delivery.save(update_fields=["attempts", "status", "last_error", "next_attempt_at"])
 
 
-def send_fcm(delivery: PushDelivery) -> None:
-    assert delivery.device is not None
+def _fcm_client() -> tuple[AuthorizedSession, str]:
     credentials, project = google.auth.default(
         scopes=["https://www.googleapis.com/auth/firebase.messaging"]
     )
     project = os.getenv("FIREBASE_PROJECT_ID") or project
     if not project:
         raise RuntimeError("Firebase project ID is unavailable")
-    response = AuthorizedSession(credentials).post(  # type: ignore[no-untyped-call]
+    return AuthorizedSession(credentials), project
+
+
+def send_fcm(delivery: PushDelivery, client: tuple[AuthorizedSession, str] | None = None) -> None:
+    assert delivery.device is not None
+    session, project = client or _fcm_client()
+    response = session.post(  # type: ignore[no-untyped-call]
         f"https://fcm.googleapis.com/v1/projects/{project}/messages:send",
         json={
             "message": {
@@ -60,6 +69,7 @@ def send_fcm(delivery: PushDelivery) -> None:
 
 
 def deliver_pending() -> None:
+    client: tuple[AuthorizedSession, str] | None = None
     while True:
         with transaction.atomic():
             delivery = (
@@ -83,7 +93,8 @@ def deliver_pending() -> None:
             delivery.device = device
             delivery.attempts += 1
             try:
-                send_fcm(delivery)
+                client = client or _fcm_client()
+                send_fcm(delivery, client)
             except Exception as exc:
                 _handle_failure(delivery, exc)
                 continue

@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 
 class DeviceToken(models.Model):
@@ -9,6 +10,7 @@ class DeviceToken(models.Model):
 
     class Meta:
         app_label = "api"
+        db_table = "api_devicetoken"
 
 
 class PushNotification(models.Model):
@@ -20,6 +22,10 @@ class PushNotification(models.Model):
 
     class Meta:
         app_label = "api"
+        db_table = "api_pushnotification"
+        indexes = [
+            models.Index(fields=["user", "-created_at", "-id"], name="pushnotif_user_created_idx")
+        ]
 
 
 class PushDelivery(models.Model):
@@ -32,6 +38,14 @@ class PushDelivery(models.Model):
 
     class Meta:
         app_label = "api"
+        db_table = "api_pushdelivery"
         constraints = [
             models.UniqueConstraint(fields=["notification", "device"], name="unique_push_delivery")
+        ]
+        indexes = [
+            models.Index(
+                fields=["next_attempt_at", "id"],
+                condition=Q(status="pending"),
+                name="pushdel_pending_idx",
+            )
         ]
