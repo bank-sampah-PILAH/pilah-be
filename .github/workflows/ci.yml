@@ -186,7 +186,7 @@ jobs:
       - name: SonarCloud analysis
         id: sonar_scan
         continue-on-error: true
-        uses: SonarSource/sonarqube-scan-action@v8.3.0
+        uses: SonarSource/sonarqube-scan-action@v8.4.1
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
@@ -204,7 +204,7 @@ jobs:
 
       - name: SonarCloud analysis (retry)
         if: steps.sonar_scan.outcome == 'failure'
-        uses: SonarSource/sonarqube-scan-action@v8.3.0
+        uses: SonarSource/sonarqube-scan-action@v8.4.1
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
