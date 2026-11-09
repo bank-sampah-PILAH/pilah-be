@@ -6,18 +6,19 @@ from apps.notification.models import PushNotification
 
 
 class PushTests(TestCase):
-    def test_notification_is_persisted_without_a_device(self):
+    def test_notification_is_persisted_without_a_device(self) -> None:
         user = User.objects.create_user(email="push@example.test", nama="Push")
         queue_push(user, title="Jadwal baru", body="Lihat jadwal terbaru.")
         self.assertTrue(PushNotification.objects.filter(user=user, title="Jadwal baru").exists())
 
-    def test_users_only_see_and_mark_their_own_notifications(self):
+    def test_users_only_see_and_mark_their_own_notifications(self) -> None:
         from rest_framework.test import APIClient
 
         first = User.objects.create_user(email="first-push@example.test", nama="First")
         second = User.objects.create_user(email="second-push@example.test", nama="Second")
         own = queue_push(first, title="Jadwal baru", body="Lihat jadwal terbaru.")
         other = queue_push(second, title="Lain", body="Pesan lain.")
+        assert own is not None and other is not None
         client = APIClient()
         client.force_authenticate(first)
         response = client.get("/api/v1/notifications/")
@@ -27,7 +28,7 @@ class PushTests(TestCase):
         own.refresh_from_db()
         self.assertIsNotNone(own.read_at)
 
-    def test_enqueue_creates_delivery_for_registered_devices(self):
+    def test_enqueue_creates_delivery_for_registered_devices(self) -> None:
         from apps.notification.models import DeviceToken, PushDelivery
 
         user = User.objects.create_user(email="delivery@example.test", nama="Delivery")
@@ -37,7 +38,7 @@ class PushTests(TestCase):
             PushDelivery.objects.filter(notification=notification, device=token).exists()
         )
 
-    def test_delivery_sends_once_and_records_success(self):
+    def test_delivery_sends_once_and_records_success(self) -> None:
         from unittest.mock import patch
 
         from django.core.management import call_command
@@ -53,7 +54,7 @@ class PushTests(TestCase):
         self.assertEqual(send.call_count, 1)
         self.assertEqual(PushDelivery.objects.get(notification=notification).status, "sent")
 
-    def test_unregistered_device_is_removed(self):
+    def test_unregistered_device_is_removed(self) -> None:
         from unittest.mock import Mock, patch
 
         import requests
@@ -72,7 +73,7 @@ class PushTests(TestCase):
             call_command("deliver_push")
         self.assertFalse(DeviceToken.objects.filter(token="invalid").exists())
 
-    def test_temporary_failure_waits_before_retry(self):
+    def test_temporary_failure_waits_before_retry(self) -> None:
         from unittest.mock import patch
 
         from django.core.management import call_command
@@ -91,7 +92,7 @@ class PushTests(TestCase):
         self.assertIsNotNone(delivery.next_attempt_at)
         self.assertEqual(send.call_count, 1)
 
-    def test_reassigned_device_does_not_receive_previous_users_notification(self):
+    def test_reassigned_device_does_not_receive_previous_users_notification(self) -> None:
         from unittest.mock import patch
 
         from django.core.management import call_command
@@ -108,7 +109,7 @@ class PushTests(TestCase):
             call_command("deliver_push")
         send.assert_not_called()
 
-    def test_notification_storage_failure_does_not_abort_business_transaction(self):
+    def test_notification_storage_failure_does_not_abort_business_transaction(self) -> None:
         from unittest.mock import patch
 
         from django.db import DatabaseError, transaction

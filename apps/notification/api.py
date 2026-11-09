@@ -8,7 +8,8 @@ queue, only this function changes.
 import logging
 from typing import Any
 
-from api.models import Transaksi
+from api.models import Transaksi, User
+from apps.notification.models import PushNotification
 from apps.notification.services import (  # noqa: F401  # re-exported: notify owns the template default
     DEFAULT_WA_TEMPLATE,
     WhatsAppService,
@@ -23,7 +24,7 @@ def send_setoran_receipt(transaksi: Transaksi) -> dict[str, Any]:
     return WhatsAppService.notify(transaksi)
 
 
-def queue_push(user, *, title: str, body: str):
+def queue_push(user: User, *, title: str, body: str) -> PushNotification | None:
     from django.db import DatabaseError, transaction
 
     from apps.notification.models import DeviceToken, PushDelivery, PushNotification
