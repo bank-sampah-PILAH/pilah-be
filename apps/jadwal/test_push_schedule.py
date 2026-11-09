@@ -73,6 +73,18 @@ class SchedulePushTests(APITestCase):
                 email=member.email,
                 no_hp=f"08123{number}",
             )
+        other_bank = BankSampah.objects.create(nama="Anggrek", alamat="Bogor", kota="Bogor")
+        outside_member = User.objects.create_user(
+            email="outside-bank@example.test", nama="Outside", role=User.Role.NASABAH
+        )
+        Nasabah.objects.create(
+            bank_sampah=other_bank,
+            user=outside_member,
+            nomor="1",
+            nama="Outside",
+            email=outside_member.email,
+            no_hp="081245",
+        )
         start = timezone.now() + timedelta(days=1)
         schedule = JadwalKegiatan.objects.create(
             bank_sampah=bank,
@@ -88,6 +100,7 @@ class SchedulePushTests(APITestCase):
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(PushNotification.objects.filter(title="Jadwal baru").count(), 2)
+        self.assertFalse(PushNotification.objects.filter(user=outside_member).exists())
 
     def test_publishing_expired_schedule_does_not_notify_members(self) -> None:
         bank = BankSampah.objects.create(nama="Melati", alamat="Depok", kota="Depok")
