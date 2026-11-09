@@ -18,7 +18,8 @@ class PushTests(TestCase):
         second = User.objects.create_user(email="second-push@example.test", nama="Second")
         own = queue_push(first, title="Jadwal baru", body="Lihat jadwal terbaru.")
         other = queue_push(second, title="Lain", body="Pesan lain.")
-        assert own is not None and other is not None
+        assert own is not None
+        assert other is not None
         client = APIClient()
         client.force_authenticate(first)
         response = client.get("/api/v1/notifications/")
