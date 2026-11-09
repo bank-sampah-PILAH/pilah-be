@@ -1,11 +1,31 @@
 from django.test import TestCase
 
 from api.models import User
-from apps.notification.api import queue_push
+from apps.notification.api import queue_push, queue_push_bulk
 from apps.notification.models import PushNotification
 
 
 class PushTests(TestCase):
+    def test_bulk_enqueue_persists_history_and_all_registered_device_deliveries(self) -> None:
+        from apps.notification.models import DeviceToken, PushDelivery
+
+        first = User.objects.create_user(email="bulk-one@example.test", nama="One")
+        second = User.objects.create_user(email="bulk-two@example.test", nama="Two")
+        first_device = DeviceToken.objects.create(user=first, token="bulk-one", platform="android")
+        second_device = DeviceToken.objects.create(user=second, token="bulk-two", platform="web")
+
+        notifications = queue_push_bulk([first, second], title="Jadwal", body="Mulai 2 jam lagi.")
+
+        assert notifications is not None
+        self.assertEqual({item.user_id for item in notifications}, {first.pk, second.pk})
+        self.assertEqual(
+            set(PushDelivery.objects.values_list("device_id", flat=True)),
+            {first_device.pk, second_device.pk},
+        )
+
+    def test_bulk_enqueue_without_recipients_is_empty(self) -> None:
+        self.assertEqual(queue_push_bulk([], title="Jadwal", body="Mulai 2 jam lagi."), [])
+
     def test_notification_is_persisted_without_a_device(self) -> None:
         user = User.objects.create_user(email="push@example.test", nama="Push")
         queue_push(user, title="Jadwal baru", body="Lihat jadwal terbaru.")
@@ -99,11 +119,35 @@ class PushTests(TestCase):
         user = User.objects.create_user(email="send@example.test", nama="Send")
         DeviceToken.objects.create(user=user, token="device", platform="android")
         notification = queue_push(user, title="Jadwal baru", body="Lihat jadwal terbaru.")
-        with patch("apps.notification.push.send_fcm") as send:
+        with (
+            patch("apps.notification.push.send_fcm") as send,
+            patch("apps.notification.push._fcm_client", return_value=(object(), "project")),
+        ):
             call_command("deliver_push")
             call_command("deliver_push")
         self.assertEqual(send.call_count, 1)
         self.assertEqual(PushDelivery.objects.get(notification=notification).status, "sent")
+
+    def test_delivery_reuses_fcm_client_within_command_run(self) -> None:
+        from unittest.mock import patch
+
+        from django.core.management import call_command
+
+        from apps.notification.models import DeviceToken
+
+        for number in range(2):
+            user = User.objects.create_user(email=f"batch-{number}@example.test", nama="Batch")
+            DeviceToken.objects.create(user=user, token=f"batch-{number}", platform="android")
+            queue_push(user, title="Jadwal", body="Lihat jadwal.")
+        client = (object(), "project")
+        with (
+            patch("apps.notification.push.send_fcm") as send,
+            patch("apps.notification.push._fcm_client", return_value=client) as create_client,
+        ):
+            call_command("deliver_push")
+        create_client.assert_called_once_with()
+        self.assertEqual(send.call_count, 2)
+        self.assertTrue(all(call.args[1] == client for call in send.call_args_list))
 
     def test_unregistered_device_is_removed(self) -> None:
         from unittest.mock import Mock, patch
@@ -117,12 +161,81 @@ class PushTests(TestCase):
         DeviceToken.objects.create(user=user, token="invalid", platform="android")
         queue_push(user, title="Jadwal", body="Lihat jadwal.")
         response = Mock(status_code=404)
-        response.json.return_value = {"error": {"details": [{"errorCode": "UNREGISTERED"}]}}
-        with patch(
-            "apps.notification.push.send_fcm", side_effect=requests.HTTPError(response=response)
+        response.json.return_value = {
+            "error": {
+                "details": [
+                    {
+                        "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError",
+                        "errorCode": "UNREGISTERED",
+                    }
+                ]
+            }
+        }
+        with (
+            patch(
+                "apps.notification.push.send_fcm", side_effect=requests.HTTPError(response=response)
+            ),
+            patch("apps.notification.push._fcm_client", return_value=(object(), "project")),
         ):
             call_command("deliver_push")
         self.assertFalse(DeviceToken.objects.filter(token="invalid").exists())
+
+    def test_invalid_argument_token_is_removed_but_bad_request_keeps_token(self) -> None:
+        from unittest.mock import Mock, patch
+
+        import requests
+        from django.core.management import call_command
+
+        from apps.notification.models import DeviceToken, PushDelivery
+
+        user = User.objects.create_user(email="invalid-argument@example.test", nama="Invalid")
+        token = DeviceToken.objects.create(user=user, token="invalid-argument", platform="android")
+        notification = queue_push(user, title="Jadwal", body="Lihat jadwal.")
+        response = Mock(status_code=400)
+        response.json.return_value = {
+            "error": {
+                "details": [
+                    {
+                        "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError",
+                        "errorCode": "INVALID_ARGUMENT",
+                    }
+                ]
+            }
+        }
+        with (
+            patch(
+                "apps.notification.push.send_fcm",
+                side_effect=requests.HTTPError(response=response),
+            ),
+            patch("apps.notification.push._fcm_client", return_value=(object(), "project")),
+        ):
+            call_command("deliver_push")
+        self.assertFalse(DeviceToken.objects.filter(pk=token.pk).exists())
+        self.assertEqual(PushDelivery.objects.get(notification=notification).status, "invalid")
+
+        user = User.objects.create_user(email="bad-request@example.test", nama="Bad Request")
+        token = DeviceToken.objects.create(user=user, token="bad-request", platform="android")
+        notification = queue_push(user, title="Jadwal", body="Lihat jadwal.")
+        response.json.return_value = {
+            "error": {
+                "details": [
+                    {
+                        "@type": "type.googleapis.com/google.rpc.BadRequest",
+                        "fieldViolations": [{"field": "message.notification.body"}],
+                    }
+                ]
+            }
+        }
+        with (
+            patch(
+                "apps.notification.push.send_fcm",
+                side_effect=requests.HTTPError(response=response),
+            ),
+            patch("apps.notification.push._fcm_client", return_value=(object(), "project")),
+        ):
+            call_command("deliver_push")
+        self.assertTrue(DeviceToken.objects.filter(pk=token.pk).exists())
+        self.assertEqual(PushDelivery.objects.get(notification=notification).status, "pending")
 
     def test_non_json_fcm_error_is_retried(self) -> None:
         from unittest.mock import Mock, patch
@@ -137,8 +250,11 @@ class PushTests(TestCase):
         notification = queue_push(user, title="Jadwal", body="Lihat jadwal.")
         response = Mock()
         response.json.side_effect = ValueError
-        with patch(
-            "apps.notification.push.send_fcm", side_effect=requests.HTTPError(response=response)
+        with (
+            patch(
+                "apps.notification.push.send_fcm", side_effect=requests.HTTPError(response=response)
+            ),
+            patch("apps.notification.push._fcm_client", return_value=(object(), "project")),
         ):
             call_command("deliver_push")
 
@@ -157,7 +273,10 @@ class PushTests(TestCase):
         user = User.objects.create_user(email="retry@example.test", nama="Retry")
         DeviceToken.objects.create(user=user, token="retry", platform="android")
         notification = queue_push(user, title="Jadwal", body="Lihat jadwal.")
-        with patch("apps.notification.push.send_fcm", side_effect=TimeoutError) as send:
+        with (
+            patch("apps.notification.push.send_fcm", side_effect=TimeoutError) as send,
+            patch("apps.notification.push._fcm_client", return_value=(object(), "project")),
+        ):
             call_command("deliver_push")
             call_command("deliver_push")
         delivery = PushDelivery.objects.get(notification=notification)
@@ -179,7 +298,10 @@ class PushTests(TestCase):
         queue_push(first, title="Jadwal", body="Lihat jadwal.")
         token.user = second
         token.save(update_fields=["user"])
-        with patch("apps.notification.push.send_fcm") as send:
+        with (
+            patch("apps.notification.push.send_fcm") as send,
+            patch("apps.notification.push._fcm_client", return_value=(object(), "project")),
+        ):
             call_command("deliver_push")
         send.assert_not_called()
 
@@ -193,7 +315,7 @@ class PushTests(TestCase):
             user.nama = "After"
             user.save(update_fields=["nama"])
             with patch(
-                "apps.notification.models.PushNotification.objects.create",
+                "apps.notification.models.PushNotification.objects.bulk_create",
                 side_effect=DatabaseError("unavailable"),
             ):
                 queue_push(user, title="Jadwal", body="Lihat jadwal.")

@@ -52,3 +52,9 @@ alerts for failed job executions and failed delivery rows. Run an initial job
 against demo accounts and a real device, then verify delivery, retry, and invalid
 token cleanup before relying on it. Deploying the API alone does not start the
 worker.
+
+The worker reuses one authenticated FCM session for each command run. It still
+holds the delivery row lock while waiting for FCM; moving the request outside the
+transaction needs a claim lease and stale-claim recovery to avoid duplicate sends.
+Notification history has no retention or pagination policy yet, so delivery rows
+and the inbox remain unbounded until those policies are agreed with the client.
