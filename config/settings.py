@@ -49,6 +49,9 @@ SECURE_REFERRER_POLICY = os.getenv("SECURE_REFERRER_POLICY", "strict-origin-when
 SECURE_CROSS_ORIGIN_OPENER_POLICY = os.getenv(
     "SECURE_CROSS_ORIGIN_OPENER_POLICY", "same-origin-allow-popups"
 )
+# Cloud Run and Fly only serve HTTPS. 30 days, no includeSubDomains/preload: the API sits
+# on shared *.run.app / *.fly.dev hosts. Set SECURE_HSTS_SECONDS=0 to switch it off.
+SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "0" if DEBUG else "2592000"))
 
 # Application definition
 
