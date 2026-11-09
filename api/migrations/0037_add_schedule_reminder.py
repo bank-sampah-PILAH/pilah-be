@@ -17,7 +17,7 @@ def skip_reminders_already_due(apps: Any, schema_editor: Any) -> None:
 
 
 class Migration(migrations.Migration):
-    dependencies = [("api", "0035_add_push_query_indexes")]
+    dependencies = [("api", "0036_pushnotification_hidden_at")]
 
     operations = [
         migrations.AddField(
