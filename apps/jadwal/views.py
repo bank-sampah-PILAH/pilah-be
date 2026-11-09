@@ -4,7 +4,7 @@ A schedule may serve activities beyond setoran and pencairan, so it is not
 tied to the ledger context.
 """
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from django.db import transaction
@@ -17,8 +17,9 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from api.models import BankSampah, JadwalKegiatan, Nasabah, User
+from apps.jadwal.api import schedule_recipients
 from apps.jadwal.serializers import JadwalKegiatanSerializer
-from apps.notification.api import queue_push
+from apps.notification.api import queue_push_bulk
 from shared_kernel.permissions import IsActivePengelola, IsJadwalViewer
 
 
@@ -33,25 +34,8 @@ def _bank_sampah(request: Request) -> BankSampah:
     return bank
 
 
-def _schedule_recipients(jadwal: JadwalKegiatan) -> set[User]:
-    if jadwal.selesai_pada < timezone.now():
-        return set()
-    members = Nasabah.objects.filter(
-        bank_sampah=jadwal.bank_sampah,
-        bank_sampah__status=BankSampah.Status.ACTIVE,
-        bank_sampah__is_active=True,
-        status=Nasabah.Status.APPROVED,
-        is_active=True,
-        user__is_active=True,
-    )
-    if jadwal.cakupan_penerima == JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH:
-        members = members.filter(jadwal_kegiatan=jadwal)
-    return set(User.objects.filter(pk__in=members.values("user_id")))
-
-
 def _notify_schedule(recipients: set[User], title: str, body: str) -> None:
-    for recipient in recipients:
-        queue_push(recipient, title=title, body=body)
+    queue_push_bulk(recipients, title=title, body=body)
 
 
 class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
@@ -184,7 +168,7 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
             )
 
         published = instance.status == JadwalKegiatan.Status.DITERBITKAN
-        previous_recipients = _schedule_recipients(instance) if published else set()
+        previous_recipients = schedule_recipients(instance) if published else set()
         previous_values = (
             instance.jenis_kegiatan,
             instance.mulai_pada,
@@ -208,8 +192,14 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
             instance.cakupan_penerima,
             frozenset(instance.penerima.values_list("pk", flat=True)),
         )
+        if published and previous_values[1] != new_values[1]:
+            now = timezone.now()
+            instance.reminder_queued_at = (
+                now if instance.mulai_pada <= now + timedelta(hours=2) else None
+            )
+            instance.save(update_fields=["reminder_queued_at", "updated_at"])
         if published and previous_values != new_values:
-            current_recipients = _schedule_recipients(instance)
+            current_recipients = schedule_recipients(instance)
             _notify_schedule(
                 current_recipients,
                 "Jadwal berubah",
@@ -232,8 +222,14 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
         allowed_from: set[str],
         target: str,
     ) -> Response:
+        now = timezone.now()
+        update_values: dict[str, Any] = {"status": target, "updated_at": now}
+        if target == JadwalKegiatan.Status.DITERBITKAN:
+            update_values["reminder_queued_at"] = (
+                now if jadwal.mulai_pada <= now + timedelta(hours=2) else None
+            )
         updated = JadwalKegiatan.objects.filter(pk=jadwal.pk, status__in=allowed_from).update(
-            status=target, updated_at=timezone.now()
+            **update_values
         )
         if not updated:
             return Response(
@@ -245,13 +241,13 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
             and jadwal.status == JadwalKegiatan.Status.DITERBITKAN
         ):
             _notify_schedule(
-                _schedule_recipients(jadwal),
+                schedule_recipients(jadwal),
                 "Jadwal dibatalkan",
                 f"Jadwal di {jadwal.bank_sampah.nama} dibatalkan.",
             )
         if target == JadwalKegiatan.Status.DITERBITKAN:
             _notify_schedule(
-                _schedule_recipients(jadwal),
+                schedule_recipients(jadwal),
                 "Jadwal baru",
                 f"{jadwal.bank_sampah.nama}: "
                 f"{timezone.localtime(jadwal.mulai_pada):%d/%m/%Y %H:%M} WIB, {jadwal.lokasi}.",

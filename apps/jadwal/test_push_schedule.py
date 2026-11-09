@@ -4,9 +4,91 @@ from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from api.models import BankSampah, JadwalKegiatan, Nasabah, PushNotification, User
+from apps.jadwal.api import queue_due_schedule_reminders
 
 
 class SchedulePushTests(APITestCase):
+    def test_publishing_with_less_than_two_hours_to_start_skips_reminder(self) -> None:
+        bank = BankSampah.objects.create(nama="Melati", alamat="Depok", kota="Depok")
+        manager = User.objects.create_user(
+            email="late-manager@example.test",
+            nama="Manager",
+            bank_sampah=bank,
+            is_profile_complete=True,
+        )
+        member = User.objects.create_user(
+            email="late-member@example.test", nama="Member", role=User.Role.NASABAH
+        )
+        Nasabah.objects.create(
+            bank_sampah=bank,
+            user=member,
+            nomor="1",
+            nama="Member",
+            email=member.email,
+            no_hp="08123",
+        )
+        start = timezone.now() + timedelta(hours=1)
+        schedule = JadwalKegiatan.objects.create(
+            bank_sampah=bank,
+            dibuat_oleh=manager,
+            jenis_kegiatan="penimbangan",
+            mulai_pada=start,
+            selesai_pada=start + timedelta(hours=1),
+            lokasi="Balai",
+        )
+        self.client.force_authenticate(manager)
+
+        response = self.client.post(f"/api/v1/jadwal/{schedule.pk}/terbitkan")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        schedule.refresh_from_db()
+        self.assertIsNotNone(schedule.reminder_queued_at)
+        self.assertEqual(queue_due_schedule_reminders(), 0)
+        self.assertFalse(
+            PushNotification.objects.filter(user=member, title="Pengingat jadwal").exists()
+        )
+
+    def test_publishing_default_scope_notifies_all_eligible_members(self) -> None:
+        bank = BankSampah.objects.create(nama="Melati", alamat="Depok", kota="Depok")
+        manager = User.objects.create_user(
+            email="all-manager@example.test",
+            nama="Manager",
+            bank_sampah=bank,
+            is_profile_complete=True,
+        )
+        members = [
+            User.objects.create_user(
+                email=f"all-member-{number}@example.test",
+                nama=f"Member {number}",
+                role=User.Role.NASABAH,
+            )
+            for number in range(2)
+        ]
+        for number, member in enumerate(members):
+            Nasabah.objects.create(
+                bank_sampah=bank,
+                user=member,
+                nomor=str(number),
+                nama=member.nama,
+                email=member.email,
+                no_hp=f"08123{number}",
+            )
+        start = timezone.now() + timedelta(days=1)
+        schedule = JadwalKegiatan.objects.create(
+            bank_sampah=bank,
+            dibuat_oleh=manager,
+            jenis_kegiatan="penimbangan",
+            mulai_pada=start,
+            selesai_pada=start + timedelta(hours=1),
+            lokasi="Balai",
+        )
+        self.client.force_authenticate(manager)
+
+        response = self.client.post(f"/api/v1/jadwal/{schedule.pk}/terbitkan")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(PushNotification.objects.filter(title="Jadwal baru").count(), 2)
+
     def test_publishing_expired_schedule_does_not_notify_members(self) -> None:
         bank = BankSampah.objects.create(nama="Melati", alamat="Depok", kota="Depok")
         manager = User.objects.create_user(
