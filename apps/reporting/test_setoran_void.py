@@ -81,11 +81,11 @@ class VoidedSetoranReportingTests(_VoidedSetoranFixture, APITestCase):
         self.assertEqual(category["deposit_count"], 1)
         self.assertEqual(Decimal(category["total_weight_kg"]), Decimal(1))
 
-    def test_recent_transactions_show_the_void(self) -> None:
+    def test_recent_transactions_leave_the_voided_setoran_out(self) -> None:
         response = self.client.get("/api/v1/dashboard/recent-transactions")
 
-        statuses = {row["id"]: row["status"] for row in response.data["transactions"]}
-        self.assertEqual(statuses[str(self.batal.id)], "dibatalkan")
+        ids = [row["id"] for row in response.data["transactions"]]
+        self.assertEqual(ids, [str(self.tetap.id)])
 
     def test_nasabah_statement_leaves_the_voided_setoran_out(self) -> None:
         request = APIRequestFactory().get("/api/v1/nasabah/me/riwayat/export-pdf")

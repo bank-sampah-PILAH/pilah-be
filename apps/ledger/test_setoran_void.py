@@ -243,15 +243,27 @@ class SetoranVoidTests(APITestCase):
         self.assertEqual(response.data["summary"]["total_setoran"], 3000)
         self.assertEqual(response.data["summary"]["total_berat"], "1.000")
 
-    def test_setoran_list_carries_the_void(self) -> None:
+    def test_setoran_list_leaves_the_voided_setoran_out(self) -> None:
+        kept = self._setor("1.000")
         self._batalkan()
 
         response = self.client.get("/api/v1/transaksi", {"periode": "semua"})
 
-        row = response.data["results"][0]
-        self.assertEqual(row["status"], "dibatalkan")
-        self.assertEqual(row["alasan_batal"], "Salah nasabah")
-        self.assertEqual(row["dibatalkan_oleh_nama"], "Pengelola")
+        ids = [row["id"] for row in response.data["results"]]
+        self.assertEqual(ids, [str(kept.id)])
+        self.assertEqual(response.data["count"], 1)
+
+    def test_a_voided_setoran_stays_reachable_by_its_id_with_its_void(self) -> None:
+        # PIL-481 hides it from the lists only: an old receipt link or the audit trail
+        # still opens it, with who voided it and why.
+        self._batalkan()
+
+        response = self.client.get(f"/api/v1/transaksi/{self.transaksi.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["status"], "dibatalkan")
+        self.assertEqual(response.data["alasan_batal"], "Salah nasabah")
+        self.assertEqual(response.data["dibatalkan_oleh_nama"], "Pengelola")
 
     def test_editing_a_pencairan_replays_the_saldo_without_the_voided_setoran(self) -> None:
         sekarang = timezone.now()
