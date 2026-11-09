@@ -5,25 +5,43 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('api', '0032_pushnotification_read_at'),
+        ("api", "0032_pushnotification_read_at"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='PushDelivery',
+            name="PushDelivery",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('status', models.CharField(default='pending', max_length=16)),
-                ('attempts', models.PositiveIntegerField(default=0)),
-                ('next_attempt_at', models.DateTimeField(blank=True, null=True)),
-                ('last_error', models.TextField(blank=True)),
-                ('device', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='api.devicetoken')),
-                ('notification', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='api.pushnotification')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("status", models.CharField(default="pending", max_length=16)),
+                ("attempts", models.PositiveIntegerField(default=0)),
+                ("next_attempt_at", models.DateTimeField(blank=True, null=True)),
+                ("last_error", models.TextField(blank=True)),
+                (
+                    "device",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE, to="api.devicetoken"
+                    ),
+                ),
+                (
+                    "notification",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE, to="api.pushnotification"
+                    ),
+                ),
             ],
             options={
-                'constraints': [models.UniqueConstraint(fields=('notification', 'device'), name='unique_push_delivery')],
+                "constraints": [
+                    models.UniqueConstraint(
+                        fields=("notification", "device"), name="unique_push_delivery"
+                    )
+                ],
             },
         ),
     ]

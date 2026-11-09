@@ -1,3 +1,5 @@
+from typing import Any
+
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers
@@ -10,7 +12,7 @@ from apps.notification.models import DeviceToken, PushNotification
 from apps.notification.serializers import WATemplateSerializer
 from apps.notification.services import WhatsAppService
 from shared_kernel.permissions import IsActivePengelola
-from shared_kernel.scoping import current_bank
+from shared_kernel.scoping import current_bank, current_user
 
 
 class WATemplateView(APIView):
@@ -43,7 +45,7 @@ class WATemplateView(APIView):
         return Response({"template": bank.wa_template, "message": "Template berhasil disimpan"})
 
 
-class DeviceTokenSerializer(serializers.Serializer):
+class DeviceTokenSerializer(serializers.Serializer[Any]):
     token = serializers.CharField(max_length=1024)
     platform = serializers.ChoiceField(choices=["android", "ios", "web"])
 
@@ -57,15 +59,15 @@ class DeviceTokenView(APIView):
         data.is_valid(raise_exception=True)
         DeviceToken.objects.update_or_create(
             token=data.validated_data["token"],
-            defaults={"user": request.user, "platform": data.validated_data["platform"]},
+            defaults={"user": current_user(request), "platform": data.validated_data["platform"]},
         )
         return Response(status=200)
 
     def delete(self, request: Request) -> Response:
-        token = request.data.get("token")
+        token = request.data.get("token") if isinstance(request.data, dict) else None
         if not isinstance(token, str) or not token or len(token) > 1024:
             raise serializers.ValidationError({"token": "Token tidak valid"})
-        DeviceToken.objects.filter(user=request.user, token=token).delete()
+        DeviceToken.objects.filter(user=current_user(request), token=token).delete()
         return Response(status=204)
 
 
@@ -73,7 +75,7 @@ class NotificationView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request: Request) -> Response:
-        notifications = PushNotification.objects.filter(user=request.user).order_by(
+        notifications = PushNotification.objects.filter(user=current_user(request)).order_by(
             "-created_at", "-pk"
         )
         return Response(list(notifications.values("id", "title", "body", "created_at", "read_at")))
@@ -83,7 +85,7 @@ class NotificationReadView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request: Request, pk: int) -> Response:
-        notification = get_object_or_404(PushNotification, pk=pk, user=request.user)
+        notification = get_object_or_404(PushNotification, pk=pk, user=current_user(request))
         if notification.read_at is None:
             notification.read_at = timezone.now()
             notification.save(update_fields=["read_at"])

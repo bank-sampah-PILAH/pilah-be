@@ -5,15 +5,16 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('api', '0033_pushdelivery'),
+        ("api", "0033_pushdelivery"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='pushdelivery',
-            name='device',
-            field=models.ForeignKey(null=True, on_delete=django.db.models.deletion.SET_NULL, to='api.devicetoken'),
+            model_name="pushdelivery",
+            name="device",
+            field=models.ForeignKey(
+                null=True, on_delete=django.db.models.deletion.SET_NULL, to="api.devicetoken"
+            ),
         ),
     ]

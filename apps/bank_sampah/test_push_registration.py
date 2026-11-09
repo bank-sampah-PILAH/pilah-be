@@ -5,7 +5,7 @@ from apps.bank_sampah.services import ApprovalService
 
 
 class RegistrationPushTests(TestCase):
-    def test_approval_notifies_primary_manager(self):
+    def test_approval_notifies_primary_manager(self) -> None:
         bank = BankSampah.objects.create(nama="Melati", alamat="Depok", kota="Depok")
         manager = User.objects.create_user(
             email="manager@example.test",
@@ -21,7 +21,7 @@ class RegistrationPushTests(TestCase):
             PushNotification.objects.filter(user=manager, title="Pendaftaran disetujui").exists()
         )
 
-    def test_rejection_notifies_primary_manager(self):
+    def test_rejection_notifies_primary_manager(self) -> None:
         bank = BankSampah.objects.create(nama="Melati", alamat="Depok", kota="Depok")
         manager = User.objects.create_user(
             email="manager@example.test",
@@ -39,7 +39,7 @@ class RegistrationPushTests(TestCase):
             ).exists()
         )
 
-    def test_application_notifies_active_superadmins(self):
+    def test_application_notifies_active_superadmins(self) -> None:
         from apps.bank_sampah.services import BankOnboardingService
 
         manager = User.objects.create_user(email="applicant@example.test", nama="Manager")
