@@ -12,7 +12,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
-from api.models import BankSampah, Nasabah, Pencairan, Transaksi, User
+from api.models import BankSampah, Nasabah, Pencairan, Transaksi, TransaksiQuerySet, User
 from apps.ledger.api import activity_query, apply_period
 from apps.ledger.serializers import TransactionDetailSerializer
 from apps.reporting.api import StatementPeriodError, export_statement_pdf
@@ -147,7 +147,11 @@ def balance_data(member: Nasabah) -> dict[str, Any]:
     }
 
 
-def activities(member: Nasabah) -> QuerySet[Transaksi]:
+def activities(member: Nasabah) -> TransaksiQuerySet:
+    """Every setoran of the member, voided ones included: the detail lookup needs them.
+
+    The lists read ``activities(member).tercatat()`` instead (PIL-481).
+    """
     return Transaksi.objects.filter(nasabah=member, bank_sampah=member.bank_sampah).order_by(
         "-tanggal", "-created_at", "-id"
     )
@@ -166,7 +170,7 @@ class NasabahHomeView(GenericAPIView[Nasabah]):
                     "keanggotaan": member,
                     "bank_sampah": member.bank_sampah,
                     "saldo": balance_data(member),
-                    "aktivitas_terbaru": activities(member)[:5],
+                    "aktivitas_terbaru": activities(member).tercatat()[:5],
                 }
             ).data
         )
@@ -246,7 +250,7 @@ class NasabahHistoryView(ListAPIView[Transaksi]):
             return self.get_paginated_response(self.get_serializer(payloads, many=True).data)
         try:
             queryset = apply_period(
-                activities(MembershipService.get_active_membership(request)),
+                activities(MembershipService.get_active_membership(request)).tercatat(),
                 request,
                 default=None,
             )
