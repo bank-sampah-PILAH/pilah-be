@@ -46,13 +46,13 @@ def _fcm_client() -> tuple[AuthorizedSession, str]:
     project = os.getenv("FIREBASE_PROJECT_ID") or project
     if not project:
         raise RuntimeError("Firebase project ID is unavailable")
-    return AuthorizedSession(credentials), project
+    return AuthorizedSession(credentials), project  # type: ignore[no-untyped-call]
 
 
 def send_fcm(delivery: PushDelivery, client: tuple[AuthorizedSession, str] | None = None) -> None:
     assert delivery.device is not None
     session, project = client or _fcm_client()
-    response = session.post(  # type: ignore[no-untyped-call]
+    response = session.post(
         f"https://fcm.googleapis.com/v1/projects/{project}/messages:send",
         json={
             "message": {
