@@ -1,4 +1,5 @@
 from django.test import TestCase
+from django.utils import timezone
 
 from api.models import User
 from apps.notification.api import queue_push, queue_push_bulk
@@ -43,11 +44,157 @@ class PushTests(TestCase):
         client = APIClient()
         client.force_authenticate(first)
         response = client.get("/api/v1/notifications/")
-        self.assertEqual([item["id"] for item in response.data], [own.pk])
+        self.assertEqual([item["id"] for item in response.data["results"]], [own.pk])
         self.assertEqual(client.post(f"/api/v1/notifications/{other.pk}/read/").status_code, 404)
         self.assertEqual(client.post(f"/api/v1/notifications/{own.pk}/read/").status_code, 204)
         own.refresh_from_db()
         self.assertIsNotNone(own.read_at)
+
+    def test_notification_list_is_paginated_in_stable_order(self) -> None:
+        from rest_framework.test import APIClient
+
+        user = User.objects.create_user(email="page-push@example.test", nama="Page")
+        notifications = [
+            PushNotification.objects.create(user=user, title=str(index), body="Body")
+            for index in range(23)
+        ]
+        PushNotification.objects.filter(pk__in=[item.pk for item in notifications]).update(
+            created_at=timezone.now()
+        )
+        expected_ids = [item.pk for item in reversed(notifications)]
+        client = APIClient()
+        client.force_authenticate(user)
+
+        first = client.get("/api/v1/notifications/?page=1&page_size=20")
+        second = client.get("/api/v1/notifications/?page=2&page_size=20")
+
+        self.assertEqual(first.data["count"], 23)
+        self.assertEqual([row["id"] for row in first.data["results"]], expected_ids[:20])
+        self.assertIsNone(first.data["previous"])
+        self.assertIsNotNone(first.data["next"])
+        self.assertEqual([row["id"] for row in second.data["results"]], expected_ids[20:])
+        self.assertIsNotNone(second.data["previous"])
+        self.assertIsNone(second.data["next"])
+
+    def test_notification_list_caps_requested_page_size_at_100(self) -> None:
+        from rest_framework.test import APIClient
+
+        user = User.objects.create_user(email="large-page@example.test", nama="Page")
+        PushNotification.objects.bulk_create(
+            [PushNotification(user=user, title="Title", body="Body") for _ in range(101)]
+        )
+        client = APIClient()
+        client.force_authenticate(user)
+
+        response = client.get("/api/v1/notifications/?page_size=1000")
+
+        self.assertEqual(response.data["count"], 101)
+        self.assertEqual(len(response.data["results"]), 100)
+
+    def test_notification_list_excludes_hidden_rows(self) -> None:
+        from rest_framework.test import APIClient
+
+        user = User.objects.create_user(email="hidden-push@example.test", nama="Hidden")
+        visible = PushNotification.objects.create(user=user, title="Visible", body="Body")
+        hidden = PushNotification.objects.create(user=user, title="Hidden", body="Body")
+        hidden.hidden_at = timezone.now()
+        hidden.save(update_fields=["hidden_at"])
+        client = APIClient()
+        client.force_authenticate(user)
+
+        response = client.get("/api/v1/notifications/")
+
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual([row["id"] for row in response.data["results"]], [visible.pk])
+
+    def test_clear_hides_notifications_beyond_first_page(self) -> None:
+        from rest_framework.test import APIClient
+
+        user = User.objects.create_user(email="clear-push@example.test", nama="Clear")
+        PushNotification.objects.bulk_create(
+            [PushNotification(user=user, title=str(index), body="Body") for index in range(27)]
+        )
+        client = APIClient()
+        client.force_authenticate(user)
+        self.assertEqual(client.get("/api/v1/notifications/").data["count"], 27)
+
+        cleared = client.post("/api/v1/notifications/clear/")
+
+        self.assertEqual(cleared.status_code, 200)
+        self.assertEqual(cleared.data, {"hidden_count": 27})
+        self.assertEqual(client.get("/api/v1/notifications/?page_size=100").data["count"], 0)
+        self.assertEqual(PushNotification.objects.filter(user=user).count(), 27)
+        self.assertEqual(
+            PushNotification.objects.filter(user=user, hidden_at__isnull=False).count(), 27
+        )
+
+    def test_clear_is_user_scoped_and_preserves_rows_read_state_and_deliveries(self) -> None:
+        from rest_framework.test import APIClient
+
+        from apps.notification.models import DeviceToken, PushDelivery
+
+        user = User.objects.create_user(email="clear-owner@example.test", nama="Owner")
+        other = User.objects.create_user(email="clear-other@example.test", nama="Other")
+        read_at = timezone.now()
+        read = PushNotification.objects.create(
+            user=user, title="Read", body="Body", read_at=read_at
+        )
+        unread = PushNotification.objects.create(user=user, title="Unread", body="Body")
+        other_notification = PushNotification.objects.create(user=other, title="Other", body="Body")
+        devices = [
+            DeviceToken.objects.create(user=user, token="clear-read", platform="android"),
+            DeviceToken.objects.create(user=user, token="clear-unread", platform="ios"),
+            DeviceToken.objects.create(user=other, token="clear-other", platform="web"),
+        ]
+        for notification, device, status in zip(
+            (read, unread, other_notification), devices, ("sent", "pending", "pending"), strict=True
+        ):
+            PushDelivery.objects.create(notification=notification, device=device, status=status)
+        deliveries_before = list(
+            PushDelivery.objects.order_by("pk").values(
+                "id",
+                "notification_id",
+                "device_id",
+                "status",
+                "attempts",
+                "next_attempt_at",
+                "last_error",
+            )
+        )
+        client = APIClient()
+        self.assertEqual(client.post("/api/v1/notifications/clear/").status_code, 401)
+        client.force_authenticate(user)
+
+        cleared = client.post("/api/v1/notifications/clear/")
+
+        self.assertEqual(cleared.status_code, 200)
+        self.assertEqual(cleared.data, {"hidden_count": 2})
+        read.refresh_from_db()
+        unread.refresh_from_db()
+        other_notification.refresh_from_db()
+        self.assertEqual(read.read_at, read_at)
+        self.assertIsNone(unread.read_at)
+        self.assertIsNotNone(read.hidden_at)
+        self.assertIsNotNone(unread.hidden_at)
+        self.assertIsNone(other_notification.hidden_at)
+        self.assertEqual(PushNotification.objects.count(), 3)
+        self.assertEqual(
+            list(
+                PushDelivery.objects.order_by("pk").values(
+                    "id",
+                    "notification_id",
+                    "device_id",
+                    "status",
+                    "attempts",
+                    "next_attempt_at",
+                    "last_error",
+                )
+            ),
+            deliveries_before,
+        )
+        self.assertEqual(client.post("/api/v1/notifications/clear/").data, {"hidden_count": 0})
+        client.force_authenticate(other)
+        self.assertEqual(client.get("/api/v1/notifications/").data["count"], 1)
 
     def test_enqueue_creates_delivery_for_registered_devices(self) -> None:
         from apps.notification.models import DeviceToken, PushDelivery
