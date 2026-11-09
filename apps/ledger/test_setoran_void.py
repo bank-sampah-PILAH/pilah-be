@@ -228,14 +228,17 @@ class SetoranVoidTests(APITestCase):
 
         self.assertEqual(Decimal(detail.data["saldo_setelah_transaksi"]), Decimal(3000))
 
-    def test_riwayat_lists_the_voided_setoran_but_its_summary_does_not_count_it(self) -> None:
-        self._setor("1.000")
+    def test_riwayat_leaves_the_voided_setoran_out_and_the_summary_stays_the_same(self) -> None:
+        # PIL-481: the UAT found a voided setoran in the riwayat confusing, so the
+        # riwayat rows no longer list it. The row itself stays for the audit trail.
+        kept = self._setor("1.000")
         self._batalkan()
 
         response = self.client.get("/api/v1/aktivitas", {"periode": "semua"})
 
-        statuses = sorted(row["data"]["status"] for row in response.data["results"])
-        self.assertEqual(statuses, ["dibatalkan", "tercatat"])
+        ids = [row["data"]["id"] for row in response.data["results"]]
+        self.assertEqual(ids, [str(kept.id)])
+        self.assertEqual(response.data["count"], 1)
         self.assertEqual(response.data["summary"]["jumlah_transaksi"], 1)
         self.assertEqual(response.data["summary"]["total_setoran"], 3000)
         self.assertEqual(response.data["summary"]["total_berat"], "1.000")

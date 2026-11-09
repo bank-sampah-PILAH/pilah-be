@@ -65,16 +65,17 @@ class VoidedSetoranNasabahTests(APITestCase):
         self.assertEqual(ringkasan["jumlah_transaksi"], 1)
         self.assertEqual(Decimal(ringkasan["total_kg"]), Decimal(1))
 
-    def test_nasabah_riwayat_shows_the_voided_setoran_as_dibatalkan(self) -> None:
+    def test_nasabah_riwayat_with_a_type_filter_leaves_the_voided_setoran_out(self) -> None:
+        # PIL-481: the voided setoran is hidden from the history list, not relabelled.
         self.client.force_authenticate(self.akun)
 
-        for params in ({}, {"periode": "semua", "tipe": "semua"}):
-            with self.subTest(params=params):
-                response = self.client.get("/api/v1/nasabah/me/riwayat", params)
+        response = self.client.get(
+            "/api/v1/nasabah/me/riwayat", {"periode": "semua", "tipe": "semua"}
+        )
 
-                statuses = self._status_per_id(response.data["results"])
-                self.assertEqual(statuses[str(self.batal.id)], "dibatalkan")
-                self.assertEqual(sorted(statuses.values()), ["dibatalkan", "tercatat"])
+        statuses = self._status_per_id(response.data["results"])
+        self.assertNotIn(str(self.batal.id), statuses)
+        self.assertEqual(list(statuses.values()), ["tercatat"])
 
     def test_nasabah_beranda_and_detail_show_the_void(self) -> None:
         self.client.force_authenticate(self.akun)
