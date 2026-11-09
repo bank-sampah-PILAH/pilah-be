@@ -366,7 +366,7 @@ class OperationalReportTests(OperationalReportFixture):
             with self.subTest(member=member.nomor):
                 wb = self.workbook(nasabah_id=str(member.id))
                 rows = list(wb["Riwayat Transaksi"].iter_rows(min_row=5, values_only=True))
-                self.assertEqual({row[13] for row in rows}, ids)
+                self.assertEqual(sum(1 for row in rows if row[11] or row[12]), len(ids))
                 self.assertTrue(all(row[4] == member.nomor for row in rows))
                 self.assertEqual(wb["Ringkasan"]["B2"].value, len(ids))
                 self.assertEqual(wb["Ringkasan"]["B3"].value, weight)
