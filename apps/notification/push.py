@@ -14,14 +14,15 @@ from apps.notification.models import DeviceToken, PushDelivery
 logger = logging.getLogger(__name__)
 
 
-def send_fcm(delivery):
+def send_fcm(delivery: PushDelivery) -> None:
+    assert delivery.device is not None
     credentials, project = google.auth.default(
         scopes=["https://www.googleapis.com/auth/firebase.messaging"]
     )
     project = os.getenv("FIREBASE_PROJECT_ID") or project
     if not project:
         raise RuntimeError("Firebase project ID is unavailable")
-    response = AuthorizedSession(credentials).post(
+    response = AuthorizedSession(credentials).post(  # type: ignore[no-untyped-call]
         f"https://fcm.googleapis.com/v1/projects/{project}/messages:send",
         json={
             "message": {
@@ -37,7 +38,7 @@ def send_fcm(delivery):
     response.raise_for_status()
 
 
-def deliver_pending():
+def deliver_pending() -> None:
     while True:
         with transaction.atomic():
             delivery = (
@@ -50,7 +51,11 @@ def deliver_pending():
             )
             if delivery is None:
                 return
-            device = DeviceToken.objects.select_for_update().filter(pk=delivery.device_id).first()
+            device = (
+                DeviceToken.objects.select_for_update().filter(pk=delivery.device_id).first()
+                if delivery.device_id is not None
+                else None
+            )
             if device is None or device.user_id != delivery.notification.user_id:
                 delivery.delete()
                 continue
