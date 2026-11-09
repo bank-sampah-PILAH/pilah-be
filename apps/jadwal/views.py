@@ -221,7 +221,7 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
                 f"Jadwal di {instance.bank_sampah.nama} tidak lagi ditujukan untuk Anda.",
             )
         if getattr(instance, "_prefetched_objects_cache", None):
-            setattr(instance, "_prefetched_objects_cache", {})
+            instance.__dict__["_prefetched_objects_cache"] = {}
         return Response(serializer.data)
 
     @transaction.atomic
