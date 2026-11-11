@@ -325,6 +325,10 @@ class OperationalReportTests(OperationalReportFixture):
         self.assertEqual(wb["Laporan"]["E2"].value, 0)
 
     def test_export_metadata_names_the_actual_selected_period(self) -> None:
+        # Rolling windows are anchored to today, while the shared fixture is
+        # pinned to October 2026. Add one event dated now so the 1-month window
+        # is never empty — otherwise this test rots as the calendar advances.
+        self.deposit(timezone.now().isoformat(), "1000", "0.100")
         for months in (1, 3, 6, 12):
             with self.subTest(months=months):
                 label = self.workbook(periode=f"{months}_bulan")["Riwayat Transaksi"]["A2"].value
