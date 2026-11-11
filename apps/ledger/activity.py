@@ -27,14 +27,18 @@ PERIODS = {
 def activity_sources(
     bank: BankSampah, request: HttpRequest, member: Nasabah | None = None
 ) -> tuple[TransaksiQuerySet, QuerySet[Pencairan]]:
-    """One authorization/filter policy for history, totals and exports."""
+    """One authorization/filter policy for history, totals and exports.
+
+    A voided setoran is not part of any of them (PIL-481): the riwayat does not list it,
+    and it counts toward nothing. The row itself stays, as the audit trail.
+    """
     period = request.GET.get("periode", "semua")
     kind = request.GET.get("tipe", "semua")
     if period not in PERIODS:
         raise serializers.ValidationError({"periode": "Periode tidak valid"})
     if kind not in {"semua", "setoran", "pencairan"}:
         raise serializers.ValidationError({"tipe": "Tipe harus semua, setoran, atau pencairan"})
-    deposits = Transaksi.objects.filter(bank_sampah=bank)
+    deposits = Transaksi.objects.tercatat().filter(bank_sampah=bank)
     payouts = Pencairan.objects.filter(bank_sampah=bank)
     if member is not None:
         deposits = deposits.filter(nasabah=member)

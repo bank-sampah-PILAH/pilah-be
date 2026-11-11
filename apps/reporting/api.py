@@ -29,7 +29,7 @@ def export_operational_report(bank: BankSampah, request: HttpRequest) -> tuple[b
     """Read all workbook data from one bank/member-filtered database snapshot."""
     with export_snapshot():
         deposits, payouts = operational_queries(bank, request)
-        # The feed lists voided setoran; the workbook is a laporan and leaves them out.
+        # Already left out by activity_sources; kept so the workbook cannot list a void if that changes.
         deposits = deposits.tercatat()
         if not deposits.exists() and not payouts.exists():
             return None
