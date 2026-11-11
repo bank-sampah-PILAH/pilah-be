@@ -11,6 +11,7 @@ from django.db import transaction
 from django.db.models import F, Q, Sum
 from django.utils import timezone
 
+from api.management.commands.seed_proof_photo import ensure_proof_photo
 from api.models import (
     BankSampah,
     DetailTransaksi,
@@ -126,6 +127,7 @@ class Command(BaseCommand):
 
             bank = bank or self._create_bank()
             review_bank = review_bank or self._create_review_bank()
+            ensure_proof_photo(review_bank)
             for name, (email, display_name, role) in ACCOUNTS.items():
                 users[name] = self._ensure_user(
                     users[name],

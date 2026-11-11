@@ -11,6 +11,7 @@ from django.db import transaction
 from django.db.models import F, Sum
 from django.utils import timezone
 
+from api.management.commands.seed_proof_photo import ensure_proof_photo
 from api.models import (
     BankSampah,
     BankSampahApprovalLog,
@@ -220,6 +221,7 @@ class Command(BaseCommand):
                 "invite_token_expires": None,
             },
         )[0]
+        ensure_proof_photo(pending_bank)
         induk_bank = BankSampah.objects.update_or_create(
             pk=INDUK_BANK_ID,
             defaults={

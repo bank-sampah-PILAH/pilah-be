@@ -487,3 +487,20 @@ class SeedStagingReviewAccountTests(TestCase):
 
         with self.assertRaisesMessage(CommandError, "membership identity conflicts"):
             call_command("seed_staging_review_account", confirm=CONFIRMATION)
+
+    def test_reviewer_queue_proof_photo_is_served(self) -> None:
+        call_command("seed_staging_review_account", confirm=CONFIRMATION)
+        client = APIClient()
+        client.force_authenticate(User.objects.get(email=REVIEWER_EMAIL))
+
+        rows = client.get("/api/v1/superadmin/bank-sampah").data["results"]
+        photo_url = rows[0]["foto_kegiatan"]
+        self.assertTrue(photo_url, "the reviewer queue must expose the proof photo")
+
+        photo = client.get(photo_url)
+        self.assertEqual(photo.status_code, 200)
+        self.assertEqual(photo.headers["Content-Type"], "image/png")
+
+        photo_path = BankSampah.objects.get(pk=REVIEW_BANK_ID).foto_kegiatan.name
+        call_command("seed_staging_review_account", confirm=CONFIRMATION)
+        self.assertEqual(BankSampah.objects.get(pk=REVIEW_BANK_ID).foto_kegiatan.name, photo_path)

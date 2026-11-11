@@ -10,7 +10,12 @@ from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from api.management.commands.seed_testing_data import ACTIVE_BANK_ID, CUSTOMER_ONE_ID, Command
+from api.management.commands.seed_testing_data import (
+    ACTIVE_BANK_ID,
+    CUSTOMER_ONE_ID,
+    PENDING_BANK_ID,
+    Command,
+)
 from api.models import (
     BankSampah,
     BankSampahApprovalLog,
@@ -151,6 +156,10 @@ class SeedTestingDataCommandTests(TestCase):
         self.assertEqual(DetailTransaksi.objects.count(), 224)
         self.assertEqual(Saldo.objects.count(), 2)
         self.assertEqual(BankSampahApprovalLog.objects.count(), 1)
+        # Registration makes the proof photo mandatory; the seeded pending bank
+        # must carry one too or the superadmin approval screen shows its empty
+        # state and cannot be exercised.
+        self.assertTrue(BankSampah.objects.get(pk=PENDING_BANK_ID).foto_kegiatan)
 
         for customer in Nasabah.objects.filter(user__isnull=False):
             self.assertGreaterEqual(Transaksi.objects.filter(nasabah=customer).count(), 100)

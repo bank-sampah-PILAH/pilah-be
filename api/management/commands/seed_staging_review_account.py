@@ -8,6 +8,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.db.models import Q
 
+from api.management.commands.seed_proof_photo import ensure_proof_photo
 from api.management.commands.seed_testing_data import ACTIVE_BANK_ID
 from api.models import BankSampah, Nasabah, User
 from apps.bank_sampah.constants import REVIEW_BANK_ID
@@ -47,6 +48,7 @@ class Command(BaseCommand):
         with transaction.atomic():
             bank = self._review_bank()
             self._ensure_review_bank()
+            ensure_proof_photo(BankSampah.objects.get(pk=REVIEW_BANK_ID))
             for email, name, role in REVIEW_ACCOUNTS:
                 user = self._existing_user(email, role, bank)
                 if user is None:
