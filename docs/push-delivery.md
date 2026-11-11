@@ -53,6 +53,11 @@ against demo accounts and a real device, then verify delivery, retry, and invali
 token cleanup before relying on it. Deploying the API alone does not start the
 worker.
 
+The `deliver_push` command also queues one reminder for each eligible recipient
+when a published schedule is two hours from starting. Cloud Scheduler runs it
+every minute; schedules published after that reminder time are skipped instead
+of receiving a misleading late reminder.
+
 The worker reuses one authenticated FCM session for each command run. It still
 holds the delivery row lock while waiting for FCM; moving the request outside the
 transaction needs a claim lease and stale-claim recovery to avoid duplicate sends.

@@ -46,6 +46,7 @@ class JadwalKegiatan(TimestampedModel):
     )
     penerima = models.ManyToManyField("api.Nasabah", related_name="jadwal_kegiatan", blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+    reminder_queued_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         app_label = "api"
