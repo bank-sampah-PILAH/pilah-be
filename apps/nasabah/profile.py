@@ -1,3 +1,5 @@
+from datetime import date
+
 from rest_framework import serializers
 from rest_framework.generics import GenericAPIView
 from rest_framework.request import Request
@@ -6,7 +8,10 @@ from rest_framework.response import Response
 from api.models import User
 from shared_kernel.permissions import IsActiveNasabah
 from shared_kernel.scoping import current_user
-from shared_kernel.validators import normalize_indonesian_phone
+from shared_kernel.validators import (
+    normalize_indonesian_phone,
+    tanggal_lahir_valid,
+)
 
 
 class NasabahProfileSerializer(serializers.ModelSerializer[User]):
@@ -26,6 +31,12 @@ class NasabahProfileSerializer(serializers.ModelSerializer[User]):
 
     def validate_no_hp(self, value: str) -> str:
         return normalize_indonesian_phone(value)
+
+    # Jalur ini sebelumnya tidak memeriksa tanggal lahir sama sekali, jadi
+    # nasabah dapat menyimpan tanggal di masa depan pada profilnya sendiri
+    # sementara jalur pengurus menolaknya. Satu aturan untuk satu field.
+    def validate_tanggal_lahir(self, value: date | None) -> date | None:
+        return tanggal_lahir_valid(value)
 
 
 class NasabahProfileView(GenericAPIView[User]):
