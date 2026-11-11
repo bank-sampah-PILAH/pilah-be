@@ -53,8 +53,11 @@ class ScheduleReminderTests(TestCase):
             reminder_queued_at=reminder_queued_at,
         )
 
-    def test_reminder_targets_selected_members_once_at_two_hour_mark(self) -> None:
-        schedule = self.make_schedule(scope=JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH)
+    def test_reminder_uses_actual_start_time_when_worker_runs_late(self) -> None:
+        schedule = self.make_schedule(
+            scope=JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH,
+            start=timedelta(minutes=20),
+        )
         schedule.penerima.add(self.member)
         other = self.add_member("reminder-other@example.test", "2")
 
@@ -72,7 +75,11 @@ class ScheduleReminderTests(TestCase):
         schedule.refresh_from_db()
         self.assertEqual(schedule.reminder_queued_at, self.now)
         notification = PushNotification.objects.get(user=self.member.user, title="Pengingat jadwal")
-        self.assertIn("dimulai 2 jam lagi", notification.body)
+        self.assertIn(
+            f"dimulai pukul {timezone.localtime(schedule.mulai_pada):%H:%M} WIB",
+            notification.body,
+        )
+        self.assertNotIn("2 jam lagi", notification.body)
 
     def test_default_scope_reminds_all_eligible_members(self) -> None:
         other = self.add_member("reminder-all@example.test", "3")

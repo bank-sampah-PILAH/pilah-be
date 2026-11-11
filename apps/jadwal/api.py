@@ -63,7 +63,7 @@ def queue_due_schedule_reminders(now: datetime | None = None) -> int:
                     title="Pengingat jadwal",
                     body=(
                         f"{jadwal.get_jenis_kegiatan_display()} di {jadwal.bank_sampah.nama} "
-                        f"dimulai 2 jam lagi, pukul {start:%H:%M} WIB. Lokasi: {jadwal.lokasi}."
+                        f"dimulai pukul {start:%H:%M} WIB. Lokasi: {jadwal.lokasi}."
                     ),
                 )
                 if notifications is None:
