@@ -324,7 +324,11 @@ class OperationalReportTests(OperationalReportFixture):
         wb = self.workbook(tipe="pencairan")
         self.assertEqual(wb["Laporan"]["E2"].value, 0)
 
-    def test_export_metadata_names_the_actual_selected_period(self) -> None:
+    @patch(
+        "django.utils.timezone.now",
+        return_value=datetime.fromisoformat("2026-10-08T12:00:00+07:00"),
+    )
+    def test_export_metadata_names_the_actual_selected_period(self, _now: Any) -> None:
         for months in (1, 3, 6, 12):
             with self.subTest(months=months):
                 label = self.workbook(periode=f"{months}_bulan")["Riwayat Transaksi"]["A2"].value
@@ -335,6 +339,34 @@ class OperationalReportTests(OperationalReportFixture):
             self.assertEqual(response.status_code, 200)
             label = load_workbook(BytesIO(response.content))["Riwayat Transaksi"]["A2"].value
             self.assertIn("Semua Periode", label)
+
+    def test_raw_sheet_leaves_out_the_activity_id_and_keeps_the_other_columns(self) -> None:
+        # PIL-480: the pengurus has no use for the internal id of a setoran or pencairan.
+        sheet = self.workbook()["Riwayat Transaksi"]
+
+        self.assertEqual(
+            [cell.value for cell in sheet[4]],
+            [
+                "No",
+                "Tanggal",
+                "Waktu",
+                "Nama Nasabah",
+                "ID Nasabah",
+                "Jenis Sampah",
+                "Berat (kg)",
+                "Harga/kg (Rp)",
+                "Subtotal (Rp)",
+                "Saldo Setelah Transaksi (Rp)",
+                "Tipe",
+                "Nilai Setoran (Rp)",
+                "Pencairan (Rp)",
+            ],
+        )
+        self.assertEqual(sheet.max_column, 13)
+        self.assertEqual({str(span) for span in sheet.merged_cells.ranges}, {"A1:M1", "A2:M2"})
+        event_ids = {str(self.first.id), str(self.second.id), str(self.payout.id)}
+        cells = {str(cell) for row in sheet.iter_rows(min_row=5, values_only=True) for cell in row}
+        self.assertTrue(event_ids.isdisjoint(cells))
 
     def test_member_filter_scopes_both_ledgers_summary_and_category_sheet(self) -> None:
         other = Nasabah.objects.create(
@@ -366,7 +398,7 @@ class OperationalReportTests(OperationalReportFixture):
             with self.subTest(member=member.nomor):
                 wb = self.workbook(nasabah_id=str(member.id))
                 rows = list(wb["Riwayat Transaksi"].iter_rows(min_row=5, values_only=True))
-                self.assertEqual({row[13] for row in rows}, ids)
+                self.assertEqual(sum(1 for row in rows if row[11] or row[12]), len(ids))
                 self.assertTrue(all(row[4] == member.nomor for row in rows))
                 self.assertEqual(wb["Ringkasan"]["B2"].value, len(ids))
                 self.assertEqual(wb["Ringkasan"]["B3"].value, weight)
