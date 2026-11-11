@@ -203,6 +203,7 @@ class SeedPlayDemoAccountsTests(TestCase):
         )
         self.assertEqual(Saldo.objects.filter(nasabah=membership).values().get(), demo_saldo_before)
         self.assertEqual(BankSampah.objects.get(pk=REVIEW_BANK_ID).status, BankSampah.Status.ACTIVE)
+        self.assertTrue(BankSampah.objects.get(pk=REVIEW_BANK_ID).foto_kegiatan)
         self.assertEqual(Transaksi.objects.filter(nasabah=membership).count(), 3)
         self.assertEqual(DetailTransaksi.objects.filter(transaksi__nasabah=membership).count(), 4)
         self.assertEqual(HargaSampah.objects.filter(jenis_sampah__bank_sampah=bank).count(), 4)
