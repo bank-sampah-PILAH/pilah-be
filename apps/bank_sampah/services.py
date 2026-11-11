@@ -7,16 +7,26 @@ from django.db import transaction
 from django.utils import timezone
 
 from api.models import BankSampah, BankSampahApprovalLog, User
-from apps.notification.api import DEFAULT_WA_TEMPLATE
+from apps.notification.api import DEFAULT_WA_TEMPLATE, queue_push
 
 
 class ApprovalService:
     @staticmethod
     @transaction.atomic
     def approve(bank: BankSampah, superadmin: User, catatan: str = "") -> BankSampahApprovalLog:
+        previous_status = bank.status
         bank.status = BankSampah.Status.ACTIVE
         bank.is_active = True
         bank.save(update_fields=["status", "is_active", "updated_at"])
+        if previous_status != BankSampah.Status.ACTIVE:
+            for manager in User.objects.filter(
+                bank_sampah=bank, is_primary_pengelola=True, is_active=True
+            ):
+                queue_push(
+                    manager,
+                    title="Pendaftaran disetujui",
+                    body=f"{bank.nama} sudah aktif. Anda dapat mulai mengelola bank sampah.",
+                )
         return BankSampahApprovalLog.objects.create(
             bank_sampah=bank,
             superadmin=superadmin,
@@ -27,9 +37,19 @@ class ApprovalService:
     @staticmethod
     @transaction.atomic
     def reject(bank: BankSampah, superadmin: User, catatan: str = "") -> BankSampahApprovalLog:
+        previous_status = bank.status
         bank.status = BankSampah.Status.REJECTED
         bank.is_active = False
         bank.save(update_fields=["status", "is_active", "updated_at"])
+        if previous_status != BankSampah.Status.REJECTED:
+            for manager in User.objects.filter(
+                bank_sampah=bank, is_primary_pengelola=True, is_active=True
+            ):
+                queue_push(
+                    manager,
+                    title="Pendaftaran perlu diperbaiki",
+                    body=f"Pendaftaran {bank.nama} belum disetujui. Periksa catatan dan ajukan kembali.",
+                )
         return BankSampahApprovalLog.objects.create(
             bank_sampah=bank,
             superadmin=superadmin,
@@ -68,6 +88,12 @@ class BankOnboardingService:
         user.bank_sampah = bank
         user.is_primary_pengelola = True
         user.save(update_fields=["bank_sampah", "is_primary_pengelola", "updated_at"])
+        for admin in User.objects.filter(role=User.Role.SUPERADMIN, is_active=True):
+            queue_push(
+                admin,
+                title="Pendaftaran bank sampah baru",
+                body=f"{bank.nama} menunggu peninjauan Anda.",
+            )
         return bank
 
     @staticmethod
