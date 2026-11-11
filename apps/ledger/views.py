@@ -283,7 +283,7 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
     )
     @action(detail=True, methods=["post"], url_path="batalkan")
     def batalkan(self, request: Request, pk: str | None = None) -> Response:
-        """Void ("hapus") a setoran: it stays in the riwayat, marked cancelled."""
+        """Void ("hapus") a setoran: hidden from every riwayat, kept for audit and detail."""
         transaksi = self.get_object()
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)

@@ -1,4 +1,4 @@
-"""PIL-428: a voided setoran in the nasabah views; shown as dibatalkan, never counted."""
+"""PIL-428/481: a voided setoran in the nasabah views; hidden from the lists, never counted."""
 
 from decimal import Decimal
 from typing import Any
