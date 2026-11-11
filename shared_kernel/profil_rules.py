@@ -43,8 +43,33 @@ class ProfilFieldRules:
     tempatnya commit sendiri.
     """
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Menolak subclass yang lupa [allowed_genders], pada waktu impor.
+
+        `raise NotImplementedError` di badan method hanya terasa saat sebuah
+        request masuk, dan hanya pada request yang memuat `jenis_kelamin`:
+        serializer yang lupa mendefinisikannya lolos impor dan lolos setiap
+        tes yang tidak menyentuh field itu. Pemeriksaan di sini memindahkan
+        kegagalan ke waktu impor, satu-satunya tempat yang mustahil terlewat.
+
+        Sengaja bukan `abc.ABC`: `ModelSerializer` memakai
+        `SerializerMetaclass`, dan menambahkan `ABCMeta` di sampingnya adalah
+        metaclass conflict. `__init_subclass__` memberi penegakan yang sama
+        tanpa menyentuh metaclass.
+        """
+        super().__init_subclass__(**kwargs)
+        if cls.allowed_genders is ProfilFieldRules.allowed_genders:
+            raise TypeError(
+                f"{cls.__name__} harus mendefinisikan allowed_genders(): "
+                "ProfilFieldRules tidak tahu enum Gender milik modelnya."
+            )
+
     def allowed_genders(self) -> tuple[str, ...]:
-        """Nilai `jenis_kelamin` yang berlaku untuk model serializer ini."""
+        """Nilai `jenis_kelamin` yang berlaku untuk model serializer ini.
+
+        Abstrak: setiap subclass wajib menimpanya, dan `__init_subclass__` di
+        atas yang menegakkannya.
+        """
         raise NotImplementedError
 
     def validate_nama(self, value: Any) -> Any:

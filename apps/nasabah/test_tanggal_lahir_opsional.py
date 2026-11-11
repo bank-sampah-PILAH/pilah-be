@@ -138,3 +138,60 @@ class TanggalLahirOpsionalProfilAkunTests(APITestCase):
         response = self.client.patch(self.url, {"tanggal_lahir": "2999-01-01"}, format="json")
 
         self.assertEqual(response.status_code, 422, response.data)
+
+
+class TanggalLahirOpsionalOnboardingTests(APITestCase):
+    """`PUT /api/v1/onboarding/profile`, jalur yang dipakai aplikasi saat daftar.
+
+    Endpoint ini mewarisi aturannya dari `UserProfileSerializer`, jadi secara
+    kode ia sudah ikut longgar sejak PIL-478. Tetap diuji terpisah karena ini
+    satu-satunya tempat tanggal lahir diminta pada pendaftaran pertama: kalau
+    ada yang mengetatkan kembali serializer profil, di sinilah nasabah baru
+    yang terhalang, bukan di `/nasabah`.
+    """
+
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(
+            email="pendaftar@example.test",
+            nama="Pendaftar Baru",
+            role=User.Role.NASABAH,
+        )
+        self.client.force_authenticate(self.user)
+        self.url = "/api/v1/onboarding/profile"
+
+    def _payload(self, **overrides: object) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "nama": "Pendaftar Baru",
+            "no_hp": "081234567890",
+            "jenis_kelamin": "perempuan",
+            "alamat": "Jl. Kenanga No. 5",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_completes_onboarding_when_tanggal_lahir_is_null(self) -> None:
+        response = self.client.put(self.url, self._payload(tanggal_lahir=None), format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIsNone(response.data["tanggal_lahir"])
+        self.user.refresh_from_db()
+        self.assertIsNone(self.user.tanggal_lahir)
+        self.assertTrue(self.user.is_profile_complete)
+
+    def test_completes_onboarding_when_the_field_is_absent(self) -> None:
+        response = self.client.put(self.url, self._payload(), format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIsNone(response.data["tanggal_lahir"])
+        self.user.refresh_from_db()
+        self.assertIsNone(self.user.tanggal_lahir)
+        self.assertTrue(self.user.is_profile_complete)
+
+    def test_a_future_tanggal_lahir_is_still_rejected(self) -> None:
+        response = self.client.put(
+            self.url, self._payload(tanggal_lahir="2999-01-01"), format="json"
+        )
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.is_profile_complete)
