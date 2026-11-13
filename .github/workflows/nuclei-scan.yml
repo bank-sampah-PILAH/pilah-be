@@ -1,0 +1,217 @@
+# Read-only exposure scan of the DEPLOYED API with Nuclei: things only visible once
+# deployed (DEBUG left on, public docs, wildcard CORS, leaked files, TLS).
+# The Flutter web app lives in pilah-mobile and has its own scan there.
+# Three ways in:
+#   - ci.yml calls it after a successful staging deploy and deploy-cloud-run.yml after the
+#     production deploy (workflow_call), so a bad commit turns red right after it ships.
+#   - weekly cron on the default branch (main): catches drift with no deploy, e.g. a
+#     Fly secret changed by hand.
+#   - manual dispatch (needs this file on main): Actions tab -> Nuclei scan -> Run workflow.
+# The run goes red on any finding except the KNOWN_NOISE list in the Gate step. It gates
+# no PR and never rolls back a deploy; it only flags the commit.
+#
+# No -dast: fuzzing a deployed environment can trigger WhatsApp/GCS and change data.
+# The target is a fixed choice, not a free URL. Only a workflow in this repo can pass
+# target_url (the production deploy does, with the URL it just read from Cloud Run).
+# Otherwise URLs come from repository variables
+# (Settings -> Secrets and variables -> Actions -> Variables):
+#   STAGING_API_URL      (required for staging)
+#   PRODUCTION_API_URL   (production cron and manual runs; the deploy passes its own)
+name: Nuclei scan
+
+on:
+  schedule:
+    # Mondays, off the hour, after scheduled-checks. Staging and production.
+    - cron: "47 3 * * 1"
+  workflow_call:
+    inputs:
+      environment:
+        description: staging or production
+        type: string
+        default: staging
+      target_url:
+        description: HTTPS URL to scan; overrides the repository variable (the production deploy passes the URL it just deployed)
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployed environment to scan
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  contents: read
+
+jobs:
+  nuclei-scan:
+    name: API exposure scan (${{ matrix.environment }})
+    runs-on: ubuntu-latest
+    # The weekly cron scans staging and production; any other trigger scans one environment.
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(github.event_name == 'schedule' && '["staging","production"]' || format('["{0}"]', inputs.environment || 'staging')) }}
+    timeout-minutes: 20
+    concurrency:
+      group: nuclei-scan-${{ matrix.environment }}
+      cancel-in-progress: false
+    env:
+      NUCLEI_IMAGE: projectdiscovery/nuclei:v3.11.0
+      ENVIRONMENT: ${{ matrix.environment }}
+      TARGET_URL_INPUT: ${{ inputs.target_url }}
+      STAGING_API_URL: ${{ vars.STAGING_API_URL }}
+      PRODUCTION_API_URL: ${{ vars.PRODUCTION_API_URL }}
+    steps:
+      - name: Resolve target
+        run: |
+          case "$ENVIRONMENT" in
+            staging) url="$STAGING_API_URL" ;;
+            production) url="$PRODUCTION_API_URL" ;;
+            *) echo "::error::environment must be staging or production, got '$ENVIRONMENT'."; exit 1 ;;
+          esac
+          # A caller (the production deploy) can pass the URL it just deployed.
+          url="${TARGET_URL_INPUT:-$url}"
+          case "$url" in
+            https://*) ;;
+            *) echo "::error::Missing or non-HTTPS API URL for $ENVIRONMENT; set the ${ENVIRONMENT^^}_API_URL repository variable."; exit 1 ;;
+          esac
+          # Reduce the URL to host[:port]: a trailing slash, a path or an explicit port
+          # must not leak into the TLS target (host:443:443) or the result file names.
+          hostport="${url#https://}"
+          hostport="${hostport%%[/?#]*}"
+          case "$hostport" in
+            ""|*@*|*\[*) echo "::error::Unsupported API URL '$url' (userinfo and IPv6 literals are not allowed)."; exit 1 ;;
+          esac
+          host="${hostport%%:*}"
+          port=443
+          case "$hostport" in *:*) port="${hostport#*:}" ;; esac
+          if ! [[ "$port" =~ ^[0-9]{1,5}$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+            echo "::error::Invalid port '$port' in API URL '$url'."; exit 1
+          fi
+          if [ "$port" = 443 ]; then base="https://$host"; else base="https://$host:$port"; fi
+          {
+            echo "TARGET=$base"
+            echo "TLS_TARGET=$host:$port"
+            echo "RESULT_NAME=$host-$port"
+          } >> "$GITHUB_ENV"
+
+      # A scan of an unreachable host finds nothing and would look green.
+      # Cloud Run's frontend reserves /healthz and answers 404 itself, so production is
+      # checked on the API root instead: unauthenticated it answers 401 (or 200/403).
+      - name: Check target is up
+        run: |
+          if [ "$ENVIRONMENT" = production ]; then
+            path=/api/v1/; ok='^(200|401|403)$'
+          else
+            path=/healthz; ok='^200$'
+          fi
+          code=$(curl -sS -o /dev/null -m 30 -w '%{http_code}' "$TARGET$path" || true)
+          echo "$TARGET$path -> $code"
+          [[ "$code" =~ $ok ]] || { echo "::error::$TARGET is not answering on $path (got $code)."; exit 1; }
+
+      - name: Fetch templates
+        run: |
+          mkdir -p nuclei-templates results
+          docker run --rm -v "$PWD/nuclei-templates":/root/nuclei-templates \
+            "$NUCLEI_IMAGE" -update-templates -duc -nc
+
+      # A curated list, not -tags: tags pull in ~3,300 templates (~7,700 requests, over
+      # an hour at a polite rate). These 16 http + 8 ssl templates make ~200 requests and
+      # finish in about a minute.
+      - name: Scan
+        run: |
+          http_templates=""
+          for t in \
+            http/exposures/apis/swagger-api \
+            http/misconfiguration/django-debug-config-enabled \
+            http/exposures/configs/django-variables-exposed \
+            http/exposures/files/django-secret-key \
+            http/exposures/logs/django-debug-exposure \
+            http/technologies/django-detect \
+            http/misconfiguration/http-missing-security-headers \
+            http/vulnerabilities/generic/cors-misconfig \
+            http/vulnerabilities/generic/open-redirect-generic \
+            http/vulnerabilities/generic/host-header-injection \
+            http/vulnerabilities/generic/generic-env \
+            http/exposures/configs/exposed-gitignore \
+            http/exposures/configs/git-config \
+            http/exposures/configs/exposed-vscode \
+            http/exposures/configs/docker-compose-config \
+            http/exposures/configs/dockerfile-hidden-disclosure; do
+            http_templates="$http_templates,/root/nuclei-templates/$t.yaml"
+          done
+          ssl_templates=""
+          for t in expired-ssl deprecated-tls weak-cipher-suites insecure-cipher-suite-detect \
+                   self-signed-ssl mismatched-ssl-certificate revoked-ssl-certificate \
+                   untrusted-root-certificate; do
+            ssl_templates="$ssl_templates,/root/nuclei-templates/ssl/$t.yaml"
+          done
+          run_nuclei() {
+            docker run --rm -v "$PWD/nuclei-templates":/root/nuclei-templates \
+              -v "$PWD/results":/results "$NUCLEI_IMAGE" \
+              -rl 5 -c 3 -timeout 15 -duc -nc -ni -jsonl "$@"
+          }
+          run_nuclei -u "$TARGET" -t "${http_templates#,}" -o "/results/$RESULT_NAME-http.jsonl"
+          run_nuclei -u "$TLS_TARGET" -t "${ssl_templates#,}" -o "/results/$RESULT_NAME-ssl.jsonl"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Nuclei API exposure scan ($ENVIRONMENT, read-only)"
+            echo
+            echo "| Target | Template | Severity | Detail |"
+            echo "| --- | --- | --- | --- |"
+            for f in results/*.jsonl; do
+              [ -s "$f" ] || continue
+              jq -r '"| \(.host) | \(.["template-id"]) | \(.info.severity) | \(.["matcher-name"] // (.["extracted-results"] // [] | join(", "))) |"' "$f"
+            done
+            echo
+            echo "Empty table: no findings. Missing-header items listed under KNOWN_NOISE in the Gate step are accepted."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuclei-results-${{ env.ENVIRONMENT }}
+          path: results/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      # Last, so the summary and artifact exist even when this fails. Gate on the
+      # template, not the severity: swagger-api, cors-misconfig and the TLS checks
+      # are "info" yet exactly what we want to catch. Accepted noise is a list of
+      # [template-id, matcher-name] pairs, so one missing header never hides another:
+      # http-missing-security-headers reports each header as its own matcher. For a
+      # false positive, add its pair (null matcher for templates without one) and say
+      # why in the PR.
+      # Known, accepted hardening debt: no HSTS, Permissions-Policy, COEP, CORP or
+      # X-Permitted-Cross-Domain-Policies on the API. Content-Security-Policy is shipped
+      # and deliberately NOT listed, so dropping it turns this red. django-detect only
+      # fingerprints the stack.
+      - name: Gate
+        run: |
+          KNOWN_NOISE='[
+            ["http-missing-security-headers","strict-transport-security"],
+            ["http-missing-security-headers","permissions-policy"],
+            ["http-missing-security-headers","cross-origin-embedder-policy"],
+            ["http-missing-security-headers","cross-origin-resource-policy"],
+            ["http-missing-security-headers","x-permitted-cross-domain-policies"],
+            ["django-detect",null]
+          ]'
+          shopt -s nullglob
+          files=(results/*.jsonl)
+          [ "${#files[@]}" -gt 0 ] || { echo "::error::No scan results were produced."; exit 1; }
+          findings=$(jq -r --argjson noise "$KNOWN_NOISE" \
+            'select([.["template-id"], .["matcher-name"]] as $k | $noise | any(. == $k) | not)
+             | "\(.host) \(.["template-id"]) [\(.info.severity)] \(.["matcher-name"] // "-") \(.["matched-at"])"' \
+            "${files[@]}")
+          if [ -n "$findings" ]; then
+            echo "::error::Nuclei findings outside KNOWN_NOISE:"
+            echo "$findings"
+            exit 1
+          fi
+          echo "No findings outside KNOWN_NOISE."
