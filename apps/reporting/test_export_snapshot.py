@@ -9,11 +9,25 @@ from unittest.mock import patch
 
 from django.db import DatabaseError, connection, connections, transaction
 from django.db.models import QuerySet
+from django.test import TestCase
 
-from api.models import DetailTransaksi, Pencairan, Transaksi
+from api.models import DetailTransaksi, Pencairan, Transaksi, TransaksiQuerySet
 from apps.reporting.operational import OperationalSummary, operational_summary
 from apps.reporting.snapshot import export_snapshot
 from apps.reporting.test_operational_report import OperationalReportFixture
+
+
+class ExportSnapshotSetupTests(TestCase):
+    def test_snapshot_sets_postgresql_read_only_repeatable_read(self) -> None:
+        with (
+            patch("apps.reporting.snapshot.connection.vendor", "postgresql"),
+            patch("apps.reporting.snapshot.connection.cursor") as cursor,
+        ):
+            with export_snapshot():
+                pass
+        cursor.return_value.__enter__.return_value.execute.assert_any_call(
+            "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
+        )
 
 
 @skipUnless(connection.vendor == "postgresql", "Real PostgreSQL snapshot regression")
@@ -31,7 +45,7 @@ class ExportSnapshotTests(OperationalReportFixture):
         with ThreadPoolExecutor(max_workers=1) as executor:
 
             def after_summary(
-                deposits: QuerySet[Transaksi], payouts: QuerySet[Pencairan]
+                deposits: TransaksiQuerySet, payouts: QuerySet[Pencairan]
             ) -> OperationalSummary:
                 summary = operational_summary(deposits, payouts)
                 executor.submit(writer).result(timeout=10)
@@ -42,7 +56,8 @@ class ExportSnapshotTests(OperationalReportFixture):
 
     def assert_original_snapshot(self, wb: Any) -> None:
         rows = list(wb["Riwayat Transaksi"].iter_rows(min_row=5, values_only=True))
-        self.assertEqual(len({row[13] for row in rows}), wb["Ringkasan"]["B2"].value)
+        # One event per row that carries a value: a setoran puts its total on its first item row.
+        self.assertEqual(sum(1 for row in rows if row[11] or row[12]), wb["Ringkasan"]["B2"].value)
         self.assertEqual(sum(row[11] or 0 for row in rows), wb["Ringkasan"]["B4"].value)
         self.assertEqual(sum(row[12] or 0 for row in rows), wb["Ringkasan"]["B5"].value)
         self.assertEqual(sum(row[6] or 0 for row in rows), wb["Ringkasan"]["B3"].value)

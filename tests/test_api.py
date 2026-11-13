@@ -5222,18 +5222,24 @@ class PencairanRiwayatTests(APITestCase):
         self.assertEqual(self._ids(), {str(today.id), str(last_week.id), str(last_month.id)})
         # Expected sets follow the period definitions directly, so the test holds
         # on any date (month starts, year boundaries).
-        this_month = now.date().replace(day=1)
+        today_local = timezone.localdate(now)
+        this_month = today_local.replace(day=1)
         prev_month = (this_month - timedelta(days=1)).replace(day=1)
         made = (today, last_week, last_month)
         cases = {
             "hari_ini": {today},
             "minggu_ini": {today},
-            "bulan_ini": {p for p in made if p.tanggal.date() >= this_month},
-            "bulan_lalu": {p for p in made if prev_month <= p.tanggal.date() < this_month},
+            "bulan_ini": {p for p in made if timezone.localdate(p.tanggal) >= this_month},
+            "bulan_lalu": {
+                p for p in made if prev_month <= timezone.localdate(p.tanggal) < this_month
+            },
         }
-        for periode, expected in cases.items():
-            with self.subTest(periode=periode):
-                self.assertEqual(self._ids(f"?periode={periode}"), {str(p.id) for p in expected})
+        with patch("apps.ledger.services.timezone.localdate", return_value=today_local):
+            for periode, expected in cases.items():
+                with self.subTest(periode=periode):
+                    self.assertEqual(
+                        self._ids(f"?periode={periode}"), {str(p.id) for p in expected}
+                    )
 
     def test_riwayat_custom_range_and_its_errors(self) -> None:
         inside = self._pencairan(self.ahmad, timezone.now() - timedelta(days=3))

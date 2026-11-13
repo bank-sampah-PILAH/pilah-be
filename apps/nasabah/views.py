@@ -1,14 +1,17 @@
+from decimal import Decimal
 from typing import Any
 
 from django.db import IntegrityError, transaction
 from django.db.models import Q, QuerySet
+from django.db.models.functions import Coalesce, Lower
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.models import Nasabah, Saldo, User
+from api.models import BankSampah, Nasabah, Saldo, User
 from apps.authentication.api import register_nasabah, user_state_hint
 from apps.bank_sampah.serializers import ApprovalDecisionSerializer
 from apps.nasabah.keanggotaan import email_terkunci, profil_akun, sinkronkan_dari_akun
@@ -38,13 +41,30 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
     serializer_class = NasabahSerializer
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="urutan",
+                type=str,
+                default="nomor",
+                enum=["nomor", "nama", "terbaru", "saldo_terbesar", "saldo_terkecil"],
+                description="Urutan daftar; nilai kosong/tidak dikenal memakai nomor. Setiap seri dipecahkan oleh nomor.",
+            )
+        ]
+    )
+    def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        return super().list(request, *args, **kwargs)
+
     def get_queryset(self) -> QuerySet[Nasabah]:
         qs = Nasabah.objects.filter(bank_sampah=current_bank(self.request)).select_related("saldo")
         search = self.request.query_params.get("search", "")
         status_filter = self.request.query_params.get("status", "aktif")
         if self.action == "list" and len(search) >= 2:
             qs = qs.filter(
-                Q(nama__icontains=search) | Q(no_hp__icontains=search) | Q(email__icontains=search)
+                Q(nama__icontains=search)
+                | Q(nomor__icontains=search)
+                | Q(no_hp__icontains=search)
+                | Q(email__icontains=search)
             )
         if self.action == "list":
             if status_filter == "aktif":
@@ -55,7 +75,22 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
                 qs = qs.filter(status=Nasabah.Status.PENDING)
             elif status_filter == "ditolak":
                 qs = qs.filter(status=Nasabah.Status.REJECTED)
-        return qs.order_by("nomor")
+        urutan = (
+            self.request.query_params.get("urutan", "nomor") if self.action == "list" else "nomor"
+        )
+        if urutan == "nama":
+            qs = qs.alias(_nama_urutan=Lower("nama"))
+        elif urutan in ("saldo_terbesar", "saldo_terkecil"):
+            # A missing saldo is displayed as zero by NasabahSerializer.
+            qs = qs.alias(_saldo_urutan=Coalesce("saldo__total_saldo", Decimal("0.00")))
+        ordering = {
+            "nomor": ("nomor",),
+            "nama": ("_nama_urutan", "nomor"),
+            "terbaru": ("-tanggal_daftar", "nomor"),
+            "saldo_terbesar": ("-_saldo_urutan", "nomor"),
+            "saldo_terkecil": ("_saldo_urutan", "nomor"),
+        }
+        return qs.order_by(*ordering.get(urutan, ordering["nomor"]))
 
     def get_serializer_class(self) -> type[NasabahSerializer | NasabahDetailSerializer]:
         if self.action == "retrieve":
@@ -65,11 +100,8 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
     def create(self, request: Request) -> Response:
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        nomor = serializer.validated_data["nomor"]
-        no_hp = serializer.validated_data["no_hp"]
         bank = current_bank(request)
-        if Nasabah.objects.filter(bank_sampah=bank, nomor=nomor).exists():
-            return Response({"errors": {"kode": ["ID Nasabah sudah digunakan"]}}, status=422)
+        no_hp = serializer.validated_data["no_hp"]
         if Nasabah.objects.filter(bank_sampah=bank, no_hp=no_hp).exists():
             return Response({"errors": {"no_hp": [_NO_HP_TERPAKAI]}}, status=422)
         email = serializer.validated_data.get("email")
@@ -81,10 +113,15 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
                 {"errors": {"email": ["Email sudah terdaftar sebagai nasabah di bank sampah ini"]}},
                 status=422,
             )
-        nasabah = serializer.save(
-            bank_sampah=bank,
-        )
-        Saldo.objects.create(nasabah=nasabah)
+        with transaction.atomic():
+            # Lock the bank so two concurrent blank-kode creates cannot read the
+            # same maximum: the second waits, then numbers from the committed row.
+            BankSampah.objects.select_for_update().get(pk=bank.pk)
+            nomor = serializer.validated_data.get("nomor") or Nasabah.nomor_berikut(bank.id)
+            if Nasabah.objects.filter(bank_sampah=bank, nomor=nomor).exists():
+                return Response({"errors": {"kode": ["ID Nasabah sudah digunakan"]}}, status=422)
+            nasabah = serializer.save(bank_sampah=bank, nomor=nomor)
+            Saldo.objects.create(nasabah=nasabah)
         return Response(self.get_serializer(nasabah).data, status=status.HTTP_201_CREATED)
 
     def update(self, request: Request, *args: Any, **kwargs: Any) -> Response:

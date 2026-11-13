@@ -1,11 +1,10 @@
 from typing import Any
 
 from django.db.models import Model
-from django.utils import timezone
 from rest_framework import serializers
 
 from api.models import User
-from shared_kernel.validators import normalize_indonesian_phone
+from shared_kernel.profil_rules import ProfilFieldRules
 
 
 class AuthUserSerializer(serializers.ModelSerializer[Model]):
@@ -32,7 +31,7 @@ class AuthUserSerializer(serializers.ModelSerializer[Model]):
         ]
 
 
-class UserProfileSerializer(serializers.ModelSerializer[Model]):
+class UserProfileSerializer(ProfilFieldRules, serializers.ModelSerializer[Model]):
     class Meta:
         model = User
         fields = [
@@ -50,24 +49,8 @@ class UserProfileSerializer(serializers.ModelSerializer[Model]):
         read_only_fields = ["id", "email", "role", "is_profile_complete", "is_primary_pengelola"]
         extra_kwargs = {"alamat": {"required": False, "allow_blank": True}}
 
-    def validate_nama(self, value: Any) -> Any:
-        value = value.strip()
-        if not 3 <= len(value) <= 100:
-            raise serializers.ValidationError("Nama minimal 3 karakter")
-        return value
-
-    def validate_no_hp(self, value: Any) -> Any:
-        return normalize_indonesian_phone(value)
-
-    def validate_jenis_kelamin(self, value: Any) -> Any:
-        if value not in [User.Gender.MALE, User.Gender.FEMALE]:
-            raise serializers.ValidationError("Jenis kelamin wajib dipilih")
-        return value
-
-    def validate_tanggal_lahir(self, value: Any) -> Any:
-        if value > timezone.localdate():
-            raise serializers.ValidationError("Tanggal lahir tidak boleh di masa depan")
-        return value
+    def allowed_genders(self) -> tuple[str, ...]:
+        return (User.Gender.MALE, User.Gender.FEMALE)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         # alamat is only meaningful (and required) for nasabah accounts —

@@ -283,12 +283,13 @@ fixtures. See [Fly.io staging](FLY_STAGING.md) for required variables.
 The staging dashboard is `https://pilah-web-staging.fly.dev`, separate from the
 backend origin `https://pilah-be-staging.fly.dev`. Mobile `BASE_URL_DEV` and
 `BASE_URL_PROD` use backend origins without paths because request paths already
-include `/api/v1`. Production uses the actual provider-generated `pilah-web`
-Cloud Run URL. Set backend repository variable
-`PILAH_WEB_ORIGIN` to that exact HTTPS origin (no path/trailing slash) before
-production deployment; both CORS and CSRF explicitly allow it. Add each dashboard
-origin to the Google Web OAuth client's Authorized JavaScript origins. Backend
-`GOOGLE_CLIENT_ID` must match frontend `GOOGLE_SERVER_CLIENT_ID`.
+include `/api/v1`. Set the backend repository variable `PILAH_WEB_ORIGIN` to the
+canonical dashboard HTTPS origin before production deployment. Set
+`PILAH_WEB_ALLOWED_ORIGINS` to a comma-separated list of exact HTTPS origins to
+allow multiple dashboard hosts for CORS and CSRF. Include the canonical origin.
+If the list is unset, deployment allows only the canonical origin. Add each
+dashboard origin to the Google Web OAuth client's Authorized JavaScript
+origins. Backend `GOOGLE_CLIENT_ID` must match frontend `GOOGLE_SERVER_CLIENT_ID`.
 `PILAH_PUBLIC_APP_URL` is the separate invite-link base, not the API base or CORS
 setting; keep it on the backend host for Android App Links. New invite links use
 `/invite/<token>` and browser requests redirect to `/#/invite/<token>` on
@@ -435,6 +436,18 @@ Nasabah:
 - `PUT /api/v1/nasabah/:id`
 - `PATCH /api/v1/nasabah/:id/status`
 - `GET /api/v1/nasabah/:id/saldo`
+
+Daftar nasabah menerima `urutan=nomor|nama|terbaru|saldo_terbesar|saldo_terkecil`.
+Bawaan (termasuk nilai kosong atau tidak dikenal) adalah `nomor` menaik. `nama`
+mengurutkan A–Z tanpa membedakan huruf besar/kecil; `terbaru` memakai
+`tanggal_daftar` menurun; saldo diurutkan sesuai pilihan, dengan saldo yang
+belum ada dianggap nol. Semua pilihan memakai `nomor` menaik sebagai pemutus
+seri. Pertahankan `urutan`, `search`, dan `status` saat berpindah halaman
+(`page` / `page_size`) agar urutan stabil selama datanya tidak berubah.
+
+`search` (minimal 2 karakter) mencocokkan sebagian atau seluruh nama, ID nasabah
+(`nomor`, tampil sebagai `kode`), nomor HP, atau email, tanpa membedakan huruf
+besar/kecil, dan hanya di bank sampah pemanggil.
 
 Jenis sampah:
 

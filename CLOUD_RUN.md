@@ -14,15 +14,17 @@ Target services:
 ## Dashboard origin and first-deploy ordering
 
 The production dashboard is the separate `pilah-web` Cloud Run service owned by
-`pilah-mobile`. Both services use provider-generated `*.run.app` URLs; do not
-guess a URL hash or configure a custom domain.
+`pilah-mobile`. Look up the provider-generated `*.run.app` URLs for both
+services when configuring a deployment.
 
 1. Deploy the backend-independent dashboard service to obtain its actual URL
    (an initial build may use a placeholder API base and is not ready for login).
    Read it with `gcloud run services describe pilah-web --region <region>
    --project <project> --format='value(status.url)'`.
-2. Set the backend repository variable `PILAH_WEB_ORIGIN` to that exact HTTPS
-   origin, without a path or trailing slash. Configure the production
+2. Set the backend repository variable `PILAH_WEB_ORIGIN` to the canonical
+   dashboard HTTPS origin, without a path or trailing slash. To allow additional
+   hosts, set `PILAH_WEB_ALLOWED_ORIGINS` to a comma-separated list of exact HTTPS
+   origins that includes `PILAH_WEB_ORIGIN`. Configure the production
    repository variables `PILAH_SUPERADMIN_EMAILS` with global admins,
    `PILAH_REVIEW_SUPERADMIN_EMAILS` with review-only Superadmins, and
    `PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS` with the four production review
@@ -31,11 +33,12 @@ guess a URL hash or configure a custom domain.
    verification for the review login identities.
    Missing/invalid origin or allowlists stop deployment before cloud mutations.
 3. Deploy the backend with its existing GCP/DB/storage/OAuth secrets and vars.
-   CORS and CSRF explicitly allow `PILAH_WEB_ORIGIN`, never all origins.
+   CORS and CSRF use `PILAH_WEB_ALLOWED_ORIGINS` when set and fall back to the
+   canonical origin.
 4. Read the actual backend Cloud Run URL and rebuild/redeploy the frontend with
    the backend origin (no path) as its `BASE_URL_PROD` and the matching Google
    Web client ID. Mobile request paths already include `/api/v1`.
-5. Add the exact dashboard origin to the Web OAuth client's **Authorized
+5. Add each dashboard origin to the Web OAuth client's **Authorized
    JavaScript origins** in Google Console. Frontend `GOOGLE_SERVER_CLIENT_ID`
    must equal backend `GOOGLE_CLIENT_ID`. If using the backend callback flow,
    register `<backend-url>/api/v1/auth/google/callback` as the redirect URI.

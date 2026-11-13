@@ -390,6 +390,32 @@ class AuthService:
         return "dashboard"
 
     @staticmethod
+    def discard_incomplete_registration(user: User) -> None:
+        """Deletes an account that never finished its profile, so the same
+        Google identity can register again and choose a different role
+        (CPBI-21 UAT finding: a fresh account whose owner tapped the wrong
+        role was locked out of the choice forever).
+
+        Deliberately narrow: only an incomplete account with no membership
+        record may go. A nasabah row (pengurus-entered or approved) is real
+        field data — never deleted by a session action. A complete profile or
+        a linked bank sampah means the account committed; those refuse too.
+        """
+        if user.is_profile_complete or user.bank_sampah_id:
+            raise AuthServiceError(
+                "Akun sudah lengkap dan tidak dapat dihapus dengan cara ini.",
+                code="registration_not_discardable",
+                status_code=409,
+            )
+        if Nasabah.objects.filter(user=user).exists():
+            raise AuthServiceError(
+                "Akun sudah terhubung dengan data nasabah dan tidak dapat dihapus dengan cara ini.",
+                code="registration_not_discardable",
+                status_code=409,
+            )
+        user.delete()
+
+    @staticmethod
     def _verify_google_token(raw_id_token: str) -> Mapping[str, Any]:
         if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN:
             dev_roles = {

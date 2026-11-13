@@ -6,7 +6,7 @@ from django.db.models import CharField, QuerySet, Value
 from django.http import HttpRequest
 from rest_framework import serializers
 
-from api.models import BankSampah, Nasabah, Pencairan, Transaksi
+from api.models import BankSampah, Nasabah, Pencairan, Transaksi, TransaksiQuerySet
 from apps.ledger.serializers import PencairanDetailSerializer, TransactionListSerializer
 from apps.ledger.services import PencairanService, TransactionFilterService
 
@@ -26,15 +26,19 @@ PERIODS = {
 
 def activity_sources(
     bank: BankSampah, request: HttpRequest, member: Nasabah | None = None
-) -> tuple[QuerySet[Transaksi], QuerySet[Pencairan]]:
-    """One authorization/filter policy for history, totals and exports."""
+) -> tuple[TransaksiQuerySet, QuerySet[Pencairan]]:
+    """One authorization/filter policy for history, totals and exports.
+
+    A voided setoran is not part of any of them (PIL-481): the riwayat does not list it,
+    and it counts toward nothing. The row itself stays, as the audit trail.
+    """
     period = request.GET.get("periode", "semua")
     kind = request.GET.get("tipe", "semua")
     if period not in PERIODS:
         raise serializers.ValidationError({"periode": "Periode tidak valid"})
     if kind not in {"semua", "setoran", "pencairan"}:
         raise serializers.ValidationError({"tipe": "Tipe harus semua, setoran, atau pencairan"})
-    deposits = Transaksi.objects.filter(bank_sampah=bank)
+    deposits = Transaksi.objects.tercatat().filter(bank_sampah=bank)
     payouts = Pencairan.objects.filter(bank_sampah=bank)
     if member is not None:
         deposits = deposits.filter(nasabah=member)
@@ -52,7 +56,9 @@ def activity_sources(
     if search:
         deposits = deposits.filter(nasabah__nama__icontains=search)
         payouts = payouts.filter(nasabah__nama__icontains=search)
-    deposits = TransactionFilterService.apply_period(deposits, request, default=None)
+    deposits = cast(
+        TransaksiQuerySet, TransactionFilterService.apply_period(deposits, request, default=None)
+    )
     payouts = TransactionFilterService.apply_period(payouts, request, default=None)
     if kind == "pencairan":
         deposits = deposits.none()
@@ -92,7 +98,7 @@ def serialize_activity_page(rows: list[dict[str, Any]], bank: BankSampah) -> lis
     payout_ids = [row["id"] for row in rows if row["tipe_aktivitas"] == "pencairan"]
     deposits = (
         Transaksi.objects.filter(bank_sampah=bank, id__in=deposit_ids)
-        .select_related("nasabah", "dicatat_oleh")
+        .select_related("nasabah", "dicatat_oleh", "dibatalkan_oleh")
         .prefetch_related("items")
     )
     payouts = PencairanService.dengan_info_revisi(

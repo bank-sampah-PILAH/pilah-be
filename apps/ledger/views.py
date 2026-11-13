@@ -6,7 +6,7 @@ from uuid import UUID
 from django.db import IntegrityError, transaction
 from django.db.models import Prefetch, QuerySet
 from django.http import HttpResponse
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ParseError
@@ -15,7 +15,15 @@ from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from api.models import BankSampah, DraftPencairan, DraftPencairanItem, Pencairan, Transaksi, User
+from api.models import (
+    BankSampah,
+    DraftPencairan,
+    DraftPencairanItem,
+    Pencairan,
+    Transaksi,
+    TransaksiQuerySet,
+    User,
+)
 from apps.ledger.activity import activity_rows, serialize_activity_page
 from apps.ledger.schema import ACTIVITY_PARAMETERS, ACTIVITY_RESPONSE, ActivityPagination
 from apps.ledger.serializers import (
@@ -30,6 +38,7 @@ from apps.ledger.serializers import (
     PencairanDetailSerializer,
     PencairanEditSerializer,
     PencairanRevisiSerializer,
+    TransactionBatalSerializer,
     TransactionCreateSerializer,
     TransactionDetailSerializer,
     TransactionEditSerializer,
@@ -40,6 +49,7 @@ from apps.ledger.services import (
     DraftTidakBisaDiubah,
     PencairanService,
     SaldoTidakCukup,
+    SetoranDibatalkan,
     TransactionFilterService,
     TransactionService,
 )
@@ -132,7 +142,8 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
     def get_serializer_class(
         self,
     ) -> type[
-        TransactionCreateSerializer
+        TransactionBatalSerializer
+        | TransactionCreateSerializer
         | TransactionDetailSerializer
         | TransactionEditSerializer
         | TransactionListSerializer
@@ -143,16 +154,18 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
             return TransactionDetailSerializer
         if self.action == "partial_update":
             return TransactionEditSerializer
+        if self.action == "batalkan":
+            return TransactionBatalSerializer
         return TransactionListSerializer
 
-    def get_queryset(self) -> QuerySet[Transaksi]:
+    def get_queryset(self) -> TransaksiQuerySet:
         qs = (
             Transaksi.objects.filter(bank_sampah=current_bank(self.request))
-            .select_related("nasabah", "bank_sampah", "dicatat_oleh")
+            .select_related("nasabah", "bank_sampah", "dicatat_oleh", "dibatalkan_oleh")
             .prefetch_related("items")
         )
         # Only the detail response carries the change history.
-        if self.action in {"retrieve", "partial_update"}:
+        if self.action in {"retrieve", "partial_update", "batalkan"}:
             qs = qs.prefetch_related("revisi__diubah_oleh")
         search = self.request.query_params.get("search", "")
         nasabah_id = self.request.query_params.get("nasabah_id")
@@ -163,9 +176,11 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         return qs
 
     def list(self, request: Request) -> Response:
-        qs = self.get_queryset()
+        # PIL-481: the list leaves a voided setoran out. get_queryset stays unfiltered
+        # because detail, edit and void must still find it.
+        counted = self.get_queryset().tercatat()
         try:
-            qs = TransactionFilterService.apply_period(qs, request)
+            qs = TransactionFilterService.apply_period(counted, request)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         page = self.paginate_queryset(qs)
@@ -246,14 +261,52 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
             TransactionService.edit_setoran(
                 current_user(request), transaksi, serializer.validated_data
             )
-        except SaldoTidakCukup as exc:
+        except (SaldoTidakCukup, SetoranDibatalkan) as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(TransactionDetailSerializer(self.get_queryset().get(pk=transaksi.pk)).data)
+
+    @extend_schema(
+        request=TransactionBatalSerializer,
+        responses={
+            200: TransactionDetailSerializer,
+            404: OpenApiResponse(description="No such setoran in the caller's bank sampah."),
+            409: OpenApiResponse(
+                description='Already voided, or its money was already paid out: `{"error": "..."}`.'
+            ),
+            422: OpenApiResponse(
+                description=(
+                    "The alasan is missing, blank or over 255 characters: "
+                    '`{"errors": {"alasan": [...]}}`.'
+                )
+            ),
+        },
+    )
+    @action(detail=True, methods=["post"], url_path="batalkan")
+    def batalkan(self, request: Request, pk: str | None = None) -> Response:
+        """Void ("hapus") a setoran: hidden from every riwayat, kept for audit and detail."""
+        transaksi = self.get_object()
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            TransactionService.batalkan_setoran(
+                current_user(request), transaksi, serializer.validated_data["alasan"]
+            )
+        except (SaldoTidakCukup, SetoranDibatalkan) as exc:
             return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
         return Response(TransactionDetailSerializer(self.get_queryset().get(pk=transaksi.pk)).data)
 
     @action(detail=True, methods=["post"], url_path="notify-wa")
     def notify_wa(self, request: Request, pk: str | None = None) -> Response:
         transaksi = self.get_object()
-        result = send_setoran_receipt(transaksi)
+        # The void's own row lock, held through the send (the gateway call is capped by
+        # WHATSAPP_GATEWAY_TIMEOUT): a void waits for a receipt in flight, and a receipt
+        # requested after a void sees it.
+        with transaction.atomic():
+            try:
+                transaksi = TransactionService.kunci_tercatat(transaksi)
+            except SetoranDibatalkan as exc:
+                return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+            result = send_setoran_receipt(transaksi)
         return Response(result, status=200 if result["success"] else 400)
 
 

@@ -348,3 +348,24 @@ class SeedTestingDataCommandTests(TestCase):
             environment="staging",
             confirm="SEED-PILAH-STAGING-DATA",
         )
+
+    @override_settings(DEBUG=True)
+    def test_reseed_leaves_a_voided_setoran_out_of_the_saldo(self) -> None:
+        # PIL-428: a voided setoran is kept but no longer counts toward the saldo.
+        call_command("seed_testing_data")
+        customer = Nasabah.objects.get(pk=CUSTOMER_ONE_ID)
+        saldo_before = Saldo.objects.get(nasabah=customer).total_saldo
+        voided = Transaksi.objects.filter(nasabah=customer).latest("tanggal")
+        Transaksi.objects.filter(pk=voided.pk).update(
+            status=Transaksi.Status.DIBATALKAN,
+            alasan_batal="Tercatat dua kali",
+            dibatalkan_oleh=User.objects.get(email="pengurus.demo@example.com"),
+            dibatalkan_pada=timezone.now(),
+        )
+
+        call_command("seed_testing_data")
+
+        self.assertEqual(
+            Saldo.objects.get(nasabah=customer).total_saldo,
+            saldo_before - voided.total_nilai,
+        )

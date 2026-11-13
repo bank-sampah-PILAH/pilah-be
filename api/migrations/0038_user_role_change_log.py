@@ -9,7 +9,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0028_transaksi_revisi"),
+        ("api", "0037_add_schedule_reminder"),
     ]
 
     operations = [

@@ -15,7 +15,9 @@ SATUAN_HARGA = "kg"
 
 class JenisSampahSerializer(serializers.ModelSerializer[Model]):
     satuan = serializers.SerializerMethodField()
-    kode = serializers.CharField(source="nomor", required=True, max_length=20)
+    # Kode boleh kosong: tanpa kirim, server menomori otomatis dari kode
+    # terbesar bank sampah ini. Isi manual masih diterima.
+    kode = serializers.CharField(source="nomor", required=False, allow_blank=True, max_length=20)
     # Bukan kolom model: harga masuk sebagai versi pertama (create) atau versi
     # baru (PUT dari aplikasi lama), dan keluar sebagai harga yang berlaku.
     harga_per_kg = serializers.DecimalField(
@@ -38,10 +40,9 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
         read_only_fields = ["id", "satuan", "is_active", "updated_at"]
 
     def validate_kode(self, value: Any) -> Any:
-        value = value.strip()
-        if not value:
-            raise serializers.ValidationError("Kode sampah wajib diisi")
-        return value
+        # Kosong diizinkan: view menomori otomatis karena bank sampah baru
+        # diketahui di sana (current_bank), tidak pada level serializer.
+        return value.strip()
 
     def validate_nama_sampah(self, value: Any) -> Any:
         value = value.strip()
