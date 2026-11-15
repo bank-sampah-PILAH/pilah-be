@@ -62,6 +62,7 @@ from apps.reporting.api import (
     operational_summary,
 )
 from shared_kernel.http_headers import CONTENT_DISPOSITION, IDEMPOTENCY_KEY
+from shared_kernel.pencarian import validasi_pencarian
 from shared_kernel.permissions import (
     IsActivePengelola,
     IsActivePengelolaOrNasabah,
@@ -167,7 +168,7 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         # Only the detail response carries the change history.
         if self.action in {"retrieve", "partial_update", "batalkan"}:
             qs = qs.prefetch_related("revisi__diubah_oleh")
-        search = self.request.query_params.get("search", "")
+        search = validasi_pencarian(self.request.query_params.get("search", ""))
         nasabah_id = self.request.query_params.get("nasabah_id")
         if len(search) >= 2:
             qs = qs.filter(nasabah__nama__icontains=search)
@@ -328,7 +329,7 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
             qs = Pencairan.objects.filter(bank_sampah=_bank_sampah(self.request))
         qs = qs.select_related("nasabah", "bank_sampah", "dicatat_oleh")
         nasabah_id = self.request.query_params.get("nasabah_id")
-        search = self.request.query_params.get("search", "")
+        search = validasi_pencarian(self.request.query_params.get("search", ""))
         if nasabah_id:
             qs = qs.filter(nasabah_id=nasabah_id)
         if len(search) >= 2:
