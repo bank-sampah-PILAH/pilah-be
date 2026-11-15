@@ -13,7 +13,7 @@ class ValidasiPencarianTests(SimpleTestCase):
         for raw in ("a\x00b", "a\x01b", "a\x1fb", "a\x7fb"):
             with self.subTest(raw=raw), self.assertRaises(serializers.ValidationError) as ctx:
                 validasi_pencarian(raw)
-            self.assertIn("search", ctx.exception.detail)  # type: ignore[operator]
+            self.assertIn("search", ctx.exception.detail)
 
     def test_tab_dan_baris_baru_ditolak_juga(self) -> None:
         with self.assertRaises(serializers.ValidationError):

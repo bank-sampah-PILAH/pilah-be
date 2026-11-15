@@ -16,6 +16,7 @@ from api.models import DetailTransaksi, Pencairan, Transaksi, TransaksiQuerySet
 from apps.reporting.money import sum_full_rupiah
 from apps.reporting.operational import OperationalSummary, operational_summary
 from shared_kernel.kalkulasi import bulatkan_rupiah
+from shared_kernel.pencarian import validasi_pencarian
 
 
 def export_excel(
@@ -255,7 +256,7 @@ def _export_filter_label(queryset: QuerySet[Transaksi], request: HttpRequest | N
     if request:
         periode_text = period_label(request, default="semua")
     kind = request.GET.get("tipe", "semua") if request else "semua"
-    search = request.GET.get("search", "").strip() if request else ""
+    search = validasi_pencarian(request.GET.get("search", "")).strip() if request else ""
     user_bank = getattr(getattr(request, "user", None), "bank_sampah", None)
     if not first_transaction and user_bank is not None:
         bank_name = user_bank.nama

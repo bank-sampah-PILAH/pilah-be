@@ -9,6 +9,7 @@ from rest_framework import serializers
 from api.models import BankSampah, Nasabah, Pencairan, Transaksi, TransaksiQuerySet
 from apps.ledger.serializers import PencairanDetailSerializer, TransactionListSerializer
 from apps.ledger.services import PencairanService, TransactionFilterService
+from shared_kernel.pencarian import validasi_pencarian
 
 PERIODS = {
     "semua",
@@ -52,7 +53,7 @@ def activity_sources(
             raise serializers.ValidationError({"nasabah_id": exc.detail}) from exc
         deposits = deposits.filter(nasabah_id=member_id)
         payouts = payouts.filter(nasabah_id=member_id)
-    search = request.GET.get("search", "").strip()
+    search = validasi_pencarian(request.GET.get("search", "")).strip()
     if search:
         deposits = deposits.filter(nasabah__nama__icontains=search)
         payouts = payouts.filter(nasabah__nama__icontains=search)
