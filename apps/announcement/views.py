@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID
 
 from django.db.models import Case, CharField, Exists, OuterRef, QuerySet, Subquery, Value, When
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, serializers, status, viewsets
@@ -44,7 +45,11 @@ def _bank_sampah(request: Request) -> BankSampah:
 
 
 def _pk(kwargs: dict[str, str]) -> UUID:
-    return UUID(kwargs["pk"])
+    try:
+        return UUID(kwargs["pk"])
+    except ValueError:
+        # Same outcome as get_object() for an unknown id.
+        raise Http404 from None
 
 
 def _annotate_status_efektif(queryset: QuerySet[Pengumuman]) -> QuerySet[Pengumuman]:
