@@ -102,6 +102,10 @@ class SuperAdminBankSampahViewSet(viewsets.GenericViewSet):  # type: ignore[type
     @action(detail=True, methods=["post"], url_path="approve")
     def approve(self, request: Request, pk: str | None = None) -> Response:
         bank = self.get_object()
+        if bank.status != BankSampah.Status.PENDING:
+            return Response(
+                {"error": "Hanya pengajuan berstatus menunggu yang dapat diproses"}, status=400
+            )
         serializer = ApprovalDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         log = ApprovalService.approve(
@@ -117,6 +121,10 @@ class SuperAdminBankSampahViewSet(viewsets.GenericViewSet):  # type: ignore[type
     @action(detail=True, methods=["post"], url_path="reject")
     def reject(self, request: Request, pk: str | None = None) -> Response:
         bank = self.get_object()
+        if bank.status != BankSampah.Status.PENDING:
+            return Response(
+                {"error": "Hanya pengajuan berstatus menunggu yang dapat diproses"}, status=400
+            )
         serializer = ApprovalDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         log = ApprovalService.reject(
