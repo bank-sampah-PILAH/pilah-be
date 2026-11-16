@@ -202,3 +202,25 @@ class RoleChangeTests(APITestCase):
         )
         self.assertIsNotNone(user.role_change_logs.get().created_at)
         self.assertFalse(locked.role_change_logs.exists())
+
+    def test_a_profile_saved_after_a_role_change_answers_for_the_new_role(self) -> None:
+        # Review on #137 (Tristan P2): the profile request loaded the account
+        # before a role change committed. Its answer must route the client by
+        # the role the account has now, not the one the request loaded.
+        user = self._fresh(User.Role.PENGELOLA)
+        stale = User.objects.get(pk=user.pk)
+        AuthService.change_role(User.objects.get(pk=user.pk), User.Role.NASABAH)
+        self.client.force_authenticate(stale)
+
+        response = self.client.put(
+            "/api/v1/onboarding/profile",
+            {"nama": "Ayu", "no_hp": "+628111111119", "alamat": "Jl. Mawar"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["role"], User.Role.NASABAH)
+        self.assertEqual(response.data["next_step"], "register_nasabah")
+        user.refresh_from_db()
+        self.assertEqual(user.role, User.Role.NASABAH)
+        self.assertTrue(user.is_profile_complete)
