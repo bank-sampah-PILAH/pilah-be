@@ -2508,16 +2508,6 @@ class APISpecTests(APITransactionTestCase):
             ],
         )
 
-    def test_pengelola_induk_can_sign_in(self) -> None:
-        response = self.client.post(
-            "/api/v1/auth/google",
-            {"id_token": "dev-pengelola-induk:induk@example.com:Pengelola Induk"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data["user"]["role"], "pengelola_induk")
-
     def test_nasabah_can_sign_in(self) -> None:
         response = self.client.post(
             "/api/v1/auth/google",
@@ -2580,7 +2570,7 @@ class APISpecTests(APITransactionTestCase):
 
     def test_new_role_logins_return_role_specific_states(self) -> None:
         expected_states = {
-            "dev-pengelola-induk": "complete_profile",
+            "dev-pengelola": "complete_profile",
             "dev-nasabah": "complete_profile",
         }
         for index, (token_prefix, state) in enumerate(expected_states.items(), start=1):
@@ -2665,7 +2655,7 @@ class APISpecTests(APITransactionTestCase):
 
     @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=True)
     def test_google_login_uses_role_assigned_to_existing_account(self) -> None:
-        for role in (User.Role.PENGELOLA_INDUK, User.Role.NASABAH):
+        for role in (User.Role.PENGELOLA, User.Role.NASABAH):
             with self.subTest(role=role):
                 email = f"{role}@example.com"
                 User.objects.create_user(email=email, nama=role, role=role)
@@ -2681,8 +2671,8 @@ class APISpecTests(APITransactionTestCase):
                 self.assertEqual(AccessToken(response.data["access_token"])["role"], role)
                 self.assertEqual(response.data["next_step"], "complete_profile")
 
-    def test_new_roles_do_not_inherit_pengelola_endpoint_access(self) -> None:
-        for role in (User.Role.PENGELOLA_INDUK, User.Role.NASABAH):
+    def test_nasabah_does_not_inherit_pengelola_endpoint_access(self) -> None:
+        for role in (User.Role.NASABAH,):
             with self.subTest(role=role):
                 user = User.objects.create_user(
                     email=f"{role}@example.com",

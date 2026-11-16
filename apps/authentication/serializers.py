@@ -54,7 +54,7 @@ class UserProfileSerializer(ProfilFieldRules, serializers.ModelSerializer[Model]
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         # alamat is only meaningful (and required) for nasabah accounts —
-        # pengelola/pengelola induk give their organization's address on a
+        # pengelola give their organization's address on a
         # separate step and have no use for a personal one here.
         instance = self.instance
         if isinstance(instance, User) and instance.role == User.Role.NASABAH:

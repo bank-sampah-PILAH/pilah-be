@@ -268,7 +268,7 @@ class AuthRegressionTests(RegressionTestCase):
             "/api/v1/transaksi",
             "/api/v1/bank-sampah/me",
         ]
-        for role in (User.Role.PENGELOLA_INDUK, User.Role.NASABAH, User.Role.SUPERADMIN):
+        for role in (User.Role.NASABAH, User.Role.SUPERADMIN):
             user = self.make_user(f"{role}@example.com", role)
             self.auth_as(user)
             for path in paths:
