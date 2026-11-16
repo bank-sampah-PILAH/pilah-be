@@ -42,7 +42,19 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
     def validate_kode(self, value: Any) -> Any:
         # Kosong diizinkan: view menomori otomatis karena bank sampah baru
         # diketahui di sana (current_bank), tidak pada level serializer.
-        return value.strip()
+        value = value.strip()
+        # Edit: validator field DRF (termasuk penolak NUL) sudah berjalan, jadi
+        # nilai ini aman dipakai untuk cek kode ganda di bank yang sama.
+        jenis = self.instance
+        if (
+            value
+            and isinstance(jenis, JenisSampah)
+            and JenisSampah.objects.filter(bank_sampah_id=jenis.bank_sampah_id, nomor=value)
+            .exclude(pk=jenis.pk)
+            .exists()
+        ):
+            raise serializers.ValidationError("Kode sampah sudah digunakan")
+        return value
 
     def validate_nama_sampah(self, value: Any) -> Any:
         value = value.strip()
