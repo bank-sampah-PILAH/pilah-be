@@ -64,6 +64,19 @@ class GoogleRegistrationTests(APITestCase):
                 self.assertTrue(user.email_verified)
 
     @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
+    def test_registration_rejects_legacy_pengelola_induk_role(self, verify: Mock) -> None:
+        token = self._registration_token()
+
+        response = self.client.post(
+            "/api/v1/auth/google/register",
+            {"registration_token": token, "role": "pengelola_induk"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertFalse(User.objects.filter(email=GOOGLE_PROFILE["email"]).exists())
+
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     def test_existing_account_logs_in_with_its_stored_role(self, verify: Mock) -> None:
         user = User.objects.create_user(
             email=str(GOOGLE_PROFILE["email"]),
