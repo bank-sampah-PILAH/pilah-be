@@ -27,7 +27,7 @@ def operational_queries(
 def operational_summary(
     deposits: TransaksiQuerySet, payouts: QuerySet[Pencairan]
 ) -> OperationalSummary:
-    # A voided setoran stays in the riwayat rows but counts toward nothing (PIL-428).
+    # A voided setoran counts toward nothing (PIL-428) and is not listed (PIL-481).
     deposits = deposits.tercatat()
     # Each ledger returns one row regardless of history size. Round per event,
     # not after summing, to preserve legacy full-Rupiah display rules.

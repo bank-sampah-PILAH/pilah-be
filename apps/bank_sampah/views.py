@@ -104,9 +104,12 @@ class SuperAdminBankSampahViewSet(viewsets.GenericViewSet):  # type: ignore[type
         bank = self.get_object()
         serializer = ApprovalDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        log = ApprovalService.approve(
-            bank, current_user(request), serializer.validated_data.get("catatan", "")
-        )
+        try:
+            log = ApprovalService.approve(
+                bank, current_user(request), serializer.validated_data.get("catatan", "")
+            )
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
         return Response(
             {
                 "bank_sampah": self.get_serializer(bank).data,
@@ -119,9 +122,12 @@ class SuperAdminBankSampahViewSet(viewsets.GenericViewSet):  # type: ignore[type
         bank = self.get_object()
         serializer = ApprovalDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        log = ApprovalService.reject(
-            bank, current_user(request), serializer.validated_data.get("catatan", "")
-        )
+        try:
+            log = ApprovalService.reject(
+                bank, current_user(request), serializer.validated_data.get("catatan", "")
+            )
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
         return Response(
             {
                 "bank_sampah": self.get_serializer(bank).data,

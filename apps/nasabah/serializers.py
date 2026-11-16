@@ -2,12 +2,11 @@ from decimal import Decimal
 from typing import Any
 
 from django.db.models import Model
-from django.utils import timezone
 from rest_framework import serializers
 
 from api.models import BankSampah, DetailTransaksi, Nasabah, NasabahApprovalLog, Saldo
 from apps.nasabah.keanggotaan import profil_akun, profil_berbeda, punya_akun
-from shared_kernel.validators import normalize_indonesian_phone
+from shared_kernel.profil_rules import ProfilFieldRules
 
 
 class NasabahApprovalLogSerializer(serializers.ModelSerializer[Model]):
@@ -18,7 +17,7 @@ class NasabahApprovalLogSerializer(serializers.ModelSerializer[Model]):
         fields = ["id", "nasabah_id", "pengurus_email", "status", "catatan", "created_at"]
 
 
-class NasabahSerializer(serializers.ModelSerializer[Model]):
+class NasabahSerializer(ProfilFieldRules, serializers.ModelSerializer[Model]):
     # Kode boleh kosong: tanpa kirim, server menomori otomatis dari ID
     # terbesar keanggotaan bank sampah ini (NAS-001 -> NAS-002, ...). Isi
     # manual masih diterima agar data lama dari aplikasi lama tetap lolos.
@@ -66,24 +65,8 @@ class NasabahSerializer(serializers.ModelSerializer[Model]):
         # diketahui di sana (current_bank), tidak pada level serializer.
         return value.strip()
 
-    def validate_nama(self, value: Any) -> Any:
-        value = value.strip()
-        if not 3 <= len(value) <= 100:
-            raise serializers.ValidationError("Nama minimal 3 karakter")
-        return value
-
-    def validate_no_hp(self, value: Any) -> Any:
-        return normalize_indonesian_phone(value)
-
-    def validate_jenis_kelamin(self, value: Any) -> Any:
-        if value not in [Nasabah.Gender.MALE, Nasabah.Gender.FEMALE]:
-            raise serializers.ValidationError("Jenis kelamin wajib dipilih")
-        return value
-
-    def validate_tanggal_lahir(self, value: Any) -> Any:
-        if value > timezone.localdate():
-            raise serializers.ValidationError("Tanggal lahir tidak boleh di masa depan")
-        return value
+    def allowed_genders(self) -> tuple[str, ...]:
+        return (Nasabah.Gender.MALE, Nasabah.Gender.FEMALE)
 
     def validate_alamat(self, value: Any) -> Any:
         value = value.strip()

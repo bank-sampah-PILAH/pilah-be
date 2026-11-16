@@ -51,7 +51,13 @@ from apps.nasabah.home import (
 )
 from apps.nasabah.profile import NasabahProfileView
 from apps.nasabah.views import NasabahSelfView, NasabahViewSet, RegisterNasabahView, SaldoView
-from apps.notification.views import WATemplateView
+from apps.notification.views import (
+    DeviceTokenView,
+    NotificationClearView,
+    NotificationReadView,
+    NotificationView,
+    WATemplateView,
+)
 from apps.reporting.views import (
     DashboardOperationalTrendsView,
     DashboardRecentTransactionsView,
@@ -73,6 +79,10 @@ router.register(
 )
 
 urlpatterns = [
+    path("notifications/", NotificationView.as_view(), name="notifications"),
+    path("notifications/clear/", NotificationClearView.as_view(), name="notifications-clear"),
+    path("notifications/<int:pk>/read/", NotificationReadView.as_view(), name="notification-read"),
+    path("device-tokens/", DeviceTokenView.as_view(), name="device-tokens"),
     path("aktivitas", ActivityHistoryView.as_view(), name="activity-history"),
     path("nasabah/me/beranda", NasabahHomeView.as_view(), name="nasabah-home"),
     path("nasabah/me/saldo", NasabahBalanceView.as_view(), name="nasabah-own-balance"),

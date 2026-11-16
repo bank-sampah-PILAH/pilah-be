@@ -9,6 +9,7 @@ from rest_framework import serializers
 from api.models import BankSampah, Nasabah, Pencairan, Transaksi, TransaksiQuerySet
 from apps.ledger.serializers import PencairanDetailSerializer, TransactionListSerializer
 from apps.ledger.services import PencairanService, TransactionFilterService
+from shared_kernel.pencarian import validasi_pencarian
 
 PERIODS = {
     "semua",
@@ -27,14 +28,18 @@ PERIODS = {
 def activity_sources(
     bank: BankSampah, request: HttpRequest, member: Nasabah | None = None
 ) -> tuple[TransaksiQuerySet, QuerySet[Pencairan]]:
-    """One authorization/filter policy for history, totals and exports."""
+    """One authorization/filter policy for history, totals and exports.
+
+    A voided setoran is not part of any of them (PIL-481): the riwayat does not list it,
+    and it counts toward nothing. The row itself stays, as the audit trail.
+    """
     period = request.GET.get("periode", "semua")
     kind = request.GET.get("tipe", "semua")
     if period not in PERIODS:
         raise serializers.ValidationError({"periode": "Periode tidak valid"})
     if kind not in {"semua", "setoran", "pencairan"}:
         raise serializers.ValidationError({"tipe": "Tipe harus semua, setoran, atau pencairan"})
-    deposits = Transaksi.objects.filter(bank_sampah=bank)
+    deposits = Transaksi.objects.tercatat().filter(bank_sampah=bank)
     payouts = Pencairan.objects.filter(bank_sampah=bank)
     if member is not None:
         deposits = deposits.filter(nasabah=member)
@@ -48,7 +53,7 @@ def activity_sources(
             raise serializers.ValidationError({"nasabah_id": exc.detail}) from exc
         deposits = deposits.filter(nasabah_id=member_id)
         payouts = payouts.filter(nasabah_id=member_id)
-    search = request.GET.get("search", "").strip()
+    search = validasi_pencarian(request.GET.get("search", "")).strip()
     if search:
         deposits = deposits.filter(nasabah__nama__icontains=search)
         payouts = payouts.filter(nasabah__nama__icontains=search)

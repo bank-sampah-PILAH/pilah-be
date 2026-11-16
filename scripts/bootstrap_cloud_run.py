@@ -28,18 +28,27 @@ REVIEW_ACCOUNT_EMAILS = frozenset(
 REVIEW_SUPERADMIN_EMAIL = "pilah.superadmin@pilah.com"
 
 
-def validate_configuration() -> None:
-    origin = os.environ.get("PILAH_WEB_ORIGIN", "")
+def validate_https_origin(origin: str, setting: str) -> None:
     if not re.fullmatch(
         r"https://[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
         r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+(?::[0-9]{1,5})?",
         origin,
     ):
-        raise ValueError("PILAH_WEB_ORIGIN must be an exact HTTPS origin without a path")
+        raise ValueError(f"{setting} must contain exact HTTPS origins without paths")
     if ":" in origin.removeprefix("https://"):
         port = int(origin.rsplit(":", 1)[1])
         if not 1 <= port <= 65535:
-            raise ValueError("PILAH_WEB_ORIGIN port is invalid")
+            raise ValueError(f"{setting} port is invalid")
+
+
+def validate_configuration() -> None:
+    origin = os.environ.get("PILAH_WEB_ORIGIN", "")
+    validate_https_origin(origin, "PILAH_WEB_ORIGIN")
+    allowed_origins = (os.environ.get("PILAH_WEB_ALLOWED_ORIGINS") or origin).split(",")
+    for allowed_origin in allowed_origins:
+        validate_https_origin(allowed_origin, "PILAH_WEB_ALLOWED_ORIGINS")
+    if origin not in allowed_origins:
+        raise ValueError("PILAH_WEB_ALLOWED_ORIGINS must include PILAH_WEB_ORIGIN")
     emails = [email.strip() for email in os.environ.get("PILAH_SUPERADMIN_EMAILS", "").split(",")]
     # Conservative ASCII dot-atoms/DNS labels accepted by Django validate_email,
     # bounded by User.email's storage length; this preflight has no Django dependency.

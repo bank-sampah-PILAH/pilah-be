@@ -4,7 +4,7 @@ from uuid import UUID
 
 from django.test import override_settings
 
-from api.models import BankSampah, User
+from api.models import BankSampah, BankSampahApprovalLog, User
 from tests.regression.helpers import RegressionTestCase
 
 REVIEW_BANK_ID = UUID("00000000-0000-4000-8000-000000000364")
@@ -67,6 +67,37 @@ class SuperadminRegressionTests(RegressionTestCase):
         self.assertEqual(rejected.status_code, 200)
         rejected_bank.refresh_from_db()
         self.assertEqual(rejected_bank.status, BankSampah.Status.REJECTED)
+
+    def test_bank_decision_only_accepts_pending_banks(self) -> None:
+        self._as_superadmin()
+        pending = self._pending_bank("Sekali Putusan")
+        url = f"/api/v1/superadmin/bank-sampah/{pending.id}"
+        self.assertEqual(self.client.post(f"{url}/approve", {}, format="json").status_code, 200)
+
+        for action in ("approve", "reject"):
+            with self.subTest(status="active", action=action):
+                response = self.client.post(f"{url}/{action}", {}, format="json")
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(
+                    response.data["error"],
+                    "Hanya pengajuan berstatus menunggu yang dapat diproses",
+                )
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, BankSampah.Status.ACTIVE)
+        self.assertTrue(pending.is_active)
+        self.assertEqual(BankSampahApprovalLog.objects.filter(bank_sampah=pending).count(), 1)
+
+        rejected = self._pending_bank("Ditolak")
+        url = f"/api/v1/superadmin/bank-sampah/{rejected.id}"
+        self.assertEqual(self.client.post(f"{url}/reject", {}, format="json").status_code, 200)
+        for action in ("approve", "reject"):
+            with self.subTest(status="rejected", action=action):
+                self.assertEqual(
+                    self.client.post(f"{url}/{action}", {}, format="json").status_code, 400
+                )
+        rejected.refresh_from_db()
+        self.assertEqual(rejected.status, BankSampah.Status.REJECTED)
+        self.assertEqual(BankSampahApprovalLog.objects.filter(bank_sampah=rejected).count(), 1)
 
     def test_retrieve_bank(self) -> None:
         self._as_superadmin()

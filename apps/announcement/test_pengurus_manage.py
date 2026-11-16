@@ -111,3 +111,16 @@ class PengumumanStatusFilterTests(APITestCase):
                 self.assertEqual(response.status_code, 400)
                 self.assertIn("error", response.data)
                 self.assertTrue(Pengumuman.objects.filter(pk=self.rows[status].pk).exists())
+
+
+class PengumumanIdRusakTests(APITestCase):
+    def setUp(self) -> None:
+        self.bank, self.pengelola = _pengelola("Bank Id Rusak")
+        self.client.force_authenticate(self.pengelola)
+
+    def test_id_bukan_uuid_pada_aksi_pengurus_ditolak_404(self) -> None:
+        for aksi in ("tarik", "terbitkan"):
+            with self.subTest(aksi=aksi):
+                response = self.client.post(f"{URL}/id/{aksi}", {}, format="json")
+
+                self.assertEqual(response.status_code, 404)

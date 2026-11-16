@@ -31,8 +31,8 @@ class TransaksiQuerySet(models.QuerySet["Transaksi"]):
         """Setoran that still count: everything but a void (PIL-428).
 
         Saldo, laporan, exports and summaries read through this, so a new
-        report cannot forget to leave voided setoran out. The riwayat feeds
-        list voided rows on purpose and do not.
+        report cannot forget to leave voided setoran out. Since PIL-481 the riwayat
+        lists leave them out as well; only a setoran's own detail still shows a void.
         """
         return self.filter(status=Transaksi.Status.TERCATAT)
 

@@ -15,7 +15,15 @@ from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from api.models import BankSampah, DraftPencairan, DraftPencairanItem, Pencairan, Transaksi, User
+from api.models import (
+    BankSampah,
+    DraftPencairan,
+    DraftPencairanItem,
+    Pencairan,
+    Transaksi,
+    TransaksiQuerySet,
+    User,
+)
 from apps.ledger.activity import activity_rows, serialize_activity_page
 from apps.ledger.schema import ACTIVITY_PARAMETERS, ACTIVITY_RESPONSE, ActivityPagination
 from apps.ledger.serializers import (
@@ -54,6 +62,7 @@ from apps.reporting.api import (
     operational_summary,
 )
 from shared_kernel.http_headers import CONTENT_DISPOSITION, IDEMPOTENCY_KEY
+from shared_kernel.pencarian import validasi_pencarian
 from shared_kernel.permissions import (
     IsActivePengelola,
     IsActivePengelolaOrNasabah,
@@ -150,7 +159,7 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
             return TransactionBatalSerializer
         return TransactionListSerializer
 
-    def get_queryset(self) -> QuerySet[Transaksi]:
+    def get_queryset(self) -> TransaksiQuerySet:
         qs = (
             Transaksi.objects.filter(bank_sampah=current_bank(self.request))
             .select_related("nasabah", "bank_sampah", "dicatat_oleh", "dibatalkan_oleh")
@@ -159,7 +168,7 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         # Only the detail response carries the change history.
         if self.action in {"retrieve", "partial_update", "batalkan"}:
             qs = qs.prefetch_related("revisi__diubah_oleh")
-        search = self.request.query_params.get("search", "")
+        search = validasi_pencarian(self.request.query_params.get("search", ""))
         nasabah_id = self.request.query_params.get("nasabah_id")
         if len(search) >= 2:
             qs = qs.filter(nasabah__nama__icontains=search)
@@ -168,9 +177,11 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         return qs
 
     def list(self, request: Request) -> Response:
-        qs = self.get_queryset()
+        # PIL-481: the list leaves a voided setoran out. get_queryset stays unfiltered
+        # because detail, edit and void must still find it.
+        counted = self.get_queryset().tercatat()
         try:
-            qs = TransactionFilterService.apply_period(qs, request)
+            qs = TransactionFilterService.apply_period(counted, request)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         page = self.paginate_queryset(qs)
@@ -273,7 +284,7 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
     )
     @action(detail=True, methods=["post"], url_path="batalkan")
     def batalkan(self, request: Request, pk: str | None = None) -> Response:
-        """Void ("hapus") a setoran: it stays in the riwayat, marked cancelled."""
+        """Void ("hapus") a setoran: hidden from every riwayat, kept for audit and detail."""
         transaksi = self.get_object()
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -318,7 +329,7 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
             qs = Pencairan.objects.filter(bank_sampah=_bank_sampah(self.request))
         qs = qs.select_related("nasabah", "bank_sampah", "dicatat_oleh")
         nasabah_id = self.request.query_params.get("nasabah_id")
-        search = self.request.query_params.get("search", "")
+        search = validasi_pencarian(self.request.query_params.get("search", ""))
         if nasabah_id:
             qs = qs.filter(nasabah_id=nasabah_id)
         if len(search) >= 2:

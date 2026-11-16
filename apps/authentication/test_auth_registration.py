@@ -38,9 +38,7 @@ class GoogleRegistrationTests(APITestCase):
 
     @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     def test_each_registration_role_creates_an_incomplete_account(self, verify: Mock) -> None:
-        for index, role in enumerate(
-            (User.Role.PENGELOLA, User.Role.PENGELOLA_INDUK, User.Role.NASABAH), start=1
-        ):
+        for index, role in enumerate((User.Role.PENGELOLA, User.Role.NASABAH), start=1):
             with self.subTest(role=role):
                 profile = dict(GOOGLE_PROFILE)
                 profile["sub"] = f"google-{index}"
@@ -62,6 +60,19 @@ class GoogleRegistrationTests(APITestCase):
                 user = User.objects.get(email=profile["email"])
                 self.assertFalse(user.is_profile_complete)
                 self.assertTrue(user.email_verified)
+
+    @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
+    def test_registration_rejects_legacy_pengelola_induk_role(self, verify: Mock) -> None:
+        token = self._registration_token()
+
+        response = self.client.post(
+            "/api/v1/auth/google/register",
+            {"registration_token": token, "role": "pengelola_induk"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 422, response.data)
+        self.assertFalse(User.objects.filter(email=GOOGLE_PROFILE["email"]).exists())
 
     @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     def test_existing_account_logs_in_with_its_stored_role(self, verify: Mock) -> None:
@@ -499,10 +510,6 @@ class RoleOnboardingStateTests(APITestCase):
     def test_all_registration_roles_can_complete_shared_profile(self) -> None:
         expected = {
             User.Role.PENGELOLA: ("dev-pengelola", "register_bank_sampah"),
-            User.Role.PENGELOLA_INDUK: (
-                "dev-pengelola-induk",
-                "register_bank_sampah_induk",
-            ),
             User.Role.NASABAH: ("dev-nasabah", "register_nasabah"),
         }
         for index, (role, (prefix, next_step)) in enumerate(expected.items(), start=1):

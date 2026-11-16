@@ -56,7 +56,8 @@ class ExportSnapshotTests(OperationalReportFixture):
 
     def assert_original_snapshot(self, wb: Any) -> None:
         rows = list(wb["Riwayat Transaksi"].iter_rows(min_row=5, values_only=True))
-        self.assertEqual(len({row[13] for row in rows}), wb["Ringkasan"]["B2"].value)
+        # One event per row that carries a value: a setoran puts its total on its first item row.
+        self.assertEqual(sum(1 for row in rows if row[11] or row[12]), wb["Ringkasan"]["B2"].value)
         self.assertEqual(sum(row[11] or 0 for row in rows), wb["Ringkasan"]["B4"].value)
         self.assertEqual(sum(row[12] or 0 for row in rows), wb["Ringkasan"]["B5"].value)
         self.assertEqual(sum(row[6] or 0 for row in rows), wb["Ringkasan"]["B3"].value)
