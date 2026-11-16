@@ -99,3 +99,11 @@ class KodeNasabahTests(_PengurusFixture):
         self.assertEqual(ganda.status_code, 422)
         self.assertEqual(ganda.json()["errors"]["kode"], ["ID Nasabah sudah digunakan"])
         self.assertEqual(sendiri.status_code, 200)
+
+
+class TokenPerangkatTests(_PengurusFixture):
+    def test_token_dengan_nul_ditolak_422_bukan_500(self) -> None:
+        response = self.client.delete("/api/v1/device-tokens/", {"token": "a\x00b"}, format="json")
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("token", response.json()["errors"])
