@@ -247,6 +247,17 @@ class CspHalamanPengembangTests(SimpleTestCase):
         self.assertEqual(re.findall(TAG_INLINE_TANPA_NONCE, body), [])
         self.assertIn("script=", body)
 
+    def test_subsumber_swagger_disematkan_pada_satu_versi(self) -> None:
+        """`swagger-ui-dist@latest` adalah URL yang isinya berubah sendiri.
+
+        Selama versinya tidak disematkan tidak ada hash yang bisa dipasang,
+        karena hash yang benar hari ini memblokir halaman begitu CDN menaikkan
+        versinya. Penyematan versi harus lebih dulu, `integrity` menyusul
+        (OWASP A08, komponen luar yang dipercaya tanpa diperiksa).
+        """
+        body = self.client.get("/api/docs/").content.decode()
+        self.assertNotIn("swagger-ui-dist@latest", body)
+
     def test_berkas_skrip_swagger_bukan_dokumen_html(self) -> None:
         """Cabang `?script=` menyajikan JavaScript, jadi ia mendapat kebijakan
         API yang paling ketat dan tidak perlu nonce sama sekali."""
