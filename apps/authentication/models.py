@@ -34,11 +34,10 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
 
     class Role(models.TextChoices):
         PENGELOLA = "pengelola", "Pengelola"
-        PENGELOLA_INDUK = "pengelola_induk", "Pengelola Induk"
         NASABAH = "nasabah", "Nasabah"
         SUPERADMIN = "superadmin", "Superadmin"
 
-    GOOGLE_REGISTRATION_ROLES = (Role.PENGELOLA, Role.PENGELOLA_INDUK, Role.NASABAH)
+    GOOGLE_REGISTRATION_ROLES = (Role.PENGELOLA, Role.NASABAH)
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     google_id = models.CharField(max_length=255, blank=True, unique=True, null=True)

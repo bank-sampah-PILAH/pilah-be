@@ -9,7 +9,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0037_add_schedule_reminder"),
+        ("api", "0038_remove_pengelola_induk_role"),
     ]
 
     operations = [
@@ -27,7 +27,6 @@ class Migration(migrations.Migration):
                     models.CharField(
                         choices=[
                             ("pengelola", "Pengelola"),
-                            ("pengelola_induk", "Pengelola Induk"),
                             ("nasabah", "Nasabah"),
                             ("superadmin", "Superadmin"),
                         ],
@@ -39,7 +38,6 @@ class Migration(migrations.Migration):
                     models.CharField(
                         choices=[
                             ("pengelola", "Pengelola"),
-                            ("pengelola_induk", "Pengelola Induk"),
                             ("nasabah", "Nasabah"),
                             ("superadmin", "Superadmin"),
                         ],

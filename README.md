@@ -17,7 +17,7 @@ PILAH is a Django REST Framework backend for a digital bank sampah management sy
 
 - Google OAuth token verification with JWT session issuance
 - Development auth token support for local testing
-- Login roles for `pengelola`, `pengelola_induk`, `nasabah`, and `superadmin`
+- Login roles for `pengelola`, `nasabah`, and `superadmin`
 - Role-based API access remains scoped to `pengelola` and `superadmin`
 - Bank sampah registration with pending, active, and rejected states
 - SuperAdmin approval and rejection workflow
@@ -223,13 +223,7 @@ The `/api-test/` Run Full Flow runner uses the first address in
 `PILAH_SUPERADMIN_EMAILS` as its stable SuperAdmin identity. For local fake-auth
 runs, use an address that is allowlisted and belongs to a SuperAdmin test account.
 
-Pengelola Induk and Nasabah:
-
-```json
-{
-  "id_token": "dev-pengelola-induk:induk@example.com:Pengelola Induk"
-}
-```
+Nasabah:
 
 ```json
 {

@@ -25,6 +25,7 @@ from apps.nasabah.serializers import (
     StatusSerializer,
 )
 from apps.nasabah.services import NasabahApprovalService
+from shared_kernel.pencarian import validasi_pencarian
 from shared_kernel.permissions import IsActivePengelola, IsNasabah, IsNasabahRole
 from shared_kernel.scoping import current_bank, current_user
 
@@ -57,7 +58,7 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
 
     def get_queryset(self) -> QuerySet[Nasabah]:
         qs = Nasabah.objects.filter(bank_sampah=current_bank(self.request)).select_related("saldo")
-        search = self.request.query_params.get("search", "")
+        search = validasi_pencarian(self.request.query_params.get("search", ""))
         status_filter = self.request.query_params.get("status", "aktif")
         if self.action == "list" and len(search) >= 2:
             qs = qs.filter(

@@ -369,10 +369,6 @@ class AuthService:
             return "superadmin_dashboard"
         if not user.is_profile_complete:
             return "complete_profile"
-        if user.role == User.Role.PENGELOLA_INDUK:
-            return (
-                "pengelola_induk_dashboard" if user.bank_sampah_id else "register_bank_sampah_induk"
-            )
         if user.role == User.Role.NASABAH:
             # Routing doesn't gate on approval: a membership application, once
             # submitted, sends the user straight to their own beranda
@@ -421,7 +417,6 @@ class AuthService:
             dev_roles = {
                 "dev-superadmin:": ("dev-superadmin", User.Role.SUPERADMIN),
                 "dev-pengelola:": ("dev-pengelola", User.Role.PENGELOLA),
-                "dev-pengelola-induk:": ("dev-pengelola-induk", User.Role.PENGELOLA_INDUK),
                 "dev-nasabah:": ("dev-nasabah", User.Role.NASABAH),
             }
             for prefix, (subject_prefix, role) in dev_roles.items():

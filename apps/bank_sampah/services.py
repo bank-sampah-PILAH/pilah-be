@@ -10,24 +10,37 @@ from api.models import BankSampah, BankSampahApprovalLog, User
 from apps.authentication.api import lock_for_onboarding
 from apps.notification.api import DEFAULT_WA_TEMPLATE, queue_push
 
+PENDING_ONLY_MESSAGE = "Hanya pengajuan berstatus menunggu yang dapat diproses"
+
 
 class ApprovalService:
     @staticmethod
+    def _lock_pending(bank: BankSampah) -> None:
+        """Lock the row, refresh the caller's instance, and require PENDING.
+
+        The caller's instance may be stale (loaded before a concurrent
+        decision), so the status check must run on the locked row.
+        """
+        BankSampah.objects.select_for_update().get(pk=bank.pk)
+        bank.refresh_from_db()
+        if bank.status != BankSampah.Status.PENDING:
+            raise ValueError(PENDING_ONLY_MESSAGE)
+
+    @staticmethod
     @transaction.atomic
     def approve(bank: BankSampah, superadmin: User, catatan: str = "") -> BankSampahApprovalLog:
-        previous_status = bank.status
+        ApprovalService._lock_pending(bank)
         bank.status = BankSampah.Status.ACTIVE
         bank.is_active = True
         bank.save(update_fields=["status", "is_active", "updated_at"])
-        if previous_status != BankSampah.Status.ACTIVE:
-            for manager in User.objects.filter(
-                bank_sampah=bank, is_primary_pengelola=True, is_active=True
-            ):
-                queue_push(
-                    manager,
-                    title="Pendaftaran disetujui",
-                    body=f"{bank.nama} sudah aktif. Anda dapat mulai mengelola bank sampah.",
-                )
+        for manager in User.objects.filter(
+            bank_sampah=bank, is_primary_pengelola=True, is_active=True
+        ):
+            queue_push(
+                manager,
+                title="Pendaftaran disetujui",
+                body=f"{bank.nama} sudah aktif. Anda dapat mulai mengelola bank sampah.",
+            )
         return BankSampahApprovalLog.objects.create(
             bank_sampah=bank,
             superadmin=superadmin,
@@ -38,19 +51,18 @@ class ApprovalService:
     @staticmethod
     @transaction.atomic
     def reject(bank: BankSampah, superadmin: User, catatan: str = "") -> BankSampahApprovalLog:
-        previous_status = bank.status
+        ApprovalService._lock_pending(bank)
         bank.status = BankSampah.Status.REJECTED
         bank.is_active = False
         bank.save(update_fields=["status", "is_active", "updated_at"])
-        if previous_status != BankSampah.Status.REJECTED:
-            for manager in User.objects.filter(
-                bank_sampah=bank, is_primary_pengelola=True, is_active=True
-            ):
-                queue_push(
-                    manager,
-                    title="Pendaftaran perlu diperbaiki",
-                    body=f"Pendaftaran {bank.nama} belum disetujui. Periksa catatan dan ajukan kembali.",
-                )
+        for manager in User.objects.filter(
+            bank_sampah=bank, is_primary_pengelola=True, is_active=True
+        ):
+            queue_push(
+                manager,
+                title="Pendaftaran perlu diperbaiki",
+                body=f"Pendaftaran {bank.nama} belum disetujui. Periksa catatan dan ajukan kembali.",
+            )
         return BankSampahApprovalLog.objects.create(
             bank_sampah=bank,
             superadmin=superadmin,

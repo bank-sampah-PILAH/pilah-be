@@ -34,8 +34,7 @@ class RoleChangeTests(APITestCase):
         # peran Google." Each target is reached from a different role.
         for start, target in (
             (User.Role.NASABAH, User.Role.PENGELOLA),
-            (User.Role.PENGELOLA, User.Role.PENGELOLA_INDUK),
-            (User.Role.PENGELOLA_INDUK, User.Role.NASABAH),
+            (User.Role.PENGELOLA, User.Role.NASABAH),
         ):
             with self.subTest(start=start, target=target):
                 user = User.objects.create_user(
