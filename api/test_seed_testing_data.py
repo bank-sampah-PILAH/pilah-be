@@ -117,9 +117,7 @@ class SeedTestingDataCommandTests(TestCase):
         )
         self.assertTrue(User.objects.filter(email="pengurus.demo@example.com").exists())
         self.assertTrue(
-            User.objects.filter(
-                email="induk.demo@example.com", role=User.Role.PENGELOLA
-            ).exists()
+            User.objects.filter(email="induk.demo@example.com", role=User.Role.PENGELOLA).exists()
         )
         self.assertTrue(User.objects.filter(email="superadmin.demo@example.com").exists())
         self.assertEqual(Nasabah.objects.count(), 62)

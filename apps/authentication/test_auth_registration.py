@@ -38,9 +38,7 @@ class GoogleRegistrationTests(APITestCase):
 
     @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     def test_each_registration_role_creates_an_incomplete_account(self, verify: Mock) -> None:
-        for index, role in enumerate(
-            (User.Role.PENGELOLA, User.Role.NASABAH), start=1
-        ):
+        for index, role in enumerate((User.Role.PENGELOLA, User.Role.NASABAH), start=1):
             with self.subTest(role=role):
                 profile = dict(GOOGLE_PROFILE)
                 profile["sub"] = f"google-{index}"
