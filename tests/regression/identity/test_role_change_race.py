@@ -149,6 +149,24 @@ class RoleChangeRaceTests(TransactionTestCase):
         self._assert_role_kept(user, User.Role.PENGELOLA, outcome)
         self.assertEqual(user.bank_sampah_id, bank.id)
 
+    def test_a_role_change_waits_for_a_profile_being_completed(self) -> None:
+        # Review on #137 (Tristan P2): completing the profile commits the
+        # account to its role, so a role change arriving mid-save must wait
+        # for it and then be refused.
+        user = User.objects.create_user(email="race-profile@example.com", role=User.Role.PENGELOLA)
+
+        outcome = self._race(
+            user,
+            lambda u: OnboardingService.complete_profile(
+                u, {"nama": "Ayu", "no_hp": "+628111111115"}
+            ),
+            (User, "save"),
+            User.Role.NASABAH,
+        )
+
+        self._assert_role_kept(user, User.Role.PENGELOLA, outcome)
+        self.assertTrue(user.is_profile_complete)
+
     @patch("apps.authentication.services.google_id_token.verify_oauth2_token")
     def test_a_role_change_waits_for_a_google_login_claiming_a_membership(
         self, verify: Mock
