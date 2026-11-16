@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from rest_framework.test import APITestCase
 
-from api.models import BankSampah, User
+from api.models import BankSampah, Nasabah, User
 from apps.waste_catalog.api import buat_jenis_sampah
 
 KODE_TIDAK_VALID = ("A\x00B", ["PET"], {"kode": "PET"})
@@ -60,4 +60,42 @@ class KodeJenisSampahTests(_PengurusFixture):
 
         self.assertEqual(ganda.status_code, 422)
         self.assertEqual(ganda.json()["errors"]["kode"], ["Kode sampah sudah digunakan"])
+        self.assertEqual(sendiri.status_code, 200)
+
+
+class KodeNasabahTests(_PengurusFixture):
+    def setUp(self) -> None:
+        super().setUp()
+        self.nasabah = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-001",
+            nama="Siti",
+            alamat="Jl. Melati 1",
+            no_hp="0811",
+            email="siti@example.test",
+        )
+        Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-002",
+            nama="Budi",
+            alamat="Jl. Melati 2",
+            no_hp="0812",
+            email="budi@example.test",
+        )
+        self.url = f"/api/v1/nasabah/{self.nasabah.id}"
+
+    def test_kode_tidak_valid_ditolak_422_bukan_500(self) -> None:
+        for kode in KODE_TIDAK_VALID:
+            with self.subTest(kode=kode):
+                response = self.client.patch(self.url, {"kode": kode}, format="json")
+
+                self.assertEqual(response.status_code, 422)
+                self.assertIn("kode", response.json()["errors"])
+
+    def test_kode_milik_nasabah_lain_tetap_ditolak_dan_kode_sendiri_diterima(self) -> None:
+        ganda = self.client.patch(self.url, {"kode": " NAS-002 "}, format="json")
+        sendiri = self.client.patch(self.url, {"kode": "NAS-001"}, format="json")
+
+        self.assertEqual(ganda.status_code, 422)
+        self.assertEqual(ganda.json()["errors"]["kode"], ["ID Nasabah sudah digunakan"])
         self.assertEqual(sendiri.status_code, 200)
