@@ -186,6 +186,14 @@ class CspHalamanDjangoTests(SimpleTestCase):
         self.assertEqual(re.findall(r'\sstyle="', body), [])
 
 
+SUBSUMBER_LUAR = r'<(?:script|link)[^>]*\b(?:src|href)="https?://[^"]*"[^>]*>'
+"""Tag yang memuat berkas dari server lain ke dalam halaman kita.
+
+Berkasnya berjalan dengan wewenang halaman ini, jadi siapa pun yang menguasai
+server itu menguasai halaman ini. `integrity` memutus rantai itu: peramban
+menolak berkas yang hashnya tidak cocok.
+"""
+
 TAG_INLINE_TANPA_NONCE = r"<(?:script|style)(?![^>]*\b(?:src=|nonce=))[^>]*>"
 """Tag `<script>`/`<style>` yang bukan berkas luar dan tidak punya nonce.
 
@@ -257,6 +265,20 @@ class CspHalamanPengembangTests(SimpleTestCase):
         """
         body = self.client.get("/api/docs/").content.decode()
         self.assertNotIn("swagger-ui-dist@latest", body)
+
+    def test_docs_memberi_integrity_pada_setiap_subsumber_luar(self) -> None:
+        """Setiap skrip dan gaya dari CDN wajib membawa hashnya sendiri.
+
+        `rel="icon"` dikecualikan karena favicon bukan subsumber yang bisa
+        dieksekusi dan tidak punya mekanisme `integrity`.
+        """
+        body = self.client.get("/api/docs/").content.decode()
+        tag_luar = [tag for tag in re.findall(SUBSUMBER_LUAR, body) if 'rel="icon"' not in tag]
+        self.assertNotEqual(tag_luar, [], body)
+        for tag in tag_luar:
+            with self.subTest(tag=tag):
+                self.assertRegex(tag, r'integrity="sha384-[A-Za-z0-9+/]+={0,2}"')
+                self.assertIn('crossorigin="anonymous"', tag)
 
     def test_berkas_skrip_swagger_bukan_dokumen_html(self) -> None:
         """Cabang `?script=` menyajikan JavaScript, jadi ia mendapat kebijakan
