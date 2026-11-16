@@ -485,6 +485,11 @@ class OnboardingService:
     @staticmethod
     @transaction.atomic
     def complete_profile(user: User, profile_data: Mapping[str, Any]) -> User:
+        # A completed profile commits the account to its role, so this takes
+        # the role-change lock too (PIL-451). The reload also means the
+        # checks below, and the role the caller answers with, are the
+        # account's current ones, not those of the object the request loaded.
+        OnboardingService.lock_account(user)
         # One-shot for pengelola, whose profile step gates their bank
         # registration. A nasabah owns their profile and may re-submit it at
         # any time, whatever their membership status.
