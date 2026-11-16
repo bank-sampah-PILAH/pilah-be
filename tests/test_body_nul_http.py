@@ -48,3 +48,16 @@ class KodeJenisSampahTests(_PengurusFixture):
 
                 self.assertEqual(response.status_code, 422)
                 self.assertIn("kode", response.json()["errors"])
+
+    def test_kode_milik_jenis_lain_tetap_ditolak_dan_kode_sendiri_diterima(self) -> None:
+        buat_jenis_sampah(
+            bank_sampah=self.bank, nomor="HDPE", nama_sampah="Galon", harga_per_kg=Decimal(2000)
+        )
+        url = f"/api/v1/jenis-sampah/{self.jenis.id}"
+
+        ganda = self.client.patch(url, {"kode": " HDPE "}, format="json")
+        sendiri = self.client.patch(url, {"kode": "PET"}, format="json")
+
+        self.assertEqual(ganda.status_code, 422)
+        self.assertEqual(ganda.json()["errors"]["kode"], ["Kode sampah sudah digunakan"])
+        self.assertEqual(sendiri.status_code, 200)
