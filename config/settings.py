@@ -249,6 +249,16 @@ REST_FRAMEWORK = {
 SWAGGER_UI_VERSION = "5.35.0"
 SWAGGER_UI_DIST = f"https://cdn.jsdelivr.net/npm/swagger-ui-dist@{SWAGGER_UI_VERSION}"
 
+# sha384 of the three files at that exact version, passed to the template so
+# the browser refuses anything else. Raising SWAGGER_UI_VERSION means
+# recomputing all three, or the docs page loads nothing at all:
+#   curl -s $SWAGGER_UI_DIST/<file> | openssl dgst -sha384 -binary | base64
+SWAGGER_UI_SRI = {
+    "css": "sha384-WlYgdmXYOOBWL5apwjDEZwN+U3HmXSSu5R6V5aGxEcf7z+KuRNwBhoxKVN1i3D5I",
+    "bundle": "sha384-gjRm0bEPMeTmMh5jT2cHccIwCUZSTd8YC+j0d0sXw0MdGEfScduGpSyF3ZSSLkX9",
+    "standalone": "sha384-My2aDM4r2Mbm3ybHcubKm9O9U8FEjvF/O5nGvE9YK5dzqOTbWEKa79RPJ1krdMaF",
+}
+
 SPECTACULAR_SETTINGS = {
     "TITLE": "PILAH API",
     "DESCRIPTION": "Bank Sampah Management System API",
