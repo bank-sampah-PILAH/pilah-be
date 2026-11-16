@@ -256,8 +256,8 @@ class Command(BaseCommand):
         self._upsert_user(
             user_id=INDUK_PENGELOLA_ID,
             email=identities.induk_email,
-            name="Pengelola Induk PILAH E2E",
-            role=User.Role.PENGELOLA_INDUK,
+            name="Pengurus Bank Induk PILAH E2E",
+            role=User.Role.PENGELOLA,
             bank=induk_bank,
             is_primary=True,
         )
