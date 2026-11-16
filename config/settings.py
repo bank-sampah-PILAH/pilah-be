@@ -241,11 +241,21 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {"statement_pdf": "10/min", "password_login": "5/min"},
 }
 
+# Swagger UI is served from a public CDN. drf-spectacular defaults both of
+# these to `swagger-ui-dist@latest`, a URL whose contents change without
+# notice, so the version is pinned here. 5.35.0 is what `@latest` resolved to
+# on 16 November 2026, which keeps the page byte-identical to what it served
+# before the pin.
+SWAGGER_UI_VERSION = "5.35.0"
+SWAGGER_UI_DIST = f"https://cdn.jsdelivr.net/npm/swagger-ui-dist@{SWAGGER_UI_VERSION}"
+
 SPECTACULAR_SETTINGS = {
     "TITLE": "PILAH API",
     "DESCRIPTION": "Bank Sampah Management System API",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    "SWAGGER_UI_DIST": SWAGGER_UI_DIST,
+    "SWAGGER_UI_FAVICON_HREF": f"{SWAGGER_UI_DIST}/favicon-32x32.png",
 }
 
 SIMPLE_JWT = {
