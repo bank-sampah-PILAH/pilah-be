@@ -81,8 +81,12 @@ class SwaggerUIView(SpectacularSwaggerSplitView):
        menyajikannya sebagai berkas terpisah (`?script=`), yang justru
        disediakan upstream untuk kebijakan CSP yang ketat.
     2. Blok `<style>` tiga baris di templatenya. Itulah sebabnya
-       `template_name` menunjuk salinan yang hanya menimpa blok `head` untuk
-       memasang nonce; sisa templatenya tetap milik upstream.
+       `template_name` menunjuk salinan yang menimpa blok `head` untuk
+       memasang nonce dan blok `body` untuk memasang `integrity`.
+
+    `sri` dikirim dari sini karena nilai hash hidup di `settings`, berpasangan
+    dengan versi yang disematkan di `SWAGGER_UI_VERSION`; template tidak
+    menyimpan satu pun hash sendiri.
     """
 
     template_name = "swagger_ui_bernonce.html"
@@ -95,6 +99,7 @@ class SwaggerUIView(SpectacularSwaggerSplitView):
             return response  # cabang berkas skrip, bukan dokumen HTML
         nonce = nonce_baru()
         response.data["csp_nonce"] = nonce
+        response.data["sri"] = settings.SWAGGER_UI_SRI
         tandai_halaman_bernonce(response, nonce)
         return response
 
