@@ -1,8 +1,9 @@
 from django.db import models
 from django.test import TestCase
 from rest_framework.request import Request
-from rest_framework.test import APIRequestFactory
+from rest_framework.test import APIClient, APIRequestFactory
 from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import AccessToken
 
 from api.models import BankSampah, Nasabah, User
 from shared_kernel.permissions import IsNasabah, IsPengelola
@@ -62,3 +63,16 @@ class AssignedRolesTest(TestCase):
         user.refresh_from_db()
         self.assertEqual(user.role, User.Role.PENGELOLA)
         self.assertEqual(user.roles, [User.Role.PENGELOLA, User.Role.NASABAH])
+
+    def test_authentication_rejects_unowned_and_malformed_claims_but_accepts_legacy_token(self):
+        user = User.objects.create_user(email="claims@example.com")
+        client = APIClient()
+        legacy = AccessToken.for_user(user)
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {legacy}")
+        self.assertEqual(client.get("/api/v1/auth/me").status_code, 200)
+        for claim in ("nasabah", "superadmin", "unknown", "", None, ["pengelola"], 1):
+            with self.subTest(claim=claim):
+                token = AccessToken.for_user(user)
+                token["role"] = claim
+                client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+                self.assertEqual(client.get("/api/v1/auth/me").status_code, 401)
