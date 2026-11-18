@@ -8,7 +8,7 @@ from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 def backfill_roles(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     User = apps.get_model("api", "User")
     users = User.objects.using(schema_editor.connection.alias)
-    for role in users.values_list("role", flat=True).distinct():
+    for role in users.order_by().values_list("role", flat=True).distinct():
         users.filter(role=role).update(roles=[role])
 
 
