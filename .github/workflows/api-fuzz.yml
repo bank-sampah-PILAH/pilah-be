@@ -1,0 +1,136 @@
+# API fuzzing (Schemathesis): pulls the OpenAPI schema from the running
+# Django app, then hurls malformed and boundary-case requests at every
+# endpoint. Targets OWASP API Top 10: API4 unrestricted resource consumption,
+# API6 unauthenticated access, API8 schema/auth mismatches. Weekly cron plus
+# manual dispatch — it is a soak check, not a merge gate.
+name: API fuzzing
+
+on:
+  schedule:
+    # Wednesdays, off the hour, spread from CodeQL's slot.
+    - cron: "37 3 * * 3"
+  workflow_dispatch:
+  # Validate changes to this workflow (or the schema) on PRs touching it.
+  pull_request:
+    branches:
+      - staging
+      - main
+    paths:
+      - ".github/workflows/**"
+
+concurrency:
+  group: api-fuzz
+  cancel-in-progress: false
+
+env:
+  # Same placeholder set scheduled-checks.yml uses; CI never talks to real
+  # Google/Twilio/WhatsApp. DEBUG stays true so drf-spectacular's
+  # debug_only /api/schema/ endpoint is reachable for export.
+  DJANGO_SECRET_KEY: ci-placeholder-secret-key
+  DJANGO_DEBUG: "true"
+  DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+  DJANGO_SETTINGS_MODULE: config.settings
+  PILAH_ALLOW_FAKE_GOOGLE_TOKEN: "true"
+  CORS_ALLOW_ALL_ORIGINS: "true"
+  DB_ENGINE: django.db.backends.sqlite3
+  # File-based scratch DB, not :memory: — the server runs in a separate
+  # process from `migrate`, so both must see the same database file.
+  DB_NAME: ci-fuzz.sqlite3
+
+jobs:
+  schemathesis:
+    name: Schema-driven fuzzing
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install schemathesis
+
+      - name: Run migrations into a scratch SQLite database
+        run: python manage.py migrate --noinput
+
+      - name: Export OpenAPI schema
+        run: python manage.py spectacular --file openapi.yaml --validate
+
+      - name: Start Django server
+        run: |
+          python manage.py runserver 127.0.0.1:8000 > server.log 2>&1 &
+          echo $! > runserver.pid
+          for _ in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:8000/healthz; then
+              break
+            fi
+            sleep 1
+          done
+          curl --silent --fail http://127.0.0.1:8000/healthz
+
+      - name: Mint dev token
+        # PILAH_ALLOW_FAKE_GOOGLE_TOKEN=true lets the OAuth endpoint mint a
+        # real access token for a dev pengelola without touching Google.
+        env:
+          ACCESS: /tmp/access_token
+        run: |
+          token="$(curl --silent --show-error \
+            --header 'Content-Type: application/json' \
+            --data '{"id_token": "dev-pengelola:fuzz@example.com:Fuzz User"}' \
+            http://127.0.0.1:8000/api/v1/auth/google \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')"
+          echo "TOKEN=${token}" >> "${GITHUB_ENV}"
+          # Sanity check: the token must actually authenticate.
+          code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${token}" \
+            http://127.0.0.1:8000/api/v1/auth/me)"
+          [ "$code" = 200 ] || { echo "::error::dev token sanity check got HTTP ${code}"; exit 1; }
+
+      - name: Fuzz API against schema
+        # Informational, not a gate, until the schema documents its error
+        # statuses (ST103 dominates: 401/403/400 are real responses the
+        # schema does not list, not bugs). First run on 2026-11-18 found
+        # 174 unique issues, incl. PUT /onboarding/profile accepting an
+        # empty body with 200 (ST201). Flip the job to blocking once the
+        # schema gaps are closed.
+        id: fuzz
+        continue-on-error: true
+        run: |
+          schemathesis run \
+            --url http://127.0.0.1:8000 \
+            --header "Authorization: Bearer ${TOKEN}" \
+            openapi.yaml \
+            --max-examples 50 \
+            --request-timeout 15 \
+            --report json \
+            --report-dir reports
+
+      - name: Summarize fuzz findings
+        if: always()
+        run: |
+          echo "### Schemathesis findings" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Job is informational until the schema documents error statuses (ST103 mass gap). Flip to blocking once closed." >> "${GITHUB_STEP_SUMMARY}"
+          echo "Known environmental ST101s: /auth/google/start (no Google client in CI), /api/docs/ (debug-only template). Real finding to fix: ST201 PUT /onboarding/profile accepts an empty body with 200." >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload fuzz reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schemathesis-report
+          path: |
+            reports/
+            server.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Stop server
+        if: always()
+        run: kill "$(cat runserver.pid)" 2>/dev/null || true
