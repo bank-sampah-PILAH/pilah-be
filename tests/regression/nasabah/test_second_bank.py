@@ -102,3 +102,30 @@ class SecondBankApplicationTests(RegressionTestCase):
         self.assertEqual(reapplied.status_code, 201, reapplied.data)
         member_b.refresh_from_db()
         self.assertEqual(member_b.status, Nasabah.Status.PENDING)
+
+    def test_once_approved_the_second_bank_is_a_choice_with_its_own_saldo(self) -> None:
+        self.apply_to_bank_b()
+        member_b = Nasabah.objects.get(user=self.customer, bank_sampah=self.bank_b)
+        self.auth_as(self.pengurus_b)
+        self.client.post(f"/api/v1/nasabah/{member_b.id}/approve", {}, format="json")
+
+        unselected = self.saldo()
+        self.assertEqual(unselected.status_code, 422)
+        self.assertEqual(
+            {choice["id"] for choice in unselected.data["errors"]["pilihan"]},
+            {str(self.member_a.id), str(member_b.id)},
+        )
+
+        self.auth_as(self.user)
+        setoran = self.client.post(
+            "/api/v1/transaksi",
+            {
+                "nasabah_id": str(self.member_a.id),
+                "items": [{"jenis_sampah_id": self.make_jenis(), "berat": "2.000"}],
+            },
+            format="json",
+        )
+        self.assertEqual(setoran.status_code, 201, setoran.data)
+
+        self.assertEqual(self.saldo(self.member_a).data["total_saldo"], "7000.00")
+        self.assertEqual(self.saldo(member_b).data["total_saldo"], "0.00")
