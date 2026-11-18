@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from api.models import BankSampah, Nasabah, User
+from apps.authentication.services import AuthService
 from shared_kernel.permissions import IsNasabah, IsPengelola
 
 
@@ -91,3 +92,13 @@ class AssignedRolesTest(TestCase):
         user.roles = [User.Role.PENGELOLA]
         user.save(update_fields=["roles"])
         self.assertEqual(client.post("/api/v1/auth/refresh", {"refresh_token": str(refresh)}, format="json").status_code, 401)
+
+    def test_new_sessions_put_primary_role_on_both_tokens(self):
+        user = User.objects.create_user(
+            email="session@example.com", role=User.Role.NASABAH,
+            roles=[User.Role.NASABAH, User.Role.PENGELOLA],
+        )
+        session = AuthService._session_response(user, is_new_user=False)
+        self.assertEqual(AccessToken(session["access_token"])["role"], "nasabah")
+        self.assertEqual(RefreshToken(session["refresh_token"])["role"], "nasabah")
+        self.assertEqual(session["user"]["role"], "nasabah")
