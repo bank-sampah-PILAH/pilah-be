@@ -31,9 +31,10 @@ class UserManager(BaseUserManager["User"]):
     def create_user(self, email: str, password: str | None = None, **extra_fields: Any) -> "User":
         if not email:
             raise ValueError("Email wajib diisi")
-        email = self.normalize_email(email)
-        user = self.model(email=email, **extra_fields)
+        user = self.model(email=self.normalize_email(email), **extra_fields)
         user.set_password(password)
+        if not user.roles:
+            user.roles = [user.role]
         user.save(using=self._db)
         return user
 
