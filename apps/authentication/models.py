@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Iterable
 from typing import Any
 
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
@@ -9,6 +10,14 @@ from shared_kernel.models import TimestampedModel
 
 
 class UserManager(BaseUserManager["User"]):
+    def bulk_create(self, objs: Iterable["User"], *args: Any, **kwargs: Any) -> list["User"]:
+        users = list(objs)
+        for user in users:
+            if not user.roles:
+                user.roles = [user.role]
+            user.clean()
+        return super().bulk_create(users, *args, **kwargs)
+
     def with_role(self, role: str) -> models.QuerySet["User"]:
         if connections[self.db].features.supports_json_field_contains:
             return self.filter(roles__contains=[role])
