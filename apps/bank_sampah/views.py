@@ -388,17 +388,17 @@ class BankSampahDirectoryView(ListAPIView[BankSampah]):
             kandidat = [(bank, jarak) for bank, jarak in kandidat if jarak <= params["radius_km"]]
         paginator = StandardPagination()
         # Potong dulu, baru serialisasi: halaman 2 tidak mengulang kerja halaman 1.
-        page = paginator.paginate_queryset(kandidat, self.request, view=self)
+        # StandardPagination selalu aktif di view ini, jadi hasilnya list;
+        # `or []` hanya memuaskan tipe stub.
+        page = paginator.paginate_queryset(kandidat, self.request, view=self) or []
         konteks = self.get_serializer_context()
         rows = [
             {
                 **BankSampahDirectorySerializer(bank, context=konteks).data,
                 "jarak_km": f"{jarak:.2f}",
             }
-            for bank, jarak in (kandidat if page is None else page)
+            for bank, jarak in page
         ]
-        if page is None:  # page_size tidak valid: seperti DRF, tanpa amplop.
-            return Response(rows)
         return paginator.get_paginated_response(rows)
 
 
