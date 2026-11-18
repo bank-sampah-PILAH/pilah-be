@@ -3,6 +3,9 @@ from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
 
 from api.models import BankSampah, User
+from apps.bank_sampah.services import BankOnboardingService
+from django.utils import timezone
+from datetime import timedelta
 
 
 class MultiroleTeamTest(TestCase):
@@ -30,3 +33,19 @@ class MultiroleTeamTest(TestCase):
         token["role"] = User.Role.NASABAH
         client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
         self.assertEqual(client.get("/api/v1/team").status_code, 403)
+
+    def test_invite_eligibility_uses_assigned_pengelola_without_changing_primary_role(self):
+        bank = BankSampah.objects.create(
+            nama="Inviting Bank", no_hp_pic="+628123456789", invite_token="test-invite",
+            invite_token_expires=timezone.now() + timedelta(days=1),
+        )
+        user = User.objects.create_user(
+            email="invite-dual@example.com", role=User.Role.NASABAH,
+            roles=[User.Role.NASABAH, User.Role.PENGELOLA],
+        )
+        joined, outcome = BankOnboardingService.accept_invite(user, "test-invite")
+        self.assertEqual(joined.pk, bank.pk)
+        self.assertEqual(outcome, "join_success")
+        user.refresh_from_db()
+        self.assertEqual(user.role, User.Role.NASABAH)
+        self.assertEqual(user.roles, [User.Role.NASABAH, User.Role.PENGELOLA])
