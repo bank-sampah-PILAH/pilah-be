@@ -3,6 +3,13 @@
 from django.db import migrations, models
 
 
+def backfill_roles(apps, schema_editor):
+    User = apps.get_model('api', 'User')
+    users = User.objects.using(schema_editor.connection.alias)
+    for role in users.values_list('role', flat=True).distinct():
+        users.filter(role=role).update(roles=[role])
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -15,4 +22,5 @@ class Migration(migrations.Migration):
             name='roles',
             field=models.JSONField(default=list),
         ),
+        migrations.RunPython(backfill_roles, migrations.RunPython.noop),
     ]
