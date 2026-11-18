@@ -1,5 +1,7 @@
+from unittest.mock import patch
+
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import connection, models
 from django.test import TestCase
 from rest_framework.request import Request
 from rest_framework.test import APIClient, APIRequestFactory
@@ -12,6 +14,44 @@ from shared_kernel.permissions import IsNasabah, IsPengelola
 
 
 class AssignedRolesTest(TestCase):
+    def test_role_queries_without_json_containment_match_assignments_in_any_order(self) -> None:
+        manager = User.objects.create_user(email="fallback-manager@example.com")
+        customer = User.objects.create_user(
+            email="fallback-customer@example.com", role=User.Role.NASABAH
+        )
+        dual = User.objects.create_user(
+            email="fallback-dual@example.com",
+            role=User.Role.NASABAH,
+            roles=[User.Role.NASABAH, User.Role.PENGELOLA],
+        )
+        with patch.object(connection.features, "supports_json_field_contains", False):
+            self.assertEqual(
+                set(User.objects.with_role(User.Role.PENGELOLA).values_list("pk", flat=True)),
+                {manager.pk, dual.pk},
+            )
+            self.assertEqual(
+                set(User.objects.with_role(User.Role.NASABAH).values_list("pk", flat=True)),
+                {customer.pk, dual.pk},
+            )
+            self.assertFalse(User.objects.with_role(User.Role.SUPERADMIN).exists())
+
+    def test_refresh_rejects_tokens_for_missing_or_inactive_accounts(self) -> None:
+        client = APIClient()
+        for state in ("missing", "inactive"):
+            with self.subTest(state=state):
+                user = User.objects.create_user(email=f"refresh-{state}@example.com")
+                token = RefreshToken.for_user(user)
+                if state == "missing":
+                    user.delete()
+                else:
+                    user.is_active = False
+                    user.save(update_fields=["is_active"])
+                response = client.post(
+                    "/api/v1/auth/refresh", {"refresh_token": str(token)}, format="json"
+                )
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(response.data, {"error": "Refresh token invalid / expired"})
+
     def test_removing_nasabah_role_with_existing_membership_is_rejected(self) -> None:
         user = User.objects.create_user(
             email="keep-membership@example.com",
