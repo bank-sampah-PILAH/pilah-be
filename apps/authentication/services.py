@@ -320,7 +320,7 @@ class AuthService:
         match an account that registered as something other than nasabah,
         and that account must not be silently turned into a member.
         """
-        if user.role != User.Role.NASABAH:
+        if User.Role.NASABAH not in user.roles:
             return
         nasabah = Nasabah.objects.filter(
             email__iexact=user.email, is_active=True, user__isnull=True
