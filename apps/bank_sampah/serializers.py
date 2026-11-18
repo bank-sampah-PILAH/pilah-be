@@ -249,5 +249,9 @@ class BankSampahDetailSerializer(serializers.ModelSerializer[Model]):
         ]
 
     def get_layanan(self, obj: BankSampah) -> Any:
-        active = obj.jenis_sampah.filter(is_active=True).order_by("nomor")
+        # .all() memakai cache prefetch; .filter() justru memicu query baru.
+        active = sorted(
+            (jenis for jenis in obj.jenis_sampah.all() if jenis.is_active),
+            key=lambda jenis: jenis.nomor,
+        )
         return DirectoryLayananSerializer(active, many=True).data

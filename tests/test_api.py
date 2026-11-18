@@ -2933,7 +2933,8 @@ class APISpecTests(APITransactionTestCase):
         response = self.client.get("/api/v1/bank-sampah")
 
         self.assertEqual(response.status_code, 200)
-        results = response.data["results"]
+        # Tanpa parameter halaman, direktori mempertahankan daftar polos lama.
+        results = response.data["results"] if isinstance(response.data, dict) else response.data
         names = {item["nama"] for item in results}
         self.assertIn(self.bank.nama, names)
         self.assertIn(unit.nama, names)
