@@ -97,6 +97,11 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
 
     def clean(self) -> None:
         super().clean()
+        self._validate_assigned_roles()
+        self._validate_nasabah_membership_role()
+        self._validate_primary_role()
+
+    def _validate_assigned_roles(self) -> None:
         if (
             not isinstance(self.roles, list)
             or not self.roles
@@ -106,6 +111,8 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
             raise ValidationError(
                 {"roles": "Daftar peran harus berisi peran valid tanpa duplikasi."}
             )
+
+    def _validate_nasabah_membership_role(self) -> None:
         if (
             not self._state.adding
             and self.keanggotaan_nasabah.exists()
@@ -116,6 +123,8 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
                     "role": "Pengguna Nasabah yang masih memiliki keanggotaan tidak dapat berganti peran."
                 }
             )
+
+    def _validate_primary_role(self) -> None:
         if self.role not in self.roles:
             raise ValidationError({"role": "Peran utama harus termasuk dalam daftar peran akun."})
 
