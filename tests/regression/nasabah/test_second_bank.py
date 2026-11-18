@@ -77,3 +77,28 @@ class SecondBankApplicationTests(RegressionTestCase):
         self.assertEqual(approved.status_code, 200, approved.data)
         member_b.refresh_from_db()
         self.assertEqual(member_b.status, Nasabah.Status.APPROVED)
+
+    def test_a_rejection_at_the_second_bank_leaves_the_first_open_and_can_be_appealed(
+        self,
+    ) -> None:
+        self.apply_to_bank_b()
+        member_b = Nasabah.objects.get(user=self.customer, bank_sampah=self.bank_b)
+        self.auth_as(self.pengurus_b)
+        self.client.post(
+            f"/api/v1/nasabah/{member_b.id}/reject",
+            {"catatan": "Alamat di luar wilayah"},
+            format="json",
+        )
+
+        self.assertEqual(self.saldo().status_code, 200)
+        self.assertEqual(self.saldo(member_b).status_code, 403)
+        own = {row["id"]: row for row in self.client.get("/api/v1/nasabah/me").data}
+        self.assertEqual(own[str(self.member_a.id)]["status"], Nasabah.Status.APPROVED)
+        self.assertEqual(own[str(member_b.id)]["status"], Nasabah.Status.REJECTED)
+        self.assertEqual(own[str(member_b.id)]["alasan_penolakan"], "Alamat di luar wilayah")
+
+        reapplied = self.apply_to_bank_b()
+
+        self.assertEqual(reapplied.status_code, 201, reapplied.data)
+        member_b.refresh_from_db()
+        self.assertEqual(member_b.status, Nasabah.Status.PENDING)
