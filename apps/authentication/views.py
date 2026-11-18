@@ -38,6 +38,7 @@ from shared_kernel.scoping import current_user
 
 # Local page a finished OAuth popup redirects to when no `next` URL survives.
 _OAUTH_FALLBACK_PATH = "/api-test/"
+REFRESH_TOKEN_INVALID_MESSAGE = "Refresh token invalid / expired"
 
 
 def _local_next_path(value: str) -> str:
@@ -190,7 +191,7 @@ class RefreshTokenView(APIView):
     def post(self, request: Request) -> Response:
         raw_refresh = request.data.get("refresh_token")  # type: ignore[union-attr]  # DRF types request.data as dict | list; these payloads are objects
         if not raw_refresh:
-            return Response({"error": "Refresh token invalid / expired"}, status=401)
+            return Response({"error": REFRESH_TOKEN_INVALID_MESSAGE}, status=401)
         try:
             refresh = RefreshToken(raw_refresh)
             access = refresh.access_token
@@ -202,12 +203,12 @@ class RefreshTokenView(APIView):
                 access["role"] = token_role(user, refresh)
                 access["email"] = user.email
             else:
-                return Response({"error": "Refresh token invalid / expired"}, status=401)
+                return Response({"error": REFRESH_TOKEN_INVALID_MESSAGE}, status=401)
             return Response({"access_token": str(access), "expires_in": 86400})
         except AuthServiceError as exc:
             return Response({"error": str(exc), "code": exc.code}, status=exc.status_code)
         except Exception:
-            return Response({"error": "Refresh token invalid / expired"}, status=401)
+            return Response({"error": REFRESH_TOKEN_INVALID_MESSAGE}, status=401)
 
 
 class LogoutView(APIView):
