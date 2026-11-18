@@ -4,7 +4,7 @@ from typing import Any, ClassVar
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
-from rest_framework.test import APITestCase
+from rest_framework.test import APITestCase, APITransactionTestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from api.models import BankSampah, Nasabah, Saldo, User
@@ -62,7 +62,7 @@ def gateway_env() -> Any:
     )
 
 
-class RegressionTestCase(APITestCase):
+class RegressionTransactionTestCase(APITransactionTestCase):
     _fake_tokens: ClassVar[Any]
 
     @classmethod
@@ -152,3 +152,7 @@ class RegressionTestCase(APITestCase):
         self.assertEqual(created.status_code, 201)
         result: str = created.data["id"]
         return result
+
+
+class RegressionTestCase(RegressionTransactionTestCase, APITestCase):
+    """Savepoint-based fixtures for contracts that do not own transactions."""

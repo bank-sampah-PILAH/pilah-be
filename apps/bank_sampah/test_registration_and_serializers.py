@@ -17,6 +17,7 @@ from apps.bank_sampah.serializers import (
     BankSampahSerializer,
 )
 from apps.bank_sampah.services import BankOnboardingService
+from apps.waste_catalog.api import buat_jenis_sampah
 
 REGISTRATION = {
     "nama": "Bank Sampah Baru",
@@ -354,12 +355,12 @@ class BankDetailTests(APITestCase):
             ("P-2", "Botol", "plastik", 2000, True),
             ("X-9", "Nonaktif", "dll", 500, False),
         ]:
-            JenisSampah.objects.create(
-                bank_sampah=self.bank,
+            buat_jenis_sampah(
+                self.bank,
+                harga_per_kg=harga,
                 nomor=nomor,
                 nama_sampah=nama_sampah,
                 kategori=kategori,
-                harga_per_kg=harga,
                 is_active=aktif,
             )
 

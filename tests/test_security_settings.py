@@ -5,6 +5,7 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
+from unittest.mock import patch
 
 from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase
@@ -98,3 +99,42 @@ class SecuritySettingsTests(SimpleTestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("PILAH_ALLOW_FAKE_GOOGLE_TOKEN", result.stderr)
+
+    def test_superadmin_allowlists_must_not_overlap(self) -> None:
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "DJANGO_SECRET_KEY": "test-secret-key",
+                "DJANGO_DEBUG": "false",
+                "PILAH_ALLOW_FAKE_GOOGLE_TOKEN": "false",
+                "PILAH_SUPERADMIN_EMAILS": "Global@example.com",
+                "PILAH_REVIEW_SUPERADMIN_EMAILS": " global@EXAMPLE.com ",
+            }
+        )
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import config.settings"],
+            cwd=Path(__file__).resolve().parent.parent,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("PILAH_REVIEW_SUPERADMIN_EMAILS", result.stderr)
+
+    def test_superadmin_allowlist_overlap_fails_during_settings_load(self) -> None:
+        overrides = {
+            "DJANGO_DEBUG": "false",
+            "DJANGO_SECRET_KEY": "test-secret-key",
+            "PILAH_ALLOW_FAKE_GOOGLE_TOKEN": "false",
+            "PILAH_SUPERADMIN_EMAILS": "Global@example.com",
+            "PILAH_REVIEW_SUPERADMIN_EMAILS": " global@EXAMPLE.com ",
+        }
+        try:
+            with patch.dict(os.environ, overrides):
+                with self.assertRaisesRegex(ImproperlyConfigured, "must not overlap"):
+                    importlib.reload(settings_module)
+        finally:
+            importlib.reload(settings_module)

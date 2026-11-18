@@ -22,6 +22,7 @@ from api.models import (
     Transaksi,
     User,
 )
+from apps.waste_catalog.services import catat_harga
 
 
 class SeedTestingDataCommandTests(TestCase):
@@ -116,9 +117,7 @@ class SeedTestingDataCommandTests(TestCase):
         )
         self.assertTrue(User.objects.filter(email="pengurus.demo@example.com").exists())
         self.assertTrue(
-            User.objects.filter(
-                email="induk.demo@example.com", role=User.Role.PENGELOLA_INDUK
-            ).exists()
+            User.objects.filter(email="induk.demo@example.com", role=User.Role.PENGELOLA).exists()
         )
         self.assertTrue(User.objects.filter(email="superadmin.demo@example.com").exists())
         self.assertEqual(Nasabah.objects.count(), 62)
@@ -313,6 +312,26 @@ class SeedTestingDataCommandTests(TestCase):
             self.assertEqual(Pencairan.objects.get(pk=pk).tanggal, tanggal)
         self.assertEqual(Nasabah.objects.filter(nomor__startswith="NAS-DEMO-").count(), 60)
 
+    @override_settings(DEBUG=True)
+    def test_reseed_after_a_price_change_keeps_historical_setoran_prices(self) -> None:
+        # Setoran seed adalah riwayat: nilainya mengikuti harga yang berlaku
+        # pada tanggal setoran, bukan harga hari ini (BR-03).
+        call_command("seed_testing_data")
+        snapshot = {
+            item.pk: (item.harga_snapshot, item.subtotal) for item in DetailTransaksi.objects.all()
+        }
+        totals = {item.pk: item.total_nilai for item in Transaksi.objects.all()}
+        pengurus = User.objects.get(email="pengurus.demo@example.com")
+        for jenis in JenisSampah.objects.filter(bank_sampah=pengurus.bank_sampah):
+            catat_harga(jenis, Decimal("99999.00"), timezone.now(), pengurus)
+
+        call_command("seed_testing_data")
+
+        for item in DetailTransaksi.objects.all():
+            self.assertEqual((item.harga_snapshot, item.subtotal), snapshot[item.pk])
+        for setoran in Transaksi.objects.all():
+            self.assertEqual(setoran.total_nilai, totals[setoran.pk])
+
     @override_settings(
         DEBUG=False,
         PILAH_ENVIRONMENT="staging",
@@ -326,4 +345,25 @@ class SeedTestingDataCommandTests(TestCase):
             "seed_testing_data",
             environment="staging",
             confirm="SEED-PILAH-STAGING-DATA",
+        )
+
+    @override_settings(DEBUG=True)
+    def test_reseed_leaves_a_voided_setoran_out_of_the_saldo(self) -> None:
+        # PIL-428: a voided setoran is kept but no longer counts toward the saldo.
+        call_command("seed_testing_data")
+        customer = Nasabah.objects.get(pk=CUSTOMER_ONE_ID)
+        saldo_before = Saldo.objects.get(nasabah=customer).total_saldo
+        voided = Transaksi.objects.filter(nasabah=customer).latest("tanggal")
+        Transaksi.objects.filter(pk=voided.pk).update(
+            status=Transaksi.Status.DIBATALKAN,
+            alasan_batal="Tercatat dua kali",
+            dibatalkan_oleh=User.objects.get(email="pengurus.demo@example.com"),
+            dibatalkan_pada=timezone.now(),
+        )
+
+        call_command("seed_testing_data")
+
+        self.assertEqual(
+            Saldo.objects.get(nasabah=customer).total_saldo,
+            saldo_before - voided.total_nilai,
         )

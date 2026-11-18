@@ -2,7 +2,8 @@
 
 from typing import Any
 
-from api.models import BankSampah, JenisSampah
+from api.models import BankSampah
+from apps.waste_catalog.api import buat_jenis_sampah
 from tests.regression.helpers import RegressionTestCase
 
 
@@ -27,7 +28,6 @@ class JenisRegressionTests(RegressionTestCase):
             {"harga_per_kg": 1000000000},
             {"deskripsi": "x" * 201},
             {"nama_sampah": "A"},
-            {"kode": "   "},
             {"kategori": "not-a-category"},
         ]
         for override in cases:
@@ -36,6 +36,16 @@ class JenisRegressionTests(RegressionTestCase):
                     "/api/v1/jenis-sampah", _jenis_payload(**override), format="json"
                 )
                 self.assertGreaterEqual(response.status_code, 400)
+
+    def test_kode_kosong_dinomori_otomatis(self) -> None:
+        # UAT 2026-11: blank kode is the auto-assign signal, not an error.
+        response = self.client.post(
+            "/api/v1/jenis-sampah",
+            _jenis_payload(kode="   "),
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertNotEqual(response.data["kode"].strip(), "")
 
     def test_fields_stripped_on_create(self) -> None:
         created = self.client.post(
@@ -50,7 +60,7 @@ class JenisRegressionTests(RegressionTestCase):
         other_bank = BankSampah.objects.create(
             nama="Lain", alamat="Jl. Lain No. 10", kota="Depok", no_hp_pic="+628999999999"
         )
-        other_jenis = JenisSampah.objects.create(
+        other_jenis = buat_jenis_sampah(
             bank_sampah=other_bank,
             nomor="X-1",
             nama_sampah="Kaca",

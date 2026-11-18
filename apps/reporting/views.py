@@ -85,8 +85,9 @@ class DashboardRecentTransactionsView(APIView):
 
     def get(self, request: Request) -> Response:
         qs = (
-            Transaksi.objects.filter(bank_sampah=current_bank(request))
-            .select_related("nasabah", "dicatat_oleh")
+            Transaksi.objects.tercatat()
+            .filter(bank_sampah=current_bank(request))
+            .select_related("nasabah", "dicatat_oleh", "dibatalkan_oleh")
             .prefetch_related("items")
             .order_by("-tanggal")[:3]
         )
