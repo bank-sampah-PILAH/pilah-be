@@ -129,3 +129,20 @@ class SecondBankApplicationTests(RegressionTestCase):
 
         self.assertEqual(self.saldo(self.member_a).data["total_saldo"], "7000.00")
         self.assertEqual(self.saldo(member_b).data["total_saldo"], "0.00")
+
+    def test_a_duplicate_application_names_the_reason(self) -> None:
+        self.apply_to_bank_b()
+        pending_twice = self.apply_to_bank_b()
+        self.auth_as(self.customer)
+        joined_twice = self.client.post(
+            "/api/v1/onboarding/nasabah", {"bank_sampah_id": str(self.bank.id)}, format="json"
+        )
+
+        for case, response in (("pending", pending_twice), ("approved", joined_twice)):
+            with self.subTest(case=case):
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(
+                    response.data,
+                    {"error": "Anda sudah terdaftar sebagai nasabah di bank sampah ini"},
+                )
+        self.assertEqual(Nasabah.objects.filter(user=self.customer).count(), 2)
