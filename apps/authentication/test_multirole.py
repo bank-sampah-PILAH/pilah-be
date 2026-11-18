@@ -12,10 +12,63 @@ from shared_kernel.permissions import IsNasabah, IsPengelola
 
 
 class AssignedRolesTest(TestCase):
-    def test_existing_dual_role_account_can_register_membership_without_changing_roles(self) -> None:
+    def test_removing_nasabah_role_with_existing_membership_is_rejected(self) -> None:
         user = User.objects.create_user(
-            email="register-dual@example.com", nama="Dual Member", alamat="Jl. Test",
-            no_hp="+628123456789", roles=[User.Role.PENGELOLA, User.Role.NASABAH],
+            email="keep-membership@example.com",
+            roles=["pengelola", "nasabah"],
+        )
+        bank = BankSampah.objects.create(nama="Bank A", no_hp_pic="+628123456789")
+        member = Nasabah.objects.create(
+            user=user,
+            bank_sampah=bank,
+            nomor="NAS-001",
+            nama="Member",
+            alamat="Jl. Test",
+            no_hp="+628123456789",
+            email=user.email,
+        )
+        user.roles = ["pengelola"]
+        with self.assertRaises(ValidationError):
+            user.save(update_fields=["roles"])
+        user.refresh_from_db()
+        self.assertEqual(user.roles, ["pengelola", "nasabah"])
+        self.assertTrue(Nasabah.objects.filter(pk=member.pk, user=user).exists())
+
+    def test_existing_access_token_is_rejected_after_role_revocation(self) -> None:
+        user = User.objects.create_user(email="revoke@example.com", roles=["pengelola", "nasabah"])
+        token = AccessToken.for_user(user)
+        token["role"] = "nasabah"
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+        self.assertEqual(client.get("/api/v1/auth/me").status_code, 200)
+        user.roles = ["pengelola"]
+        user.save(update_fields=["roles"])
+        self.assertEqual(client.get("/api/v1/auth/me").status_code, 401)
+
+    def test_refresh_legacy_fallback_and_invalid_claims(self) -> None:
+        user = User.objects.create_user(email="legacy-refresh@example.com")
+        client = APIClient()
+        token = RefreshToken.for_user(user)
+        response = client.post("/api/v1/auth/refresh", {"refresh_token": str(token)}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(AccessToken(response.data["access_token"])["role"], "pengelola")
+        for role in (None, "", "unknown", "nasabah", ["pengelola"]):
+            with self.subTest(role=role):
+                token["role"] = role
+                response = client.post(
+                    "/api/v1/auth/refresh", {"refresh_token": str(token)}, format="json"
+                )
+                self.assertEqual(response.status_code, 401)
+
+    def test_existing_dual_role_account_can_register_membership_without_changing_roles(
+        self,
+    ) -> None:
+        user = User.objects.create_user(
+            email="register-dual@example.com",
+            nama="Dual Member",
+            alamat="Jl. Test",
+            no_hp="+628123456789",
+            roles=[User.Role.PENGELOLA, User.Role.NASABAH],
         )
         bank = BankSampah.objects.create(nama="Bank A", no_hp_pic="+628123456789")
         member = OnboardingService.register_nasabah(user, {"bank_sampah_id": bank.pk})
@@ -42,8 +95,12 @@ class AssignedRolesTest(TestCase):
         )
         bank = BankSampah.objects.create(nama="Bank A", no_hp_pic="+628123456789")
         member = Nasabah.objects.create(
-            bank_sampah=bank, nomor="NAS-001", nama="Member", alamat="Jl. Test",
-            no_hp="+628123456789", email=user.email,
+            bank_sampah=bank,
+            nomor="NAS-001",
+            nama="Member",
+            alamat="Jl. Test",
+            no_hp="+628123456789",
+            email=user.email,
         )
         AuthService._sync_nasabah_prefill(user)
         member.refresh_from_db()
