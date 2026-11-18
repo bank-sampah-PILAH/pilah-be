@@ -514,7 +514,7 @@ class OnboardingService:
     @staticmethod
     @transaction.atomic
     def register_nasabah(user: User, payload: Mapping[str, Any]) -> Nasabah:
-        if user.role != User.Role.NASABAH:
+        if User.Role.NASABAH not in user.roles:
             raise PermissionError("Hanya nasabah yang dapat mengajukan keanggotaan")
         if not user.alamat.strip():
             raise ValueError("Lengkapi alamat pada profil Anda terlebih dahulu")
