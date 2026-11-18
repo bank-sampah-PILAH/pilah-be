@@ -351,6 +351,12 @@ class BankDirectorySearchTests(APITestCase):
         # Filter tanpa parameter halaman juga tetap berbentuk daftar.
         self.assertIsInstance(self.client.get(self.url, {"kota": "Depok"}).data, list)
 
+    def test_kota_with_repeated_spaces_matches_its_own_query(self) -> None:
+        # Normalisasi merapatkan spasi kueri; kota tersimpan menyimpan spasi ganda,
+        # jadi bentuk asli juga harus ikut dicocokkan.
+        BankSampah.objects.create(nama="Bank Jakarta", alamat="Jl. J", kota="Jakarta  Selatan")
+        self.assertEqual(self._names({"kota": "Jakarta  Selatan"}), ["Bank Jakarta"])
+
     def test_page_or_page_size_alone_still_returns_the_envelope(self) -> None:
         for query in ({"page": "1"}, {"page_size": "1"}):
             with self.subTest(query=query):

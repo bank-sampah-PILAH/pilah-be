@@ -280,7 +280,9 @@ class BankSampahDirectoryView(ListAPIView[BankSampah]):
             qs = qs.filter(Q(nama__icontains=q) | Q(alamat__icontains=q) | Q(kota__icontains=q))
         kota = (self.request.query_params.get("kota") or "").strip()
         if kota:
-            qs = qs.filter(kota__icontains=normalisasi_kota(kota))
+            # Bandingkan bentuk normal dan asli: normalisasi merapatkan spasi,
+            # sedangkan kota tersimpan bisa memuat spasi ganda ("Jakarta  Selatan").
+            qs = qs.filter(Q(kota__icontains=normalisasi_kota(kota)) | Q(kota__icontains=kota))
         return qs
 
     def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
