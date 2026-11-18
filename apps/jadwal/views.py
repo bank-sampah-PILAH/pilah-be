@@ -16,6 +16,8 @@ from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from shared_kernel.roles import active_role
+
 from api.models import BankSampah, JadwalKegiatan, Nasabah, User
 from apps.jadwal.api import schedule_recipients
 from apps.jadwal.serializers import JadwalKegiatanSerializer
@@ -84,7 +86,7 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
     def get_queryset(self) -> QuerySet[JadwalKegiatan]:
         user = _user(self.request)
         queryset = JadwalKegiatan.objects.select_related("bank_sampah", "dibuat_oleh")
-        if user.role == User.Role.NASABAH:
+        if active_role(self.request) == User.Role.NASABAH:
             queryset = (
                 queryset.filter(
                     bank_sampah__status=BankSampah.Status.ACTIVE,

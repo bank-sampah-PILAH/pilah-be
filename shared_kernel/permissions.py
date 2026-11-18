@@ -4,6 +4,7 @@ from rest_framework.request import Request
 from rest_framework.views import APIView
 
 from api.models import BankSampah, User
+from shared_kernel.roles import active_role
 
 
 def _auth_user(request: Request) -> User:
@@ -15,14 +16,14 @@ class IsPengelola(BasePermission):
     message = "Endpoint ini hanya untuk pengelola"
 
     def has_permission(self, request: Request, view: APIView) -> bool:
-        return request.user.is_authenticated and request.user.role == User.Role.PENGELOLA
+        return request.user.is_authenticated and active_role(request) == User.Role.PENGELOLA
 
 
 class IsRegistrationRole(BasePermission):
     message = "Endpoint ini hanya untuk peran yang sedang mendaftar"
 
     def has_permission(self, request: Request, view: APIView) -> bool:
-        return request.user.is_authenticated and request.user.role in User.GOOGLE_REGISTRATION_ROLES
+        return request.user.is_authenticated and active_role(request) in User.GOOGLE_REGISTRATION_ROLES
 
 
 class IsNasabah(BasePermission):
@@ -31,7 +32,7 @@ class IsNasabah(BasePermission):
     def has_permission(self, request: Request, view: APIView) -> bool:
         return (
             request.user.is_authenticated
-            and request.user.role == User.Role.NASABAH
+            and active_role(request) == User.Role.NASABAH
             and request.user.is_profile_complete
         )
 
@@ -50,7 +51,7 @@ class IsNasabahRole(BasePermission):
     message = "Endpoint ini hanya untuk nasabah"
 
     def has_permission(self, request: Request, view: APIView) -> bool:
-        return request.user.is_authenticated and request.user.role == User.Role.NASABAH
+        return request.user.is_authenticated and active_role(request) == User.Role.NASABAH
 
 
 class IsActivePengelola(IsPengelola):
@@ -95,7 +96,7 @@ class IsJadwalViewer(BasePermission):
         if not request.user.is_authenticated:
             return False
         user = _auth_user(request)
-        return user.role == User.Role.NASABAH and user.is_active
+        return active_role(request) == User.Role.NASABAH and user.is_active
 
 
 def superadmin_allowlist() -> frozenset[str]:
@@ -133,7 +134,7 @@ class IsSuperAdmin(BasePermission):
 
     def has_permission(self, request: Request, view: APIView) -> bool:
         user = request.user
-        if not user.is_authenticated or user.role != User.Role.SUPERADMIN:
+        if not user.is_authenticated or active_role(request) != User.Role.SUPERADMIN:
             return False
         return is_app_superadmin_allowlisted(user.email)
 
@@ -147,4 +148,4 @@ class IsActiveNasabah(BasePermission):
         user = request.user
         if not user.is_authenticated:
             return False
-        return bool(user.is_active and user.role == User.Role.NASABAH)
+        return bool(user.is_active and active_role(request) == User.Role.NASABAH)

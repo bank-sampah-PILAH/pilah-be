@@ -15,6 +15,8 @@ from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from shared_kernel.roles import active_role
+
 from api.models import (
     BankSampah,
     DraftPencairan,
@@ -323,7 +325,7 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
 
     def get_queryset(self) -> QuerySet[Pencairan]:
         user = _user(self.request)
-        if user.role == User.Role.NASABAH:
+        if active_role(self.request) == User.Role.NASABAH:
             qs = Pencairan.objects.filter(nasabah__user=user)
         else:
             qs = Pencairan.objects.filter(bank_sampah=_bank_sampah(self.request))
