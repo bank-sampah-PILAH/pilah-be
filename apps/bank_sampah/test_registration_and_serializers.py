@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import SimpleTestCase, TestCase, override_settings
 from rest_framework import serializers
 from rest_framework.test import APITestCase
@@ -251,6 +252,15 @@ class BankDirectoryCoordinateTests(APITestCase):
         data = BankSampahDirectorySerializer(self.mandiri).data
         self.assertEqual(data["latitude"], "-6.362829")
         self.assertEqual(data["longitude"], "106.828655")
+
+
+class BankSampahCoordinateIndexTests(TestCase):
+    """PIL-326: pencarian koordinat memakai indeks komposit (latitude, longitude)."""
+
+    def test_coordinate_columns_are_indexed(self) -> None:
+        with connection.cursor() as cursor:
+            indexes = connection.introspection.get_constraints(cursor, BankSampah._meta.db_table)
+        self.assertIn("banksampah_lat_lng_idx", indexes)
 
 
 class BankProfileApiTests(APITestCase):
