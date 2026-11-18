@@ -1,5 +1,3 @@
-from typing import Any
-
 from django.db import transaction
 from django.db.models import QuerySet
 from django.utils import timezone
@@ -69,18 +67,6 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
             data["nomor"] = nomor
             jenis = buat_jenis_sampah(bank, harga_per_kg=harga, oleh=current_user(request), **data)
         return Response(self.get_serializer(jenis).data, status=status.HTTP_201_CREATED)
-
-    def update(self, request: Request, *args: Any, **kwargs: Any) -> Response:
-        instance = self.get_object()
-        nomor = request.data.get("kode")  # type: ignore[union-attr]  # DRF types request.data as dict | list; these payloads are objects
-        if (
-            nomor
-            and JenisSampah.objects.filter(bank_sampah=current_bank(request), nomor=nomor)
-            .exclude(id=instance.id)
-            .exists()
-        ):
-            return Response({"errors": {"kode": ["Kode sampah sudah digunakan"]}}, status=422)
-        return super().update(request, *args, **kwargs)
 
     @transaction.atomic
     def perform_update(self, serializer: BaseSerializer[JenisSampah]) -> None:

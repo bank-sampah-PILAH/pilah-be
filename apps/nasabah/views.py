@@ -129,8 +129,14 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
         instance = self.get_object()
         if not instance.is_active:
             return Response({"error": "Nasabah nonaktif tidak bisa diedit"}, status=403)
-        nomor = request.data.get("kode")  # type: ignore[union-attr]  # DRF types request.data as dict | list; these payloads are objects
         bank = current_bank(request)
+        serializer = self.get_serializer(
+            instance, data=request.data, partial=kwargs.pop("partial", False)
+        )
+        serializer.is_valid(raise_exception=True)
+        # Validated, not raw: the field validators reject NUL and the strip has
+        # run, so the check sees the same kode the save will write.
+        nomor = serializer.validated_data.get("nomor")
         if (
             nomor
             and Nasabah.objects.filter(bank_sampah=bank, nomor=nomor)
@@ -138,10 +144,6 @@ class NasabahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs 
             .exists()
         ):
             return Response({"errors": {"kode": ["ID Nasabah sudah digunakan"]}}, status=422)
-        serializer = self.get_serializer(
-            instance, data=request.data, partial=kwargs.pop("partial", False)
-        )
-        serializer.is_valid(raise_exception=True)
         if email_terkunci(instance, serializer.validated_data):
             return Response(
                 {"error": "Email nasabah dengan akun tidak dapat diubah"},

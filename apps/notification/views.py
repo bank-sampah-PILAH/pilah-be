@@ -46,8 +46,13 @@ class WATemplateView(APIView):
         return Response({"template": bank.wa_template, "message": "Template berhasil disimpan"})
 
 
-class DeviceTokenSerializer(serializers.Serializer[Any]):
+class ForgetDeviceTokenSerializer(serializers.Serializer[Any]):
+    # CharField brings DRF's NUL validator, so a crafted token is a 422 and
+    # never reaches PostgreSQL.
     token = serializers.CharField(max_length=1024)
+
+
+class DeviceTokenSerializer(ForgetDeviceTokenSerializer):
     platform = serializers.ChoiceField(choices=["android", "ios", "web"])
 
 
@@ -65,10 +70,11 @@ class DeviceTokenView(APIView):
         return Response(status=200)
 
     def delete(self, request: Request) -> Response:
-        token = request.data.get("token") if isinstance(request.data, dict) else None
-        if not isinstance(token, str) or not token or len(token) > 1024:
-            raise serializers.ValidationError({"token": "Token tidak valid"})
-        DeviceToken.objects.filter(user=current_user(request), token=token).delete()
+        data = ForgetDeviceTokenSerializer(data=request.data)
+        data.is_valid(raise_exception=True)
+        DeviceToken.objects.filter(
+            user=current_user(request), token=data.validated_data["token"]
+        ).delete()
         return Response(status=204)
 
 
