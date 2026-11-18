@@ -78,10 +78,11 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
 
     def clean(self) -> None:
         super().clean()
-        if self._state.adding or self.role == self.Role.NASABAH:
+        if self._state.adding:
             return
-        previous_role = type(self).objects.filter(pk=self.pk).values_list("role", flat=True).first()
-        if previous_role == self.Role.NASABAH and self.keanggotaan_nasabah.exists():
+        if self.keanggotaan_nasabah.exists() and (
+            self.Role.NASABAH not in self.roles or self.role not in self.roles
+        ):
             raise ValidationError(
                 {
                     "role": "Pengguna Nasabah yang masih memiliki keanggotaan tidak dapat berganti peran."
@@ -92,7 +93,7 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
         if self._state.adding and not self.roles:
             self.roles = [self.role]
         update_fields = kwargs.get("update_fields")
-        if update_fields is None or "role" in update_fields:
+        if update_fields is None or "role" in update_fields or "roles" in update_fields:
             self.clean()
         super().save(*args, **kwargs)
 
