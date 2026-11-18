@@ -21,6 +21,21 @@ class AssignedRolesTest(TestCase):
         users[0].roles.append("nasabah")
         self.assertEqual(users[1].roles, [users[1].role])
 
+    def test_prefill_links_existing_membership_for_an_account_assigned_nasabah(self) -> None:
+        user = User.objects.create_user(
+            email="prefill-dual@example.com",
+            roles=[User.Role.PENGELOLA, User.Role.NASABAH],
+        )
+        bank = BankSampah.objects.create(nama="Bank A", no_hp_pic="+628123456789")
+        member = Nasabah.objects.create(
+            bank_sampah=bank, nomor="NAS-001", nama="Member", alamat="Jl. Test",
+            no_hp="+628123456789", email=user.email,
+        )
+        AuthService._sync_nasabah_prefill(user)
+        member.refresh_from_db()
+        self.assertEqual(member.user_id, user.pk)
+        self.assertEqual(user.role, User.Role.PENGELOLA)
+
     def test_roles_are_json_and_preserve_single_and_dual_role_accounts(self) -> None:
         self.assertIsInstance(User._meta.get_field("roles"), models.JSONField)
         for role in User.Role.values:
