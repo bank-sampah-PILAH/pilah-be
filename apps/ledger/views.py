@@ -15,8 +15,6 @@ from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from shared_kernel.roles import active_role
-
 from api.models import (
     BankSampah,
     DraftPencairan,
@@ -69,6 +67,7 @@ from shared_kernel.permissions import (
     IsActivePengelola,
     IsActivePengelolaOrNasabah,
 )
+from shared_kernel.roles import active_role
 from shared_kernel.scoping import current_bank, current_user
 
 

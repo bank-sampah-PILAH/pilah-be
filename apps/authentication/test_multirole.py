@@ -1,5 +1,5 @@
-from django.db import models
 from django.core.exceptions import ValidationError
+from django.db import models
 from django.test import TestCase
 from rest_framework.request import Request
 from rest_framework.test import APIClient, APIRequestFactory
@@ -12,7 +12,7 @@ from shared_kernel.permissions import IsNasabah, IsPengelola
 
 
 class AssignedRolesTest(TestCase):
-    def test_roles_are_json_and_preserve_single_and_dual_role_accounts(self):
+    def test_roles_are_json_and_preserve_single_and_dual_role_accounts(self) -> None:
         self.assertIsInstance(User._meta.get_field("roles"), models.JSONField)
         for role in User.Role.values:
             with self.subTest(role=role):
@@ -29,15 +29,23 @@ class AssignedRolesTest(TestCase):
         self.assertEqual(dual.roles, [User.Role.PENGELOLA, User.Role.NASABAH])
         self.assertEqual(dual.role, User.Role.PENGELOLA)
 
-    def test_pengelola_with_nasabah_role_can_keep_membership_when_primary_role_changes(self):
+    def test_pengelola_with_nasabah_role_can_keep_membership_when_primary_role_changes(
+        self,
+    ) -> None:
         user = User.objects.create_user(
-            email="member@example.com", role=User.Role.PENGELOLA,
+            email="member@example.com",
+            role=User.Role.PENGELOLA,
             roles=[User.Role.PENGELOLA, User.Role.NASABAH],
         )
         bank = BankSampah.objects.create(nama="Bank A", no_hp_pic="+628123456789")
         member = Nasabah.objects.create(
-            user=user, bank_sampah=bank, nomor="NAS-001", nama="Member",
-            alamat="Jl. Test", no_hp="+628123456789", email=user.email,
+            user=user,
+            bank_sampah=bank,
+            nomor="NAS-001",
+            nama="Member",
+            alamat="Jl. Test",
+            no_hp="+628123456789",
+            email=user.email,
         )
         user.role = User.Role.NASABAH
         user.save(update_fields=["role"])
@@ -49,10 +57,12 @@ class AssignedRolesTest(TestCase):
         self.assertEqual(user.role, User.Role.PENGELOLA)
         self.assertIn(User.Role.NASABAH, user.roles)
 
-    def test_permissions_use_each_devices_active_role_without_mutating_account(self):
+    def test_permissions_use_each_devices_active_role_without_mutating_account(self) -> None:
         user = User.objects.create_user(
-            email="devices@example.com", role=User.Role.PENGELOLA,
-            roles=[User.Role.PENGELOLA, User.Role.NASABAH], is_profile_complete=True,
+            email="devices@example.com",
+            role=User.Role.PENGELOLA,
+            roles=[User.Role.PENGELOLA, User.Role.NASABAH],
+            is_profile_complete=True,
         )
         factory = APIRequestFactory()
         for active_role in user.roles:
@@ -60,13 +70,19 @@ class AssignedRolesTest(TestCase):
                 request = Request(factory.get("/"))
                 request.user = user
                 request.auth = {"role": active_role}
-                self.assertEqual(IsPengelola().has_permission(request, APIView()), active_role == "pengelola")
-                self.assertEqual(IsNasabah().has_permission(request, APIView()), active_role == "nasabah")
+                self.assertEqual(
+                    IsPengelola().has_permission(request, APIView()), active_role == "pengelola"
+                )
+                self.assertEqual(
+                    IsNasabah().has_permission(request, APIView()), active_role == "nasabah"
+                )
         user.refresh_from_db()
         self.assertEqual(user.role, User.Role.PENGELOLA)
         self.assertEqual(user.roles, [User.Role.PENGELOLA, User.Role.NASABAH])
 
-    def test_authentication_rejects_unowned_and_malformed_claims_but_accepts_legacy_token(self):
+    def test_authentication_rejects_unowned_and_malformed_claims_but_accepts_legacy_token(
+        self,
+    ) -> None:
         user = User.objects.create_user(email="claims@example.com")
         client = APIClient()
         legacy = AccessToken.for_user(user)
@@ -79,7 +95,7 @@ class AssignedRolesTest(TestCase):
                 client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
                 self.assertEqual(client.get("/api/v1/auth/me").status_code, 401)
 
-    def test_refresh_preserves_assigned_active_role_and_rejects_revoked_role(self):
+    def test_refresh_preserves_assigned_active_role_and_rejects_revoked_role(self) -> None:
         user = User.objects.create_user(
             email="refresh-roles@example.com",
             roles=[User.Role.PENGELOLA, User.Role.NASABAH],
@@ -87,16 +103,24 @@ class AssignedRolesTest(TestCase):
         refresh = RefreshToken.for_user(user)
         refresh["role"] = User.Role.NASABAH
         client = APIClient()
-        response = client.post("/api/v1/auth/refresh", {"refresh_token": str(refresh)}, format="json")
+        response = client.post(
+            "/api/v1/auth/refresh", {"refresh_token": str(refresh)}, format="json"
+        )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(AccessToken(response.data["access_token"])["role"], "nasabah")
         user.roles = [User.Role.PENGELOLA]
         user.save(update_fields=["roles"])
-        self.assertEqual(client.post("/api/v1/auth/refresh", {"refresh_token": str(refresh)}, format="json").status_code, 401)
+        self.assertEqual(
+            client.post(
+                "/api/v1/auth/refresh", {"refresh_token": str(refresh)}, format="json"
+            ).status_code,
+            401,
+        )
 
-    def test_new_sessions_put_primary_role_on_both_tokens(self):
+    def test_new_sessions_put_primary_role_on_both_tokens(self) -> None:
         user = User.objects.create_user(
-            email="session@example.com", role=User.Role.NASABAH,
+            email="session@example.com",
+            role=User.Role.NASABAH,
             roles=[User.Role.NASABAH, User.Role.PENGELOLA],
         )
         session = AuthService._session_response(user, is_new_user=False)
@@ -104,9 +128,17 @@ class AssignedRolesTest(TestCase):
         self.assertEqual(RefreshToken(session["refresh_token"])["role"], "nasabah")
         self.assertEqual(session["user"]["role"], "nasabah")
 
-    def test_invalid_assigned_role_lists_cannot_be_saved(self):
+    def test_invalid_assigned_role_lists_cannot_be_saved(self) -> None:
         user = User.objects.create_user(email="invalid-roles@example.com")
-        for roles in ([], "pengelola", {"pengelola": True}, [None], ["unknown"], ["pengelola", "pengelola"], ["nasabah"]):
+        for roles in (
+            [],
+            "pengelola",
+            {"pengelola": True},
+            [None],
+            ["unknown"],
+            ["pengelola", "pengelola"],
+            ["nasabah"],
+        ):
             with self.subTest(roles=roles):
                 user.roles = roles
                 with self.assertRaises(ValidationError):

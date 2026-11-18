@@ -8,8 +8,8 @@ from django.db import connections, models
 from shared_kernel.models import TimestampedModel
 
 
-class UserQuerySet(models.QuerySet["User"]):
-    def with_role(self, role: str) -> "UserQuerySet":
+class UserManager(BaseUserManager["User"]):
+    def with_role(self, role: str) -> models.QuerySet["User"]:
         if connections[self.db].features.supports_json_field_contains:
             return self.filter(roles__contains=[role])
         # SQLite supports JSON array indexes, but not JSON containment. A valid
@@ -19,8 +19,6 @@ class UserQuerySet(models.QuerySet["User"]):
             predicate |= models.Q(**{f"roles__{index}": role})
         return self.filter(predicate)
 
-
-class UserManager(BaseUserManager["User"].from_queryset(UserQuerySet)):
     def create_user(self, email: str, password: str | None = None, **extra_fields: Any) -> "User":
         if not email:
             raise ValueError("Email wajib diisi")
@@ -96,9 +94,13 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
             or any(not isinstance(role, str) or role not in self.Role.values for role in self.roles)
             or len(set(self.roles)) != len(self.roles)
         ):
-            raise ValidationError({"roles": "Daftar peran harus berisi peran valid tanpa duplikasi."})
-        if not self._state.adding and self.keanggotaan_nasabah.exists() and (
-            self.Role.NASABAH not in self.roles or self.role not in self.roles
+            raise ValidationError(
+                {"roles": "Daftar peran harus berisi peran valid tanpa duplikasi."}
+            )
+        if (
+            not self._state.adding
+            and self.keanggotaan_nasabah.exists()
+            and (self.Role.NASABAH not in self.roles or self.role not in self.roles)
         ):
             raise ValidationError(
                 {

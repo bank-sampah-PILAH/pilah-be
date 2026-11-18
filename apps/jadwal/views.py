@@ -16,13 +16,12 @@ from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from shared_kernel.roles import active_role
-
 from api.models import BankSampah, JadwalKegiatan, Nasabah, User
 from apps.jadwal.api import schedule_recipients
 from apps.jadwal.serializers import JadwalKegiatanSerializer
 from apps.notification.api import queue_push_bulk
 from shared_kernel.permissions import IsActivePengelola, IsJadwalViewer
+from shared_kernel.roles import active_role
 
 
 def _user(request: Request) -> User:

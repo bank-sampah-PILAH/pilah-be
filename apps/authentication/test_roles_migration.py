@@ -4,7 +4,7 @@ from django.test import TransactionTestCase
 
 
 class RolesMigrationTest(TransactionTestCase):
-    def test_existing_accounts_receive_their_primary_role(self):
+    def test_existing_accounts_receive_their_primary_role(self) -> None:
         executor = MigrationExecutor(connection)
         before = [("api", "0038_remove_pengelola_induk_role")]
         executor.migrate(before)
