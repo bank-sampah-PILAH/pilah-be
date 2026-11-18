@@ -157,14 +157,20 @@ class HargaPerbandinganQuerySerializer(serializers.Serializer):  # type: ignore[
             raise serializers.ValidationError(
                 f"Maksimal {JENIS_PERBANDINGAN_MAKS} bank per perbandingan"
             )
+        # UUID menerima huruf besar dan bentuk tanpa tanda hubung; simpan bentuk
+        # kanonik supaya perbandingan dengan str(bank.id) tetap cocok. Duplikat
+        # dibuang dengan urutan permintaan dipertahankan.
+        kanonik: list[str] = []
         for part in ids:
             try:
-                UUID(part)
+                uuid = str(UUID(part))
             except ValueError:
                 raise serializers.ValidationError(
                     "bank_ids harus berupa UUID dipisah koma"
                 ) from None
-        return ids
+            if uuid not in kanonik:
+                kanonik.append(uuid)
+        return kanonik
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         # The jenis must belong to one of the compared banks; comparing a
@@ -182,11 +188,13 @@ class HargaPerbandinganQuerySerializer(serializers.Serializer):  # type: ignore[
 class HargaPerbandinganView(APIView):
     """Compare one waste type's current price across banks (PIL-309).
 
-    The cross-bank anchor is `nomor` (kode): every bank keeps its own
-    `JenisSampah` row and shares the item code. A bank without that kode,
-    or with it inactive, is reported as `tanpa_jenis`/`jenis_nonaktif` rather
-    than silently matched by name. Pending/induk/inactive banks are never
-    priced out — the same joinable filter as the directory applies.
+    The cross-bank anchor is `nomor` (kode) plus the material identity
+    (`kategori` + `nama_sampah`): every bank keeps its own `JenisSampah` row
+    and shares the item code, but a reused code for a different material is
+    not a match. A bank without that kode/material, or with it inactive, is
+    reported as `tanpa_jenis`/`jenis_nonaktif` rather than silently matched by
+    name. Pending/induk/inactive banks are never priced out — the same
+    joinable filter as the directory applies, and their rows carry no identity.
 
     The response is hand-built: 304's serializers only cover one bank's own
     rows, and this envelope mixes bank rows with the jenis echo. Errors are
@@ -209,32 +217,37 @@ class HargaPerbandinganView(APIView):
         ).exclude(jenis_organisasi=BankSampah.OrganizationType.INDUK)
         asal = JenisSampah.objects.select_related("bank_sampah").get(id=jenis_id)
         daftar = list(bank_filter.filter(id__in=bank_ids).order_by("nama"))
-        baris: list[dict[str, Any]] = []
         jenis_rows = {
             jenis.bank_sampah_id: jenis
             for jenis in JenisSampah.objects.filter(
-                bank_sampah__in=daftar, nomor=asal.nomor, is_active=True
+                bank_sampah__in=daftar,
+                nomor=asal.nomor,
+                kategori=asal.kategori,
+                nama_sampah=asal.nama_sampah,
+                is_active=True,
             ).prefetch_related("riwayat_harga")
         }
-        baris = []
+        baris: list[dict[str, Any]] = []
         for bank_id in bank_ids:
             bank = next((b for b in daftar if str(b.id) == bank_id), None)
             if bank is None:
-                # Identity-only lookup so the row still names the bank it
-                # refuses to price.
-                terlarang = BankSampah.objects.filter(id=bank_id).first()
+                # Baris non-joinable hanya membawa id + alasan: identitas bank
+                # (nama/kota) sama-sama 404 di direktori.
                 baris.append(
-                    _baris_kosong(
-                        terlarang or BankSampah(nama="", kota=""),
-                        "bukan_bank_bisa_gabung",
-                    )
+                    _baris_kosong(BankSampah(nama="", kota=""), "bukan_bank_bisa_gabung")
                     | {"bank_sampah_id": bank_id}
                 )
                 continue
             jenis = jenis_rows.get(bank.id)
             if jenis is None:
-                # Distinguish: a missing kode row vs an inactive one.
-                masih_ada = JenisSampah.objects.filter(bank_sampah=bank, nomor=asal.nomor).exists()
+                # Distinguish: a missing kode row vs an inactive one, both with
+                # the same material identity as the compared jenis.
+                masih_ada = JenisSampah.objects.filter(
+                    bank_sampah=bank,
+                    nomor=asal.nomor,
+                    kategori=asal.kategori,
+                    nama_sampah=asal.nama_sampah,
+                ).exists()
                 baris.append(_baris_kosong(bank, "jenis_nonaktif" if masih_ada else "tanpa_jenis"))
                 continue
             berlaku, _terjadwal = ringkas_harga(jenis.riwayat_harga.all(), timezone.now())
@@ -252,18 +265,19 @@ class HargaPerbandinganView(APIView):
                     "alasan": None,
                 }
             )
-        return Response(
-            {
-                "jenis_sampah": {
-                    "id": str(asal.id),
+        # Echo jenis hanya bila bank pemiliknya joinable; selain itu cukup id
+        # yang memang dikirim klien sendiri.
+        jenis_echo: dict[str, Any] = {"id": str(asal.id)}
+        if asal.bank_sampah_id in {bank.id for bank in daftar}:
+            jenis_echo.update(
+                {
                     "nomor": asal.nomor,
                     "nama_sampah": asal.nama_sampah,
                     "kategori": asal.kategori,
                     "satuan": "kg",
-                },
-                "perbandingan": baris,
-            }
-        )
+                }
+            )
+        return Response({"jenis_sampah": jenis_echo, "perbandingan": baris})
 
 
 def _baris_kosong(bank: BankSampah, alasan: str) -> dict[str, Any]:

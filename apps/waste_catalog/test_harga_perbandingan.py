@@ -144,7 +144,7 @@ class HargaPerbandinganTests(APITestCase):
         )
         self.assertEqual(response.status_code, 422)
 
-    def test_non_joinable_bank_nevers_leak_a_price(self) -> None:
+    def test_non_joinable_bank_nevers_leak_a_price_or_identity(self) -> None:
         pending = self.buat_bank("Bank Pending", kota="Depok", status=BankSampah.Status.PENDING)
         induk = self.buat_bank(
             "Induk XYZ", kota="Depok", jenis_organisasi=BankSampah.OrganizationType.INDUK
@@ -153,11 +153,61 @@ class HargaPerbandinganTests(APITestCase):
         response = self._fetch(
             banks=",".join(str(b.id) for b in (self.bank_a, pending, induk, nonaktif))
         )
-        baris = {row["nama"]: row for row in response.data["perbandingan"]}
-        for nama in ("Bank Pending", "Induk XYZ", "Bank Tutup"):
-            self.assertEqual(baris[nama]["alasan"], "bukan_bank_bisa_gabung")
-            self.assertIsNone(baris[nama]["harga_per_kg"])
-        self.assertEqual(baris["Bank A"]["harga_per_kg"], "3000.00")
+        baris = {row["bank_sampah_id"]: row for row in response.data["perbandingan"]}
+        for bank in (pending, induk, nonaktif):
+            with self.subTest(bank=str(bank.id)):
+                row = baris[str(bank.id)]
+                self.assertEqual(row["alasan"], "bukan_bank_bisa_gabung")
+                self.assertEqual(row["nama"], "")
+                self.assertEqual(row["kota"], "")
+                self.assertIsNone(row["harga_per_kg"])
+        self.assertEqual(baris[str(self.bank_a.id)]["harga_per_kg"], "3000.00")
+
+    def test_same_kode_for_a_different_material_is_not_a_match(self) -> None:
+        # Kode bank-lokal bisa dipakai ulang untuk bahan lain; itu bukan jenis
+        # yang sama, jadi jangan diberi label harga.
+        HargaSampah.objects.filter(jenis_sampah=self.jenis_b).delete()
+        JenisSampah.objects.filter(id=self.jenis_b.id).delete()
+        JenisSampah.objects.create(
+            bank_sampah=self.bank_b,
+            nomor="PLS-001",
+            nama_sampah="Kardus",
+            kategori=JenisSampah.Kategori.KERTAS,
+        )
+        row = self._fetch().data["perbandingan"][1]
+        self.assertTrue(row["harga_tidak_tersedia"])
+        self.assertEqual(row["alasan"], "tanpa_jenis")
+        self.assertIsNone(row["harga_per_kg"])
+
+    def test_jenis_echo_is_restricted_when_its_bank_is_not_joinable(self) -> None:
+        pending = self.buat_bank("Bank Pending", kota="Depok", status=BankSampah.Status.PENDING)
+        jenis_pending = self.buat_jenis(pending, harga=1000)
+        response = self._fetch(jenis=jenis_pending, banks=f"{pending.id},{self.bank_a.id}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["jenis_sampah"], {"id": str(jenis_pending.id)})
+        baris = {row["bank_sampah_id"]: row for row in response.data["perbandingan"]}
+        self.assertEqual(baris[str(pending.id)]["nama"], "")
+        self.assertEqual(baris[str(self.bank_a.id)]["harga_per_kg"], "3000.00")
+
+    def test_uppercase_and_unhyphenated_bank_ids_match_the_canonical_bank(self) -> None:
+        for spelling in (
+            str(self.bank_a.id).upper(),
+            str(self.bank_a.id).replace("-", ""),
+        ):
+            with self.subTest(spelling=spelling):
+                response = self._fetch(banks=f"{spelling},{self.bank_b.id}")
+                self.assertEqual(response.status_code, 200)
+                row = response.data["perbandingan"][0]
+                self.assertEqual(row["bank_sampah_id"], str(self.bank_a.id))
+                self.assertEqual(row["nama"], "Bank A")
+                self.assertEqual(row["harga_per_kg"], "3000.00")
+
+    def test_duplicate_bank_ids_are_deduped_preserving_order(self) -> None:
+        response = self._fetch(banks=f"{self.bank_a.id},{self.bank_b.id},{self.bank_a.id}")
+        self.assertEqual(
+            [row["bank_sampah_id"] for row in response.data["perbandingan"]],
+            [str(self.bank_a.id), str(self.bank_b.id)],
+        )
 
     def test_jenis_outside_the_requested_banks_is_422(self) -> None:
         bank_c = self.buat_bank("Bank C", kota="Bekasi")
