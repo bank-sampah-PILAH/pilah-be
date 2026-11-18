@@ -1,4 +1,5 @@
 from django.db import models
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from rest_framework.request import Request
 from rest_framework.test import APIClient, APIRequestFactory
@@ -102,3 +103,13 @@ class AssignedRolesTest(TestCase):
         self.assertEqual(AccessToken(session["access_token"])["role"], "nasabah")
         self.assertEqual(RefreshToken(session["refresh_token"])["role"], "nasabah")
         self.assertEqual(session["user"]["role"], "nasabah")
+
+    def test_invalid_assigned_role_lists_cannot_be_saved(self):
+        user = User.objects.create_user(email="invalid-roles@example.com")
+        for roles in ([], "pengelola", {"pengelola": True}, [None], ["unknown"], ["pengelola", "pengelola"], ["nasabah"]):
+            with self.subTest(roles=roles):
+                user.roles = roles
+                with self.assertRaises(ValidationError):
+                    user.save(update_fields=["roles"])
+                user.refresh_from_db()
+                self.assertEqual(user.roles, ["pengelola"])
