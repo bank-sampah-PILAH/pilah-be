@@ -31,7 +31,6 @@ from api.models import (
 from apps.ledger.api import saldo_at
 from apps.reporting.render import _tanggal_label, item_berat, render_statement
 from apps.reporting.statement import MAX_DISPLAYED_ROWS, StatementPeriodError, build_statement
-from apps.waste_catalog.api import buat_jenis_sampah
 from shared_kernel.kalkulasi import bulatkan_rupiah
 
 

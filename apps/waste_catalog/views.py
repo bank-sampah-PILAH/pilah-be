@@ -14,7 +14,12 @@ from rest_framework.views import APIView
 
 from api.models import BankSampah, JenisSampah
 from apps.nasabah.serializers import StatusSerializer
-from apps.waste_catalog.api import buat_jenis_sampah, harga_berlaku, ringkas_harga, susun_riwayat_harga
+from apps.waste_catalog.api import (
+    buat_jenis_sampah,
+    harga_berlaku,
+    ringkas_harga,
+    susun_riwayat_harga,
+)
 from apps.waste_catalog.serializers import (
     FilterJenisSampahSerializer,
     HargaBaruSerializer,
@@ -259,18 +264,6 @@ class HargaPerbandinganView(APIView):
                 "perbandingan": baris,
             }
         )
-
-
-def _baris_kosong(bank: BankSampah, alasan: str) -> dict[str, Any]:
-    return {
-        "bank_sampah_id": str(bank.id),
-        "nama": bank.nama,
-        "kota": bank.kota,
-        "harga_per_kg": None,
-        "berlaku_mulai": None,
-        "harga_tidak_tersedia": True,
-        "alasan": alasan,
-    }
 
 
 def _baris_kosong(bank: BankSampah, alasan: str) -> dict[str, Any]:
