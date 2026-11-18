@@ -1,7 +1,6 @@
 import mimetypes
 import re
 from typing import Any
-from urllib.parse import urlencode
 
 from django.conf import settings
 from django.core.files.storage import default_storage
