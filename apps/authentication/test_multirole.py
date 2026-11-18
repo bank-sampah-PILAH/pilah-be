@@ -3,7 +3,7 @@ from django.test import TestCase
 from rest_framework.request import Request
 from rest_framework.test import APIClient, APIRequestFactory
 from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import AccessToken
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from api.models import BankSampah, Nasabah, User
 from shared_kernel.permissions import IsNasabah, IsPengelola
@@ -76,3 +76,18 @@ class AssignedRolesTest(TestCase):
                 token["role"] = claim
                 client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
                 self.assertEqual(client.get("/api/v1/auth/me").status_code, 401)
+
+    def test_refresh_preserves_assigned_active_role_and_rejects_revoked_role(self):
+        user = User.objects.create_user(
+            email="refresh-roles@example.com",
+            roles=[User.Role.PENGELOLA, User.Role.NASABAH],
+        )
+        refresh = RefreshToken.for_user(user)
+        refresh["role"] = User.Role.NASABAH
+        client = APIClient()
+        response = client.post("/api/v1/auth/refresh", {"refresh_token": str(refresh)}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(AccessToken(response.data["access_token"])["role"], "nasabah")
+        user.roles = [User.Role.PENGELOLA]
+        user.save(update_fields=["roles"])
+        self.assertEqual(client.post("/api/v1/auth/refresh", {"refresh_token": str(refresh)}, format="json").status_code, 401)
