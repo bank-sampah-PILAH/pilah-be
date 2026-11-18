@@ -28,7 +28,6 @@ class JenisRegressionTests(RegressionTestCase):
             {"harga_per_kg": 1000000000},
             {"deskripsi": "x" * 201},
             {"nama_sampah": "A"},
-            {"kode": "   "},
             {"kategori": "not-a-category"},
         ]
         for override in cases:
@@ -37,6 +36,16 @@ class JenisRegressionTests(RegressionTestCase):
                     "/api/v1/jenis-sampah", _jenis_payload(**override), format="json"
                 )
                 self.assertGreaterEqual(response.status_code, 400)
+
+    def test_kode_kosong_dinomori_otomatis(self) -> None:
+        # UAT 2026-11: blank kode is the auto-assign signal, not an error.
+        response = self.client.post(
+            "/api/v1/jenis-sampah",
+            _jenis_payload(kode="   "),
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertNotEqual(response.data["kode"].strip(), "")
 
     def test_fields_stripped_on_create(self) -> None:
         created = self.client.post(

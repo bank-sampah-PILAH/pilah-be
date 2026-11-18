@@ -3,14 +3,23 @@ from rest_framework.routers import DefaultRouter
 
 # ponytail: views live in their canonical bounded-context homes; routes and
 # names are frozen so this compose is behavior-neutral.
+from apps.announcement.views import (
+    NasabahPengumumanBacaView,
+    NasabahPengumumanBerandaView,
+    NasabahPengumumanDetailView,
+    NasabahPengumumanListView,
+    PengumumanViewSet,
+)
 from apps.authentication.views import (
     AuthMeView,
     CompleteProfileView,
+    DiscardRegistrationView,
     GoogleAuthView,
     GoogleOAuthCallbackView,
     GoogleOAuthStartView,
     GoogleRegistrationView,
     LogoutView,
+    PasswordLoginView,
     RefreshTokenView,
 )
 from apps.bank_sampah.views import (
@@ -43,7 +52,13 @@ from apps.nasabah.home import (
 )
 from apps.nasabah.profile import NasabahProfileView
 from apps.nasabah.views import NasabahSelfView, NasabahViewSet, RegisterNasabahView, SaldoView
-from apps.notification.views import WATemplateView
+from apps.notification.views import (
+    DeviceTokenView,
+    NotificationClearView,
+    NotificationReadView,
+    NotificationView,
+    WATemplateView,
+)
 from apps.reporting.views import (
     DashboardOperationalTrendsView,
     DashboardRecentTransactionsView,
@@ -53,6 +68,7 @@ from apps.reporting.views import (
 from apps.waste_catalog.views import HargaPerbandinganView, JenisSampahViewSet
 
 router = DefaultRouter(trailing_slash=False)
+router.register("pengumuman", PengumumanViewSet, basename="pengumuman")
 router.register("nasabah", NasabahViewSet, basename="nasabah")
 router.register("jenis-sampah", JenisSampahViewSet, basename="jenis-sampah")
 router.register("jadwal", JadwalKegiatanViewSet, basename="jadwal")
@@ -64,6 +80,10 @@ router.register(
 )
 
 urlpatterns = [
+    path("notifications/", NotificationView.as_view(), name="notifications"),
+    path("notifications/clear/", NotificationClearView.as_view(), name="notifications-clear"),
+    path("notifications/<int:pk>/read/", NotificationReadView.as_view(), name="notification-read"),
+    path("device-tokens/", DeviceTokenView.as_view(), name="device-tokens"),
     path("aktivitas", ActivityHistoryView.as_view(), name="activity-history"),
     path("nasabah/me/beranda", NasabahHomeView.as_view(), name="nasabah-home"),
     path("nasabah/me/saldo", NasabahBalanceView.as_view(), name="nasabah-own-balance"),
@@ -79,8 +99,25 @@ urlpatterns = [
         NasabahTransactionDetailView.as_view(),
         name="nasabah-own-transaction-detail",
     ),
+    path(
+        "nasabah/me/pengumuman/beranda",
+        NasabahPengumumanBerandaView.as_view(),
+        name="nasabah-pengumuman-beranda",
+    ),
+    path("nasabah/me/pengumuman", NasabahPengumumanListView.as_view(), name="nasabah-pengumuman"),
+    path(
+        "nasabah/me/pengumuman/<uuid:pk>",
+        NasabahPengumumanDetailView.as_view(),
+        name="nasabah-pengumuman-detail",
+    ),
+    path(
+        "nasabah/me/pengumuman/<uuid:pk>/baca",
+        NasabahPengumumanBacaView.as_view(),
+        name="nasabah-pengumuman-baca",
+    ),
     path("nasabah/me/profil", NasabahProfileView.as_view(), name="nasabah-own-profile"),
     path("auth/google", GoogleAuthView.as_view(), name="auth-google"),
+    path("auth/login", PasswordLoginView.as_view(), name="auth-login"),
     path("auth/google/register", GoogleRegistrationView.as_view(), name="auth-google-register"),
     path("auth/google/start", GoogleOAuthStartView.as_view(), name="auth-google-start"),
     path("auth/google/callback", GoogleOAuthCallbackView.as_view(), name="auth-google-callback"),
@@ -88,6 +125,11 @@ urlpatterns = [
     path("auth/logout", LogoutView.as_view(), name="auth-logout"),
     path("auth/me", AuthMeView.as_view(), name="auth-me"),
     path("onboarding/profile", CompleteProfileView.as_view(), name="onboarding-profile"),
+    path(
+        "onboarding/discard-registration",
+        DiscardRegistrationView.as_view(),
+        name="onboarding-discard-registration",
+    ),
     path("onboarding/bank-sampah", RegisterBankSampahView.as_view(), name="onboarding-bank-sampah"),
     path("onboarding/nasabah", RegisterNasabahView.as_view(), name="onboarding-nasabah"),
     path("invites/accept", AcceptInviteView.as_view(), name="invite-accept"),

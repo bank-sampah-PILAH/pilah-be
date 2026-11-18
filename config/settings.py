@@ -35,6 +35,7 @@ ALLOWED_HOSTS = [
     host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()
 ]
 PILAH_PUBLIC_APP_URL = os.getenv("PILAH_PUBLIC_APP_URL", "")
+PILAH_WEB_ORIGIN = os.getenv("PILAH_WEB_ORIGIN", "")
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
 CSRF_TRUSTED_ORIGINS = [
@@ -73,6 +74,17 @@ if os.getenv("MIGRATION_LINTER") == "1":
     INSTALLED_APPS += ["django_migration_linter"]
 
 MIDDLEWARE = [
+    # Paling luar, supaya SETIAP respons membawa header — termasuk yang dibuat
+    # middleware di bawahnya tanpa pernah mencapai view: preflight CORS,
+    # pengalihan 301 ke HTTPS oleh SecurityMiddleware, berkas statis WhiteNoise,
+    # dan 400 untuk Host yang tidak diizinkan. Di posisi terakhir, middleware
+    # ini tidak pernah dijalankan untuk respons-respons itu.
+    #
+    # Posisi ini tidak mengganggu pemilihan kebijakan: kebijakannya dipilih
+    # setelah `get_response(request)` kembali, jadi tipe konten respons dan
+    # penanda nonce dari view sudah ada saat dibaca. Yang menentukan bukan
+    # urutan di daftar ini, melainkan fase tempat kebijakan dibaca.
+    "shared_kernel.csp.CspMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
@@ -125,6 +137,16 @@ DATABASES = {
             if variable in os.environ
         },
     }
+}
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    },
+    "auth_rate_limit": {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "auth_rate_limit_cache",
+    },
 }
 
 
@@ -192,7 +214,16 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "api.User"
 AUTHENTICATION_BACKENDS = ("apps.authentication.backends.AllowlistedSuperadminBackend",)
 
+# Browsable API hanya untuk pengembangan. Tanpa ini bawaan DRF menyertakan
+# BrowsableAPIRenderer, sehingga setiap endpoint membalas dokumen HTML begitu
+# klien mengirim `Accept: text/html` — permukaan yang tidak dipakai klien
+# Flutter dan yang memaksa kebijakan CSP jauh lebih longgar untuk seluruh API.
+_RENDERER = ["rest_framework.renderers.JSONRenderer"]
+if DEBUG:
+    _RENDERER.append("rest_framework.renderers.BrowsableAPIRenderer")
+
 REST_FRAMEWORK = {
+    "DEFAULT_RENDERER_CLASSES": tuple(_RENDERER),
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
@@ -204,14 +235,42 @@ REST_FRAMEWORK = {
     # Scoped rates: keys are the throttle scope of the views declaring one.
     # statement_pdf = the riwayat statement render (CPU-heavy; see
     # apps.nasabah.home.NasabahHistoryExportPdfView).
-    "DEFAULT_THROTTLE_RATES": {"statement_pdf": "10/min"},
+    # Cloud Run appends the client and two proxy addresses to XFF; this count
+    # makes DRF select the client while ignoring any caller-supplied prefix.
+    "NUM_PROXIES": 3,
+    "DEFAULT_THROTTLE_RATES": {"statement_pdf": "10/min", "password_login": "5/min"},
 }
+
+# Swagger UI is served from a public CDN. drf-spectacular defaults both of
+# these to `swagger-ui-dist@latest`, a URL whose contents change without
+# notice, so the version is pinned here. 5.35.0 is what `@latest` resolved to
+# on 16 November 2026, which keeps the page byte-identical to what it served
+# before the pin.
+SWAGGER_UI_VERSION = "5.35.0"
+SWAGGER_UI_DIST = f"https://cdn.jsdelivr.net/npm/swagger-ui-dist@{SWAGGER_UI_VERSION}"
+
+# sha384 of the three files, keyed by the version they were computed from, and
+# passed to the template so the browser refuses anything else. The hashes are
+# keyed rather than listed so that raising SWAGGER_UI_VERSION without adding
+# its entry is a KeyError the moment settings load, in manage.py and in every
+# test, instead of a blank docs page nothing else notices:
+#   curl -s $SWAGGER_UI_DIST/<file> | openssl dgst -sha384 -binary | base64
+_SWAGGER_UI_SRI_BY_VERSION = {
+    "5.35.0": {
+        "css": "sha384-WlYgdmXYOOBWL5apwjDEZwN+U3HmXSSu5R6V5aGxEcf7z+KuRNwBhoxKVN1i3D5I",
+        "bundle": "sha384-gjRm0bEPMeTmMh5jT2cHccIwCUZSTd8YC+j0d0sXw0MdGEfScduGpSyF3ZSSLkX9",
+        "standalone": "sha384-My2aDM4r2Mbm3ybHcubKm9O9U8FEjvF/O5nGvE9YK5dzqOTbWEKa79RPJ1krdMaF",
+    },
+}
+SWAGGER_UI_SRI = _SWAGGER_UI_SRI_BY_VERSION[SWAGGER_UI_VERSION]
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "PILAH API",
     "DESCRIPTION": "Bank Sampah Management System API",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    "SWAGGER_UI_DIST": SWAGGER_UI_DIST,
+    "SWAGGER_UI_FAVICON_HREF": f"{SWAGGER_UI_DIST}/favicon-32x32.png",
 }
 
 SIMPLE_JWT = {
@@ -246,11 +305,27 @@ PILAH_ALLOW_FAKE_GOOGLE_TOKEN = (
 if PILAH_ALLOW_FAKE_GOOGLE_TOKEN and not DEBUG:
     raise ImproperlyConfigured("PILAH_ALLOW_FAKE_GOOGLE_TOKEN requires DJANGO_DEBUG=true")
 PILAH_ENVIRONMENT = os.getenv("PILAH_ENVIRONMENT", "")
+PILAH_STAGING_DB_HOST = os.getenv("PILAH_STAGING_DB_HOST", "")
 PILAH_SUPERADMIN_EMAILS = tuple(
     email.strip().lower()
     for email in os.getenv("PILAH_SUPERADMIN_EMAILS", "").split(",")
     if email.strip()
 )
+PILAH_REVIEW_SUPERADMIN_EMAILS = tuple(
+    email.strip().lower()
+    for email in os.getenv("PILAH_REVIEW_SUPERADMIN_EMAILS", "").split(",")
+    if email.strip()
+)
+PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS = tuple(
+    email.strip().lower()
+    for email in os.getenv("PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS", "").split(",")
+    if email.strip()
+)
+PILAH_REVIEW_ACCOUNT_PASSWORD = os.getenv("PILAH_REVIEW_ACCOUNT_PASSWORD", "")
+if set(PILAH_SUPERADMIN_EMAILS).intersection(PILAH_REVIEW_SUPERADMIN_EMAILS):
+    raise ImproperlyConfigured(
+        "PILAH_REVIEW_SUPERADMIN_EMAILS must not overlap PILAH_SUPERADMIN_EMAILS"
+    )
 if not DEBUG and not PILAH_SUPERADMIN_EMAILS:
     logging.getLogger(__name__).warning(
         "PILAH_SUPERADMIN_EMAILS is empty; all Superadmin logins will be rejected"

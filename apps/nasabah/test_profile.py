@@ -45,7 +45,7 @@ class NasabahProfileTests(APITestCase):
     def test_anonymous_and_management_roles_cannot_access(self) -> None:
         self.client.force_authenticate(None)
         self.assertEqual(self.client.get(self.url).status_code, 401)
-        for role in (User.Role.PENGELOLA, User.Role.PENGELOLA_INDUK, User.Role.SUPERADMIN):
+        for role in (User.Role.PENGELOLA, User.Role.SUPERADMIN):
             user = User.objects.create_user(
                 email=f"{role}@example.test", nama="Pengurus", role=role
             )

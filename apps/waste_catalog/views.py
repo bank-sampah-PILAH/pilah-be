@@ -14,13 +14,15 @@ from rest_framework.views import APIView
 
 from api.models import BankSampah, JenisSampah
 from apps.nasabah.serializers import StatusSerializer
-from apps.waste_catalog.api import buat_jenis_sampah, harga_berlaku, ringkas_harga
+from apps.waste_catalog.api import buat_jenis_sampah, harga_berlaku, ringkas_harga, susun_riwayat_harga
 from apps.waste_catalog.serializers import (
     FilterJenisSampahSerializer,
     HargaBaruSerializer,
     JenisSampahSerializer,
+    VersiHargaSerializer,
 )
 from apps.waste_catalog.services import catat_harga
+from shared_kernel.pencarian import validasi_pencarian
 from shared_kernel.permissions import IsActivePengelola
 from shared_kernel.scoping import current_bank, current_user
 
@@ -41,7 +43,7 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
     def _saring(self, qs: QuerySet[JenisSampah]) -> QuerySet[JenisSampah]:
         filter_ = FilterJenisSampahSerializer(data=self.request.query_params)
         filter_.is_valid(raise_exception=True)
-        search = self.request.query_params.get("search", "")
+        search = validasi_pencarian(self.request.query_params.get("search", ""))
         if len(search) >= 2:
             qs = qs.filter(nama_sampah__icontains=search)
         status_filter = filter_.validated_data["status"]
@@ -57,13 +59,18 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
     def create(self, request: Request) -> Response:
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        nomor = serializer.validated_data["nomor"]
         bank = current_bank(request)
-        if JenisSampah.objects.filter(bank_sampah=bank, nomor=nomor).exists():
-            return Response({"errors": {"kode": ["Kode sampah sudah digunakan"]}}, status=422)
         data = dict(serializer.validated_data)
         harga = data.pop("harga_per_kg")
-        jenis = buat_jenis_sampah(bank, harga_per_kg=harga, oleh=current_user(request), **data)
+        with transaction.atomic():
+            # Lock the bank so two concurrent blank-kode creates cannot read the
+            # same maximum: the second waits, then numbers from the committed row.
+            BankSampah.objects.select_for_update().get(pk=bank.pk)
+            nomor = data.get("nomor") or JenisSampah.nomor_berikut(bank.id)
+            if JenisSampah.objects.filter(bank_sampah=bank, nomor=nomor).exists():
+                return Response({"errors": {"kode": ["Kode sampah sudah digunakan"]}}, status=422)
+            data["nomor"] = nomor
+            jenis = buat_jenis_sampah(bank, harga_per_kg=harga, oleh=current_user(request), **data)
         return Response(self.get_serializer(jenis).data, status=status.HTTP_201_CREATED)
 
     def update(self, request: Request, *args: Any, **kwargs: Any) -> Response:
@@ -121,6 +128,11 @@ class JenisSampahViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # st
         # Muat ulang: riwayat harga hasil prefetch get_object() belum memuat versi baru.
         jenis = self.get_object()
         return Response(self.get_serializer(jenis).data, status=status.HTTP_201_CREATED)
+
+    @ubah_harga.mapping.get
+    def riwayat_harga(self, request: Request, pk: str | None = None) -> Response:
+        page = self.paginate_queryset(susun_riwayat_harga(self.get_object(), timezone.now()))
+        return self.get_paginated_response(VersiHargaSerializer(page, many=True).data)
 
 
 JENIS_PERBANDINGAN_MAKS = 10  # Bandingkan antar-bank itu banding kecil, bukan pasar.
@@ -247,6 +259,18 @@ class HargaPerbandinganView(APIView):
                 "perbandingan": baris,
             }
         )
+
+
+def _baris_kosong(bank: BankSampah, alasan: str) -> dict[str, Any]:
+    return {
+        "bank_sampah_id": str(bank.id),
+        "nama": bank.nama,
+        "kota": bank.kota,
+        "harga_per_kg": None,
+        "berlaku_mulai": None,
+        "harga_tidak_tersedia": True,
+        "alasan": alasan,
+    }
 
 
 def _baris_kosong(bank: BankSampah, alasan: str) -> dict[str, Any]:

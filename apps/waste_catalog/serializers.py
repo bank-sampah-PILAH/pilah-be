@@ -9,10 +9,15 @@ from rest_framework import serializers
 from api.models import JenisSampah
 from apps.waste_catalog.api import ringkas_harga
 
+# Semua harga saat ini per kg; PIL-305 menggantinya dengan satuan per jenis.
+SATUAN_HARGA = "kg"
+
 
 class JenisSampahSerializer(serializers.ModelSerializer[Model]):
     satuan = serializers.SerializerMethodField()
-    kode = serializers.CharField(source="nomor", required=True, max_length=20)
+    # Kode boleh kosong: tanpa kirim, server menomori otomatis dari kode
+    # terbesar bank sampah ini. Isi manual masih diterima.
+    kode = serializers.CharField(source="nomor", required=False, allow_blank=True, max_length=20)
     # Bukan kolom model: harga masuk sebagai versi pertama (create) atau versi
     # baru (PUT dari aplikasi lama), dan keluar sebagai harga yang berlaku.
     harga_per_kg = serializers.DecimalField(
@@ -35,10 +40,9 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
         read_only_fields = ["id", "satuan", "is_active", "updated_at"]
 
     def validate_kode(self, value: Any) -> Any:
-        value = value.strip()
-        if not value:
-            raise serializers.ValidationError("Kode sampah wajib diisi")
-        return value
+        # Kosong diizinkan: view menomori otomatis karena bank sampah baru
+        # diketahui di sana (current_bank), tidak pada level serializer.
+        return value.strip()
 
     def validate_nama_sampah(self, value: Any) -> Any:
         value = value.strip()
@@ -60,7 +64,7 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
         return attrs
 
     def get_satuan(self, obj: Any) -> Any:
-        return "kg"
+        return SATUAN_HARGA
 
     def to_representation(self, instance: Any) -> Any:
         data = super().to_representation(instance)
@@ -78,6 +82,61 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
             else None
         )
         return data
+
+
+class DirectoryLayananSerializer(serializers.ModelSerializer[Model]):
+    """Compact public read of one layanan (jenis sampah) for directory detail.
+
+    Write-side stays in `JenisSampahSerializer`; this one is for the bank
+    sampah directory detail view (PIL-308), so no admin fields like
+    `is_active`/`updated_at`.
+    """
+
+    satuan = serializers.SerializerMethodField()
+    kode = serializers.CharField(source="nomor")
+    harga_per_kg = serializers.SerializerMethodField()
+    harga_berlaku_mulai = serializers.SerializerMethodField()
+    harga_terjadwal = serializers.SerializerMethodField()
+
+    class Meta:
+        model = JenisSampah
+        fields = [
+            "id",
+            "kode",
+            "nama_sampah",
+            "kategori",
+            "deskripsi",
+            "satuan",
+            "harga_per_kg",
+            "harga_berlaku_mulai",
+            "harga_terjadwal",
+        ]
+
+    def get_satuan(self, obj: Any) -> Any:
+        return SATUAN_HARGA
+
+    def get_harga_per_kg(self, obj: Any) -> Any:
+        berlaku, _ = self._harga_ringkas(obj)
+        return _HARGA.to_representation(berlaku.harga_per_kg) if berlaku else None
+
+    def get_harga_berlaku_mulai(self, obj: Any) -> Any:
+        berlaku, _ = self._harga_ringkas(obj)
+        return _WAKTU.to_representation(berlaku.berlaku_mulai) if berlaku else None
+
+    def get_harga_terjadwal(self, obj: Any) -> Any:
+        _, terjadwal = self._harga_ringkas(obj)
+        return (
+            {
+                "harga_per_kg": _HARGA.to_representation(terjadwal.harga_per_kg),
+                "berlaku_mulai": _WAKTU.to_representation(terjadwal.berlaku_mulai),
+            }
+            if terjadwal
+            else None
+        )
+
+    @staticmethod
+    def _harga_ringkas(instance: Any) -> tuple[Any, Any]:
+        return ringkas_harga(instance.riwayat_harga.all(), timezone.now())
 
 
 _HARGA = serializers.DecimalField(max_digits=11, decimal_places=2)
@@ -142,36 +201,17 @@ class FilterJenisSampahSerializer(serializers.Serializer[Any]):
     kategori = serializers.ChoiceField(choices=JenisSampah.Kategori.choices, required=False)
 
 
-class DirectoryLayananSerializer(serializers.ModelSerializer[Model]):
-    """Compact public read of one layanan (jenis sampah) for directory detail.
+class VersiHargaSerializer(serializers.Serializer[Any]):
+    """Satu baris riwayat harga: nominal, satuan, mulai berlaku, pembuat, dan status."""
 
-    Write-side stays in `JenisSampahSerializer`; this one is for the bank
-    sampah directory detail view (PIL-308), so no admin fields like
-    `is_active`/`updated_at`.
-    """
-
+    id = serializers.IntegerField(source="versi.id")
+    harga_per_kg = serializers.DecimalField(
+        source="versi.harga_per_kg", max_digits=11, decimal_places=2
+    )
     satuan = serializers.SerializerMethodField()
-    kode = serializers.CharField(source="nomor")
+    berlaku_mulai = serializers.DateTimeField(source="versi.berlaku_mulai")
+    dibuat_oleh = serializers.CharField(source="versi.dibuat_oleh.nama", allow_null=True)
+    status = serializers.CharField()
 
-    class Meta:
-        model = JenisSampah
-        fields = [
-            "id",
-            "kode",
-            "nama_sampah",
-            "kategori",
-            "deskripsi",
-            "satuan",
-        ]
-
-    def get_satuan(self, obj: Any) -> Any:
-        return "kg"
-
-    def to_representation(self, instance: Any) -> Any:
-        data = super().to_representation(instance)
-        berlaku, terjadwal = ringkas_harga(instance.riwayat_harga.all(), timezone.now())
-        data["harga_per_kg"] = _HARGA.to_representation(berlaku.harga_per_kg) if berlaku else None
-        data["harga_berlaku_mulai"] = (
-            _WAKTU.to_representation(berlaku.berlaku_mulai) if berlaku else None
-        )
-        return data
+    def get_satuan(self, obj: Any) -> str:
+        return SATUAN_HARGA

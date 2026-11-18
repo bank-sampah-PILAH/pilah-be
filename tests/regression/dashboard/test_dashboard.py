@@ -15,6 +15,7 @@ from api.models import (
     Transaksi,
     User,
 )
+from apps.waste_catalog.api import buat_jenis_sampah
 from tests.regression.helpers import RegressionTestCase
 
 
@@ -205,8 +206,9 @@ class DashboardRegressionTests(RegressionTestCase):
             no_hp="+628987654322",
             email="nasabah.lain@example.com",
         )
-        other_jenis = JenisSampah.objects.create(
+        other_jenis = buat_jenis_sampah(
             bank_sampah=other_bank,
+            harga_per_kg=Decimal("1000.00"),
             nomor="PLS-OTHER",
             nama_sampah="Plastik",
             kategori=JenisSampah.Kategori.PLASTIK,

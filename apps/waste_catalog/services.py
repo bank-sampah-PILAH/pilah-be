@@ -5,9 +5,12 @@ from api.models import HargaSampah, JenisSampah, User
 
 
 def catat_harga(
-    jenis: JenisSampah, harga_per_kg: Decimal, berlaku_mulai: datetime, oleh: User
+    jenis: JenisSampah, harga_per_kg: Decimal, berlaku_mulai: datetime, oleh: User | None
 ) -> HargaSampah:
-    """Tambah satu versi harga. Versi lama tidak pernah diubah (SDS 7.1.2)."""
+    """Tambah satu versi harga. Versi lama tidak pernah diubah (SDS 7.1.2).
+
+    ``oleh`` kosong hanya untuk data yang dibuat sistem, seperti seed.
+    """
     return HargaSampah.objects.create(
         jenis_sampah=jenis,
         bank_sampah=jenis.bank_sampah,

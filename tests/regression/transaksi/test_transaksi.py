@@ -10,10 +10,10 @@ from django.utils import timezone
 
 from api.models import BankSampah, Nasabah, Saldo, Transaksi, User
 from apps.waste_catalog.api import buat_jenis_sampah
-from tests.regression.helpers import RegressionTestCase, gateway_env, twilio_env
+from tests.regression.helpers import RegressionTransactionTestCase, gateway_env, twilio_env
 
 
-class TransaksiRegressionTests(RegressionTestCase):
+class TransaksiRegressionTests(RegressionTransactionTestCase):
     def test_create_positive_contract(self) -> None:
         nasabah = self.make_nasabah()
         jenis_id = self.make_jenis()

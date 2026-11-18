@@ -124,16 +124,6 @@ _STYLES = {
 }
 
 
-def _p(text: str, style: ParagraphStyle) -> Paragraph:
-    """Dynamic text as a Paragraph: escaped.
-
-    Paragraph bodies parse as XML — a bank or nasabah named "A & B Sampah"
-    or one containing "<" aborts the whole export otherwise. Labels the code
-    writes itself stay literal (they carry ``<br/>`` in the header band).
-    """
-    return Paragraph(escape(text), style)
-
-
 class NumberedCanvas(Canvas):  # type: ignore[misc]  # reportlab has no stubs; Canvas resolves Any
     """Standard two-phase pattern: collect page states, draw footers on save."""
 
@@ -300,10 +290,12 @@ def _page_chrome(canvas: Canvas, data: StatementData, theme: Theme) -> None:
         canvas.roundRect(x, strip_top - strip_h, cell_w - 2, strip_h, _RADIUS, stroke=1, fill=0)
         canvas.setFillColor(colors.HexColor("#6B7280"))
         canvas.setFont("Inter", 8)
-        canvas.drawString(x + 8, strip_top - strip_h + 6, caption)
+        canvas.drawCentredString(x + cell_w / 2, strip_top - strip_h / 2 + 4, caption)
         canvas.setFillColor(colors.HexColor("#111827"))
         canvas.setFont("Inter-Bold", 9)
-        canvas.drawString(x + 8, strip_top - 6, "Rp " + format_ribuan(amount))
+        canvas.drawCentredString(
+            x + cell_w / 2, strip_top - strip_h / 2 - 6, "Rp " + format_ribuan(amount)
+        )
     canvas.restoreState()
 
     canvas.saveState()
