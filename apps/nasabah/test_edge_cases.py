@@ -84,15 +84,16 @@ class NasabahManagementEdgeCaseTests(APITestCase):
 
 
 class NasabahSerializerGuardTests(APITestCase):
-    def test_blank_email_and_member_number_are_refused_by_the_field_validators(self) -> None:
+    def test_blank_email_is_refused_and_blank_kode_is_trimmed(self) -> None:
         # The CharField/EmailField reject blanks first over HTTP; the explicit
         # validators are the backstop for any input that reaches them as is.
+        # Kode is different since UAT 2026-11: blank is the "number it for me"
+        # signal, trimmed and left empty for the view to auto-assign.
         serializer = NasabahSerializer()
 
         with self.assertRaisesRegex(Exception, "Email wajib diisi"):
             serializer.validate_email("   ")
-        with self.assertRaisesRegex(Exception, "ID Nasabah wajib diisi"):
-            serializer.validate_kode("   ")
+        self.assertEqual(serializer.validate_kode("   "), "")
 
 
 class NasabahSelfRegistrationEdgeCaseTests(APITestCase):
