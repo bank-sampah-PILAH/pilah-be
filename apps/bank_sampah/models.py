@@ -56,6 +56,10 @@ class BankSampah(TimestampedModel):
         app_label = "api"
         db_table = "bank_sampah"
         ordering = ["nama"]
+        # PIL-326: coordinate search filters on both decimals.
+        indexes = [
+            models.Index(fields=["latitude", "longitude"], name="banksampah_lat_lng_idx"),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=(
