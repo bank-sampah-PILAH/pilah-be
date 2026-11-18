@@ -12,6 +12,15 @@ from shared_kernel.permissions import IsNasabah, IsPengelola
 
 
 class AssignedRolesTest(TestCase):
+    def test_bulk_created_single_role_accounts_get_independent_role_lists(self) -> None:
+        users = [User(email=f"bulk-{role}@example.com", role=role) for role in User.Role.values]
+        User.objects.bulk_create(users)
+        for user in users:
+            user.refresh_from_db()
+            self.assertEqual(user.roles, [user.role])
+        users[0].roles.append("nasabah")
+        self.assertEqual(users[1].roles, [users[1].role])
+
     def test_roles_are_json_and_preserve_single_and_dual_role_accounts(self) -> None:
         self.assertIsInstance(User._meta.get_field("roles"), models.JSONField)
         for role in User.Role.values:
