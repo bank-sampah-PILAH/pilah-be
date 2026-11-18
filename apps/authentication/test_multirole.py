@@ -7,11 +7,25 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from api.models import BankSampah, Nasabah, User
-from apps.authentication.services import AuthService
+from apps.authentication.services import AuthService, OnboardingService
 from shared_kernel.permissions import IsNasabah, IsPengelola
 
 
 class AssignedRolesTest(TestCase):
+    def test_existing_dual_role_account_can_register_membership_without_changing_roles(self) -> None:
+        user = User.objects.create_user(
+            email="register-dual@example.com", nama="Dual Member", alamat="Jl. Test",
+            no_hp="+628123456789", roles=[User.Role.PENGELOLA, User.Role.NASABAH],
+        )
+        bank = BankSampah.objects.create(nama="Bank A", no_hp_pic="+628123456789")
+        member = OnboardingService.register_nasabah(user, {"bank_sampah_id": bank.pk})
+        self.assertEqual(member.user_id, user.pk)
+        self.assertEqual(member.status, Nasabah.Status.PENDING)
+        self.assertEqual(member.saldo.total_saldo, 0)
+        user.refresh_from_db()
+        self.assertEqual(user.role, User.Role.PENGELOLA)
+        self.assertEqual(user.roles, [User.Role.PENGELOLA, User.Role.NASABAH])
+
     def test_bulk_created_single_role_accounts_get_independent_role_lists(self) -> None:
         users = [User(email=f"bulk-{role}@example.com", role=role) for role in User.Role.values]
         User.objects.bulk_create(users)
