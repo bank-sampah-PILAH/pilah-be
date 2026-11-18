@@ -7,8 +7,12 @@ Nilai setoran lama tidak disentuh karena tersimpan sebagai harga_snapshot
 (SDS 7.1.2).
 
 Kebalikannya mengisi kembali kolom dari harga yang berlaku saat itu.
+Harga lama 0/negatif tidak disalin: constraint HargaSampah menuntut harga
+positif, dan harga pengganti tidak boleh dikarang. Pembalikan mengisi 0 untuk
+jenis tersebut agar kolom NOT NULL lama tetap terisi.
 """
 
+from decimal import Decimal
 from typing import Any
 
 from django.db import migrations, models
@@ -23,6 +27,9 @@ def isi_versi_awal(apps: Any, schema_editor: Any) -> None:
     # Lewati jenis yang sudah punya versi, agar menjalankan ulang migrasi
     # setelah dibalik tidak menambah versi awal kedua.
     for jenis in JenisSampah.objects.exclude(riwayat_harga__isnull=False).iterator():
+        if jenis.harga_per_kg is None or jenis.harga_per_kg <= 0:
+            # Harga 0/negatif melanggar constraint harga_sampah_harga_positif.
+            continue
         setoran_pertama = DetailTransaksi.objects.filter(jenis_sampah=jenis).aggregate(
             awal=Min("transaksi__tanggal")
         )["awal"]
@@ -48,6 +55,9 @@ def kembalikan_kolom(apps: Any, schema_editor: Any) -> None:
         if versi is not None:
             # update() alih-alih save(): updated_at milik pengurus, bukan migrasi.
             JenisSampah.objects.filter(pk=jenis.pk).update(harga_per_kg=versi.harga_per_kg)
+        else:
+            # Jenis tanpa versi (harga lama <= 0) tetap terisi agar kolom NOT NULL.
+            JenisSampah.objects.filter(pk=jenis.pk).update(harga_per_kg=Decimal(0))
 
 
 class Migration(migrations.Migration):
