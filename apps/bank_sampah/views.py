@@ -1,3 +1,4 @@
+import math
 import mimetypes
 import re
 from typing import Any
@@ -276,17 +277,18 @@ class BankSampahLokasiQuerySerializer(serializers.Serializer):  # type: ignore[t
     _WILAYAH = {"latitude": (-90, 90), "longitude": (-180, 180)}
 
     def validate_latitude(self, value: float) -> float:
-        if not -90 <= value <= 90:
+        if not math.isfinite(value) or not -90 <= value <= 90:
             raise serializers.ValidationError("Lintang harus di antara -90 dan 90")
         return value
 
     def validate_longitude(self, value: float) -> float:
-        if not -180 <= value <= 180:
+        if not math.isfinite(value) or not -180 <= value <= 180:
             raise serializers.ValidationError("Bujur harus di antara -180 dan 180")
         return value
 
     def validate_radius_km(self, value: float) -> float:
-        if value <= 0 or value > JARAK_MAKSIMAL_KM:
+        # NaN lolos semua perbandingan, jadi tolak nilai tak hingga lebih dulu.
+        if not math.isfinite(value) or value <= 0 or value > JARAK_MAKSIMAL_KM:
             raise serializers.ValidationError(
                 f"Radius harus lebih dari 0 dan maksimal {JARAK_MAKSIMAL_KM} km"
             )
@@ -335,7 +337,9 @@ class BankSampahDirectoryView(ListAPIView[BankSampah]):
             qs = qs.filter(Q(nama__icontains=q) | Q(alamat__icontains=q) | Q(kota__icontains=q))
         kota = (self.request.query_params.get("kota") or "").strip()
         if kota:
-            qs = qs.filter(kota__icontains=normalisasi_kota(kota))
+            # Bandingkan bentuk normal dan asli: normalisasi merapatkan spasi,
+            # sedangkan kota tersimpan bisa memuat spasi ganda ("Jakarta  Selatan").
+            qs = qs.filter(Q(kota__icontains=normalisasi_kota(kota)) | Q(kota__icontains=kota))
         return qs
 
     def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
@@ -348,6 +352,11 @@ class BankSampahDirectoryView(ListAPIView[BankSampah]):
         params = lokasi.validated_data
         if params.get("sort") == "distance" or "radius_km" in params:
             return self._list_dengan_jarak(params)
+        # Aplikasi terpasang yang lama membaca daftar polos; amplop hanya
+        # dikirim saat klien benar-benar meminta halaman.
+        if not ({"page", "page_size"} & request.query_params.keys()):
+            queryset = self.filter_queryset(self.get_queryset())
+            return Response(self.get_serializer(queryset, many=True).data)
         return super().list(request, *args, **kwargs)
 
     def _list_dengan_jarak(self, params: dict[str, Any]) -> Response:
@@ -377,17 +386,20 @@ class BankSampahDirectoryView(ListAPIView[BankSampah]):
         )
         if "radius_km" in params:
             kandidat = [(bank, jarak) for bank, jarak in kandidat if jarak <= params["radius_km"]]
+        paginator = StandardPagination()
+        # Potong dulu, baru serialisasi: halaman 2 tidak mengulang kerja halaman 1.
+        page = paginator.paginate_queryset(kandidat, self.request, view=self)
         konteks = self.get_serializer_context()
         rows = [
             {
                 **BankSampahDirectorySerializer(bank, context=konteks).data,
                 "jarak_km": f"{jarak:.2f}",
             }
-            for bank, jarak in kandidat
+            for bank, jarak in (kandidat if page is None else page)
         ]
-        paginator = StandardPagination()
-        page = paginator.paginate_queryset(rows, self.request, view=self)
-        return paginator.get_paginated_response(page)
+        if page is None:  # page_size tidak valid: seperti DRF, tanpa amplop.
+            return Response(rows)
+        return paginator.get_paginated_response(rows)
 
 
 class BankSampahDetailView(RetrieveAPIView[BankSampah]):
@@ -401,4 +413,5 @@ class BankSampahDetailView(RetrieveAPIView[BankSampah]):
     serializer_class = BankSampahDetailSerializer  # type: ignore[assignment]  # DRF stubs type serializer_class too narrowly
 
     def get_queryset(self) -> QuerySet[BankSampah]:
-        return _joinable_banks()
+        # Prefetch riwayat harga layanan: tanpa ini serialisasi detail query per layanan.
+        return _joinable_banks().prefetch_related("jenis_sampah__riwayat_harga")

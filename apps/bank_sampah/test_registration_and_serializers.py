@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import SimpleTestCase, TestCase, override_settings
 from rest_framework import serializers
 from rest_framework.test import APITestCase
@@ -237,7 +238,9 @@ class BankDirectoryCoordinateTests(APITestCase):
 
     def _results(self, **query: str) -> list[Mapping[str, Any]]:
         response = self.client.get(self.url, query or None)
-        return response.data["results"]  # type: ignore[no-any-return]
+        data = response.data
+        # Tanpa parameter halaman endpoint mempertahankan daftar polos lama.
+        return data["results"] if isinstance(data, dict) else data  # type: ignore[no-any-return]
 
     def _data(self, nama: str, **query: str) -> Mapping[str, Any]:
         return {item["nama"]: item for item in self._results(**query)}[nama]
@@ -279,7 +282,9 @@ class BankDirectorySearchTests(APITestCase):
         )
 
     def _names(self, query: Mapping[str, str] | None = None) -> list[str]:
-        return sorted(item["nama"] for item in self.client.get(self.url, query).data["results"])
+        data = self.client.get(self.url, query).data
+        results = data["results"] if isinstance(data, dict) else data
+        return sorted(item["nama"] for item in results)
 
     def test_q_searches_nama_alamat_and_kota(self) -> None:
         cases = [
@@ -338,6 +343,29 @@ class BankDirectorySearchTests(APITestCase):
         self.assertIn("page_size=1", response.data["previous"])
         self.assertNotIn("page=2", response.data["previous"])
 
+    def test_no_pagination_param_keeps_the_legacy_bare_list(self) -> None:
+        # Aplikasi lama membaca array polos, bukan amplop {count, results}.
+        response = self.client.get(self.url)
+        self.assertIsInstance(response.data, list)
+        self.assertEqual(
+            sorted(item["nama"] for item in response.data), ["Bank Garis Dua", "Bank Kosong"]
+        )
+        # Filter tanpa parameter halaman juga tetap berbentuk daftar.
+        self.assertIsInstance(self.client.get(self.url, {"kota": "Depok"}).data, list)
+
+    def test_kota_with_repeated_spaces_matches_its_own_query(self) -> None:
+        # Normalisasi merapatkan spasi kueri; kota tersimpan menyimpan spasi ganda,
+        # jadi bentuk asli juga harus ikut dicocokkan.
+        BankSampah.objects.create(nama="Bank Jakarta", alamat="Jl. J", kota="Jakarta  Selatan")
+        self.assertEqual(self._names({"kota": "Jakarta  Selatan"}), ["Bank Jakarta"])
+
+    def test_page_or_page_size_alone_still_returns_the_envelope(self) -> None:
+        for query in ({"page": "1"}, {"page_size": "1"}):
+            with self.subTest(query=query):
+                data = self.client.get(self.url, query).data
+                self.assertEqual(data["count"], 2)
+                self.assertIn("results", data)
+
 
 class HaversineTests(SimpleTestCase):
     def test_known_pair_within_tolerance(self) -> None:
@@ -385,7 +413,9 @@ class BankDirectoryLocationSearchTests(APITestCase):
         self.pusat = (-6.362829, 106.828655)  # = dekat's own coordinates.
 
     def _names(self, query: Mapping[str, Any]) -> list[str]:
-        return [item["nama"] for item in self.client.get(self.url, query).data["results"]]
+        data = self.client.get(self.url, query).data
+        results = data["results"] if isinstance(data, dict) else data
+        return [item["nama"] for item in results]
 
     def _trio(self, **overrides: Any) -> dict[str, Any]:
         query = {
@@ -485,6 +515,34 @@ class BankDirectoryLocationSearchTests(APITestCase):
         jarak = [float(b["jarak_km"]) for b in data["results"]]
         self.assertTrue(jarak[0] < jarak[1])
 
+    def test_non_finite_coordinate_and_radius_values_are_422(self) -> None:
+        # float() menerima NaN/Infinity; NaN lolos semua perbandingan rentang.
+        for query in (
+            {"latitude": "NaN", "longitude": "106.82", "radius_km": "5"},
+            {"latitude": "-6.36", "longitude": "Infinity", "radius_km": "5"},
+            {"latitude": "-6.36", "longitude": "106.82", "radius_km": "NaN"},
+            {"latitude": "-6.36", "longitude": "106.82", "radius_km": "Infinity"},
+            {"latitude": "-6.36", "longitude": "106.82", "radius_km": "-Infinity"},
+        ):
+            with self.subTest(query=str(query)):
+                self.assertEqual(self.client.get(self.url, query).status_code, 422)
+
+    def test_page_serializes_only_the_requested_slice(self) -> None:
+        original = BankSampahDirectorySerializer.to_representation
+        with patch.object(
+            BankSampahDirectorySerializer,
+            "to_representation",
+            autospec=True,
+            side_effect=original,
+        ) as to_representation:
+            data = self.client.get(
+                self.url,
+                self._trio(radius_km=10, sort="distance", page_size=1, page=1),
+            ).data
+        self.assertEqual(len(data["results"]), 1)
+        # Hanya satu bank halaman ini yang diserialisasi, bukan seluruh kandidat.
+        self.assertEqual(to_representation.call_count, 1)
+
     def test_q_and_kota_combine_with_radius(self) -> None:
         self.assertEqual(self._names(self._trio(radius_km=5, q="Menengah")), ["Bank Menengah"])
         self.assertEqual(
@@ -563,6 +621,12 @@ class BankDetailTests(APITestCase):
         self.assertEqual(lain["satuan"], "kg")
         self.assertNotIn("is_active", lain)
 
+    def test_detail_serialization_uses_a_constant_number_of_queries(self) -> None:
+        # Layanan dan riwayat harganya di-prefetch: jumlah query tetap walau
+        # bank punya tiga layanan (sebelumnya satu query per layanan).
+        with self.assertNumQueries(3):
+            self._detail()
+
     def test_detail_hides_non_joinable_banks(self) -> None:
         induk = BankSampah.objects.create(
             nama="Induk BTH", jenis_organisasi=BankSampah.OrganizationType.INDUK, no_hp_pic="081"
@@ -575,6 +639,15 @@ class BankDetailTests(APITestCase):
                 response = self.client.get(f"{self.url}/{bank.id}")
                 self.assertEqual(response.status_code, 404)
         self.assertEqual(self.client.get(f"{self.url}/not-a-uuid").status_code, 404)
+
+
+class BankSampahCoordinateIndexTests(TestCase):
+    """PIL-326: pencarian koordinat memakai indeks komposit (latitude, longitude)."""
+
+    def test_coordinate_columns_are_indexed(self) -> None:
+        with connection.cursor() as cursor:
+            indexes = connection.introspection.get_constraints(cursor, BankSampah._meta.db_table)
+        self.assertIn("banksampah_lat_lng_idx", indexes)
 
 
 class BankProfileApiTests(APITestCase):
