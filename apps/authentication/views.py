@@ -34,6 +34,7 @@ from shared_kernel.permissions import (
     IsRegistrationRole,
 )
 from shared_kernel.scoping import current_user
+from shared_kernel.roles import token_role
 
 # Local page a finished OAuth popup redirects to when no `next` URL survives.
 _OAUTH_FALLBACK_PATH = "/api-test/"
@@ -194,12 +195,14 @@ class RefreshTokenView(APIView):
             refresh = RefreshToken(raw_refresh)
             access = refresh.access_token
             user = User.objects.filter(id=refresh["user_id"]).first()
-            if user:
+            if user and user.is_active:
                 AuthService._enforce_superadmin_allowlist(user, user.email)
                 if user.bank_sampah_id:
                     access["bank_sampah_id"] = str(user.bank_sampah_id)
-                access["role"] = user.role
+                access["role"] = token_role(user, refresh)
                 access["email"] = user.email
+            else:
+                return Response({"error": "Refresh token invalid / expired"}, status=401)
             return Response({"access_token": str(access), "expires_in": 86400})
         except AuthServiceError as exc:
             return Response({"error": str(exc), "code": exc.code}, status=exc.status_code)
