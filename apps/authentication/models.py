@@ -51,6 +51,7 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
     # (PIL-204) — copied onto each Nasabah membership row at registration time.
     alamat = models.TextField(blank=True)
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.PENGELOLA)
+    roles = models.JSONField(default=list)
     is_profile_complete = models.BooleanField(default=False)
     bank_sampah = models.ForeignKey(
         "api.BankSampah",
@@ -88,6 +89,8 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
             )
 
     def save(self, *args: Any, **kwargs: Any) -> None:
+        if self._state.adding and not self.roles:
+            self.roles = [self.role]
         update_fields = kwargs.get("update_fields")
         if update_fields is None or "role" in update_fields:
             self.clean()
