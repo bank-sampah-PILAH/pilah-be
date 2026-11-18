@@ -272,6 +272,7 @@ class AuthService:
     @staticmethod
     def _session_response(user: User, *, is_new_user: bool) -> dict[str, Any]:
         refresh = RefreshToken.for_user(user)
+        refresh["role"] = user.role
         access = refresh.access_token
         if user.bank_sampah_id:
             access["bank_sampah_id"] = str(user.bank_sampah_id)
