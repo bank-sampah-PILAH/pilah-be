@@ -8,6 +8,7 @@ from django.urls import reverse
 from rest_framework import serializers
 
 from api.models import BankSampah, BankSampahApprovalLog, User
+from apps.waste_catalog.serializers import DirectoryLayananSerializer
 from shared_kernel.validators import normalize_indonesian_phone
 
 
@@ -222,3 +223,35 @@ class BankSampahDirectorySerializer(serializers.ModelSerializer[Model]):
     class Meta:
         model = BankSampah
         fields = ["id", "nama", "alamat", "kota", "latitude", "longitude", "foto_logo"]
+
+
+class BankSampahDetailSerializer(serializers.ModelSerializer[Model]):
+    """Directory entry plus what a detail page needs: status and layanan.
+
+    Layanan comes from the bank's active jenis sampah (waste_catalog context
+    via its public DTO, PIL-308).
+    """
+
+    layanan = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BankSampah
+        fields = [
+            "id",
+            "nama",
+            "alamat",
+            "kota",
+            "status",
+            "latitude",
+            "longitude",
+            "foto_logo",
+            "layanan",
+        ]
+
+    def get_layanan(self, obj: BankSampah) -> Any:
+        # .all() memakai cache prefetch; .filter() justru memicu query baru.
+        active = sorted(
+            (jenis for jenis in obj.jenis_sampah.all() if jenis.is_active),
+            key=lambda jenis: jenis.nomor,
+        )
+        return DirectoryLayananSerializer(active, many=True).data
