@@ -259,6 +259,14 @@ class BankSampahDirectoryView(ListAPIView[BankSampah]):
             qs = qs.filter(kota__icontains=kota)  # PIL-329 option A placeholder
         return qs
 
+    def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        # Aplikasi terpasang yang lama membaca daftar polos; amplop hanya
+        # dikirim saat klien benar-benar meminta halaman.
+        if not ({"page", "page_size"} & request.query_params.keys()):
+            queryset = self.filter_queryset(self.get_queryset())
+            return Response(self.get_serializer(queryset, many=True).data)
+        return super().list(request, *args, **kwargs)
+
 
 class BankSampahDetailView(RetrieveAPIView[BankSampah]):
     """Detail of one joinable bank: profile, status, layanan, and coordinates.
@@ -271,4 +279,5 @@ class BankSampahDetailView(RetrieveAPIView[BankSampah]):
     serializer_class = BankSampahDetailSerializer  # type: ignore[assignment]  # DRF stubs type serializer_class too narrowly
 
     def get_queryset(self) -> QuerySet[BankSampah]:
-        return _joinable_banks()
+        # Prefetch riwayat harga layanan: tanpa ini serialisasi detail query per layanan.
+        return _joinable_banks().prefetch_related("jenis_sampah__riwayat_harga")

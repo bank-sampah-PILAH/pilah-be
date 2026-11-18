@@ -236,7 +236,9 @@ class BankDirectoryCoordinateTests(APITestCase):
 
     def _results(self, **query: str) -> list[Mapping[str, Any]]:
         response = self.client.get(self.url, query or None)
-        return response.data["results"]  # type: ignore[no-any-return]
+        data = response.data
+        # Tanpa parameter halaman endpoint mempertahankan daftar polos lama.
+        return data["results"] if isinstance(data, dict) else data  # type: ignore[no-any-return]
 
     def _data(self, nama: str, **query: str) -> Mapping[str, Any]:
         return {item["nama"]: item for item in self._results(**query)}[nama]
@@ -278,7 +280,9 @@ class BankDirectorySearchTests(APITestCase):
         )
 
     def _names(self, query: Mapping[str, str] | None = None) -> list[str]:
-        return sorted(item["nama"] for item in self.client.get(self.url, query).data["results"])
+        data = self.client.get(self.url, query).data
+        results = data["results"] if isinstance(data, dict) else data
+        return sorted(item["nama"] for item in results)
 
     def test_q_searches_nama_alamat_and_kota(self) -> None:
         cases = [
@@ -317,6 +321,23 @@ class BankDirectorySearchTests(APITestCase):
         # DRF omits `page=1` from the previous link.
         self.assertIn("page_size=1", response.data["previous"])
         self.assertNotIn("page=2", response.data["previous"])
+
+    def test_no_pagination_param_keeps_the_legacy_bare_list(self) -> None:
+        # Aplikasi lama membaca array polos, bukan amplop {count, results}.
+        response = self.client.get(self.url)
+        self.assertIsInstance(response.data, list)
+        self.assertEqual(
+            sorted(item["nama"] for item in response.data), ["Bank Garis Dua", "Bank Kosong"]
+        )
+        # Filter tanpa parameter halaman juga tetap berbentuk daftar.
+        self.assertIsInstance(self.client.get(self.url, {"kota": "Depok"}).data, list)
+
+    def test_page_or_page_size_alone_still_returns_the_envelope(self) -> None:
+        for query in ({"page": "1"}, {"page_size": "1"}):
+            with self.subTest(query=query):
+                data = self.client.get(self.url, query).data
+                self.assertEqual(data["count"], 2)
+                self.assertIn("results", data)
 
 
 class BankDetailTests(APITestCase):
@@ -362,6 +383,12 @@ class BankDetailTests(APITestCase):
         self.assertEqual(lain["harga_per_kg"], "2000.00")
         self.assertEqual(lain["satuan"], "kg")
         self.assertNotIn("is_active", lain)
+
+    def test_detail_serialization_uses_a_constant_number_of_queries(self) -> None:
+        # Layanan dan riwayat harganya di-prefetch: jumlah query tetap walau
+        # bank punya tiga layanan (sebelumnya satu query per layanan).
+        with self.assertNumQueries(3):
+            self._detail()
 
     def test_detail_hides_non_joinable_banks(self) -> None:
         induk = BankSampah.objects.create(
