@@ -23,10 +23,25 @@ def seed_staging() -> None:
         if not re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", email):
             raise ValueError(f"Set {key} to a valid test-account email")
         command.append(f"--{flag}-email={email}")
-    subprocess.run(
-        ["flyctl", "ssh", "console", "--app", "pilah-be-staging", "--command", shlex.join(command)],
-        check=True,
-    )
+    review_command = [
+        "python",
+        "/app/manage.py",
+        "seed_staging_review_account",
+        "--confirm=SEED-PILAH-STAGING-REVIEW-ACCOUNT",
+    ]
+    for seed_command in (command, review_command):
+        subprocess.run(
+            [
+                "flyctl",
+                "ssh",
+                "console",
+                "--app",
+                "pilah-be-staging",
+                "--command",
+                shlex.join(seed_command),
+            ],
+            check=True,
+        )
 
 
 if __name__ == "__main__":

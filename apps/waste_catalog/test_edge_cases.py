@@ -3,7 +3,8 @@ from decimal import Decimal
 from rest_framework import serializers
 from rest_framework.test import APITestCase
 
-from api.models import BankSampah, JenisSampah, User
+from api.models import BankSampah, User
+from apps.waste_catalog.api import buat_jenis_sampah
 from apps.waste_catalog.serializers import JenisSampahSerializer
 
 
@@ -35,7 +36,7 @@ class JenisSampahEdgeCaseTests(APITestCase):
         self.assertEqual(duplicate.data["errors"]["kode"], ["Kode sampah sudah digunakan"])
 
     def test_waste_type_string_is_its_name(self) -> None:
-        jenis = JenisSampah.objects.create(
+        jenis = buat_jenis_sampah(
             bank_sampah=self.bank, nomor="PET", nama_sampah="Botol PET", harga_per_kg=Decimal(3000)
         )
 
@@ -46,9 +47,10 @@ class JenisSampahSerializerGuardTests(APITestCase):
     def test_blank_code_and_nine_digit_price_cap_are_enforced_by_the_validators(self) -> None:
         # Field-level blank and max_digits checks fire first over HTTP; these
         # validators remain the backstop for values that reach them directly.
+        # Kode is different since UAT 2026-11: blank means "auto-assign", so
+        # the validator trims and accepts it; the view numbers the row.
         serializer = JenisSampahSerializer()
 
-        with self.assertRaisesRegex(serializers.ValidationError, "Kode sampah wajib diisi"):
-            serializer.validate_kode("  ")
+        self.assertEqual(serializer.validate_kode("  "), "")
         with self.assertRaisesRegex(serializers.ValidationError, "Harga maksimal 9 digit"):
             serializer.validate_harga_per_kg(Decimal(1000000000))
