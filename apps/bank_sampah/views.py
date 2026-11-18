@@ -1,5 +1,5 @@
 import mimetypes
-from urllib.parse import urlencode
+from typing import Any
 
 from django.conf import settings
 from django.core.files.storage import default_storage
@@ -18,6 +18,7 @@ from rest_framework.views import APIView
 
 from api.models import BankSampah, User
 from apps.authentication.api import user_state_hint
+from apps.bank_sampah.constants import REVIEW_BANK_ID
 from apps.bank_sampah.serializers import (
     ApprovalDecisionSerializer,
     ApprovalLogSerializer,
@@ -36,6 +37,7 @@ from shared_kernel.permissions import (
     IsPengelola,
     IsPrimaryPengelola,
     IsSuperAdmin,
+    is_review_superadmin,
 )
 from shared_kernel.scoping import current_bank, current_user
 
@@ -79,6 +81,12 @@ class SuperAdminBankSampahViewSet(viewsets.GenericViewSet):  # type: ignore[type
     serializer_class = BankSampahApprovalListSerializer
     queryset = BankSampah.objects.all().order_by("created_at")
 
+    def get_queryset(self) -> QuerySet[BankSampah]:
+        queryset = super().get_queryset()
+        if is_review_superadmin(current_user(self.request).email):
+            return queryset.filter(pk=REVIEW_BANK_ID, status=BankSampah.Status.PENDING)
+        return queryset
+
     def list(self, request: Request) -> Response:
         status_filter = request.query_params.get("status", BankSampah.Status.PENDING)
         qs = self.get_queryset()
@@ -99,9 +107,12 @@ class SuperAdminBankSampahViewSet(viewsets.GenericViewSet):  # type: ignore[type
         bank = self.get_object()
         serializer = ApprovalDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        log = ApprovalService.approve(
-            bank, current_user(request), serializer.validated_data.get("catatan", "")
-        )
+        try:
+            log = ApprovalService.approve(
+                bank, current_user(request), serializer.validated_data.get("catatan", "")
+            )
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
         return Response(
             {
                 "bank_sampah": self.get_serializer(bank).data,
@@ -114,9 +125,12 @@ class SuperAdminBankSampahViewSet(viewsets.GenericViewSet):  # type: ignore[type
         bank = self.get_object()
         serializer = ApprovalDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        log = ApprovalService.reject(
-            bank, current_user(request), serializer.validated_data.get("catatan", "")
-        )
+        try:
+            log = ApprovalService.reject(
+                bank, current_user(request), serializer.validated_data.get("catatan", "")
+            )
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
         return Response(
             {
                 "bank_sampah": self.get_serializer(bank).data,
@@ -190,20 +204,24 @@ class GenerateInviteView(APIView):
     permission_classes = [IsPrimaryPengelola]
     serializer_class = InviteAcceptSerializer
 
+    def get(self, request: Request) -> Response:
+        return Response(self._invite_data(request, current_bank(request)))
+
     def post(self, request: Request) -> Response:
         bank = current_bank(request)
-        token = TeamService.generate_invite(bank)
-        invite_path = f"/invite?{urlencode({'token': token})}"
+        TeamService.generate_invite(bank)
+        return Response(self._invite_data(request, bank), status=201)
+
+    @staticmethod
+    def _invite_data(request: Request, bank: BankSampah) -> dict[str, Any]:
+        token = bank.invite_token or None
         base_url = request.build_absolute_uri("/")[:-1]
         public_base = getattr(settings, "PILAH_PUBLIC_APP_URL", "") or base_url
-        return Response(
-            {
-                "token": token,
-                "invite_url": f"{public_base}{invite_path}",
-                "expires_at": bank.invite_token_expires,
-            },
-            status=201,
-        )
+        return {
+            "token": token,
+            "invite_url": f"{public_base}/invite/{token}" if token else None,
+            "expires_at": bank.invite_token_expires if token else None,
+        }
 
 
 def _joinable_banks() -> QuerySet[BankSampah]:
