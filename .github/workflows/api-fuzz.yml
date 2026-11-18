@@ -1,0 +1,100 @@
+# API fuzzing (Schemathesis): pulls the OpenAPI schema from the running
+# Django app, then hurls malformed and boundary-case requests at every
+# endpoint. Targets OWASP API Top 10: API4 unrestricted resource consumption,
+# API6 unauthenticated access, API8 schema/auth mismatches. Weekly cron plus
+# manual dispatch — it is a soak check, not a merge gate.
+name: API fuzzing
+
+on:
+  schedule:
+    # Wednesdays, off the hour, spread from CodeQL's slot.
+    - cron: "37 3 * * 3"
+  workflow_dispatch:
+
+concurrency:
+  group: api-fuzz
+  cancel-in-progress: false
+
+env:
+  # Same placeholder set scheduled-checks.yml uses; CI never talks to real
+  # Google/Twilio/WhatsApp. DEBUG stays true so drf-spectacular's
+  # debug_only /api/schema/ endpoint is reachable for export.
+  DJANGO_SECRET_KEY: ci-placeholder-secret-key
+  DJANGO_DEBUG: "true"
+  DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+  DJANGO_SETTINGS_MODULE: config.settings
+  PILAH_ALLOW_FAKE_GOOGLE_TOKEN: "true"
+  CORS_ALLOW_ALL_ORIGINS: "true"
+  DB_ENGINE: django.db.backends.sqlite3
+  # File-based scratch DB, not :memory: — the server runs in a separate
+  # process from `migrate`, so both must see the same database file.
+  DB_NAME: ci-fuzz.sqlite3
+
+jobs:
+  schemathesis:
+    name: Schema-driven fuzzing
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install schemathesis
+
+      - name: Run migrations into a scratch SQLite database
+        run: python manage.py migrate --noinput
+
+      - name: Export OpenAPI schema
+        run: python manage.py spectacular --file openapi.yaml --validate
+
+      - name: Start Django server
+        run: |
+          python manage.py runserver 127.0.0.1:8000 > server.log 2>&1 &
+          echo $! > runserver.pid
+          for _ in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:8000/healthz; then
+              break
+            fi
+            sleep 1
+          done
+          curl --silent --fail http://127.0.0.1:8000/healthz
+
+      - name: Fuzz API against schema
+        # Default check set (not_a_server_error, status_code_conformance,
+        # content-conformance, ...). Failing runs leave a JSON report for triage.
+        run: |
+          schemathesis run \
+            --url http://127.0.0.1:8000 \
+            openapi.yaml \
+            --max-examples 50 \
+            --request-timeout 15 \
+            --report json \
+            --report-dir reports || {
+              tail -n 100 server.log || true
+              exit 1
+            }
+
+      - name: Upload fuzz reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schemathesis-report
+          path: |
+            reports/
+            server.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Stop server
+        if: always()
+        run: kill "$(cat runserver.pid)" 2>/dev/null || true
