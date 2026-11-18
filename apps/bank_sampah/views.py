@@ -189,8 +189,8 @@ class TeamView(APIView):
     serializer_class = TeamMemberSerializer
 
     def get(self, request: Request) -> Response:
-        members = User.objects.filter(
-            bank_sampah=current_bank(request), role=User.Role.PENGELOLA, is_active=True
+        members = User.objects.with_role(User.Role.PENGELOLA).filter(
+            bank_sampah=current_bank(request), is_active=True
         ).order_by("-is_primary_pengelola", "nama")
         return Response(
             {"members": TeamMemberSerializer(members, many=True, context={"request": request}).data}

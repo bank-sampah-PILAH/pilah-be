@@ -3,12 +3,24 @@ from typing import Any
 
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import connections, models
 
 from shared_kernel.models import TimestampedModel
 
 
-class UserManager(BaseUserManager["User"]):
+class UserQuerySet(models.QuerySet["User"]):
+    def with_role(self, role: str) -> "UserQuerySet":
+        if connections[self.db].features.supports_json_field_contains:
+            return self.filter(roles__contains=[role])
+        # SQLite supports JSON array indexes, but not JSON containment. A valid
+        # role list has at most one entry per declared role.
+        predicate = models.Q()
+        for index in range(len(User.Role)):
+            predicate |= models.Q(**{f"roles__{index}": role})
+        return self.filter(predicate)
+
+
+class UserManager(BaseUserManager["User"].from_queryset(UserQuerySet)):
     def create_user(self, email: str, password: str | None = None, **extra_fields: Any) -> "User":
         if not email:
             raise ValueError("Email wajib diisi")
