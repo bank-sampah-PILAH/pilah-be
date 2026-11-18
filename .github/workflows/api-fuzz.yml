@@ -10,6 +10,13 @@ on:
     # Wednesdays, off the hour, spread from CodeQL's slot.
     - cron: "37 3 * * 3"
   workflow_dispatch:
+  # Validate changes to this workflow (or the schema) on PRs touching it.
+  pull_request:
+    branches:
+      - staging
+      - main
+    paths:
+      - ".github/workflows/**"
 
 concurrency:
   group: api-fuzz
