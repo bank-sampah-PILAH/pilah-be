@@ -1,7 +1,11 @@
 from django.db import models
 from django.test import TestCase
+from rest_framework.request import Request
+from rest_framework.test import APIRequestFactory
+from rest_framework.views import APIView
 
 from api.models import BankSampah, Nasabah, User
+from shared_kernel.permissions import IsNasabah, IsPengelola
 
 
 class AssignedRolesTest(TestCase):
@@ -41,3 +45,20 @@ class AssignedRolesTest(TestCase):
         self.assertEqual(member.user_id, user.pk)
         self.assertEqual(user.role, User.Role.PENGELOLA)
         self.assertIn(User.Role.NASABAH, user.roles)
+
+    def test_permissions_use_each_devices_active_role_without_mutating_account(self):
+        user = User.objects.create_user(
+            email="devices@example.com", role=User.Role.PENGELOLA,
+            roles=[User.Role.PENGELOLA, User.Role.NASABAH], is_profile_complete=True,
+        )
+        factory = APIRequestFactory()
+        for active_role in user.roles:
+            with self.subTest(active_role=active_role):
+                request = Request(factory.get("/"))
+                request.user = user
+                request.auth = {"role": active_role}
+                self.assertEqual(IsPengelola().has_permission(request, APIView()), active_role == "pengelola")
+                self.assertEqual(IsNasabah().has_permission(request, APIView()), active_role == "nasabah")
+        user.refresh_from_db()
+        self.assertEqual(user.role, User.Role.PENGELOLA)
+        self.assertEqual(user.roles, [User.Role.PENGELOLA, User.Role.NASABAH])
