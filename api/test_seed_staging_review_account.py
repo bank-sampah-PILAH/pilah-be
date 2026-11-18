@@ -138,7 +138,8 @@ class SeedStagingReviewAccountTests(TestCase):
         self.assertTrue(reviewer.is_primary_pengelola)
 
         reviewer.role = User.Role.NASABAH
-        reviewer.save(update_fields=["role"])
+        reviewer.roles = [User.Role.NASABAH]
+        reviewer.save(update_fields=["role", "roles"])
         with self.assertRaisesMessage(CommandError, "identity conflicts"):
             call_command("seed_staging_review_account", confirm=CONFIRMATION)
         reviewer.refresh_from_db()
