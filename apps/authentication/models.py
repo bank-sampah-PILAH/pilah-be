@@ -90,9 +90,14 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
 
     def clean(self) -> None:
         super().clean()
-        if self._state.adding:
-            return
-        if self.keanggotaan_nasabah.exists() and (
+        if (
+            not isinstance(self.roles, list)
+            or not self.roles
+            or any(not isinstance(role, str) or role not in self.Role.values for role in self.roles)
+            or len(set(self.roles)) != len(self.roles)
+        ):
+            raise ValidationError({"roles": "Daftar peran harus berisi peran valid tanpa duplikasi."})
+        if not self._state.adding and self.keanggotaan_nasabah.exists() and (
             self.Role.NASABAH not in self.roles or self.role not in self.roles
         ):
             raise ValidationError(
@@ -100,6 +105,8 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
                     "role": "Pengguna Nasabah yang masih memiliki keanggotaan tidak dapat berganti peran."
                 }
             )
+        if self.role not in self.roles:
+            raise ValidationError({"role": "Peran utama harus termasuk dalam daftar peran akun."})
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         if self._state.adding and not self.roles:
