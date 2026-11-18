@@ -9,7 +9,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from rest_framework import serializers
 from rest_framework.test import APITestCase
 
-from api.models import BankSampah, JenisSampah, User
+from api.models import BankSampah, User
 from apps.bank_sampah.serializers import (
     BankSampahApprovalListSerializer,
     BankSampahDirectorySerializer,
