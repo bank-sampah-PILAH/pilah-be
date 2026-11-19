@@ -8,6 +8,8 @@ from django.urls import reverse
 from rest_framework import serializers
 
 from api.models import BankSampah, BankSampahApprovalLog, User
+from apps.bank_sampah.models import SUMBER_KOORDINAT
+from apps.waste_catalog.serializers import DirectoryLayananSerializer
 from shared_kernel.validators import normalize_indonesian_phone
 
 
@@ -17,6 +19,20 @@ def validate_image_upload(value: Any, label: str) -> Any:
         raise serializers.ValidationError(f"{label} harus berformat JPG, JPEG, atau PNG")
     if getattr(value, "size", 0) > 5 * 1024 * 1024:
         raise serializers.ValidationError(f"Ukuran {label.lower()} maksimal 5 MB")
+    return value
+
+
+# One rule set for both the pengelola serializer and the registration
+# serializer — no reason for two serializers to disagree about a range.
+def validate_latitude(value: Any) -> Any:
+    if value is not None and not -90 <= value <= 90:
+        raise serializers.ValidationError("Lintang harus di antara -90 dan 90")
+    return value
+
+
+def validate_longitude(value: Any) -> Any:
+    if value is not None and not -180 <= value <= 180:
+        raise serializers.ValidationError("Bujur harus di antara -180 dan 180")
     return value
 
 
@@ -32,6 +48,10 @@ class BankSampahSerializer(serializers.ModelSerializer[Model]):
             "kota",
             "no_hp_pic",
             "wa_gateway_token",
+            "latitude",
+            "longitude",
+            "koordinat_sumber",
+            "koordinat_akurasi_m",
             "foto_logo",
             "status",
             "is_active",
@@ -39,6 +59,12 @@ class BankSampahSerializer(serializers.ModelSerializer[Model]):
             "pengelola",
         ]
         read_only_fields = ["id", "status", "is_active", "created_at", "pengelola"]
+
+    def validate_latitude(self, value: Any) -> Any:
+        return validate_latitude(value)
+
+    def validate_longitude(self, value: Any) -> Any:
+        return validate_longitude(value)
 
     def validate_nama(self, value: Any) -> Any:
         if len(value.strip()) < 3:
@@ -67,6 +93,27 @@ class BankSampahRegistrationSerializer(serializers.Serializer[Any]):
     kota = serializers.CharField(required=False, allow_blank=True, max_length=100)
     no_hp_pic = serializers.CharField(required=True)
     foto_kegiatan = serializers.FileField(required=True)
+    latitude = serializers.DecimalField(
+        required=False, allow_null=True, max_digits=9, decimal_places=6
+    )
+    longitude = serializers.DecimalField(
+        required=False, allow_null=True, max_digits=9, decimal_places=6
+    )
+    koordinat_sumber = serializers.ChoiceField(
+        choices=SUMBER_KOORDINAT,
+        required=False,
+        allow_blank=True,
+        error_messages={"invalid_choice": "Sumber koordinat tidak dikenal"},
+    )
+    koordinat_akurasi_m = serializers.DecimalField(
+        required=False, allow_null=True, max_digits=8, decimal_places=2
+    )
+
+    def validate_latitude(self, value: Any) -> Any:
+        return validate_latitude(value)
+
+    def validate_longitude(self, value: Any) -> Any:
+        return validate_longitude(value)
 
     def validate_nama(self, value: Any) -> Any:
         value = value.strip()
@@ -187,4 +234,36 @@ class BankSampahDirectorySerializer(serializers.ModelSerializer[Model]):
 
     class Meta:
         model = BankSampah
-        fields = ["id", "nama", "alamat", "kota", "foto_logo"]
+        fields = ["id", "nama", "alamat", "kota", "latitude", "longitude", "foto_logo"]
+
+
+class BankSampahDetailSerializer(serializers.ModelSerializer[Model]):
+    """Directory entry plus what a detail page needs: status and layanan.
+
+    Layanan comes from the bank's active jenis sampah (waste_catalog context
+    via its public DTO, PIL-308).
+    """
+
+    layanan = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BankSampah
+        fields = [
+            "id",
+            "nama",
+            "alamat",
+            "kota",
+            "status",
+            "latitude",
+            "longitude",
+            "foto_logo",
+            "layanan",
+        ]
+
+    def get_layanan(self, obj: BankSampah) -> Any:
+        # .all() memakai cache prefetch; .filter() justru memicu query baru.
+        active = sorted(
+            (jenis for jenis in obj.jenis_sampah.all() if jenis.is_active),
+            key=lambda jenis: jenis.nomor,
+        )
+        return DirectoryLayananSerializer(active, many=True).data

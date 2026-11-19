@@ -56,6 +56,21 @@ class Harga0021BackfillTests(TransactionTestCase):
             kategori="kertas",
             harga_per_kg=Decimal(2000),
         )
+        # Harga lama yang tidak sah: constraint HargaSampah menolak <= 0.
+        self.nol = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NOL-001",
+            nama_sampah="Nol",
+            kategori="dll",
+            harga_per_kg=Decimal(0),
+        )
+        self.negatif = JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NEG-001",
+            nama_sampah="Negatif",
+            kategori="dll",
+            harga_per_kg=Decimal(-100),
+        )
         self.diubah_pada = timezone.now() - timedelta(days=3)
         JenisSampah.objects.update(updated_at=self.diubah_pada)
 
@@ -95,6 +110,13 @@ class Harga0021BackfillTests(TransactionTestCase):
         self.assertEqual(baru.harga_per_kg, 2000)
         self.assertEqual(baru.berlaku_mulai, self.diubah_pada)
 
+    def test_non_positive_legacy_prices_get_no_version(self) -> None:
+        HargaSampah = self.new_apps.get_model("api", "HargaSampah")
+
+        self.assertFalse(
+            HargaSampah.objects.filter(jenis_sampah_id__in=[self.nol.id, self.negatif.id]).exists()
+        )
+
     def test_column_is_dropped(self) -> None:
         JenisSampah = self.new_apps.get_model("api", "JenisSampah")
 
@@ -124,3 +146,6 @@ class Harga0021BackfillTests(TransactionTestCase):
 
         self.assertEqual(JenisSampah.objects.get(id=self.dipakai.id).harga_per_kg, 4000)
         self.assertEqual(JenisSampah.objects.get(id=self.baru.id).harga_per_kg, 2000)
+        # Tanpa versi, kolom kembali sebagai 0 agar NOT NULL lama tetap terisi.
+        self.assertEqual(JenisSampah.objects.get(id=self.nol.id).harga_per_kg, 0)
+        self.assertEqual(JenisSampah.objects.get(id=self.negatif.id).harga_per_kg, 0)

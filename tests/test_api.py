@@ -2933,13 +2933,18 @@ class APISpecTests(APITransactionTestCase):
         response = self.client.get("/api/v1/bank-sampah")
 
         self.assertEqual(response.status_code, 200)
-        names = {item["nama"] for item in response.data}
+        # Tanpa parameter halaman, direktori mempertahankan daftar polos lama.
+        results = response.data["results"] if isinstance(response.data, dict) else response.data
+        names = {item["nama"] for item in results}
         self.assertIn(self.bank.nama, names)
         self.assertIn(unit.nama, names)
         self.assertNotIn(pending_bank.nama, names)
         self.assertNotIn(induk.nama, names)
-        listed = next(item for item in response.data if item["nama"] == unit.nama)
-        self.assertEqual(set(listed.keys()), {"id", "nama", "alamat", "kota", "foto_logo"})
+        listed = next(item for item in results if item["nama"] == unit.nama)
+        self.assertEqual(
+            set(listed.keys()),
+            {"id", "nama", "alamat", "kota", "latitude", "longitude", "foto_logo"},
+        )
 
     def test_nasabah_self_registration_creates_membership(self) -> None:
         customer = User.objects.create_user(

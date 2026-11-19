@@ -25,10 +25,12 @@ from apps.authentication.views import (
 )
 from apps.bank_sampah.views import (
     AcceptInviteView,
+    BankSampahDetailView,
     BankSampahDirectoryView,
     BankSampahMeView,
     GenerateInviteView,
     RegisterBankSampahView,
+    ResolveKoordinatView,
     SuperAdminBankSampahViewSet,
     TeamView,
 )
@@ -65,7 +67,7 @@ from apps.reporting.views import (
     DashboardStatsView,
     DashboardWasteCategoriesView,
 )
-from apps.waste_catalog.views import JenisSampahViewSet
+from apps.waste_catalog.views import HargaPerbandinganView, JenisSampahViewSet
 
 router = DefaultRouter(trailing_slash=False)
 router.register("pengumuman", PengumumanViewSet, basename="pengumuman")
@@ -136,7 +138,20 @@ urlpatterns = [
     path("invites/accept", AcceptInviteView.as_view(), name="invite-accept"),
     path("bank-sampah/invite/join", AcceptInviteView.as_view(), name="bank-sampah-invite-join"),
     path("bank-sampah/me", BankSampahMeView.as_view(), name="bank-sampah-me"),
+    path(
+        "bank-sampah/resolve-koordinat",
+        ResolveKoordinatView.as_view(),
+        name="bank-sampah-resolve-koordinat",
+    ),
+    # Before "bank-sampah" directory: "harga-perbandingan" must not be eaten
+    # by that (or any future <pk>) path — top-down matching (PIL-309).
+    path(
+        "bank-sampah/harga-perbandingan",
+        HargaPerbandinganView.as_view(),
+        name="bank-sampah-harga-perbandingan",
+    ),
     path("bank-sampah", BankSampahDirectoryView.as_view(), name="bank-sampah-directory"),
+    path("bank-sampah/<uuid:pk>", BankSampahDetailView.as_view(), name="bank-sampah-detail"),
     path("team", TeamView.as_view(), name="team"),
     path("team/invite", GenerateInviteView.as_view(), name="team-invite"),
     path("nasabah/me", NasabahSelfView.as_view(), name="nasabah-me"),
