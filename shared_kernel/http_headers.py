@@ -15,10 +15,15 @@ supaya aman dibaca dari ``config/settings.py`` saat setelan dimuat.
 """
 
 IDEMPOTENCY_KEY = "Idempotency-Key"
+REQUEST_ID = "X-Request-Id"
 CONTENT_DISPOSITION = "Content-Disposition"
 
-HEADER_PERMINTAAN_KUSTOM: tuple[str, ...] = (IDEMPOTENCY_KEY,)
-"""Header kustom yang dibaca API dari permintaan klien.
+HEADER_PERMINTAAN_KUSTOM: tuple[str, ...] = (IDEMPOTENCY_KEY, REQUEST_ID)
+"""Header kustom yang dikirim klien pada permintaan.
+
+``REQUEST_ID`` berisi UUID acak yang dibuat aplikasi untuk setiap panggilan,
+supaya kegagalan yang dilihat pengguna bisa dicari di log server. Browser hanya
+mengirimnya bila preflight mengizinkan.
 
 Setiap entri harus lolos preflight, jadi ``CORS_ALLOW_HEADERS`` diturunkan
 dari tuple ini alih-alih menuliskan ulang namanya.
