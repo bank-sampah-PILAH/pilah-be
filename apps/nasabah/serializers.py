@@ -188,6 +188,7 @@ class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
 
     bank_sampah = NasabahSelfBankSampahSerializer(read_only=True)
     total_saldo = serializers.SerializerMethodField()
+    dapat_dibuka = serializers.SerializerMethodField()
     alasan_penolakan = serializers.SerializerMethodField()
     riwayat_persetujuan = serializers.SerializerMethodField()
 
@@ -198,6 +199,7 @@ class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
             "bank_sampah",
             "status",
             "is_active",
+            "dapat_dibuka",
             "total_saldo",
             "alasan_penolakan",
             "riwayat_persetujuan",
@@ -207,6 +209,14 @@ class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
     def get_total_saldo(self, obj: Nasabah) -> str:
         saldo = getattr(getattr(obj, "saldo", None), "total_saldo", Decimal("0.00"))
         return format(saldo, ".2f")
+
+    def get_dapat_dibuka(self, obj: Nasabah) -> bool:
+        """Apakah keanggotaan ini benar-benar bisa dibuka sekarang.
+
+        Penanda tampilan saja, seperti `punya_akun` (PIL-281): keputusan
+        wewenangnya tetap di server.
+        """
+        return obj.status == Nasabah.Status.APPROVED and obj.is_active
 
     def get_alasan_penolakan(self, obj: Nasabah) -> str | None:
         if obj.status != Nasabah.Status.REJECTED:
