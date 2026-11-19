@@ -46,6 +46,10 @@ class BankSampah(TimestampedModel):
     # plain decimals keep the SQLite default engine working (PIL-308/329).
     latitude = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, blank=True, null=True)
+    # Provenance: a coordinate without its source cannot be trusted or re-checked.
+    # Empty string is the backfill default for rows that predate this field.
+    koordinat_sumber = models.CharField(max_length=16, blank=True, default="")
+    koordinat_akurasi_m = models.DecimalField(max_digits=8, decimal_places=2, blank=True, null=True)
     invite_token = models.CharField(max_length=120, blank=True)
     invite_token_expires = models.DateTimeField(blank=True, null=True)
     is_active = models.BooleanField(default=True)

@@ -95,6 +95,8 @@ class BankOnboardingService:
         bank.foto_kegiatan = payload["foto_kegiatan"]
         bank.latitude = payload.get("latitude")
         bank.longitude = payload.get("longitude")
+        bank.koordinat_sumber = payload.get("koordinat_sumber", "")
+        bank.koordinat_akurasi_m = payload.get("koordinat_akurasi_m")
         bank.status = BankSampah.Status.PENDING
         bank.is_active = False
         bank.wa_template = bank.wa_template or DEFAULT_WA_TEMPLATE

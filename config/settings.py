@@ -238,7 +238,11 @@ REST_FRAMEWORK = {
     # Cloud Run appends the client and two proxy addresses to XFF; this count
     # makes DRF select the client while ignoring any caller-supplied prefix.
     "NUM_PROXIES": 3,
-    "DEFAULT_THROTTLE_RATES": {"statement_pdf": "10/min", "password_login": "5/min"},
+    "DEFAULT_THROTTLE_RATES": {
+        "statement_pdf": "10/min",
+        "password_login": "5/min",
+        "resolve_koordinat": "20/min",
+    },
 }
 
 # Swagger UI is served from a public CDN. drf-spectacular defaults both of

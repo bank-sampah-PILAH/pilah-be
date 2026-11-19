@@ -49,6 +49,8 @@ class BankSampahSerializer(serializers.ModelSerializer[Model]):
             "wa_gateway_token",
             "latitude",
             "longitude",
+            "koordinat_sumber",
+            "koordinat_akurasi_m",
             "foto_logo",
             "status",
             "is_active",
@@ -95,6 +97,10 @@ class BankSampahRegistrationSerializer(serializers.Serializer[Any]):
     )
     longitude = serializers.DecimalField(
         required=False, allow_null=True, max_digits=9, decimal_places=6
+    )
+    koordinat_sumber = serializers.CharField(required=False, allow_blank=True, max_length=16)
+    koordinat_akurasi_m = serializers.DecimalField(
+        required=False, allow_null=True, max_digits=8, decimal_places=2
     )
 
     def validate_latitude(self, value: Any) -> Any:

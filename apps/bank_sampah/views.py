@@ -16,12 +16,14 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from api.models import BankSampah, User
 from apps.authentication.api import user_state_hint
 from apps.bank_sampah.constants import REVIEW_BANK_ID
 from apps.bank_sampah.geo import haversine_km
+from apps.bank_sampah.geocoding import GeocoderTidakTersedia, geocode_alamat
 from apps.bank_sampah.serializers import (
     ApprovalDecisionSerializer,
     ApprovalLogSerializer,
@@ -34,6 +36,12 @@ from apps.bank_sampah.serializers import (
     TeamMemberSerializer,
 )
 from apps.bank_sampah.services import ApprovalService, BankOnboardingService, TeamService
+from apps.bank_sampah.tautan import (
+    TautanTidakTersedia,
+    TautanTidakValid,
+    koordinat_dari_tautan,
+    perluas_tautan_pendek,
+)
 from shared_kernel.pagination import StandardPagination
 from shared_kernel.permissions import (
     IsActivePengelola,
@@ -84,6 +92,83 @@ def bank_sampah_activity_media(request: HttpRequest, token: str) -> FileResponse
         raise Http404 from None
     content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
     return FileResponse(media_file, content_type=content_type)
+
+
+class ResolveKoordinatSerializer(serializers.Serializer):  # type: ignore[type-arg]  # stubs are generic, runtime is not
+    """Exactly one of an address or a pasted Maps link, per `sumber`."""
+
+    sumber = serializers.ChoiceField(
+        choices=["alamat", "tautan"],
+        error_messages={
+            "required": "Sumber wajib diisi",
+            "invalid_choice": "Sumber harus 'alamat' atau 'tautan'",
+        },
+    )
+    alamat = serializers.CharField(required=False, allow_blank=True)
+    kota = serializers.CharField(required=False, allow_blank=True)
+    tautan = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if attrs["sumber"] == "alamat" and not attrs.get("alamat", "").strip():
+            raise serializers.ValidationError({"alamat": "Alamat wajib diisi"})
+        if attrs["sumber"] == "tautan" and not attrs.get("tautan", "").strip():
+            raise serializers.ValidationError({"tautan": "Tautan wajib diisi"})
+        return attrs
+
+
+class ResolveKoordinatView(APIView):
+    """Resolve a bank-sampah coordinate so the app never calls a geocoder itself."""
+
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "resolve_koordinat"
+    serializer_class = ResolveKoordinatSerializer
+
+    def post(self, request: Request) -> Response:
+        serializer = ResolveKoordinatSerializer(data=request.data)
+        # The shared handler turns validation errors into 422; this endpoint's
+        # contract fixes malformed input at 400.
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+        data = serializer.validated_data
+        if data["sumber"] == "alamat":
+            query = " ".join(
+                bagian
+                for bagian in (data.get("alamat", "").strip(), data.get("kota", "").strip())
+                if bagian
+            )
+            try:
+                hasil = geocode_alamat(query)
+            except GeocoderTidakTersedia:
+                return Response({"detail": "Layanan geocoder tidak dapat dihubungi"}, status=503)
+            if hasil is None:
+                return Response({"detail": "Alamat tidak ditemukan"}, status=404)
+            return Response(
+                {
+                    "latitude": hasil.latitude,
+                    "longitude": hasil.longitude,
+                    "sumber": "geocode",
+                    "alamat_hasil": hasil.alamat_hasil,
+                    "akurasi_m": hasil.akurasi_m,
+                }
+            )
+        try:
+            koordinat = koordinat_dari_tautan(perluas_tautan_pendek(data["tautan"].strip()))
+        except TautanTidakValid as exc:
+            return Response({"detail": str(exc)}, status=400)
+        except TautanTidakTersedia:
+            return Response({"detail": "Tautan tidak dapat diperluas"}, status=503)
+        if koordinat is None:
+            return Response({"detail": "Tautan tidak memuat koordinat"}, status=400)
+        return Response(
+            {
+                "latitude": koordinat[0],
+                "longitude": koordinat[1],
+                "sumber": "tautan",
+                "alamat_hasil": None,
+                "akurasi_m": None,
+            }
+        )
 
 
 class BankSampahMeView(APIView):

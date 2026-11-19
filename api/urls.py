@@ -29,6 +29,7 @@ from apps.bank_sampah.views import (
     BankSampahMeView,
     GenerateInviteView,
     RegisterBankSampahView,
+    ResolveKoordinatView,
     SuperAdminBankSampahViewSet,
     TeamView,
 )
@@ -135,6 +136,11 @@ urlpatterns = [
     path("invites/accept", AcceptInviteView.as_view(), name="invite-accept"),
     path("bank-sampah/invite/join", AcceptInviteView.as_view(), name="bank-sampah-invite-join"),
     path("bank-sampah/me", BankSampahMeView.as_view(), name="bank-sampah-me"),
+    path(
+        "bank-sampah/resolve-koordinat",
+        ResolveKoordinatView.as_view(),
+        name="bank-sampah-resolve-koordinat",
+    ),
     # Before "bank-sampah" directory: "harga-perbandingan" must not be eaten
     # by that (or any future <pk>) path — top-down matching (PIL-309).
     path(
