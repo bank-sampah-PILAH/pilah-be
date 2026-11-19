@@ -20,6 +20,20 @@ def validate_image_upload(value: Any, label: str) -> Any:
     return value
 
 
+# One rule set for both the pengelola serializer and the registration
+# serializer — no reason for two serializers to disagree about a range.
+def validate_latitude(value: Any) -> Any:
+    if value is not None and not -90 <= value <= 90:
+        raise serializers.ValidationError("Lintang harus di antara -90 dan 90")
+    return value
+
+
+def validate_longitude(value: Any) -> Any:
+    if value is not None and not -180 <= value <= 180:
+        raise serializers.ValidationError("Bujur harus di antara -180 dan 180")
+    return value
+
+
 class BankSampahSerializer(serializers.ModelSerializer[Model]):
     pengelola = serializers.SerializerMethodField()
 
@@ -32,6 +46,8 @@ class BankSampahSerializer(serializers.ModelSerializer[Model]):
             "kota",
             "no_hp_pic",
             "wa_gateway_token",
+            "latitude",
+            "longitude",
             "foto_logo",
             "status",
             "is_active",
@@ -39,6 +55,12 @@ class BankSampahSerializer(serializers.ModelSerializer[Model]):
             "pengelola",
         ]
         read_only_fields = ["id", "status", "is_active", "created_at", "pengelola"]
+
+    def validate_latitude(self, value: Any) -> Any:
+        return validate_latitude(value)
+
+    def validate_longitude(self, value: Any) -> Any:
+        return validate_longitude(value)
 
     def validate_nama(self, value: Any) -> Any:
         if len(value.strip()) < 3:
@@ -67,6 +89,18 @@ class BankSampahRegistrationSerializer(serializers.Serializer[Any]):
     kota = serializers.CharField(required=False, allow_blank=True, max_length=100)
     no_hp_pic = serializers.CharField(required=True)
     foto_kegiatan = serializers.FileField(required=True)
+    latitude = serializers.DecimalField(
+        required=False, allow_null=True, max_digits=9, decimal_places=6
+    )
+    longitude = serializers.DecimalField(
+        required=False, allow_null=True, max_digits=9, decimal_places=6
+    )
+
+    def validate_latitude(self, value: Any) -> Any:
+        return validate_latitude(value)
+
+    def validate_longitude(self, value: Any) -> Any:
+        return validate_longitude(value)
 
     def validate_nama(self, value: Any) -> Any:
         value = value.strip()
@@ -187,4 +221,4 @@ class BankSampahDirectorySerializer(serializers.ModelSerializer[Model]):
 
     class Meta:
         model = BankSampah
-        fields = ["id", "nama", "alamat", "kota", "foto_logo"]
+        fields = ["id", "nama", "alamat", "kota", "latitude", "longitude", "foto_logo"]
