@@ -44,7 +44,7 @@ def geocode_alamat(query: str) -> HasilGeocode | None:
     try:
         response = requests.get(
             NOMINATIM_URL,
-            params={"q": query, "format": "jsonv2", "limit": 1, "countrycodes": "id"},
+            params={"q": query, "format": "jsonv2", "limit": "1", "countrycodes": "id"},
             headers={"User-Agent": user_agent()},
             timeout=10,
         )

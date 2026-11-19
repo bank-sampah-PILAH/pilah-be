@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 import requests
@@ -71,15 +71,15 @@ class ResolveKoordinatApiTests(APITestCase):
                 {"sumber": "alamat", "alamat": "Jl. Margonda Raya 5", "kota": "Depok"}
             )
 
-        self.assertEqual(response.status_code, 200)  # type: ignore[attr-defined]
-        self.assertEqual(response.data["latitude"], -6.3703237)  # type: ignore[attr-defined]
-        self.assertEqual(response.data["longitude"], 106.8270541)  # type: ignore[attr-defined]
-        self.assertEqual(response.data["sumber"], "geocode")  # type: ignore[attr-defined]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["latitude"], -6.3703237)
+        self.assertEqual(response.data["longitude"], 106.8270541)
+        self.assertEqual(response.data["sumber"], "geocode")
         self.assertEqual(
             response.data["alamat_hasil"],
-            "Fakultas Ilmu Komputer UI, Depok",  # type: ignore[attr-defined]
+            "Fakultas Ilmu Komputer UI, Depok",
         )
-        self.assertIsNone(response.data["akurasi_m"])  # type: ignore[attr-defined]
+        self.assertIsNone(response.data["akurasi_m"])
         self.assertEqual(get.call_args.kwargs["params"]["q"], "Jl. Margonda Raya 5 Depok")
         self.assertTrue(get.call_args.kwargs["headers"]["User-Agent"])
 
@@ -87,13 +87,13 @@ class ResolveKoordinatApiTests(APITestCase):
         with patch(GEOCODER, return_value=_GeocoderResponse([])):
             response = self._post({"sumber": "alamat", "alamat": "Jalan Entah"})
 
-        self.assertEqual(response.status_code, 404)  # type: ignore[attr-defined]
+        self.assertEqual(response.status_code, 404)
 
     def test_unreachable_geocoder_is_service_unavailable(self) -> None:
         with patch(GEOCODER, side_effect=requests.RequestException("timeout")):
             response = self._post({"sumber": "alamat", "alamat": "Jalan Entah"})
 
-        self.assertEqual(response.status_code, 503)  # type: ignore[attr-defined]
+        self.assertEqual(response.status_code, 503)
 
     def test_malformed_bodies_are_rejected(self) -> None:
         bodies = [
@@ -105,16 +105,16 @@ class ResolveKoordinatApiTests(APITestCase):
         for body in bodies:
             with self.subTest(body=body):
                 response = self._post(body)
-                self.assertEqual(response.status_code, 400)  # type: ignore[attr-defined]
+                self.assertEqual(response.status_code, 400)
 
     def test_link_pin_beats_viewport_centre(self) -> None:
         response = self._post({"sumber": "tautan", "tautan": LINK_PIN})
 
-        self.assertEqual(response.status_code, 200)  # type: ignore[attr-defined]
-        self.assertEqual(response.data["latitude"], -6.3703237)  # type: ignore[attr-defined]
-        self.assertEqual(response.data["longitude"], 106.8270541)  # type: ignore[attr-defined]
-        self.assertEqual(response.data["sumber"], "tautan")  # type: ignore[attr-defined]
-        self.assertIsNone(response.data["alamat_hasil"])  # type: ignore[attr-defined]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["latitude"], -6.3703237)
+        self.assertEqual(response.data["longitude"], 106.8270541)
+        self.assertEqual(response.data["sumber"], "tautan")
+        self.assertIsNone(response.data["alamat_hasil"])
 
     def test_link_with_only_viewport_centre_falls_back(self) -> None:
         response = self._post(
@@ -124,15 +124,15 @@ class ResolveKoordinatApiTests(APITestCase):
             }
         )
 
-        self.assertEqual(response.status_code, 200)  # type: ignore[attr-defined]
-        self.assertEqual(response.data["latitude"], -6.36)  # type: ignore[attr-defined]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["latitude"], -6.36)
 
     def test_link_without_coordinates_is_rejected(self) -> None:
         response = self._post(
             {"sumber": "tautan", "tautan": "https://www.google.com/maps/search/bank+sampah"}
         )
 
-        self.assertEqual(response.status_code, 400)  # type: ignore[attr-defined]
+        self.assertEqual(response.status_code, 400)
 
     def test_short_link_redirects_are_followed_manually(self) -> None:
         tujuan = (
@@ -142,16 +142,16 @@ class ResolveKoordinatApiTests(APITestCase):
         with patch(TAUTAN_GET, return_value=_RedirectResponse(302, tujuan)) as get:
             response = self._post({"sumber": "tautan", "tautan": "https://maps.app.goo.gl/abc123"})
 
-        self.assertEqual(response.status_code, 200)  # type: ignore[attr-defined]
-        self.assertEqual(response.data["latitude"], -6.21)  # type: ignore[attr-defined]
-        self.assertEqual(response.data["longitude"], 106.81)  # type: ignore[attr-defined]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["latitude"], -6.21)
+        self.assertEqual(response.data["longitude"], 106.81)
         self.assertFalse(get.call_args.kwargs["allow_redirects"])
 
     def test_short_link_to_foreign_host_is_rejected(self) -> None:
         with patch(TAUTAN_GET, return_value=_RedirectResponse(302, "https://evil.example/x")):
             response = self._post({"sumber": "tautan", "tautan": "https://maps.app.goo.gl/abc123"})
 
-        self.assertEqual(response.status_code, 400)  # type: ignore[attr-defined]
+        self.assertEqual(response.status_code, 400)
 
     def test_short_link_hitting_consent_page_asks_for_the_long_link(self) -> None:
         with patch(
@@ -160,20 +160,22 @@ class ResolveKoordinatApiTests(APITestCase):
         ):
             response = self._post({"sumber": "tautan", "tautan": "https://maps.app.goo.gl/abc123"})
 
-        self.assertEqual(response.status_code, 400)  # type: ignore[attr-defined]
-        self.assertIn("panjang", response.data["detail"])  # type: ignore[attr-defined]
+        self.assertEqual(response.status_code, 400)
+        detail = str(response.data["detail"])
+        self.assertIn("panjang", detail)
 
     def test_throttle_scope_is_registered(self) -> None:
         self.assertEqual(ResolveKoordinatView.throttle_scope, "resolve_koordinat")
         self.assertIn(ScopedRateThrottle, ResolveKoordinatView.throttle_classes)
-        self.assertIn("resolve_koordinat", settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"])
+        rates = cast("dict[str, str]", settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"])
+        self.assertIn("resolve_koordinat", rates)
 
     def test_anonymous_request_is_unauthorized(self) -> None:
         self.client.force_authenticate(None)
 
         response = self._post({"sumber": "alamat", "alamat": "Jl. Margonda Raya 5"})
 
-        self.assertEqual(response.status_code, 401)  # type: ignore[attr-defined]
+        self.assertEqual(response.status_code, 401)
 
 
 class BankKoordinatMetadataTests(APITestCase):
@@ -202,9 +204,9 @@ class BankKoordinatMetadataTests(APITestCase):
             format="multipart",
         )
 
-        self.assertEqual(response.status_code, 201)  # type: ignore[attr-defined]
-        self.assertEqual(response.data["koordinat_sumber"], "gps")  # type: ignore[attr-defined]
-        self.assertEqual(response.data["koordinat_akurasi_m"], "12.50")  # type: ignore[attr-defined]
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["koordinat_sumber"], "gps")
+        self.assertEqual(response.data["koordinat_akurasi_m"], "12.50")
         bank = BankSampah.objects.get(nama="Bank Sampah Metadata")
         self.assertEqual(bank.koordinat_sumber, "gps")
         self.assertEqual(bank.koordinat_akurasi_m, Decimal("12.50"))
