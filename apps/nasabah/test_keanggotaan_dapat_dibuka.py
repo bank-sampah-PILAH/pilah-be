@@ -50,3 +50,20 @@ class KeanggotaanDapatDibukaTests(APITestCase):
         self.member.is_active = False
         self.member.save()
         self.assertIs(self._baris()["dapat_dibuka"], False)
+
+    def test_keanggotaan_di_bank_yang_mati_tidak_dapat_dibuka(self) -> None:
+        """Syarat sisi bank sama dengan yang dipakai endpoint beranda.
+
+        Bank yang dinonaktifkan atau belum disetujui membuat keanggotaan yang
+        statusnya sendiri sehat tetap tidak bisa dibuka, dan inilah kasus yang
+        tidak terlihat dari baris keanggotaan saja.
+        """
+        for status, is_active in (
+            (BankSampah.Status.ACTIVE, False),
+            (BankSampah.Status.PENDING, True),
+            (BankSampah.Status.REJECTED, True),
+        ):
+            with self.subTest(bank_status=status, bank_is_active=is_active):
+                self.bank.status, self.bank.is_active = status, is_active
+                self.bank.save()
+                self.assertIs(self._baris()["dapat_dibuka"], False)
