@@ -7,7 +7,7 @@ keanggotaan yang benar-benar bisa dibuka dari yang sudah mati, sehingga layar
 berikutnya.
 """
 
-from typing import Any
+from typing import Any, cast
 
 from rest_framework.test import APITestCase
 
@@ -35,7 +35,8 @@ class KeanggotaanDapatDibukaTests(APITestCase):
     def _baris(self) -> dict[str, Any]:
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
-        return {baris["id"]: baris for baris in response.data}[str(self.member.id)]
+        semua = {baris["id"]: baris for baris in response.data}
+        return cast(dict[str, Any], semua[str(self.member.id)])
 
     def test_keanggotaan_disetujui_dan_aktif_dapat_dibuka(self) -> None:
         self.assertIs(self._baris()["dapat_dibuka"], True)
