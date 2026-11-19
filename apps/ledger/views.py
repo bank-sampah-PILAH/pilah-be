@@ -62,6 +62,7 @@ from apps.reporting.api import (
     operational_summary,
 )
 from shared_kernel.http_headers import CONTENT_DISPOSITION, IDEMPOTENCY_KEY
+from shared_kernel.parameter import validasi_uuid
 from shared_kernel.pencarian import validasi_pencarian
 from shared_kernel.permissions import (
     IsActivePengelola,
@@ -173,7 +174,7 @@ class TransaksiViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         if len(search) >= 2:
             qs = qs.filter(nasabah__nama__icontains=search)
         if nasabah_id:
-            qs = qs.filter(nasabah_id=nasabah_id)
+            qs = qs.filter(nasabah_id=validasi_uuid(nasabah_id, kunci="nasabah_id"))
         return qs
 
     def list(self, request: Request) -> Response:
@@ -331,7 +332,7 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
         nasabah_id = self.request.query_params.get("nasabah_id")
         search = validasi_pencarian(self.request.query_params.get("search", ""))
         if nasabah_id:
-            qs = qs.filter(nasabah_id=nasabah_id)
+            qs = qs.filter(nasabah_id=validasi_uuid(nasabah_id, kunci="nasabah_id"))
         if len(search) >= 2:
             qs = qs.filter(nasabah__nama__icontains=search)
         return PencairanService.dengan_info_revisi(qs)
