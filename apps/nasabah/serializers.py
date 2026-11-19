@@ -216,7 +216,12 @@ class NasabahSelfViewSerializer(serializers.ModelSerializer[Model]):
         Penanda tampilan saja, seperti `punya_akun` (PIL-281): keputusan
         wewenangnya tetap di server.
         """
-        return obj.status == Nasabah.Status.APPROVED and obj.is_active
+        return (
+            obj.status == Nasabah.Status.APPROVED
+            and obj.is_active
+            and obj.bank_sampah.is_active
+            and obj.bank_sampah.status == BankSampah.Status.ACTIVE
+        )
 
     def get_alasan_penolakan(self, obj: Nasabah) -> str | None:
         if obj.status != Nasabah.Status.REJECTED:
