@@ -8,6 +8,7 @@ from django.urls import reverse
 from rest_framework import serializers
 
 from api.models import BankSampah, BankSampahApprovalLog, User
+from apps.bank_sampah.models import SUMBER_KOORDINAT
 from apps.waste_catalog.serializers import DirectoryLayananSerializer
 from shared_kernel.validators import normalize_indonesian_phone
 
@@ -98,7 +99,12 @@ class BankSampahRegistrationSerializer(serializers.Serializer[Any]):
     longitude = serializers.DecimalField(
         required=False, allow_null=True, max_digits=9, decimal_places=6
     )
-    koordinat_sumber = serializers.CharField(required=False, allow_blank=True, max_length=16)
+    koordinat_sumber = serializers.ChoiceField(
+        choices=SUMBER_KOORDINAT,
+        required=False,
+        allow_blank=True,
+        error_messages={"invalid_choice": "Sumber koordinat tidak dikenal"},
+    )
     koordinat_akurasi_m = serializers.DecimalField(
         required=False, allow_null=True, max_digits=8, decimal_places=2
     )

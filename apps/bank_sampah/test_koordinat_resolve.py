@@ -211,6 +211,28 @@ class BankKoordinatMetadataTests(APITestCase):
         self.assertEqual(bank.koordinat_sumber, "gps")
         self.assertEqual(bank.koordinat_akurasi_m, Decimal("12.50"))
 
+    def test_unknown_coordinate_source_is_rejected(self) -> None:
+        # The vocabulary is part of the contract; a typo must not reach the
+        # table and quietly poison the re-check list later.
+        response = self.client.post(
+            "/api/v1/onboarding/bank-sampah",
+            {
+                "nama": "Bank Sampah Sumber Aneh",
+                "alamat": "Jl. Melati No. 10, Depok",
+                "no_hp_pic": "081234567890",
+                "foto_kegiatan": SimpleUploadedFile(
+                    "kegiatan.png", b"x" * 16, content_type="image/png"
+                ),
+                "latitude": "-6.362829",
+                "longitude": "106.828655",
+                "koordinat_sumber": "telepati",
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("koordinat_sumber", response.data["errors"])
+
     def test_fields_are_exposed_where_coordinates_are(self) -> None:
         bank = BankSampah.objects.create(
             nama="Bank Sampah Terbaca",

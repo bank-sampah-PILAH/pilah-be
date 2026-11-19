@@ -132,26 +132,32 @@ class ResolveKoordinatView(APIView):
             return Response(serializer.errors, status=400)
         data = serializer.validated_data
         if data["sumber"] == "alamat":
-            query = " ".join(
-                bagian
-                for bagian in (data.get("alamat", "").strip(), data.get("kota", "").strip())
-                if bagian
-            )
-            try:
-                hasil = geocode_alamat(query)
-            except GeocoderTidakTersedia:
-                return Response({"detail": "Layanan geocoder tidak dapat dihubungi"}, status=503)
-            if hasil is None:
-                return Response({"detail": "Alamat tidak ditemukan"}, status=404)
-            return Response(
-                {
-                    "latitude": hasil.latitude,
-                    "longitude": hasil.longitude,
-                    "sumber": "geocode",
-                    "alamat_hasil": hasil.alamat_hasil,
-                    "akurasi_m": hasil.akurasi_m,
-                }
-            )
+            return self._dari_alamat(data)
+        return self._dari_tautan(data)
+
+    def _dari_alamat(self, data: dict[str, Any]) -> Response:
+        query = " ".join(
+            bagian
+            for bagian in (data.get("alamat", "").strip(), data.get("kota", "").strip())
+            if bagian
+        )
+        try:
+            hasil = geocode_alamat(query)
+        except GeocoderTidakTersedia:
+            return Response({"detail": "Layanan geocoder tidak dapat dihubungi"}, status=503)
+        if hasil is None:
+            return Response({"detail": "Alamat tidak ditemukan"}, status=404)
+        return Response(
+            {
+                "latitude": hasil.latitude,
+                "longitude": hasil.longitude,
+                "sumber": "geocode",
+                "alamat_hasil": hasil.alamat_hasil,
+                "akurasi_m": hasil.akurasi_m,
+            }
+        )
+
+    def _dari_tautan(self, data: dict[str, Any]) -> Response:
         try:
             koordinat = koordinat_dari_tautan(perluas_tautan_pendek(data["tautan"].strip()))
         except TautanTidakValid as exc:

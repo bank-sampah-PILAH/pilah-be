@@ -6,6 +6,10 @@ from django.db import models
 
 from shared_kernel.models import TimestampedModel
 
+# Where a bank's coordinate came from (PIL-326). Kept beside the model so the
+# registration payload validates against the same four values the app sends.
+SUMBER_KOORDINAT = ("gps", "geocode", "tautan", "manual")
+
 
 class BankSampah(TimestampedModel):
     class OrganizationType(models.TextChoices):
