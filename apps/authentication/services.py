@@ -11,8 +11,12 @@ from google.oauth2 import id_token as google_id_token
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.models import BankSampah, Nasabah, NasabahApprovalLog, Saldo, User
-from shared_kernel.permissions import superadmin_allowlist
+from api.models import BankSampah, Nasabah, NasabahApprovalLog, Saldo, User, UserRoleChangeLog
+from shared_kernel.permissions import (
+    email_verification_exempt_allowlist,
+    is_app_superadmin_allowlisted,
+    superadmin_allowlist,
+)
 
 REGISTRATION_TOKEN_MAX_AGE = 600
 REGISTRATION_TOKEN_SALT = "pilah-google-registration"
@@ -63,8 +67,9 @@ class AuthService:
         user = AuthService._user_for_email(email)
         created = False
         if user is None:
-            is_allowlisted = superadmin_allowlist().__contains__(email.lower().strip())
+            is_allowlisted = is_app_superadmin_allowlisted(email)
             registered_role = User.Role.SUPERADMIN if is_allowlisted else role
+            has_django_admin_access = AuthService.is_superadmin_allowlisted(email)
             try:
                 with transaction.atomic():
                     user = User.objects.create_user(
@@ -73,8 +78,8 @@ class AuthService:
                         nama=name,
                         role=registered_role,
                         is_profile_complete=is_allowlisted,
-                        is_staff=is_allowlisted,
-                        is_superuser=is_allowlisted,
+                        is_staff=has_django_admin_access,
+                        is_superuser=has_django_admin_access,
                     )
                     created = True
             except IntegrityError:
@@ -85,6 +90,29 @@ class AuthService:
         AuthService._enforce_superadmin_allowlist(user, email)
         AuthService._update_google_identity(user, google_id, name)
         return AuthService._session_response(user, is_new_user=created), created
+
+    @staticmethod
+    def change_role(user: User, role: str) -> dict[str, Any]:
+        # A mis-tapped role is only correctable while nothing has been
+        # committed for it: no completed profile, no bank sampah (pending
+        # included), no linked membership. The account row is locked first:
+        # every onboarding write that checks the role takes the same lock, so
+        # a registration already past its check finishes before this reads
+        # the row, and its link refuses the change.
+        with transaction.atomic():
+            OnboardingService.lock_account(user)
+            if user.is_profile_complete or user.bank_sampah_id or user.keanggotaan_nasabah.exists():
+                raise AuthServiceError(
+                    "Peran tidak dapat diganti setelah pendaftaran berjalan.",
+                    code="role_locked",
+                    status_code=409,
+                )
+            previous = user.role
+            if previous != role:
+                User.objects.filter(pk=user.pk).update(role=role, updated_at=timezone.now())
+                UserRoleChangeLog.objects.create(user=user, from_role=previous, to_role=role)
+        user.refresh_from_db()
+        return AuthService._session_response(user, is_new_user=False)
 
     @staticmethod
     def _user_for_email(email: str) -> User | None:
@@ -106,10 +134,19 @@ class AuthService:
         )
 
     @staticmethod
+    def _invalid_credentials() -> AuthServiceError:
+        return AuthServiceError(
+            "Email atau kata sandi tidak valid",
+            code="invalid_credentials",
+            status_code=401,
+        )
+
+    @staticmethod
     def _enforce_superadmin_allowlist(user: User, email: str) -> None:
         if user.role != User.Role.SUPERADMIN:
             return
-        if not AuthService._sync_superadmin_admin_flags(user, email):
+        AuthService._sync_superadmin_admin_flags(user, email)
+        if not is_app_superadmin_allowlisted(email):
             raise AuthService._superadmin_not_allowlisted()
 
     @staticmethod
@@ -127,6 +164,9 @@ class AuthService:
         if not user.google_id:
             user.google_id = google_id
             updates.append("google_id")
+        if not user.email_verified:
+            user.email_verified = True
+            updates.append("email_verified")
         if not user.nama:
             user.nama = name
             updates.append("nama")
@@ -178,6 +218,7 @@ class AuthService:
     ) -> tuple[User, bool]:
         if role == User.Role.SUPERADMIN and not is_allowlisted:
             raise AuthService._superadmin_not_allowlisted()
+        has_django_admin_access = AuthService.is_superadmin_allowlisted(email)
         try:
             with transaction.atomic():
                 return (
@@ -187,8 +228,8 @@ class AuthService:
                         nama=name,
                         role=role,
                         is_profile_complete=role == User.Role.SUPERADMIN,
-                        is_staff=role == User.Role.SUPERADMIN,
-                        is_superuser=role == User.Role.SUPERADMIN,
+                        is_staff=has_django_admin_access,
+                        is_superuser=has_django_admin_access,
                     ),
                     True,
                 )
@@ -210,7 +251,7 @@ class AuthService:
         dev_role = profile.get("_pilah_dev_role")
         user = AuthService._user_for_email(email)
         nasabah = Nasabah.objects.filter(email__iexact=email, is_active=True).first()
-        is_allowlisted = AuthService.is_superadmin_allowlisted(email)
+        is_allowlisted = is_app_superadmin_allowlisted(email)
 
         if user is None and nasabah is None and not is_allowlisted and dev_role is None:
             return AuthService._registration_response(profile, email, google_id, name)
@@ -229,6 +270,27 @@ class AuthService:
         AuthService._sync_nasabah_prefill(user)
 
         return AuthService._session_response(user, is_new_user=is_new_user)
+
+    @staticmethod
+    def login_with_password(email: str, password: str) -> dict[str, Any]:
+        email = email.strip().lower()
+        try:
+            user = AuthService._user_for_email(email)
+        except AuthServiceError as exc:
+            raise AuthService._invalid_credentials() from exc
+
+        if user is None:
+            User().set_password(password)
+            raise AuthService._invalid_credentials()
+        if not user.check_password(password) or not user.is_active:
+            raise AuthService._invalid_credentials()
+        if not user.email_verified and email not in email_verification_exempt_allowlist():
+            raise AuthService._invalid_credentials()
+        try:
+            AuthService._enforce_superadmin_allowlist(user, email)
+        except AuthServiceError as exc:
+            raise AuthService._invalid_credentials() from exc
+        return AuthService._session_response(user, is_new_user=False)
 
     @staticmethod
     def _session_response(user: User, *, is_new_user: bool) -> dict[str, Any]:
@@ -279,6 +341,11 @@ class AuthService:
         Gated on role because a pengurus-entered email can coincidentally
         match an account that registered as something other than nasabah,
         and that account must not be silently turned into a member.
+
+        Linking a membership is one of the onboarding writes a role change
+        must not overlap (PIL-451), so the claim takes the same account row
+        lock and decides on the role it reads under it. Logins with nothing
+        to claim skip the lock.
         """
         if user.role != User.Role.NASABAH:
             return
@@ -287,8 +354,14 @@ class AuthService:
         ).first()
         if nasabah is None:
             return
-        nasabah.user = user
-        nasabah.save(update_fields=["user", "updated_at"])
+        # Read before the lock: email is unique, so only this same account can
+        # claim the record meanwhile, and linking it to itself again is harmless.
+        with transaction.atomic():
+            OnboardingService.lock_account(user)
+            if user.role != User.Role.NASABAH:
+                return
+            nasabah.user = user
+            nasabah.save(update_fields=["user", "updated_at"])
 
     @staticmethod
     def user_state(user: User) -> str:
@@ -296,10 +369,6 @@ class AuthService:
             return "superadmin_dashboard"
         if not user.is_profile_complete:
             return "complete_profile"
-        if user.role == User.Role.PENGELOLA_INDUK:
-            return (
-                "pengelola_induk_dashboard" if user.bank_sampah_id else "register_bank_sampah_induk"
-            )
         if user.role == User.Role.NASABAH:
             # Routing doesn't gate on approval: a membership application, once
             # submitted, sends the user straight to their own beranda
@@ -317,12 +386,37 @@ class AuthService:
         return "dashboard"
 
     @staticmethod
+    def discard_incomplete_registration(user: User) -> None:
+        """Deletes an account that never finished its profile, so the same
+        Google identity can register again and choose a different role
+        (CPBI-21 UAT finding: a fresh account whose owner tapped the wrong
+        role was locked out of the choice forever).
+
+        Deliberately narrow: only an incomplete account with no membership
+        record may go. A nasabah row (pengurus-entered or approved) is real
+        field data — never deleted by a session action. A complete profile or
+        a linked bank sampah means the account committed; those refuse too.
+        """
+        if user.is_profile_complete or user.bank_sampah_id:
+            raise AuthServiceError(
+                "Akun sudah lengkap dan tidak dapat dihapus dengan cara ini.",
+                code="registration_not_discardable",
+                status_code=409,
+            )
+        if Nasabah.objects.filter(user=user).exists():
+            raise AuthServiceError(
+                "Akun sudah terhubung dengan data nasabah dan tidak dapat dihapus dengan cara ini.",
+                code="registration_not_discardable",
+                status_code=409,
+            )
+        user.delete()
+
+    @staticmethod
     def _verify_google_token(raw_id_token: str) -> Mapping[str, Any]:
         if settings.PILAH_ALLOW_FAKE_GOOGLE_TOKEN:
             dev_roles = {
                 "dev-superadmin:": ("dev-superadmin", User.Role.SUPERADMIN),
                 "dev-pengelola:": ("dev-pengelola", User.Role.PENGELOLA),
-                "dev-pengelola-induk:": ("dev-pengelola-induk", User.Role.PENGELOLA_INDUK),
                 "dev-nasabah:": ("dev-nasabah", User.Role.NASABAH),
             }
             for prefix, (subject_prefix, role) in dev_roles.items():
@@ -377,8 +471,25 @@ NO_HP_TERPAKAI_DI_BANK = "Nomor HP ini sudah terdaftar di bank sampah ini, hubun
 
 class OnboardingService:
     @staticmethod
+    def lock_account(user: User) -> None:
+        """Lock the account row for the caller's transaction and reload it.
+
+        A role change and every onboarding write that checks the role
+        (PIL-451) lock this same row, so they run one after the other: a bank
+        or a membership is never linked under a role that changed after its
+        check, and a role change sees whatever a finished registration
+        linked. Call inside ``transaction.atomic()``.
+        """
+        user.refresh_from_db(from_queryset=User.objects.select_for_update())
+
+    @staticmethod
     @transaction.atomic
     def complete_profile(user: User, profile_data: Mapping[str, Any]) -> User:
+        # A completed profile commits the account to its role, so this takes
+        # the role-change lock too (PIL-451). The reload also means the
+        # checks below, and the role the caller answers with, are the
+        # account's current ones, not those of the object the request loaded.
+        OnboardingService.lock_account(user)
         # One-shot for pengelola, whose profile step gates their bank
         # registration. A nasabah owns their profile and may re-submit it at
         # any time, whatever their membership status.
@@ -453,6 +564,7 @@ class OnboardingService:
     @staticmethod
     @transaction.atomic
     def register_nasabah(user: User, payload: Mapping[str, Any]) -> Nasabah:
+        OnboardingService.lock_account(user)
         if user.role != User.Role.NASABAH:
             raise PermissionError("Hanya nasabah yang dapat mengajukan keanggotaan")
         if not user.alamat.strip():

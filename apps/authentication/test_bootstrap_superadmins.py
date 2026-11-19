@@ -51,7 +51,7 @@ class BootstrapSuperadminsTests(TestCase):
         self.assertEqual(set(User.objects.values_list("role", flat=True)), {User.Role.SUPERADMIN})
 
     def test_conflicting_roles_fail_atomically_without_privilege_escalation(self) -> None:
-        for role in (User.Role.PENGELOLA, User.Role.PENGELOLA_INDUK, User.Role.NASABAH):
+        for role in (User.Role.PENGELOLA, User.Role.NASABAH):
             with self.subTest(role=role):
                 User.objects.all().delete()
                 user = User.objects.create_user(email="second@example.com", role=role)

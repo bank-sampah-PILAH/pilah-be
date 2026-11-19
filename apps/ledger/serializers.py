@@ -14,8 +14,10 @@ from api.models import (
     Pencairan,
     PencairanRevisi,
     Transaksi,
+    TransaksiRevisi,
 )
 from apps.ledger.services import BalanceService, PencairanService
+from apps.waste_catalog.api import harga_berlaku_bank
 from shared_kernel.kalkulasi import bulatkan_rupiah, format_ribuan
 from shared_kernel.validators import get_initials
 
@@ -25,7 +27,27 @@ _NASABAH_NAMA = "nasabah.nama"
 _DIBUAT_OLEH_NAMA = "dibuat_oleh.nama"
 _DIUBAH_OLEH_NAMA = "diubah_oleh.nama"
 _BANK_SAMPAH_ID = "bank_sampah.id"
+_ALASAN_WAJIB = "Alasan perubahan wajib diisi"
+_ALASAN_BATAL_WAJIB = "Alasan pembatalan wajib diisi"
 _DICATAT_OLEH_ID = "dicatat_oleh.id"
+
+
+# PIL-428: the void and who made it; the dibatalkan_* fields are null while tercatat.
+_VOID_FIELDS = [
+    "status",
+    "alasan_batal",
+    "dibatalkan_oleh",
+    "dibatalkan_oleh_nama",
+    "dibatalkan_pada",
+]
+
+
+def _dibatalkan_oleh() -> serializers.UUIDField:
+    return serializers.UUIDField(source="dibatalkan_oleh.id", allow_null=True, read_only=True)
+
+
+def _dibatalkan_oleh_nama() -> serializers.CharField:
+    return serializers.CharField(source="dibatalkan_oleh.nama", allow_null=True, read_only=True)
 
 
 class TransactionListSerializer(serializers.ModelSerializer[Model]):
@@ -34,7 +56,10 @@ class TransactionListSerializer(serializers.ModelSerializer[Model]):
     nasabah_inisial = serializers.SerializerMethodField()
     jenis_sampah_utama = serializers.SerializerMethodField()
     total_berat_kg = serializers.SerializerMethodField()
+    jumlah_item = serializers.SerializerMethodField()
     dicatat_oleh = serializers.UUIDField(source=_DICATAT_OLEH_ID)
+    dibatalkan_oleh = _dibatalkan_oleh()
+    dibatalkan_oleh_nama = _dibatalkan_oleh_nama()
 
     class Meta:
         model = Transaksi
@@ -45,10 +70,12 @@ class TransactionListSerializer(serializers.ModelSerializer[Model]):
             "nasabah_inisial",
             "jenis_sampah_utama",
             "total_berat_kg",
+            "jumlah_item",
             "total_nilai",
             "tanggal",
             "status_wa",
             "dicatat_oleh",
+            *_VOID_FIELDS,
         ]
 
     def get_nasabah_inisial(self, obj: Any) -> Any:
@@ -60,6 +87,9 @@ class TransactionListSerializer(serializers.ModelSerializer[Model]):
 
     def get_total_berat_kg(self, obj: Any) -> Any:
         return sum((item.berat for item in obj.items.all()), Decimal(0))
+
+    def get_jumlah_item(self, obj: Any) -> int:
+        return len(obj.items.all())
 
 
 BERAT_MAKS_PER_ITEM = Decimal(500)
@@ -79,9 +109,9 @@ class TransactionItemInputSerializer(serializers.Serializer[Any]):
     )
 
 
-class TransactionCreateSerializer(serializers.Serializer[Any]):
-    nasabah_id = serializers.UUIDField(required=True)
-    items = TransactionItemInputSerializer(many=True, required=True)
+class _SetoranWriteSerializer(serializers.Serializer[Any]):
+    """Rules shared by creating a setoran and correcting one."""
+
     catatan = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     def validate_items(self, value: Any) -> Any:
@@ -138,13 +168,63 @@ class DetailTransaksiSerializer(serializers.ModelSerializer[Model]):
         ]
 
 
+class TransactionCreateSerializer(_SetoranWriteSerializer):
+    nasabah_id = serializers.UUIDField(required=True)
+    items = TransactionItemInputSerializer(many=True, required=True)
+
+
+class TransactionEditSerializer(_SetoranWriteSerializer):
+    items = TransactionItemInputSerializer(many=True, required=False)
+    alasan = serializers.CharField(
+        required=True,
+        max_length=255,
+        error_messages={
+            "required": _ALASAN_WAJIB,
+            "blank": _ALASAN_WAJIB,
+        },
+    )
+
+
+class TransactionBatalSerializer(serializers.Serializer[Any]):
+    alasan = serializers.CharField(
+        required=True,
+        max_length=255,
+        error_messages={
+            "required": _ALASAN_BATAL_WAJIB,
+            "blank": _ALASAN_BATAL_WAJIB,
+        },
+    )
+
+
+class TransaksiRevisiSerializer(serializers.ModelSerializer[Model]):
+    diubah_oleh = serializers.UUIDField(source="diubah_oleh.id")
+    diubah_oleh_nama = serializers.CharField(source=_DIUBAH_OLEH_NAMA)
+
+    class Meta:
+        model = TransaksiRevisi
+        fields = [
+            "versi",
+            "total_nilai",
+            "catatan",
+            "items",
+            "alasan",
+            "diubah_oleh",
+            "diubah_oleh_nama",
+            "diubah_pada",
+        ]
+
+
 class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
     nasabah_id = serializers.UUIDField(source=_NASABAH_ID)
     nasabah_nama = serializers.CharField(source=_NASABAH_NAMA)
     bank_sampah_id = serializers.UUIDField(source=_BANK_SAMPAH_ID)
     dicatat_oleh = serializers.UUIDField(source=_DICATAT_OLEH_ID)
     items = DetailTransaksiSerializer(many=True)
+    revisi = TransaksiRevisiSerializer(many=True, read_only=True)
     saldo_setelah_transaksi = serializers.SerializerMethodField()
+    harga_pada_tanggal = serializers.SerializerMethodField()
+    dibatalkan_oleh = _dibatalkan_oleh()
+    dibatalkan_oleh_nama = _dibatalkan_oleh_nama()
 
     class Meta:
         model = Transaksi
@@ -159,8 +239,18 @@ class TransactionDetailSerializer(serializers.ModelSerializer[Model]):
             "catatan",
             "status_wa",
             "items",
+            "revisi",
             "saldo_setelah_transaksi",
+            "harga_pada_tanggal",
+            *_VOID_FIELDS,
         ]
+
+    def get_harga_pada_tanggal(self, obj: Any) -> dict[str, str]:
+        """Price per kg each jenis had on the setoran date, which is what an edit is priced at."""
+        return {
+            str(jenis_id): str(harga)
+            for jenis_id, harga in harga_berlaku_bank(obj.bank_sampah, obj.tanggal).items()
+        }
 
     def get_saldo_setelah_transaksi(self, obj: Any) -> Any:
         return bulatkan_rupiah(
@@ -182,22 +272,6 @@ def _validate_nominal_pencairan(value: Decimal) -> Decimal:
     return value
 
 
-class PencairanCreateSerializer(serializers.Serializer[Any]):
-    nasabah_id = serializers.UUIDField(required=True)
-    nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=True)
-    metode = serializers.ChoiceField(choices=Pencairan.Metode.choices, required=True)
-    tanggal = serializers.DateTimeField(required=False)
-    keterangan = serializers.CharField(
-        required=False, allow_blank=True, allow_null=True, max_length=255
-    )
-
-    def validate_nominal(self, value: Decimal) -> Decimal:
-        return _validate_nominal_pencairan(value)
-
-    def validate_tanggal(self, value: datetime) -> datetime:
-        return _validate_tanggal_pencairan(value)
-
-
 class PencairanEditSerializer(serializers.Serializer[Any]):
     nominal = serializers.DecimalField(max_digits=14, decimal_places=2, required=False)
     metode = serializers.ChoiceField(choices=Pencairan.Metode.choices, required=False)
@@ -209,8 +283,8 @@ class PencairanEditSerializer(serializers.Serializer[Any]):
         required=True,
         max_length=255,
         error_messages={
-            "required": "Alasan perubahan wajib diisi",
-            "blank": "Alasan perubahan wajib diisi",
+            "required": _ALASAN_WAJIB,
+            "blank": _ALASAN_WAJIB,
         },
     )
 
@@ -285,6 +359,16 @@ class PencairanRevisiSerializer(serializers.ModelSerializer[Model]):
             "diubah_oleh_nama",
             "diubah_pada",
         ]
+
+
+class SetoranActivityEnvelopeSerializer(serializers.Serializer[Any]):
+    tipe = serializers.ChoiceField(choices=["setoran"])
+    data = TransactionListSerializer()  # type: ignore[assignment]  # schema field; DRF removes it before binding Serializer.data
+
+
+class PencairanActivityEnvelopeSerializer(serializers.Serializer[Any]):
+    tipe = serializers.ChoiceField(choices=["pencairan"])
+    data = PencairanDetailSerializer()  # type: ignore[assignment]  # schema field; DRF removes it before binding Serializer.data
 
 
 def _validate_pasangan(attrs: dict[str, Any], nama: str) -> dict[str, Any]:

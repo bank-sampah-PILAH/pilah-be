@@ -1,14 +1,15 @@
-import json
 from typing import Any
 
 import requests
 from django.conf import settings
+from django.core.cache import caches
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.http import HttpResponse, HttpResponseRedirect
-from django.utils.http import urlencode
+from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -18,7 +19,9 @@ from apps.authentication.serializers import (
     GoogleAuthSerializer,
     GoogleRegistrationSerializer,
     LogoutSerializer,
+    PasswordLoginSerializer,
     RefreshTokenSerializer,
+    RoleChangeSerializer,
     UserProfileSerializer,
 )
 from apps.authentication.services import (
@@ -26,6 +29,8 @@ from apps.authentication.services import (
     AuthServiceError,
     OnboardingService,
 )
+from shared_kernel.csp import nonce_baru, tandai_dokumen_tertutup
+from shared_kernel.keluaran_dokumen import LITERAL_SKRIP, TEKS_HTML
 from shared_kernel.permissions import (
     IsRegistrationRole,
 )
@@ -33,6 +38,13 @@ from shared_kernel.scoping import current_user
 
 # Local page a finished OAuth popup redirects to when no `next` URL survives.
 _OAUTH_FALLBACK_PATH = "/api-test/"
+
+
+def _local_next_path(value: str) -> str:
+    """`next` is only ever a path on this site; a value that could leave it falls back."""
+    if not value.startswith("/") or not url_has_allowed_host_and_scheme(value, allowed_hosts=None):
+        return _OAUTH_FALLBACK_PATH
+    return value
 
 
 class GoogleAuthView(APIView):
@@ -51,6 +63,30 @@ class GoogleAuthView(APIView):
             return Response({"error": "ID Token invalid atau expired"}, status=401)
 
 
+class PasswordLoginThrottle(ScopedRateThrottle):
+    # Login guessing limits must be shared across autoscaled Cloud Run instances.
+    cache = caches["auth_rate_limit"]
+
+
+class PasswordLoginView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [PasswordLoginThrottle]
+    throttle_scope = "password_login"
+    serializer_class = PasswordLoginSerializer
+
+    def post(self, request: Request) -> Response:
+        serializer = PasswordLoginSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({"errors": serializer.errors}, status=422)
+        try:
+            payload = AuthService.login_with_password(
+                serializer.validated_data["email"], serializer.validated_data["password"]
+            )
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
+        return Response(payload)
+
+
 class GoogleOAuthStartView(APIView):
     permission_classes = [AllowAny]
 
@@ -60,9 +96,7 @@ class GoogleOAuthStartView(APIView):
         redirect_uri = settings.GOOGLE_REDIRECT_URI or request.build_absolute_uri(
             "/api/v1/auth/google/callback"
         )
-        next_url = request.GET.get("next") or _OAUTH_FALLBACK_PATH
-        if not next_url.startswith("/"):
-            next_url = _OAUTH_FALLBACK_PATH
+        next_url = _local_next_path(request.GET.get("next") or _OAUTH_FALLBACK_PATH)
         state = TimestampSigner().sign(next_url)
         params = urlencode(
             {
@@ -91,8 +125,7 @@ class GoogleOAuthCallbackView(APIView):
             next_url = TimestampSigner().unsign(raw_state, max_age=600)
         except (BadSignature, SignatureExpired):
             next_url = _OAUTH_FALLBACK_PATH
-        if not next_url.startswith("/"):
-            next_url = _OAUTH_FALLBACK_PATH
+        next_url = _local_next_path(next_url)
 
         redirect_uri = settings.GOOGLE_REDIRECT_URI or request.build_absolute_uri(
             "/api/v1/auth/google/callback"
@@ -125,25 +158,29 @@ class GoogleOAuthCallbackView(APIView):
     def _popup_response(
         ok: bool, payload: Any, next_url: str = _OAUTH_FALLBACK_PATH
     ) -> HttpResponse:
-        message = json.dumps({"type": "pilah-google-oauth", "ok": ok, "payload": payload})
-        fallback = json.dumps(payload, indent=2)
+        nonce = nonce_baru()
+        isi = {"type": "pilah-google-oauth", "ok": ok, "payload": payload}
+        message = LITERAL_SKRIP.loloskan(isi)
+        fallback = TEKS_HTML.loloskan(payload)
         html = f"""<!doctype html>
 <html>
 <head><meta charset="utf-8"><title>PILAH Google OAuth</title></head>
 <body>
 <pre>{fallback}</pre>
-<script>
+<script nonce="{nonce}">
   const message = {message};
   if (window.opener) {{
     window.opener.postMessage(message, window.location.origin);
     window.close();
   }} else {{
-    window.location.href = {json.dumps(next_url)};
+    window.location.href = {LITERAL_SKRIP.loloskan(next_url)};
   }}
 </script>
 </body>
 </html>"""
-        return HttpResponse(html, status=200 if ok else 400)
+        response = HttpResponse(html, status=200 if ok else 400)
+        tandai_dokumen_tertutup(response, nonce)
+        return response
 
 
 class RefreshTokenView(APIView):
@@ -209,6 +246,33 @@ class CompleteProfileView(APIView):
         data = UserProfileSerializer(user).data
         data["next_step"] = AuthService.user_state(user)
         return Response(data)
+
+
+class RoleChangeView(APIView):
+    permission_classes = [IsRegistrationRole]
+    serializer_class = RoleChangeSerializer
+
+    def patch(self, request: Request) -> Response:
+        serializer = RoleChangeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            return Response(
+                AuthService.change_role(current_user(request), serializer.validated_data["role"])
+            )
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
+
+
+class DiscardRegistrationView(APIView):
+    """Deletes the caller's own profile-incomplete account so they can sign
+    up again and pick a different role (CPBI-21 UAT finding)."""
+
+    def delete(self, request: Request) -> Response:
+        try:
+            AuthService.discard_incomplete_registration(current_user(request))
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
+        return Response({"message": "Pendaftaran dihapus. Silakan daftar ulang."})
 
 
 def _auth_service_error_response(error: AuthServiceError) -> Response:

@@ -22,6 +22,10 @@ KERNEL_ROOT = REPO_ROOT / "shared_kernel"
 # import the domain layer is allowed to keep.
 ALLOWED_API_MODULES = {"api.models"}
 
+# PIL-428: TransaksiQuerySet.tercatat() is the one named rule for "setoran that
+# still count"; every other read calls it instead of spelling out the status.
+TERCATAT_RULE_HOME = APPS_ROOT / "ledger" / "models.py"
+
 
 def _imported_modules(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(), filename=str(path))
@@ -32,6 +36,34 @@ def _imported_modules(path: Path) -> list[str]:
         elif isinstance(node, ast.ImportFrom) and node.module:
             found.append(node.module)
     return found
+
+
+def _names_transaksi_tercatat(node: ast.expr) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "TERCATAT"
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "Status"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "Transaksi"
+    )
+
+
+def _spelled_out_tercatat_filters(path: Path) -> list[int]:
+    lines: list[int] = []
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"filter", "exclude"}
+        ):
+            continue
+        for keyword in node.keywords:
+            if _names_transaksi_tercatat(keyword.value) or (keyword.arg or "").endswith(
+                "transaksi__status"
+            ):
+                lines.append(keyword.value.lineno)
+    return lines
 
 
 def _is_allowed_api(module: str) -> bool:
@@ -68,4 +100,15 @@ class ArchitectureTest(SimpleTestCase):
                     violations.append(f"{path}: kernel imports app {module}")
                 elif (module == "api" or module.startswith("api.")) and not _is_allowed_api(module):
                     violations.append(f"{path}: kernel imports {module}")
+        self.assertEqual(violations, [])
+
+    def test_counted_setoran_are_read_through_tercatat(self) -> None:
+        violations: list[str] = []
+        for path in sorted(APPS_ROOT.rglob("*.py")):
+            if path == TERCATAT_RULE_HOME or path.name.startswith("test_"):
+                continue
+            violations.extend(
+                f"{path.relative_to(REPO_ROOT)}:{line}"
+                for line in _spelled_out_tercatat_filters(path)
+            )
         self.assertEqual(violations, [])

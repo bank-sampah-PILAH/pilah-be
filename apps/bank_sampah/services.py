@@ -7,16 +7,40 @@ from django.db import transaction
 from django.utils import timezone
 
 from api.models import BankSampah, BankSampahApprovalLog, User
-from apps.notification.api import DEFAULT_WA_TEMPLATE
+from apps.authentication.api import lock_for_onboarding
+from apps.notification.api import DEFAULT_WA_TEMPLATE, queue_push
+
+PENDING_ONLY_MESSAGE = "Hanya pengajuan berstatus menunggu yang dapat diproses"
 
 
 class ApprovalService:
     @staticmethod
+    def _lock_pending(bank: BankSampah) -> None:
+        """Lock the row, refresh the caller's instance, and require PENDING.
+
+        The caller's instance may be stale (loaded before a concurrent
+        decision), so the status check must run on the locked row.
+        """
+        BankSampah.objects.select_for_update().get(pk=bank.pk)
+        bank.refresh_from_db()
+        if bank.status != BankSampah.Status.PENDING:
+            raise ValueError(PENDING_ONLY_MESSAGE)
+
+    @staticmethod
     @transaction.atomic
     def approve(bank: BankSampah, superadmin: User, catatan: str = "") -> BankSampahApprovalLog:
+        ApprovalService._lock_pending(bank)
         bank.status = BankSampah.Status.ACTIVE
         bank.is_active = True
         bank.save(update_fields=["status", "is_active", "updated_at"])
+        for manager in User.objects.filter(
+            bank_sampah=bank, is_primary_pengelola=True, is_active=True
+        ):
+            queue_push(
+                manager,
+                title="Pendaftaran disetujui",
+                body=f"{bank.nama} sudah aktif. Anda dapat mulai mengelola bank sampah.",
+            )
         return BankSampahApprovalLog.objects.create(
             bank_sampah=bank,
             superadmin=superadmin,
@@ -27,9 +51,18 @@ class ApprovalService:
     @staticmethod
     @transaction.atomic
     def reject(bank: BankSampah, superadmin: User, catatan: str = "") -> BankSampahApprovalLog:
+        ApprovalService._lock_pending(bank)
         bank.status = BankSampah.Status.REJECTED
         bank.is_active = False
         bank.save(update_fields=["status", "is_active", "updated_at"])
+        for manager in User.objects.filter(
+            bank_sampah=bank, is_primary_pengelola=True, is_active=True
+        ):
+            queue_push(
+                manager,
+                title="Pendaftaran perlu diperbaiki",
+                body=f"Pendaftaran {bank.nama} belum disetujui. Periksa catatan dan ajukan kembali.",
+            )
         return BankSampahApprovalLog.objects.create(
             bank_sampah=bank,
             superadmin=superadmin,
@@ -47,6 +80,7 @@ class BankOnboardingService:
     @staticmethod
     @transaction.atomic
     def register_bank_sampah(user: User, payload: Mapping[str, Any]) -> BankSampah:
+        lock_for_onboarding(user)
         if user.role != User.Role.PENGELOLA:
             raise PermissionError("Hanya pengelola yang dapat mendaftarkan bank sampah")
         bank = user.bank_sampah
@@ -68,15 +102,25 @@ class BankOnboardingService:
         user.bank_sampah = bank
         user.is_primary_pengelola = True
         user.save(update_fields=["bank_sampah", "is_primary_pengelola", "updated_at"])
+        for admin in User.objects.filter(role=User.Role.SUPERADMIN, is_active=True):
+            queue_push(
+                admin,
+                title="Pendaftaran bank sampah baru",
+                body=f"{bank.nama} menunggu peninjauan Anda.",
+            )
         return bank
 
     @staticmethod
+    @transaction.atomic
     def accept_invite(user: User, token: str) -> tuple[BankSampah, str]:
+        lock_for_onboarding(user)
         bank = BankSampah.objects.filter(
             invite_token=token, invite_token_expires__gt=timezone.now()
         ).first()
-        if not bank or bank.status != BankSampah.Status.ACTIVE:
+        if not bank:
             raise ValueError("Tautan undangan tidak valid atau sudah kedaluwarsa")
+        if bank.status != BankSampah.Status.ACTIVE or not bank.is_active:
+            raise ValueError("Undangan tidak dapat digunakan karena bank sampah tidak aktif")
         if user.role != User.Role.PENGELOLA:
             raise PermissionError("Hanya pengelola yang dapat menerima undangan")
         if user.bank_sampah_id == bank.id:
