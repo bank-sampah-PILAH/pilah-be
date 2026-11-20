@@ -13,6 +13,15 @@ URL = "/api/v1/onboarding/role"
 
 
 class RoleChangeTests(APITestCase):
+    def test_correction_to_an_assigned_role_preserves_other_assignments(self) -> None:
+        user = User.objects.create_user(
+            email="dual-correction@example.com", roles=[User.Role.PENGELOLA, User.Role.NASABAH]
+        )
+        AuthService.change_role(user, User.Role.NASABAH)
+        user.refresh_from_db()
+        self.assertEqual(user.roles, [User.Role.PENGELOLA, User.Role.NASABAH])
+        self.assertEqual(user.role, User.Role.NASABAH)
+
     def test_corrected_role_assignments_and_tokens_remain_consistent(self) -> None:
         user = self._fresh()
         self.client.force_authenticate(user)
