@@ -190,7 +190,9 @@ class RoleChangeTests(APITestCase):
             alamat="Jl. Mawar",
         )
         stale = User.objects.get(pk=user.pk)
-        User.objects.filter(pk=user.pk).update(role=User.Role.PENGELOLA, roles=[User.Role.PENGELOLA])
+        User.objects.filter(pk=user.pk).update(
+            role=User.Role.PENGELOLA, roles=[User.Role.PENGELOLA]
+        )
         verify.return_value = {
             "sub": "google-stale",
             "email": user.email,

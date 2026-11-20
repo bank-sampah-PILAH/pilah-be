@@ -109,9 +109,11 @@ class AuthService:
                 )
             previous = user.role
             if previous != role:
-                roles = [assigned for assigned in user.roles if assigned != previous]
-                if role not in roles:
-                    roles.append(role)
+                roles = (
+                    user.roles
+                    if role in user.roles
+                    else [role if assigned == previous else assigned for assigned in user.roles]
+                )
                 User.objects.filter(pk=user.pk).update(
                     role=role, roles=roles, updated_at=timezone.now()
                 )
