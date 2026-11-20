@@ -109,7 +109,12 @@ class AuthService:
                 )
             previous = user.role
             if previous != role:
-                User.objects.filter(pk=user.pk).update(role=role, updated_at=timezone.now())
+                roles = [assigned for assigned in user.roles if assigned != previous]
+                if role not in roles:
+                    roles.append(role)
+                User.objects.filter(pk=user.pk).update(
+                    role=role, roles=roles, updated_at=timezone.now()
+                )
                 UserRoleChangeLog.objects.create(user=user, from_role=previous, to_role=role)
         user.refresh_from_db()
         return AuthService._session_response(user, is_new_user=False)
