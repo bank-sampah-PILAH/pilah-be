@@ -93,13 +93,13 @@ class DashboardService:
         bank = user.bank_sampah
         assert bank is not None  # ponytail: views gate on IsActivePengelola
         start_dt, end_dt = _date_bounds(start, end)
+        counted = Transaksi.objects.tercatat().filter(
+            bank_sampah=bank,
+            tipe=Transaksi.Tipe.SETORAN,
+            tanggal__range=(start_dt, end_dt),
+        )
         categories = (
-            DetailTransaksi.objects.filter(
-                transaksi__bank_sampah=bank,
-                transaksi__tipe=Transaksi.Tipe.SETORAN,
-                transaksi__status=Transaksi.Status.TERCATAT,
-                transaksi__tanggal__range=(start_dt, end_dt),
-            )
+            DetailTransaksi.objects.filter(transaksi__in=counted)
             .values("kategori_snapshot")
             .annotate(
                 total_weight_kg=Coalesce(Sum("berat"), Decimal(0)),

@@ -21,6 +21,7 @@ from apps.authentication.views import (
     LogoutView,
     PasswordLoginView,
     RefreshTokenView,
+    RoleChangeView,
 )
 from apps.bank_sampah.views import (
     AcceptInviteView,
@@ -124,6 +125,7 @@ urlpatterns = [
     path("auth/logout", LogoutView.as_view(), name="auth-logout"),
     path("auth/me", AuthMeView.as_view(), name="auth-me"),
     path("onboarding/profile", CompleteProfileView.as_view(), name="onboarding-profile"),
+    path("onboarding/role", RoleChangeView.as_view(), name="onboarding-role"),
     path(
         "onboarding/discard-registration",
         DiscardRegistrationView.as_view(),

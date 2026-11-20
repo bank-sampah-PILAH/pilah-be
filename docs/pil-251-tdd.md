@@ -5,7 +5,7 @@ Baseline: `origin/staging` at `d5a2ff9`. Branch: `feature/pil-251`.
 ## Implementation
 
 - `User.role` remains the primary role. `User.roles` is a Django JSONField.
-- Migration 0039 backfills existing accounts to `[role]`. New normal and bulk
+- Migration 0040 backfills existing accounts to `[role]`. New normal and bulk
   account creation also initialize that list.
 - Assigned-role lists must contain valid, unique roles and include the primary
   role. Memberships require an assigned Nasabah role.
