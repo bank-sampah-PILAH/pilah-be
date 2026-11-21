@@ -109,7 +109,14 @@ class AuthService:
                 )
             previous = user.role
             if previous != role:
-                User.objects.filter(pk=user.pk).update(role=role, updated_at=timezone.now())
+                roles = (
+                    user.roles
+                    if role in user.roles
+                    else [role if assigned == previous else assigned for assigned in user.roles]
+                )
+                User.objects.filter(pk=user.pk).update(
+                    role=role, roles=roles, updated_at=timezone.now()
+                )
                 UserRoleChangeLog.objects.create(user=user, from_role=previous, to_role=role)
         user.refresh_from_db()
         return AuthService._session_response(user, is_new_user=False)
@@ -295,6 +302,7 @@ class AuthService:
     @staticmethod
     def _session_response(user: User, *, is_new_user: bool) -> dict[str, Any]:
         refresh = RefreshToken.for_user(user)
+        refresh["role"] = user.role
         access = refresh.access_token
         if user.bank_sampah_id:
             access["bank_sampah_id"] = str(user.bank_sampah_id)
@@ -347,7 +355,7 @@ class AuthService:
         lock and decides on the role it reads under it. Logins with nothing
         to claim skip the lock.
         """
-        if user.role != User.Role.NASABAH:
+        if User.Role.NASABAH not in user.roles:
             return
         nasabah = Nasabah.objects.filter(
             email__iexact=user.email, is_active=True, user__isnull=True
@@ -358,7 +366,7 @@ class AuthService:
         # claim the record meanwhile, and linking it to itself again is harmless.
         with transaction.atomic():
             OnboardingService.lock_account(user)
-            if user.role != User.Role.NASABAH:
+            if User.Role.NASABAH not in user.roles:
                 return
             nasabah.user = user
             nasabah.save(update_fields=["user", "updated_at"])
@@ -565,7 +573,7 @@ class OnboardingService:
     @transaction.atomic
     def register_nasabah(user: User, payload: Mapping[str, Any]) -> Nasabah:
         OnboardingService.lock_account(user)
-        if user.role != User.Role.NASABAH:
+        if User.Role.NASABAH not in user.roles:
             raise PermissionError("Hanya nasabah yang dapat mengajukan keanggotaan")
         if not user.alamat.strip():
             raise ValueError("Lengkapi alamat pada profil Anda terlebih dahulu")

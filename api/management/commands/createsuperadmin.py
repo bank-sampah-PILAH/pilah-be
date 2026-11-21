@@ -31,6 +31,8 @@ class Command(BaseCommand):
         )
         user.nama = nama
         user.role = User.Role.SUPERADMIN
+        if User.Role.SUPERADMIN not in user.roles:
+            user.roles.append(User.Role.SUPERADMIN)
         user.is_profile_complete = True
         user.is_staff = True
         user.is_superuser = True

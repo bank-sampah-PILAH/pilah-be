@@ -68,6 +68,7 @@ from shared_kernel.permissions import (
     IsActivePengelola,
     IsActivePengelolaOrNasabah,
 )
+from shared_kernel.roles import active_role
 from shared_kernel.scoping import current_bank, current_user
 
 
@@ -324,7 +325,7 @@ class PencairanViewSet(viewsets.GenericViewSet):  # type: ignore[type-arg]  # st
 
     def get_queryset(self) -> QuerySet[Pencairan]:
         user = _user(self.request)
-        if user.role == User.Role.NASABAH:
+        if active_role(self.request) == User.Role.NASABAH:
             qs = Pencairan.objects.filter(nasabah__user=user)
         else:
             qs = Pencairan.objects.filter(bank_sampah=_bank_sampah(self.request))

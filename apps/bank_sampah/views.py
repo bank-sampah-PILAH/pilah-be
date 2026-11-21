@@ -157,8 +157,12 @@ class RegisterBankSampahView(APIView):
         return Response(data, status=201)
 
 
+class CanAcceptInvite(IsPengelola):
+    message = "Hanya pengelola yang dapat menerima undangan"
+
+
 class AcceptInviteView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [CanAcceptInvite]
     serializer_class = InviteAcceptSerializer
 
     def post(self, request: Request) -> Response:
@@ -189,9 +193,11 @@ class TeamView(APIView):
     serializer_class = TeamMemberSerializer
 
     def get(self, request: Request) -> Response:
-        members = User.objects.filter(
-            bank_sampah=current_bank(request), role=User.Role.PENGELOLA, is_active=True
-        ).order_by("-is_primary_pengelola", "nama")
+        members = (
+            User.objects.with_role(User.Role.PENGELOLA)
+            .filter(bank_sampah=current_bank(request), is_active=True)
+            .order_by("-is_primary_pengelola", "nama")
+        )
         return Response(
             {"members": TeamMemberSerializer(members, many=True, context={"request": request}).data}
         )

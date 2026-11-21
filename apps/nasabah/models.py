@@ -67,8 +67,10 @@ class Nasabah(TimestampedModel):
         if self.user_id:
             from api.models import User
 
-            user_role = User.objects.filter(pk=self.user_id).values_list("role", flat=True).first()
-            if user_role != User.Role.NASABAH:
+            user_roles = (
+                User.objects.filter(pk=self.user_id).values_list("roles", flat=True).first()
+            )
+            if not user_roles or User.Role.NASABAH not in user_roles:
                 raise ValidationError({"user": "Keanggotaan hanya dapat dikaitkan dengan Nasabah."})
 
     def save(self, *args: Any, **kwargs: Any) -> None:
