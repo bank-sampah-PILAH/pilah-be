@@ -157,8 +157,12 @@ class RegisterBankSampahView(APIView):
         return Response(data, status=201)
 
 
+class CanAcceptInvite(IsPengelola):
+    message = "Hanya pengelola yang dapat menerima undangan"
+
+
 class AcceptInviteView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [CanAcceptInvite]
     serializer_class = InviteAcceptSerializer
 
     def post(self, request: Request) -> Response:

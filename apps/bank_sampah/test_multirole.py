@@ -12,7 +12,9 @@ from apps.bank_sampah.services import BankOnboardingService
 class MultiroleTeamTest(TestCase):
     def test_invite_http_endpoints_require_active_pengelola_role(self) -> None:
         bank = BankSampah.objects.create(
-            nama="Inviting Bank", no_hp_pic="+628123456789", invite_token="role-bound-invite",
+            nama="Inviting Bank",
+            no_hp_pic="+628123456789",
+            invite_token="role-bound-invite",
             invite_token_expires=timezone.now() + timedelta(days=1),
         )
         user = User.objects.create_user(
@@ -29,7 +31,9 @@ class MultiroleTeamTest(TestCase):
             self.assertIsNone(user.bank_sampah_id)
         token["role"] = "pengelola"
         client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
-        response = client.post("/api/v1/invites/accept", {"token": bank.invite_token}, format="json")
+        response = client.post(
+            "/api/v1/invites/accept", {"token": bank.invite_token}, format="json"
+        )
         self.assertEqual(response.status_code, 200)
         user.refresh_from_db()
         self.assertEqual(user.bank_sampah_id, bank.pk)
