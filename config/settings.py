@@ -243,6 +243,19 @@ REST_FRAMEWORK = {
     },
 }
 
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"security_console": {"class": "logging.StreamHandler", "level": "INFO"}},
+    "loggers": {
+        "pilah.security.role_switch": {
+            "handlers": ["security_console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
+
 # Swagger UI is served from a public CDN. drf-spectacular defaults both of
 # these to `swagger-ui-dist@latest`, a URL whose contents change without
 # notice, so the version is pinned here. 5.35.0 is what `@latest` resolved to

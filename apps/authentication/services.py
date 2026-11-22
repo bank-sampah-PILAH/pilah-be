@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 from datetime import timedelta
+import logging
 from typing import Any, cast
 
 from django.conf import settings
@@ -20,6 +21,7 @@ from shared_kernel.permissions import (
 
 REGISTRATION_TOKEN_MAX_AGE = 600
 REGISTRATION_TOKEN_SALT = "pilah-google-registration"
+security_logger = logging.getLogger("pilah.security.role_switch")
 
 
 class AuthServiceError(Exception):
@@ -302,10 +304,13 @@ class AuthService:
     @staticmethod
     def switch_role(user: User, role: str) -> dict[str, Any]:
         if role not in User.Role.values or role not in user.roles:
+            security_logger.warning("role_switch.denied account_id=%s", user.pk)
             raise AuthServiceError(
                 "Role tujuan tidak dimiliki akun", code="role_not_owned", status_code=403
             )
-        return AuthService._session_response(user, is_new_user=False, active_role=role)
+        response = AuthService._session_response(user, is_new_user=False, active_role=role)
+        security_logger.info("role_switch.succeeded account_id=%s role=%s", user.pk, role)
+        return response
 
     @staticmethod
     def _session_response(
