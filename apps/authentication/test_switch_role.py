@@ -1,17 +1,23 @@
 from datetime import timedelta
 from typing import Any
+from unittest.mock import patch
 
+from django.core.cache import caches
 from django.test import TestCase
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from api.models import BankSampah, Nasabah, User
+from apps.authentication.views import SwitchRoleView
 
 
 class SwitchRoleTest(TestCase):
     client: APIClient
 
     def setUp(self) -> None:
+        cache = caches["auth_rate_limit"]
+        cache.clear()
+        self.addCleanup(cache.clear)
         self.user = User.objects.create_user(
             email="switch@example.com",
             roles=[User.Role.PENGELOLA, User.Role.NASABAH],
@@ -21,6 +27,28 @@ class SwitchRoleTest(TestCase):
         self.refresh["role"] = User.Role.PENGELOLA
         self.client = APIClient()
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.refresh.access_token}")
+
+    def test_rate_limit_is_shared_per_account_despite_token_and_ip_changes(self) -> None:
+        other_session = RefreshToken.for_user(self.user)
+        other_session["role"] = "nasabah"
+        with patch("apps.authentication.views.AuthService.switch_role", return_value={}) as switch:
+            for index in range(11):
+                token = self.refresh.access_token if index % 2 else other_session.access_token
+                self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+                response = self.client.post(
+                    "/api/v1/auth/switch-role", {"role": "nasabah"}, format="json",
+                    HTTP_X_FORWARDED_FOR=f"192.0.2.{index}, 198.51.100.1, 35.191.0.1, 35.191.0.2",
+                )
+                self.assertEqual(response.status_code, 200 if index < 10 else 429)
+            self.assertEqual(switch.call_count, 10)
+        self.assertIn("Retry-After", response)
+        self.assertIn("no-store", response.get("Cache-Control", ""))
+        self.assertIs(SwitchRoleView().get_throttles()[0].cache, caches["auth_rate_limit"])
+        other_user = User.objects.create_user(email="other-limit@example.com")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(other_user).access_token}")
+        self.assertEqual(self.client.post(
+            "/api/v1/auth/switch-role", {"role": "pengelola"}, format="json"
+        ).status_code, 200)
 
     def test_owned_role_issues_new_token_pair_without_changing_account(self) -> None:
         response = self.client.post(
