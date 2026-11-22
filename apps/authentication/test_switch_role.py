@@ -128,6 +128,15 @@ class SwitchRoleTest(TestCase):
                        str(self.refresh), self.user.email, "forged", "\n"):
             self.assertNotIn(secret, logs)
 
+    def test_service_rechecks_role_revoked_after_authentication(self) -> None:
+        User.objects.filter(pk=self.user.pk).update(roles=[User.Role.PENGELOLA])
+        with patch.object(AuthService, "_session_response") as issue:
+            with self.assertRaises(AuthServiceError) as denied:
+                AuthService.switch_role(self.user, User.Role.NASABAH)
+        self.assertEqual(denied.exception.status_code, 403)
+        self.assertEqual(denied.exception.code, "role_not_owned")
+        issue.assert_not_called()
+
     def test_unowned_role_is_forbidden_and_preserves_existing_session(self) -> None:
         response = self.client.post(
             "/api/v1/auth/switch-role", {"role": User.Role.SUPERADMIN}, format="json"
