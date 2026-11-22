@@ -4,6 +4,7 @@ A schedule may serve activities beyond setoran and pencairan, so it is not
 tied to the ledger context.
 """
 
+from datetime import date, timedelta
 from typing import Any
 
 from django.db import transaction
@@ -16,8 +17,10 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from api.models import BankSampah, JadwalKegiatan, User
+from apps.jadwal.api import schedule_recipients
 from apps.jadwal.serializers import JadwalKegiatanSerializer
-from apps.nasabah.api import resolve_active_membership
+from apps.nasabah.api import aktif_keanggotaan
+from apps.notification.api import queue_push_bulk
 from shared_kernel.permissions import IsActivePengelola, IsJadwalViewer
 
 
@@ -30,6 +33,10 @@ def _bank_sampah(request: Request) -> BankSampah:
     bank = _user(request).bank_sampah
     assert bank is not None  # ponytail: IsActivePengelola guarantees bank membership
     return bank
+
+
+def _notify_schedule(recipients: set[User], title: str, body: str) -> None:
+    queue_push_bulk(recipients, title=title, body=body)
 
 
 class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  # stubs are generic, runtime is not
@@ -45,14 +52,42 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
         )
         return [permission() for permission in permission_classes]
 
+    def _filter_by_dates(self, queryset: QuerySet[JadwalKegiatan]) -> QuerySet[JadwalKegiatan]:
+        """Filter by `date` (one day) and/or `date_from` / `date_to` (inclusive range)."""
+        params = self.request.query_params
+        parsed: dict[str, date] = {}
+        for name in ("date", "date_from", "date_to"):
+            value = params.get(name)
+            if not isinstance(value, str) or not value:
+                continue
+            day = parse_date(value)
+            if day is None:
+                raise serializers.ValidationError(
+                    {name: "Gunakan tanggal dengan format YYYY-MM-DD"}
+                )
+            parsed[name] = day
+        if (
+            "date_from" in parsed
+            and "date_to" in parsed
+            and parsed["date_to"] < parsed["date_from"]
+        ):
+            raise serializers.ValidationError(
+                {"date_to": "date_to harus sama dengan atau setelah date_from"}
+            )
+        if "date" in parsed:
+            queryset = queryset.filter(mulai_pada__date=parsed["date"])
+        if "date_from" in parsed:
+            queryset = queryset.filter(mulai_pada__date__gte=parsed["date_from"])
+        if "date_to" in parsed:
+            queryset = queryset.filter(mulai_pada__date__lte=parsed["date_to"])
+        return queryset.order_by("mulai_pada", "pk")
+
     def get_queryset(self) -> QuerySet[JadwalKegiatan]:
         user = _user(self.request)
         queryset = JadwalKegiatan.objects.select_related("bank_sampah", "dibuat_oleh")
         if user.role == User.Role.NASABAH:
             if self.action in {"list", "retrieve", "calendar_dates"}:
-                member = resolve_active_membership(
-                    user, self.request.query_params.get("keanggotaan_id")
-                )
+                member = aktif_keanggotaan(self.request)
                 queryset = (
                     queryset.filter(
                         bank_sampah_id=member.bank_sampah_id,
@@ -84,15 +119,7 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
                 .annotate(_peringatan_jadwal_bertumpuk=Exists(overlapping_schedules))
             )
         if self.action == "list":
-            date_value = self.request.query_params.get("date")
-            if isinstance(date_value, str) and date_value:
-                date = parse_date(date_value)
-                if date is None:
-                    raise serializers.ValidationError(
-                        {"date": "Gunakan tanggal dengan format YYYY-MM-DD"}
-                    )
-                queryset = queryset.filter(mulai_pada__date=date)
-            queryset = queryset.order_by("mulai_pada", "pk")
+            queryset = self._filter_by_dates(queryset)
         if self.action in {"update", "partial_update"}:
             queryset = queryset.select_for_update()
         return queryset
@@ -141,13 +168,54 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        published = instance.status == JadwalKegiatan.Status.DITERBITKAN
+        previous_recipients = schedule_recipients(instance) if published else set()
+        previous_values = (
+            instance.jenis_kegiatan,
+            instance.mulai_pada,
+            instance.selesai_pada,
+            instance.lokasi,
+            instance.keterangan,
+            instance.cakupan_penerima,
+            frozenset(instance.penerima.values_list("pk", flat=True)),
+        )
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
+        instance = serializer.instance
+        assert isinstance(instance, JadwalKegiatan)
+        new_values = (
+            instance.jenis_kegiatan,
+            instance.mulai_pada,
+            instance.selesai_pada,
+            instance.lokasi,
+            instance.keterangan,
+            instance.cakupan_penerima,
+            frozenset(instance.penerima.values_list("pk", flat=True)),
+        )
+        if published and previous_values[1] != new_values[1]:
+            now = timezone.now()
+            instance.reminder_queued_at = (
+                now if instance.mulai_pada <= now + timedelta(hours=2) else None
+            )
+            instance.save(update_fields=["reminder_queued_at", "updated_at"])
+        if published and previous_values != new_values:
+            current_recipients = schedule_recipients(instance)
+            _notify_schedule(
+                current_recipients,
+                "Jadwal berubah",
+                f"Jadwal di {instance.bank_sampah.nama} berubah. Periksa kembali detailnya.",
+            )
+            _notify_schedule(
+                previous_recipients - current_recipients,
+                "Jadwal tidak lagi untuk Anda",
+                f"Jadwal di {instance.bank_sampah.nama} tidak lagi ditujukan untuk Anda.",
+            )
         if getattr(instance, "_prefetched_objects_cache", None):
-            instance._prefetched_objects_cache = {}
+            instance.__dict__["_prefetched_objects_cache"] = {}
         return Response(serializer.data)
 
+    @transaction.atomic
     def _transition(
         self,
         jadwal: JadwalKegiatan,
@@ -155,13 +223,35 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
         allowed_from: set[str],
         target: str,
     ) -> Response:
+        now = timezone.now()
+        update_values: dict[str, Any] = {"status": target, "updated_at": now}
+        if target == JadwalKegiatan.Status.DITERBITKAN:
+            update_values["reminder_queued_at"] = (
+                now if jadwal.mulai_pada <= now + timedelta(hours=2) else None
+            )
         updated = JadwalKegiatan.objects.filter(pk=jadwal.pk, status__in=allowed_from).update(
-            status=target, updated_at=timezone.now()
+            **update_values
         )
         if not updated:
             return Response(
                 {"error": "Perubahan status jadwal tidak diizinkan"},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+        if (
+            target == JadwalKegiatan.Status.DIBATALKAN
+            and jadwal.status == JadwalKegiatan.Status.DITERBITKAN
+        ):
+            _notify_schedule(
+                schedule_recipients(jadwal),
+                "Jadwal dibatalkan",
+                f"Jadwal di {jadwal.bank_sampah.nama} dibatalkan.",
+            )
+        if target == JadwalKegiatan.Status.DITERBITKAN:
+            _notify_schedule(
+                schedule_recipients(jadwal),
+                "Jadwal baru",
+                f"{jadwal.bank_sampah.nama}: "
+                f"{timezone.localtime(jadwal.mulai_pada):%d/%m/%Y %H:%M} WIB, {jadwal.lokasi}.",
             )
         return Response(self.get_serializer(self.get_object()).data)
 

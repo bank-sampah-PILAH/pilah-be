@@ -1,0 +1,47 @@
+{% extends "drf_spectacular/swagger_ui.html" %}
+{% comment %}
+Salinan dua blok drf-spectacular, dengan dua perubahan saja:
+
+1. `<style>` bawaan mereka diberi nonce supaya tidak diblokir kebijakan CSP
+   halaman (blok `head`).
+2. Ketiga subsumber dari CDN membawa `integrity` dan `crossorigin` (blok
+   `head` untuk gaya, blok `body` untuk dua skrip). Nilai hashnya datang dari
+   `settings.SWAGGER_UI_SRI`, berpasangan dengan `settings.SWAGGER_UI_VERSION`;
+   tidak ada hash yang ditulis di sini.
+
+Cabang `{% if script_url %}` pada blok `body` dipertahankan apa adanya:
+`SpectacularSwaggerSplitView` ada justru supaya skrip inisialisasi disajikan
+sebagai berkas terpisah, bukan tag inline.
+
+Isi kedua blok di bawah sama dengan drf_spectacular/swagger_ui.html pada versi
+0.29.0. Kalau upstream mengubah salah satunya, halaman ini kehilangan
+perubahan itu, yang tetap terlihat karena
+`test_docs_tidak_memuat_tag_inline_tanpa_nonce` dan
+`test_docs_memberi_integrity_pada_setiap_subsumber_luar` menjaga dua bagian
+yang penting: tidak ada tag inline tanpa nonce, dan tidak ada subsumber luar
+tanpa hash.
+{% endcomment %}
+{% block head %}
+<title>{{ title|default:"Swagger" }}</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{% if favicon_href %}<link rel="icon" href="{{ favicon_href }}">{% endif %}
+<link rel="stylesheet" href="{{ swagger_ui_css }}" integrity="{{ sri.css }}" crossorigin="anonymous">
+<style nonce="{{ csp_nonce }}">
+  html { box-sizing: border-box; overflow-y: scroll; }
+  *, *:after, *:before { box-sizing: inherit; }
+  body { background: #fafafa; margin: 0; }
+</style>
+{% endblock head %}
+{% block body %}
+<div id="swagger-ui"></div>
+<script src="{{ swagger_ui_bundle }}" integrity="{{ sri.bundle }}" crossorigin="anonymous"></script>
+<script src="{{ swagger_ui_standalone }}" integrity="{{ sri.standalone }}" crossorigin="anonymous"></script>
+{% if script_url %}
+<script src="{{ script_url }}"></script>
+{% else %}
+<script nonce="{{ csp_nonce }}">
+{% include template_name_js %}
+</script>
+{% endif %}
+{% endblock body %}

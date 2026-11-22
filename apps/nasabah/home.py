@@ -6,16 +6,18 @@ from django.db.models import QuerySet
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.generics import GenericAPIView, ListAPIView
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
-from api.models import BankSampah, Nasabah, Transaksi, User
-from apps.ledger.api import apply_period
+from api.models import BankSampah, Nasabah, Pencairan, Transaksi, TransaksiQuerySet, User
+from apps.ledger.api import activity_query, apply_period
 from apps.ledger.serializers import TransactionDetailSerializer
-from apps.nasabah.api import resolve_active_membership
+from apps.nasabah.keanggotaan import filter_dapat_dibuka
 from apps.reporting.api import StatementPeriodError, export_statement_pdf
+from shared_kernel.http_headers import CONTENT_DISPOSITION
 from shared_kernel.pagination import StandardPagination
 from shared_kernel.permissions import IsActiveNasabah
 
@@ -36,10 +38,15 @@ class BankUnitSerializer(serializers.ModelSerializer[BankSampah]):
         ]
 
 
-class ActivitySerializer(serializers.ModelSerializer[Transaksi]):
-    class Meta:
-        model = Transaksi
-        fields = ["id", "tanggal", "tipe", "total_nilai"]
+class ActivitySerializer(serializers.Serializer[Any]):
+    """Public history summary shared by deposits and payout projections."""
+
+    id = serializers.UUIDField()
+    tanggal = serializers.DateTimeField()
+    tipe = serializers.CharField()
+    total_nilai = serializers.DecimalField(max_digits=14, decimal_places=2)
+    # "dibatalkan" only reaches the detail of a voided setoran (PIL-428); the lists leave it out (PIL-481).
+    status = serializers.CharField()
 
 
 class NasabahTransactionDetailSerializer(TransactionDetailSerializer):
@@ -52,6 +59,7 @@ class NasabahTransactionDetailSerializer(TransactionDetailSerializer):
             "catatan",
             "items",
             "saldo_setelah_transaksi",
+            "status",
         ]
 
 
@@ -83,9 +91,44 @@ class HomeSerializer(serializers.Serializer[Any]):
 class MembershipService:
     @staticmethod
     def get_active_membership(request: Request) -> Nasabah:
-        return resolve_active_membership(
-            cast(User, request.user), request.query_params.get("keanggotaan_id")
+        memberships = Nasabah.objects.filter(user=cast(User, request.user)).select_related(
+            "bank_sampah", "saldo"
         )
+        identifier = request.query_params.get("keanggotaan_id")
+        if identifier is not None:
+            return MembershipService._get_selected_membership(memberships, identifier)
+        return MembershipService._get_default_membership(memberships)
+
+    @staticmethod
+    def _get_selected_membership(memberships: QuerySet[Nasabah], identifier: str) -> Nasabah:
+        try:
+            member_id = UUID(identifier)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValidationError({"keanggotaan_id": "UUID tidak valid."}) from exc
+        selected = memberships.filter(pk=member_id)
+        member = filter_dapat_dibuka(selected).first()
+        if member is not None:
+            return member
+        if selected.exists():
+            raise PermissionDenied("Keanggotaan dan bank sampah harus aktif.")
+        raise NotFound()
+
+    @staticmethod
+    def _get_default_membership(memberships: QuerySet[Nasabah]) -> Nasabah:
+        eligible = list(filter_dapat_dibuka(memberships))
+        if not eligible:
+            raise PermissionDenied("Keanggotaan aktif diperlukan.")
+        if len(eligible) > 1:
+            raise ValidationError(
+                {
+                    "keanggotaan_id": "Pilih keanggotaan untuk melihat beranda.",
+                    "pilihan": [
+                        {"id": str(member.id), "bank_sampah_nama": member.bank_sampah.nama}
+                        for member in eligible
+                    ],
+                }
+            )
+        return eligible[0]
 
 
 def balance_data(member: Nasabah) -> dict[str, Any]:
@@ -96,7 +139,11 @@ def balance_data(member: Nasabah) -> dict[str, Any]:
     }
 
 
-def activities(member: Nasabah) -> QuerySet[Transaksi]:
+def activities(member: Nasabah) -> TransaksiQuerySet:
+    """Every setoran of the member, voided ones included: the detail lookup needs them.
+
+    The lists read ``activities(member).tercatat()`` instead (PIL-481).
+    """
     return Transaksi.objects.filter(nasabah=member, bank_sampah=member.bank_sampah).order_by(
         "-tanggal", "-created_at", "-id"
     )
@@ -115,7 +162,7 @@ class NasabahHomeView(GenericAPIView[Nasabah]):
                     "keanggotaan": member,
                     "bank_sampah": member.bank_sampah,
                     "saldo": balance_data(member),
-                    "aktivitas_terbaru": activities(member)[:5],
+                    "aktivitas_terbaru": activities(member).tercatat()[:5],
                 }
             ).data
         )
@@ -152,19 +199,59 @@ class NasabahHistoryView(ListAPIView[Transaksi]):
     # get_queryset can only raise, not return a Response. The queryset runs
     # through apply_period exactly once (here).
     def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        if "tipe" in request.query_params:
+            member = MembershipService.get_active_membership(request)
+            try:
+                rows = activity_query(member.bank_sampah, request, member)
+            except ValueError as exc:
+                return Response({"error": str(exc)}, status=400)
+            page = self.paginate_queryset(rows)
+            assert page is not None  # StandardPagination is always enabled.
+            # Preserve the nasabah list DTO and never expose staff-only fields.
+            payloads = []
+            deposits = {
+                obj.id: obj
+                for obj in Transaksi.objects.filter(
+                    nasabah=member,
+                    id__in=[row["id"] for row in page if row["tipe_aktivitas"] == "setoran"],
+                )
+            }
+            payouts = {
+                obj.id: obj
+                for obj in Pencairan.objects.filter(
+                    nasabah=member,
+                    id__in=[row["id"] for row in page if row["tipe_aktivitas"] == "pencairan"],
+                )
+            }
+            for row in page:
+                if row["tipe_aktivitas"] == "setoran":
+                    setoran = deposits[row["id"]]
+                    value, status = setoran.total_nilai, setoran.status
+                else:
+                    pencairan = payouts[row["id"]]
+                    value, status = pencairan.nominal, pencairan.status
+                payloads.append(
+                    {
+                        "id": row["id"],
+                        "tanggal": row["tanggal"],
+                        "tipe": row["tipe_aktivitas"],
+                        "total_nilai": value,
+                        "status": status,
+                    }
+                )
+            return self.get_paginated_response(self.get_serializer(payloads, many=True).data)
         try:
             queryset = apply_period(
-                activities(MembershipService.get_active_membership(request)),
+                activities(MembershipService.get_active_membership(request)).tercatat(),
                 request,
                 default=None,
             )
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         page = self.paginate_queryset(queryset)
-        serializer = self.get_serializer(page or queryset, many=True)
-        if page is not None:
-            return self.get_paginated_response(serializer.data)
-        return Response(serializer.data)
+        assert page is not None  # StandardPagination is always enabled.
+        serializer = self.get_serializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
 
 
 class NasabahHistoryExportPdfView(GenericAPIView[Nasabah]):
@@ -196,7 +283,7 @@ class NasabahHistoryExportPdfView(GenericAPIView[Nasabah]):
             return Response({"error": "Tidak ada data pada periode ini"}, status=400)
         content, filename = result
         response = HttpResponse(content, content_type="application/pdf")
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response[CONTENT_DISPOSITION] = f'attachment; filename="{filename}"'
         return response
 
 
