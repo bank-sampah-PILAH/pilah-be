@@ -7,7 +7,7 @@ from typing import Any
 from django.db import transaction
 from django.utils import timezone
 
-from api.models import BankSampah, BankSampahApprovalLog, User
+from api.models import BankSampah, BankSampahApprovalLog, PengurusDikeluarkan, User
 from apps.authentication.api import lock_for_onboarding
 from apps.notification.api import DEFAULT_WA_TEMPLATE, queue_push
 
@@ -194,3 +194,33 @@ class TeamService:
     def _promote(target: User) -> None:
         target.is_primary_pengelola = True
         target.save(update_fields=["is_primary_pengelola", "updated_at"])
+
+    @staticmethod
+    def remove_member(caller: User, member_id: uuid.UUID) -> None:
+        """Take a pengurus out of the caller's bank, keeping their history.
+
+        Only the bank link is cut; the account, its transactions and its
+        approval records stay. The invite link is rotated away because it may
+        have been shared with the person being removed.
+        """
+        assert caller.bank_sampah_id is not None  # ponytail: IsPrimaryPengelola gates this
+        if member_id == caller.pk:
+            raise ValueError("Tidak dapat mengeluarkan diri sendiri dari bank sampah")
+        with transaction.atomic():
+            bank = BankSampah.objects.select_for_update().get(pk=caller.bank_sampah_id)
+            member = (
+                User.objects.select_for_update()
+                .filter(pk=member_id, bank_sampah=bank, role=User.Role.PENGELOLA, is_active=True)
+                .first()
+            )
+            if member is None:
+                raise LookupError("Pengurus tidak ditemukan di bank sampah ini")
+            member.bank_sampah = None
+            member.is_primary_pengelola = False
+            member.save(update_fields=["bank_sampah", "is_primary_pengelola", "updated_at"])
+            PengurusDikeluarkan.objects.create(
+                user=member, bank_sampah=bank, dikeluarkan_oleh=caller
+            )
+            bank.invite_token = ""
+            bank.invite_token_expires = None
+            bank.save(update_fields=["invite_token", "invite_token_expires", "updated_at"])

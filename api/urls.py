@@ -30,6 +30,7 @@ from apps.bank_sampah.views import (
     GenerateInviteView,
     RegisterBankSampahView,
     SuperAdminBankSampahViewSet,
+    TeamMemberView,
     TeamTransferView,
     TeamView,
 )
@@ -139,6 +140,7 @@ urlpatterns = [
     path("bank-sampah/me", BankSampahMeView.as_view(), name="bank-sampah-me"),
     path("bank-sampah", BankSampahDirectoryView.as_view(), name="bank-sampah-directory"),
     path("team", TeamView.as_view(), name="team"),
+    path("team/<uuid:pk>", TeamMemberView.as_view(), name="team-member"),
     path("team/transfer", TeamTransferView.as_view(), name="team-transfer"),
     path("team/invite", GenerateInviteView.as_view(), name="team-invite"),
     path("nasabah/me", NasabahSelfView.as_view(), name="nasabah-me"),
