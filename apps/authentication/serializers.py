@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 from django.db.models import Model
 from rest_framework import serializers
@@ -82,7 +82,7 @@ class SwitchRoleSerializer(serializers.Serializer[Any]):
             raise serializers.ValidationError(
                 {"non_field_errors": ["Hanya field role yang diizinkan"]}
             )
-        return super().to_internal_value(data)
+        return cast(dict[str, Any], super().to_internal_value(data))
 
 
 class RefreshTokenSerializer(serializers.Serializer[Any]):

@@ -5,11 +5,12 @@ from unittest.mock import patch
 from django.core.cache import caches
 from django.test import TestCase
 from rest_framework.test import APIClient
+from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from api.models import BankSampah, Nasabah, User
 from apps.authentication.services import AuthService, AuthServiceError
-from apps.authentication.views import SwitchRoleView
+from apps.authentication.views import SwitchRoleThrottle, SwitchRoleView
 
 
 class SwitchRoleTest(TestCase):
@@ -46,7 +47,8 @@ class SwitchRoleTest(TestCase):
             self.assertEqual(switch.call_count, 10)
         self.assertIn("Retry-After", response)
         self.assertIn("no-store", response.get("Cache-Control", ""))
-        self.assertIs(SwitchRoleView().get_throttles()[0].cache, caches["auth_rate_limit"])
+        self.assertIsInstance(SwitchRoleView().get_throttles()[0], SwitchRoleThrottle)
+        self.assertIs(SwitchRoleThrottle.cache, caches["auth_rate_limit"])
         other_user = User.objects.create_user(email="other-limit@example.com")
         self.client.credentials(
             HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(other_user).access_token}"
@@ -156,6 +158,35 @@ class SwitchRoleTest(TestCase):
         self.assertEqual(denied.exception.status_code, 403)
         self.assertEqual(denied.exception.code, "role_not_owned")
         issue.assert_not_called()
+
+    def test_service_rejects_disabled_or_deleted_accounts_without_issuance(self) -> None:
+        for state in ("disabled", "deleted"):
+            with self.subTest(state=state):
+                account = User.objects.create_user(email=f"{state}@switch.example.com")
+                if state == "disabled":
+                    User.objects.filter(pk=account.pk).update(is_active=False)
+                else:
+                    User.objects.filter(pk=account.pk).delete()
+                with patch.object(AuthService, "_session_response") as issue:
+                    with self.assertRaises(AuthServiceError) as denied:
+                        AuthService.switch_role(account, "pengelola")
+                self.assertEqual(denied.exception.status_code, 401)
+                self.assertEqual(denied.exception.code, "account_unavailable")
+                issue.assert_not_called()
+
+    def test_token_issuance_failure_rolls_back_outstanding_token_and_emits_no_success(self) -> None:
+        count = OutstandingToken.objects.count()
+
+        def failing_issuance(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            RefreshToken.for_user(self.user)
+            raise RuntimeError("Token response could not be built")
+
+        with self.assertNoLogs("pilah.security.role_switch", level="INFO"):
+            with patch.object(AuthService, "_session_response", side_effect=failing_issuance):
+                with self.assertRaises(RuntimeError):
+                    AuthService.switch_role(self.user, "nasabah")
+        self.assertEqual(OutstandingToken.objects.count(), count)
+        self.assertEqual(self.client.get("/api/v1/auth/me").data["role"], "pengelola")
 
     def test_unowned_role_is_forbidden_and_preserves_existing_session(self) -> None:
         response = self.client.post(
