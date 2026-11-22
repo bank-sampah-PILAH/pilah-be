@@ -168,10 +168,14 @@ class MembershipRegressionTests(RegressionTestCase):
         response = self.client.post("/api/v1/invites/accept", {}, format="json")
         self.assertGreaterEqual(response.status_code, 400)
 
-    def test_non_primary_cannot_generate_invite(self) -> None:
+    def test_non_primary_cannot_read_or_generate_invite(self) -> None:
         member = self.fresh_pengelola("anggota@example.com")
         member.bank_sampah = self.bank
         member.is_profile_complete = True
         member.save()
         self.auth_as(member)
-        self.assertGreaterEqual(self.client.post("/api/v1/team/invite", {}).status_code, 400)
+        for method in (self.client.get, self.client.post):
+            with self.subTest(method=method.__name__):
+                response = method("/api/v1/team/invite", {}) if method == self.client.post else method("/api/v1/team/invite")
+                self.assertEqual(response.status_code, 403)
+                self.assertIn("Pengurus Utama", response.data["error"])
