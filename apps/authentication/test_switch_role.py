@@ -33,6 +33,15 @@ class SwitchRoleTest(TestCase):
         self.assertEqual(self.user.role, User.Role.PENGELOLA)
         self.assertEqual(self.user.roles, [User.Role.PENGELOLA, User.Role.NASABAH])
 
+    def test_response_routes_to_selected_role_without_nasabah_membership(self) -> None:
+        response = self.client.post(
+            "/api/v1/auth/switch-role", {"role": User.Role.NASABAH}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["user"]["role"], User.Role.NASABAH)
+        self.assertEqual(response.data["user"]["state"], "register_nasabah")
+        self.assertEqual(response.data["next_step"], "register_nasabah")
+
     def test_unowned_role_is_forbidden_and_preserves_existing_session(self) -> None:
         response = self.client.post(
             "/api/v1/auth/switch-role", {"role": User.Role.SUPERADMIN}, format="json"
