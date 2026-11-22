@@ -21,6 +21,7 @@ from apps.authentication.serializers import (
     LogoutSerializer,
     PasswordLoginSerializer,
     RefreshTokenSerializer,
+    SwitchRoleSerializer,
     RoleChangeSerializer,
     UserProfileSerializer,
 )
@@ -183,6 +184,21 @@ class GoogleOAuthCallbackView(APIView):
         response = HttpResponse(html, status=200 if ok else 400)
         tandai_dokumen_tertutup(response, nonce)
         return response
+
+
+class SwitchRoleView(APIView):
+    serializer_class = SwitchRoleSerializer
+
+    def post(self, request: Request) -> Response:
+        serializer = SwitchRoleSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({"errors": serializer.errors}, status=422)
+        try:
+            return Response(
+                AuthService.switch_role(current_user(request), serializer.validated_data["role"])
+            )
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
 
 
 class RefreshTokenView(APIView):

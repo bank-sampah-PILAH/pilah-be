@@ -74,6 +74,10 @@ class PasswordLoginSerializer(serializers.Serializer[Any]):
     password = serializers.CharField(required=True, trim_whitespace=False, write_only=True)
 
 
+class SwitchRoleSerializer(serializers.Serializer[Any]):
+    role = serializers.ChoiceField(choices=User.Role.choices)
+
+
 class RefreshTokenSerializer(serializers.Serializer[Any]):
     refresh_token = serializers.CharField(required=True)
 

@@ -300,13 +300,24 @@ class AuthService:
         return AuthService._session_response(user, is_new_user=False)
 
     @staticmethod
-    def _session_response(user: User, *, is_new_user: bool) -> dict[str, Any]:
+    def switch_role(user: User, role: str) -> dict[str, Any]:
+        if role not in User.Role.values or role not in user.roles:
+            raise AuthServiceError(
+                "Role tujuan tidak dimiliki akun", code="role_not_owned", status_code=403
+            )
+        return AuthService._session_response(user, is_new_user=False, active_role=role)
+
+    @staticmethod
+    def _session_response(
+        user: User, *, is_new_user: bool, active_role: str | None = None
+    ) -> dict[str, Any]:
+        role = active_role if active_role is not None else user.role
         refresh = RefreshToken.for_user(user)
-        refresh["role"] = user.role
+        refresh["role"] = role
         access = refresh.access_token
         if user.bank_sampah_id:
             access["bank_sampah_id"] = str(user.bank_sampah_id)
-        access["role"] = user.role
+        access["role"] = role
         access["email"] = user.email
         bank = user.bank_sampah
         state = AuthService.user_state(user)

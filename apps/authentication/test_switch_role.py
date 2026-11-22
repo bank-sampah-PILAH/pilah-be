@@ -32,3 +32,22 @@ class SwitchRoleTest(TestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.role, User.Role.PENGELOLA)
         self.assertEqual(self.user.roles, [User.Role.PENGELOLA, User.Role.NASABAH])
+
+    def test_unowned_role_is_forbidden_and_preserves_existing_session(self) -> None:
+        response = self.client.post(
+            "/api/v1/auth/switch-role", {"role": User.Role.SUPERADMIN}, format="json"
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data["code"], "role_not_owned")
+        self.assertIn("error", response.data)
+        self.assertNotIn("access_token", response.data)
+        self.assertNotIn("refresh_token", response.data)
+        self.assertEqual(self.client.get("/api/v1/auth/me").status_code, 200)
+        refreshed = self.client.post(
+            "/api/v1/auth/refresh", {"refresh_token": str(self.refresh)}, format="json"
+        )
+        self.assertEqual(refreshed.status_code, 200)
+        self.assertEqual(AccessToken(refreshed.data["access_token"])["role"], User.Role.PENGELOLA)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.role, User.Role.PENGELOLA)
+        self.assertEqual(self.user.roles, [User.Role.PENGELOLA, User.Role.NASABAH])
