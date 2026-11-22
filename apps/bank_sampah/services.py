@@ -1,4 +1,5 @@
 import secrets
+import uuid
 from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any
@@ -154,3 +155,42 @@ class TeamService:
         bank.invite_token_expires = timezone.now() + timedelta(days=3)
         bank.save(update_fields=["invite_token", "invite_token_expires", "updated_at"])
         return bank.invite_token
+
+    @staticmethod
+    def transfer_primary(caller: User, target_id: uuid.UUID) -> User:
+        """Hand the Pengurus Utama role to another pengurus of the same bank.
+
+        Locks the bank row so two handovers cannot interleave, re-reads the
+        caller under that lock (a stale request must not hand over twice), and
+        demotes the caller before promoting the target: the unique constraint
+        is immediate, so the order is not optional.
+        """
+        assert caller.bank_sampah_id is not None  # ponytail: IsPrimaryPengelola gates this
+        with transaction.atomic():
+            bank = BankSampah.objects.select_for_update().get(pk=caller.bank_sampah_id)
+            current = User.objects.select_for_update().get(pk=caller.pk)
+            if not current.is_primary_pengelola or current.bank_sampah_id != bank.pk:
+                raise PermissionError("Hanya Pengurus Utama yang dapat menyerahkan jabatan")
+            if target_id == current.pk:
+                raise ValueError("Tidak dapat menyerahkan jabatan kepada diri sendiri")
+            target = (
+                User.objects.select_for_update()
+                .filter(pk=target_id, bank_sampah=bank, role=User.Role.PENGELOLA, is_active=True)
+                .first()
+            )
+            if target is None:
+                raise LookupError("Pengurus tidak ditemukan di bank sampah ini")
+            current.is_primary_pengelola = False
+            current.save(update_fields=["is_primary_pengelola", "updated_at"])
+            TeamService._promote(target)
+        queue_push(
+            target,
+            title="Anda kini Pengurus Utama",
+            body=f"Anda sekarang menjadi Pengurus Utama {bank.nama}.",
+        )
+        return target
+
+    @staticmethod
+    def _promote(target: User) -> None:
+        target.is_primary_pengelola = True
+        target.save(update_fields=["is_primary_pengelola", "updated_at"])

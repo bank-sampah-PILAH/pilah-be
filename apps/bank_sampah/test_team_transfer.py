@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 from unittest import mock
 
 from django.db import IntegrityError
@@ -21,8 +22,8 @@ def make_bank(nama: str = "Melati") -> BankSampah:
     )
 
 
-def make_pengurus(email: str, bank: BankSampah, *, primary: bool = False, **extra: object) -> User:
-    fields: dict[str, object] = {
+def make_pengurus(email: str, bank: BankSampah, *, primary: bool = False, **extra: Any) -> User:
+    fields: dict[str, Any] = {
         "nama": email.split("@")[0],
         "role": User.Role.PENGELOLA,
         "bank_sampah": bank,
@@ -130,3 +131,12 @@ class TeamTransferTests(APITestCase):
             TeamService.transfer_primary(stale_owner, self.other.id)
 
         self.assertEqual(self._primaries(), [self.other])
+
+    def test_view_answers_403_when_the_handover_race_is_lost(self) -> None:
+        with mock.patch.object(
+            TeamService, "transfer_primary", side_effect=PermissionError("sudah diserahkan")
+        ):
+            response = self._as(self.owner).post(URL, {"id": str(self.other.id)}, format="json")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json(), {"error": "sudah diserahkan"})
