@@ -42,6 +42,17 @@ class SwitchRoleTest(TestCase):
         self.assertEqual(response.data["user"]["state"], "register_nasabah")
         self.assertEqual(response.data["next_step"], "register_nasabah")
 
+    def test_me_preserves_selected_role_and_routing(self) -> None:
+        switched = self.client.post(
+            "/api/v1/auth/switch-role", {"role": User.Role.NASABAH}, format="json"
+        )
+        self.assertEqual(switched.status_code, 200)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {switched.data['access_token']}")
+        response = self.client.get("/api/v1/auth/me")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["role"], User.Role.NASABAH)
+        self.assertEqual(response.data["state"], "register_nasabah")
+
     def test_unowned_role_is_forbidden_and_preserves_existing_session(self) -> None:
         response = self.client.post(
             "/api/v1/auth/switch-role", {"role": User.Role.SUPERADMIN}, format="json"
