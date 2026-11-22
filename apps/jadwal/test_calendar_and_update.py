@@ -202,7 +202,11 @@ class JadwalNasabahListTests(APITestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_calendar_dates_are_scoped_to_selected_membership_bank_and_recipients(self) -> None:
-        start = (timezone.now() + timedelta(days=2)).date()
+        # The endpoint groups by calendar day in TIME_ZONE, so the expected
+        # dates have to be read in that zone too: taken from the UTC instant
+        # instead, this assertion is a day out whenever Jakarta is already on
+        # the next date, i.e. every run between 00:00 and 07:00 local.
+        start = timezone.localtime(timezone.now() + timedelta(days=2)).date()
         response = self.client.get(
             "/api/v1/jadwal/calendar-dates",
             {
