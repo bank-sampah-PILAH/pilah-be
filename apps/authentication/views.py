@@ -188,9 +188,15 @@ class GoogleOAuthCallbackView(APIView):
         return response
 
 
+class SwitchRoleThrottle(ScopedRateThrottle):
+    cache = caches["auth_rate_limit"]
+
+
 @method_decorator(never_cache, name="dispatch")
 class SwitchRoleView(APIView):
     serializer_class = SwitchRoleSerializer
+    throttle_classes = [SwitchRoleThrottle]
+    throttle_scope = "switch_role"
 
     def post(self, request: Request) -> Response:
         serializer = SwitchRoleSerializer(data=request.data)
