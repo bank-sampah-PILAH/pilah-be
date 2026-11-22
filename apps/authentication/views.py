@@ -5,7 +5,9 @@ from django.conf import settings
 from django.core.cache import caches
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.http import HttpResponse, HttpResponseRedirect
+from django.utils.decorators import method_decorator
 from django.utils.http import url_has_allowed_host_and_scheme, urlencode
+from django.views.decorators.cache import never_cache
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -186,6 +188,7 @@ class GoogleOAuthCallbackView(APIView):
         return response
 
 
+@method_decorator(never_cache, name="dispatch")
 class SwitchRoleView(APIView):
     serializer_class = SwitchRoleSerializer
 
