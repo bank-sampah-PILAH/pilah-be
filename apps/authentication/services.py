@@ -320,7 +320,7 @@ class AuthService:
         access["role"] = role
         access["email"] = user.email
         bank = user.bank_sampah
-        state = AuthService.user_state(user)
+        state = AuthService.user_state(user, active_role=role)
         return {
             "access_token": str(access),
             "refresh_token": str(refresh),
@@ -337,7 +337,7 @@ class AuthService:
                 "jenis_kelamin": user.jenis_kelamin,
                 "tanggal_lahir": user.tanggal_lahir.isoformat() if user.tanggal_lahir else None,
                 "alamat": user.alamat,
-                "role": user.role,
+                "role": role,
                 "bank_sampah_id": str(user.bank_sampah_id) if user.bank_sampah_id else None,
                 "bank_sampah_nama": bank.nama if bank else None,
                 "bank_sampah_status": bank.status if bank else None,
@@ -383,12 +383,13 @@ class AuthService:
             nasabah.save(update_fields=["user", "updated_at"])
 
     @staticmethod
-    def user_state(user: User) -> str:
-        if user.role == User.Role.SUPERADMIN:
+    def user_state(user: User, *, active_role: str | None = None) -> str:
+        role = active_role if active_role is not None else user.role
+        if role == User.Role.SUPERADMIN:
             return "superadmin_dashboard"
         if not user.is_profile_complete:
             return "complete_profile"
-        if user.role == User.Role.NASABAH:
+        if role == User.Role.NASABAH:
             # Routing doesn't gate on approval: a membership application, once
             # submitted, sends the user straight to their own beranda
             # regardless of status. Pending/rejected states — and appealing a
