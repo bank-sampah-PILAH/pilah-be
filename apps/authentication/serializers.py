@@ -79,7 +79,9 @@ class SwitchRoleSerializer(serializers.Serializer[Any]):
 
     def to_internal_value(self, data: Any) -> dict[str, Any]:
         if isinstance(data, dict) and set(data) - {"role"}:
-            raise serializers.ValidationError({"non_field_errors": ["Hanya field role yang diizinkan"]})
+            raise serializers.ValidationError(
+                {"non_field_errors": ["Hanya field role yang diizinkan"]}
+            )
         return super().to_internal_value(data)
 
 

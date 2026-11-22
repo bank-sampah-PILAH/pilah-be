@@ -1,6 +1,6 @@
+import logging
 from collections.abc import Mapping
 from datetime import timedelta
-import logging
 from typing import Any, cast
 
 from django.conf import settings
@@ -303,12 +303,21 @@ class AuthService:
 
     @staticmethod
     def switch_role(user: User, role: str) -> dict[str, Any]:
-        if role not in User.Role.values or role not in user.roles:
-            security_logger.warning("role_switch.denied account_id=%s", user.pk)
-            raise AuthServiceError(
-                "Role tujuan tidak dimiliki akun", code="role_not_owned", status_code=403
-            )
-        response = AuthService._session_response(user, is_new_user=False, active_role=role)
+        with transaction.atomic():
+            # Serialize issuance with role/account updates; never trust the
+            # account snapshot loaded earlier by authentication.
+            account = User.objects.select_for_update().filter(pk=user.pk, is_active=True).first()
+            if account is None:
+                security_logger.warning("role_switch.denied account_id=%s", user.pk)
+                raise AuthServiceError(
+                    "Akun tidak tersedia", code="account_unavailable", status_code=401
+                )
+            if role not in User.Role.values or role not in account.roles:
+                security_logger.warning("role_switch.denied account_id=%s", account.pk)
+                raise AuthServiceError(
+                    "Role tujuan tidak dimiliki akun", code="role_not_owned", status_code=403
+                )
+            response = AuthService._session_response(account, is_new_user=False, active_role=role)
         security_logger.info("role_switch.succeeded account_id=%s role=%s", user.pk, role)
         return response
 

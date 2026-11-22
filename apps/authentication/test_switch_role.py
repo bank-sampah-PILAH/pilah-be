@@ -37,7 +37,9 @@ class SwitchRoleTest(TestCase):
                 token = self.refresh.access_token if index % 2 else other_session.access_token
                 self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
                 response = self.client.post(
-                    "/api/v1/auth/switch-role", {"role": "nasabah"}, format="json",
+                    "/api/v1/auth/switch-role",
+                    {"role": "nasabah"},
+                    format="json",
                     HTTP_X_FORWARDED_FOR=f"192.0.2.{index}, 198.51.100.1, 35.191.0.1, 35.191.0.2",
                 )
                 self.assertEqual(response.status_code, 200 if index < 10 else 429)
@@ -46,10 +48,15 @@ class SwitchRoleTest(TestCase):
         self.assertIn("no-store", response.get("Cache-Control", ""))
         self.assertIs(SwitchRoleView().get_throttles()[0].cache, caches["auth_rate_limit"])
         other_user = User.objects.create_user(email="other-limit@example.com")
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(other_user).access_token}")
-        self.assertEqual(self.client.post(
-            "/api/v1/auth/switch-role", {"role": "pengelola"}, format="json"
-        ).status_code, 200)
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(other_user).access_token}"
+        )
+        self.assertEqual(
+            self.client.post(
+                "/api/v1/auth/switch-role", {"role": "pengelola"}, format="json"
+            ).status_code,
+            200,
+        )
 
     def test_owned_role_issues_new_token_pair_without_changing_account(self) -> None:
         response = self.client.post(
@@ -68,8 +75,11 @@ class SwitchRoleTest(TestCase):
         self.assertEqual(self.user.roles, [User.Role.PENGELOLA, User.Role.NASABAH])
 
     def test_switch_responses_cannot_be_cached_including_errors(self) -> None:
-        for payload, expected in (({"role": "nasabah"}, 200),
-                                  ({"role": "superadmin"}, 403), ({}, 422)):
+        for payload, expected in (
+            ({"role": "nasabah"}, 200),
+            ({"role": "superadmin"}, 403),
+            ({}, 422),
+        ):
             response = self.client.post("/api/v1/auth/switch-role", payload, format="json")
             self.assertEqual(response.status_code, expected)
             self.assertIn("no-store", response.get("Cache-Control", ""))
@@ -88,9 +98,13 @@ class SwitchRoleTest(TestCase):
         self.assertEqual(response.data["next_step"], "register_nasabah")
 
     def test_unknown_fields_cannot_override_identity_or_token_claims(self) -> None:
-        for field, value in (("user_id", "other-account"), ("roles", ["superadmin"]),
-                             ("is_superuser", True), ("bank_sampah_id", "other-bank"),
-                             ("exp", 9999999999)):
+        for field, value in (
+            ("user_id", "other-account"),
+            ("roles", ["superadmin"]),
+            ("is_superuser", True),
+            ("bank_sampah_id", "other-bank"),
+            ("exp", 9999999999),
+        ):
             with self.subTest(field=field):
                 response = self.client.post(
                     "/api/v1/auth/switch-role", {"role": "nasabah", field: value}, format="json"
@@ -124,8 +138,14 @@ class SwitchRoleTest(TestCase):
         self.assertIn("role_switch.denied", events.records[1].getMessage())
         self.assertIn(str(self.user.pk), events.records[0].getMessage())
         logs = " ".join(events.output)
-        for secret in (response.data["access_token"], response.data["refresh_token"],
-                       str(self.refresh), self.user.email, "forged", "\n"):
+        for secret in (
+            response.data["access_token"],
+            response.data["refresh_token"],
+            str(self.refresh),
+            self.user.email,
+            "forged",
+            "\n",
+        ):
             self.assertNotIn(secret, logs)
 
     def test_service_rechecks_role_revoked_after_authentication(self) -> None:
