@@ -1,5 +1,6 @@
 import uuid
 from decimal import Decimal
+from typing import Any
 
 from rest_framework.test import APIClient, APITestCase
 
@@ -20,13 +21,16 @@ class TeamRemoveTests(APITestCase):
         self.client.force_authenticate(user)
         return self.client
 
-    def _remove(self, target: User) -> object:
-        return self._as(self.owner).delete(f"/api/v1/team/{target.id}")
+    def _remove(self, target: User) -> Any:
+        response = self._as(self.owner).delete(f"/api/v1/team/{target.id}")
+        # force_authenticate keeps the in-memory user; a real token reloads it.
+        target.refresh_from_db()
+        return response
 
     def test_primary_removes_a_member_and_the_team_list_drops_them(self) -> None:
         response = self._remove(self.member)
 
-        self.assertEqual(response.status_code, 204)  # type: ignore[attr-defined]
+        self.assertEqual(response.status_code, 204)
         members = self.client.get("/api/v1/team").json()["members"]
         self.assertEqual([m["id"] for m in members], [str(self.owner.id)])
         self.member.refresh_from_db()
@@ -62,6 +66,7 @@ class TeamRemoveTests(APITestCase):
     def test_pengurus_who_never_had_a_bank_gets_no_removal_code(self) -> None:
         fresh = make_pengurus("fresh@example.test", self.bank)
         User.objects.filter(pk=fresh.pk).update(bank_sampah=None)
+        fresh.refresh_from_db()
 
         response = self._as(fresh).get("/api/v1/team")
 
@@ -101,7 +106,7 @@ class TeamRemoveTests(APITestCase):
         self._remove(self.member)
 
         self.assertEqual(BankSampah.objects.get(pk=self.bank.pk).invite_token, "")
-        response = self._as(self.member).post("/api/v1/team/invite/accept", {"token": token})
+        response = self._as(self.member).post("/api/v1/invites/accept", {"token": token})
         self.assertEqual(response.status_code, 400)
 
     def test_removed_pengurus_can_still_join_another_bank(self) -> None:
@@ -111,7 +116,7 @@ class TeamRemoveTests(APITestCase):
         self._as(User.objects.get(email="mawar@example.test")).post("/api/v1/team/invite")
         token = BankSampah.objects.get(pk=other_bank.pk).invite_token
 
-        response = self._as(self.member).post("/api/v1/team/invite/accept", {"token": token})
+        response = self._as(self.member).post("/api/v1/invites/accept", {"token": token})
 
         self.assertEqual(response.status_code, 200)
         self.member.refresh_from_db()
@@ -121,8 +126,8 @@ class TeamRemoveTests(APITestCase):
     def test_cannot_remove_oneself(self) -> None:
         response = self._remove(self.owner)
 
-        self.assertEqual(response.status_code, 400)  # type: ignore[attr-defined]
-        self.assertIn("diri sendiri", response.json()["error"])  # type: ignore[attr-defined]
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("diri sendiri", response.json()["error"])
         self.owner.refresh_from_db()
         self.assertEqual(self.owner.bank_sampah, self.bank)
 
@@ -131,7 +136,7 @@ class TeamRemoveTests(APITestCase):
 
         response = self._remove(stranger)
 
-        self.assertEqual(response.status_code, 404)  # type: ignore[attr-defined]
+        self.assertEqual(response.status_code, 404)
         stranger.refresh_from_db()
         self.assertIsNotNone(stranger.bank_sampah)
 

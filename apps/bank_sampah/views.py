@@ -1,4 +1,5 @@
 import mimetypes
+import uuid
 from typing import Any
 
 from django.conf import settings
@@ -217,6 +218,20 @@ class TeamTransferView(APIView):
         except LookupError as exc:
             return Response({"error": str(exc)}, status=404)
         return Response(team_payload(request))
+
+
+class TeamMemberView(APIView):
+    permission_classes = [IsPrimaryPengelola]
+    serializer_class = TeamMemberSerializer
+
+    def delete(self, request: Request, pk: uuid.UUID) -> Response:
+        try:
+            TeamService.remove_member(current_user(request), pk)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
+        except LookupError as exc:
+            return Response({"error": str(exc)}, status=404)
+        return Response(status=204)
 
 
 class GenerateInviteView(APIView):
