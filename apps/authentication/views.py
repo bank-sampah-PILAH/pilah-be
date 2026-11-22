@@ -21,8 +21,8 @@ from apps.authentication.serializers import (
     LogoutSerializer,
     PasswordLoginSerializer,
     RefreshTokenSerializer,
-    SwitchRoleSerializer,
     RoleChangeSerializer,
+    SwitchRoleSerializer,
     UserProfileSerializer,
 )
 from apps.authentication.services import (

@@ -1,11 +1,16 @@
+from datetime import timedelta
+from typing import Any
+
 from django.test import TestCase
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
-from api.models import User
+from api.models import BankSampah, Nasabah, User
 
 
 class SwitchRoleTest(TestCase):
+    client: APIClient
+
     def setUp(self) -> None:
         self.user = User.objects.create_user(
             email="switch@example.com",
@@ -71,3 +76,145 @@ class SwitchRoleTest(TestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.role, User.Role.PENGELOLA)
         self.assertEqual(self.user.roles, [User.Role.PENGELOLA, User.Role.NASABAH])
+
+    def test_refresh_and_other_device_preserve_independent_roles(self) -> None:
+        other_refresh = RefreshToken.for_user(self.user)
+        other_refresh["role"] = User.Role.PENGELOLA
+        other = APIClient()
+        other.credentials(HTTP_AUTHORIZATION=f"Bearer {other_refresh.access_token}")
+        switched = self.client.post(
+            "/api/v1/auth/switch-role", {"role": User.Role.NASABAH}, format="json"
+        )
+        self.assertEqual(switched.status_code, 200)
+        for raw, expected in (
+            (switched.data["refresh_token"], User.Role.NASABAH),
+            (str(other_refresh), User.Role.PENGELOLA),
+        ):
+            for _ in range(2):
+                response = APIClient().post(
+                    "/api/v1/auth/refresh", {"refresh_token": raw}, format="json"
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(AccessToken(response.data["access_token"])["role"], expected)
+        self.assertEqual(other.get("/api/v1/auth/me").data["role"], User.Role.PENGELOLA)
+
+    def test_switch_round_trip_and_same_role_issue_fresh_pairs(self) -> None:
+        previous = str(self.refresh)
+        for role, state in (
+            (User.Role.NASABAH, "register_nasabah"),
+            (User.Role.PENGELOLA, "register_bank_sampah"),
+            (User.Role.PENGELOLA, "register_bank_sampah"),
+        ):
+            response = self.client.post("/api/v1/auth/switch-role", {"role": role}, format="json")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data["user"]["role"], role)
+            self.assertEqual(response.data["next_step"], state)
+            self.assertEqual(RefreshToken(response.data["refresh_token"])["role"], role)
+            self.assertEqual(AccessToken(response.data["access_token"])["role"], role)
+            self.assertNotEqual(response.data["refresh_token"], previous)
+            previous = response.data["refresh_token"]
+            self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access_token']}")
+
+    def test_invalid_payloads_are_rejected_without_changing_session(self) -> None:
+        payloads: list[Any] = [
+            {},
+            {"role": ""},
+            {"role": None},
+            {"role": "unknown"},
+            {"role": 1},
+            {"role": []},
+            {"role": {}},
+            [],
+        ]
+        for payload in payloads:
+            with self.subTest(payload=payload):
+                response = self.client.post("/api/v1/auth/switch-role", payload, format="json")
+                self.assertEqual(response.status_code, 422)
+                self.assertIn("errors", response.data)
+                self.assertNotIn("access_token", response.data)
+        self.assertEqual(self.client.get("/api/v1/auth/me").data["role"], User.Role.PENGELOLA)
+
+    def test_invalid_authentication_cannot_switch(self) -> None:
+        expired = self.refresh.access_token
+        expired.set_exp(lifetime=timedelta(seconds=-1))
+        inactive = User.objects.create_user(email="inactive-switch@example.com")
+        inactive_token = AccessToken.for_user(inactive)
+        inactive.is_active = False
+        inactive.save(update_fields=["is_active"])
+        for raw in (
+            None,
+            "invalid",
+            str(expired),
+            str(self.refresh),
+            str(self.refresh.access_token) + "tampered",
+            str(inactive_token),
+        ):
+            with self.subTest(raw=raw):
+                client = APIClient()
+                if raw is not None:
+                    client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw}")
+                response = client.post(
+                    "/api/v1/auth/switch-role", {"role": User.Role.PENGELOLA}, format="json"
+                )
+                self.assertEqual(response.status_code, 401)
+                self.assertNotIn("access_token", response.data)
+
+    def test_new_token_has_nasabah_permissions_and_rejects_manager_endpoint(self) -> None:
+        bank = BankSampah.objects.create(nama="Permission Bank", no_hp_pic="+628123456789")
+        Nasabah.objects.create(
+            user=self.user,
+            bank_sampah=bank,
+            nomor="NAS-001",
+            nama="Member",
+            alamat="Jl. Test",
+            no_hp="+628123456789",
+            email=self.user.email,
+        )
+        response = self.client.post(
+            "/api/v1/auth/switch-role", {"role": User.Role.NASABAH}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access_token']}")
+        self.assertEqual(self.client.get("/api/v1/nasabah/me/beranda").status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/nasabah").status_code, 403)
+
+    def test_membership_routes_to_nasabah_dashboard(self) -> None:
+        bank = BankSampah.objects.create(nama="Switch Bank", no_hp_pic="+628123456789")
+        Nasabah.objects.create(
+            user=self.user,
+            bank_sampah=bank,
+            nomor="NAS-001",
+            nama="Member",
+            alamat="Jl. Test",
+            no_hp="+628123456789",
+            email=self.user.email,
+        )
+        response = self.client.post(
+            "/api/v1/auth/switch-role", {"role": User.Role.NASABAH}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["next_step"], "nasabah_dashboard")
+
+    def test_refresh_rejects_role_removed_after_switch(self) -> None:
+        switched = self.client.post(
+            "/api/v1/auth/switch-role", {"role": User.Role.NASABAH}, format="json"
+        )
+        self.assertEqual(switched.status_code, 200)
+        self.user.roles = [User.Role.PENGELOLA]
+        self.user.save(update_fields=["roles"])
+        response = APIClient().post(
+            "/api/v1/auth/refresh", {"refresh_token": switched.data["refresh_token"]}, format="json"
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertNotIn("access_token", response.data)
+
+    def test_supplied_identity_and_roles_cannot_grant_permissions(self) -> None:
+        victim = User.objects.create_user(email="other-switch@example.com", role=User.Role.NASABAH)
+        response = self.client.post(
+            "/api/v1/auth/switch-role",
+            {"role": User.Role.SUPERADMIN, "user_id": str(victim.pk), "roles": ["superadmin"]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 403)
+        victim.refresh_from_db()
+        self.assertEqual(victim.roles, [User.Role.NASABAH])
