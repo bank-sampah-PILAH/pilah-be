@@ -47,8 +47,13 @@ class Command(BaseCommand):
         with transaction.atomic():
             bank = self._review_bank()
             self._ensure_review_bank()
-            for email, name, role in REVIEW_ACCOUNTS:
-                user = self._existing_user(email, role, bank)
+            # Validate every identity before writing any: the one-primary-per-bank
+            # constraint would otherwise surface as an IntegrityError on the
+            # reviewer insert instead of the identity-conflict CommandError.
+            existing = [
+                self._existing_user(email, role, bank) for email, _, role in REVIEW_ACCOUNTS
+            ]
+            for (email, name, role), user in zip(REVIEW_ACCOUNTS, existing, strict=True):
                 if user is None:
                     user = self._create_user(email, name, role, bank, password)
                 else:
