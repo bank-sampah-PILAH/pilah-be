@@ -38,6 +38,17 @@ class SwitchRoleTest(TestCase):
         self.assertEqual(self.user.role, User.Role.PENGELOLA)
         self.assertEqual(self.user.roles, [User.Role.PENGELOLA, User.Role.NASABAH])
 
+    def test_switch_responses_cannot_be_cached_including_errors(self) -> None:
+        for payload, expected in (({"role": "nasabah"}, 200),
+                                  ({"role": "superadmin"}, 403), ({}, 422)):
+            response = self.client.post("/api/v1/auth/switch-role", payload, format="json")
+            self.assertEqual(response.status_code, expected)
+            self.assertIn("no-store", response.get("Cache-Control", ""))
+            self.assertIn("private", response.get("Cache-Control", ""))
+        response = APIClient().post("/api/v1/auth/switch-role", {"role": "nasabah"}, format="json")
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("no-store", response.get("Cache-Control", ""))
+
     def test_response_routes_to_selected_role_without_nasabah_membership(self) -> None:
         response = self.client.post(
             "/api/v1/auth/switch-role", {"role": User.Role.NASABAH}, format="json"
