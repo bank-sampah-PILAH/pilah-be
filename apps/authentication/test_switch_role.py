@@ -58,6 +58,19 @@ class SwitchRoleTest(TestCase):
         self.assertEqual(response.data["user"]["state"], "register_nasabah")
         self.assertEqual(response.data["next_step"], "register_nasabah")
 
+    def test_unknown_fields_cannot_override_identity_or_token_claims(self) -> None:
+        for field, value in (("user_id", "other-account"), ("roles", ["superadmin"]),
+                             ("is_superuser", True), ("bank_sampah_id", "other-bank"),
+                             ("exp", 9999999999)):
+            with self.subTest(field=field):
+                response = self.client.post(
+                    "/api/v1/auth/switch-role", {"role": "nasabah", field: value}, format="json"
+                )
+                self.assertEqual(response.status_code, 422)
+                self.assertNotIn("access_token", response.data)
+                self.assertIn("errors", response.data)
+        self.assertEqual(self.client.get("/api/v1/auth/me").data["role"], "pengelola")
+
     def test_me_preserves_selected_role_and_routing(self) -> None:
         switched = self.client.post(
             "/api/v1/auth/switch-role", {"role": User.Role.NASABAH}, format="json"
