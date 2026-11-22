@@ -239,6 +239,7 @@ class SwitchRoleTest(TestCase):
             {"role": User.Role.SUPERADMIN, "user_id": str(victim.pk), "roles": ["superadmin"]},
             format="json",
         )
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 422)
+        self.assertNotIn("access_token", response.data)
         victim.refresh_from_db()
         self.assertEqual(victim.roles, [User.Role.NASABAH])
