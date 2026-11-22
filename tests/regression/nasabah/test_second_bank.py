@@ -1,8 +1,11 @@
 """Nasabah contracts: an account already approved at one bank applies to another (PIL-539)."""
 
+from datetime import timedelta
 from typing import Any
 
-from api.models import BankSampah, Nasabah, Saldo, User
+from django.utils import timezone
+
+from api.models import BankSampah, JadwalKegiatan, Nasabah, Saldo, User
 from tests.regression.helpers import RegressionTestCase
 
 
@@ -46,6 +49,47 @@ class SecondBankApplicationTests(RegressionTestCase):
         self.auth_as(self.customer)
         query = {"keanggotaan_id": str(member.id)} if member else {}
         return self.client.get("/api/v1/nasabah/me/saldo", query)
+
+    def approve_bank_b(self) -> Nasabah:
+        """Apply to bank B and have its own pengurus approve, leaving two open banks."""
+        self.apply_to_bank_b()
+        member_b = Nasabah.objects.get(user=self.customer, bank_sampah=self.bank_b)
+        self.auth_as(self.pengurus_b)
+        self.client.post(f"/api/v1/nasabah/{member_b.id}/approve", {}, format="json")
+        member_b.refresh_from_db()
+        return member_b
+
+    def setoran_at_bank_a(self) -> Any:
+        self.auth_as(self.user)
+        return self.client.post(
+            "/api/v1/transaksi",
+            {
+                "nasabah_id": str(self.member_a.id),
+                "items": [{"jenis_sampah_id": self.make_jenis(), "berat": "2.000"}],
+            },
+            format="json",
+        )
+
+    def riwayat(self, member: Nasabah) -> Any:
+        self.auth_as(self.customer)
+        return self.client.get("/api/v1/nasabah/me/riwayat", {"keanggotaan_id": str(member.id)})
+
+    def jadwal(self, member: Nasabah) -> Any:
+        self.auth_as(self.customer)
+        return self.client.get("/api/v1/jadwal", {"keanggotaan_id": str(member.id)})
+
+    def publish_schedule_at_bank_a(self) -> JadwalKegiatan:
+        start = timezone.now() + timedelta(days=1)
+        return JadwalKegiatan.objects.create(
+            bank_sampah=self.bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=start,
+            selesai_pada=start + timedelta(hours=1),
+            lokasi="Balai RW 03",
+            cakupan_penerima=JadwalKegiatan.CakupanPenerima.SEMUA_NASABAH,
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
 
     def test_applying_to_a_second_bank_waits_while_the_first_stays_open(self) -> None:
         applied = self.apply_to_bank_b()
@@ -104,10 +148,7 @@ class SecondBankApplicationTests(RegressionTestCase):
         self.assertEqual(member_b.status, Nasabah.Status.PENDING)
 
     def test_once_approved_the_second_bank_is_a_choice_with_its_own_saldo(self) -> None:
-        self.apply_to_bank_b()
-        member_b = Nasabah.objects.get(user=self.customer, bank_sampah=self.bank_b)
-        self.auth_as(self.pengurus_b)
-        self.client.post(f"/api/v1/nasabah/{member_b.id}/approve", {}, format="json")
+        member_b = self.approve_bank_b()
 
         unselected = self.saldo()
         self.assertEqual(unselected.status_code, 422)
@@ -116,19 +157,31 @@ class SecondBankApplicationTests(RegressionTestCase):
             {str(self.member_a.id), str(member_b.id)},
         )
 
-        self.auth_as(self.user)
-        setoran = self.client.post(
-            "/api/v1/transaksi",
-            {
-                "nasabah_id": str(self.member_a.id),
-                "items": [{"jenis_sampah_id": self.make_jenis(), "berat": "2.000"}],
-            },
-            format="json",
-        )
+        setoran = self.setoran_at_bank_a()
         self.assertEqual(setoran.status_code, 201, setoran.data)
 
         self.assertEqual(self.saldo(self.member_a).data["total_saldo"], "7000.00")
         self.assertEqual(self.saldo(member_b).data["total_saldo"], "0.00")
+
+    def test_each_membership_keeps_its_own_riwayat_and_jadwal(self) -> None:
+        """The saldo half of this is above; a setoran must not leak any further.
+
+        Riwayat had no test for two memberships of the same account: the
+        existing ones cover another account's history, not a sibling bank's.
+        """
+        member_b = self.approve_bank_b()
+        self.assertEqual(self.setoran_at_bank_a().status_code, 201)
+        schedule = self.publish_schedule_at_bank_a()
+
+        own_riwayat = self.riwayat(self.member_a)
+        self.assertEqual(own_riwayat.status_code, 200, own_riwayat.data)
+        self.assertEqual(len(own_riwayat.data["results"]), 1)
+        self.assertEqual(self.riwayat(member_b).data["results"], [])
+
+        own_jadwal = self.jadwal(self.member_a)
+        self.assertEqual(own_jadwal.status_code, 200, own_jadwal.data)
+        self.assertEqual({item["id"] for item in own_jadwal.data["results"]}, {str(schedule.id)})
+        self.assertEqual(self.jadwal(member_b).data["results"], [])
 
     def test_a_duplicate_application_names_the_reason(self) -> None:
         self.apply_to_bank_b()
