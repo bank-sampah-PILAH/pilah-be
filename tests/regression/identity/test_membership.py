@@ -168,14 +168,33 @@ class MembershipRegressionTests(RegressionTestCase):
         response = self.client.post("/api/v1/invites/accept", {}, format="json")
         self.assertGreaterEqual(response.status_code, 400)
 
-    def test_non_primary_cannot_read_or_generate_invite(self) -> None:
-        member = self.fresh_pengelola("anggota@example.com")
-        member.bank_sampah = self.bank
-        member.is_profile_complete = True
-        member.save()
-        self.auth_as(member)
-        for method in (self.client.get, self.client.post):
-            with self.subTest(method=method.__name__):
-                response = method("/api/v1/team/invite", {}) if method == self.client.post else method("/api/v1/team/invite")
-                self.assertEqual(response.status_code, 403)
-                self.assertIn("Pengurus Utama", response.data["error"])
+    def test_invite_access_is_limited_to_primary_pengelola(self) -> None:
+        other_bank = type(self.bank).objects.create(
+            nama="Bank Lain", alamat="Depok", kota="Depok", no_hp_pic="+628123456788"
+        )
+        users = (
+            self.make_user("anggota@example.com", "pengelola", self.bank),
+            self.make_user("nasabah@example.com", "nasabah", self.bank),
+            self.make_user("tanpa-bank@example.com", "pengelola"),
+        )
+        cross_bank_primary = self.make_user(
+            "pengurus-utama-lain@example.com", "pengelola", other_bank
+        )
+        cross_bank_primary.is_primary_pengelola = True
+        cross_bank_primary.save(update_fields=["is_primary_pengelola"])
+        for user in users:
+            self.auth_as(user)
+            for method in (self.client.get, self.client.post):
+                with self.subTest(user=user.email, method=method.__name__):
+                    response = (
+                        method("/api/v1/team/invite", {})
+                        if method == self.client.post
+                        else method("/api/v1/team/invite")
+                    )
+                    self.assertEqual(response.status_code, 403)
+                    self.assertTrue(response.data["error"])
+        # The route has no bank identifier: an authenticated primary manager
+        # acts only on their own bank, not on the caller's bank.
+        self.auth_as(cross_bank_primary)
+        self.assertEqual(self.client.get("/api/v1/team/invite").status_code, 200)
+        self.assertEqual(self.client.post("/api/v1/team/invite", {}).status_code, 201)
