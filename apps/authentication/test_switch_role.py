@@ -8,6 +8,7 @@ from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from api.models import BankSampah, Nasabah, User
+from apps.authentication.services import AuthService, AuthServiceError
 from apps.authentication.views import SwitchRoleView
 
 
@@ -109,6 +110,23 @@ class SwitchRoleTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["role"], User.Role.NASABAH)
         self.assertEqual(response.data["state"], "register_nasabah")
+
+    def test_switch_security_events_omit_tokens_and_untrusted_input(self) -> None:
+        with self.assertLogs("pilah.security.role_switch", level="INFO") as events:
+            response = self.client.post(
+                "/api/v1/auth/switch-role", {"role": "nasabah"}, format="json"
+            )
+            self.assertEqual(response.status_code, 200)
+            with self.assertRaises(AuthServiceError):
+                AuthService.switch_role(self.user, "forged\nrole_switch.succeeded")
+        self.assertEqual(len(events.records), 2)
+        self.assertIn("role_switch.succeeded", events.records[0].getMessage())
+        self.assertIn("role_switch.denied", events.records[1].getMessage())
+        self.assertIn(str(self.user.pk), events.records[0].getMessage())
+        logs = " ".join(events.output)
+        for secret in (response.data["access_token"], response.data["refresh_token"],
+                       str(self.refresh), self.user.email, "forged", "\n"):
+            self.assertNotIn(secret, logs)
 
     def test_unowned_role_is_forbidden_and_preserves_existing_session(self) -> None:
         response = self.client.post(
