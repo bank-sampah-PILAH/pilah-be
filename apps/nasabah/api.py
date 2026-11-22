@@ -15,6 +15,14 @@ from rest_framework.request import Request
 
 from api.models import BankSampah, Nasabah
 
+# Re-exported so another bounded context can ask the "dapat dibuka" question
+# without importing apps.nasabah.keanggotaan directly, which
+# tests/test_architecture.py forbids: a cross-context import must name
+# apps.<bc>.api or its serializers. The one caller is apps/jadwal (PIL-235).
+# The redundant alias is what marks it an explicit re-export, which mypy
+# strict requires and ruff accepts in place of a noqa.
+from apps.nasabah.keanggotaan import filter_dapat_dibuka as filter_dapat_dibuka
+
 
 def _eligible_in(bank: BankSampah) -> QuerySet[Nasabah]:
     return Nasabah.objects.filter(bank_sampah=bank, is_active=True, status=Nasabah.Status.APPROVED)
