@@ -68,3 +68,53 @@ with `DJANGO_DEBUG=true`; no dependencies or credentials were modified.
 
 The full suite remains a Linux CI validation requirement; this implementation
 has not been pushed or submitted as a PR.
+
+## OWASP hardening
+
+Controls follow the [OWASP REST Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html)
+and [Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html).
+They are concrete endpoint protections, not a claim of OWASP certification.
+
+| Threat | Added prevention | Verified behavior |
+| --- | --- | --- |
+| Sensitive token responses stored by HTTP caches | `never_cache` on switch dispatch | Success and 401/403/422 responses include `Cache-Control: no-store`; 429 also checked. |
+| Unexpected properties and mass-assignment attempts | Serializer permits only `role` | Supplied identity, roles, admin flag, bank ID, or expiry cause 422 before issuance. |
+| Automated switching/token issuance abuse | Shared `auth_rate_limit` cache and account-keyed DRF scope | Ten requests/minute; eleventh returns 429 and Retry-After, despite token or forwarded-IP changes; another account retains its allowance. |
+| Missing security evidence or log injection/credential exposure | Dedicated security logger for successful/denied switches | Only account UUID and validated role on success; denial omits untrusted role; no JWTs, email, or raw injected input. |
+| Stale authorization or partially persisted token issuance | Reload active account under row lock and validate current roles within a transaction | Revoked roles denied before issuance; disabled/deleted accounts rejected; token-build failure rolls back outstanding token and produces no success event. |
+
+The strict field policy deliberately changes spoofed payloads from ignored
+extra fields to 422. A recognized but unowned role submitted alone still
+returns the acceptance-criteria-required 403.
+
+Rate limiting uses the existing shared database cache and is scoped to the
+account, so devices share an abuse allowance while retaining separate active
+roles. DRF's cache throttling is best-effort under concurrency; it is not a
+hard distributed quota or a replacement for infrastructure request limits.
+Row-lock concurrency requires PostgreSQL in production; SQLite local tests
+verify stale reads and transaction rollback, not PostgreSQL lock scheduling.
+
+### Additional demonstrated RED/GREEN cycles
+
+| RED commit and observed failure | GREEN commit | Focused result |
+| --- | --- | --- |
+| `3b9c324`: no-store absent | `23818f4` | 16 passed |
+| `3b888b2`: unexpected fields accepted with 200 | `c609b3b` | 17 passed |
+| `ebe301f`: eleventh request accepted with 200 | `6d6b2ca` | 36 passed |
+| `92e91fd`: no security log events emitted | `6aa87dc` | 19 passed |
+| `2facfd9`: stale revoked role accepted | `e7f87ed` | 35 passed |
+
+Supplemental disabled/deleted-account and token-rollback cases exercise the
+last protection without claiming additional RED cycles. Strict typing required
+an explicit cast for the third-party serializer return type and concrete
+throttle-type assertions; neither changes runtime behavior.
+
+Final focused run: **245 tests passed** across authentication, bank, Nasabah,
+multi-role scoping, architecture, and identity regressions. Ruff lint/format,
+strict mypy (273 source files), and migration drift checks pass.
+
+Final full-suite run with a temporary explicit test secret: **1,128 tests**
+in 219 seconds, with **6 failures, 10 errors, and 10 skips**. The failing test
+names exactly match the unchanged PIL-251 Windows baseline described above;
+no new failing test names were introduced by these protections. All 19
+switch-role tests pass. Linux CI remains necessary for a full green gate.
