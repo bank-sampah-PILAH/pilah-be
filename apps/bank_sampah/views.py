@@ -27,6 +27,7 @@ from apps.bank_sampah.serializers import (
     BankSampahSerializer,
     InviteAcceptSerializer,
     TeamMemberSerializer,
+    TeamTransferSerializer,
 )
 from apps.bank_sampah.services import ApprovalService, BankOnboardingService, TeamService
 from shared_kernel.permissions import (
@@ -189,12 +190,33 @@ class TeamView(APIView):
     serializer_class = TeamMemberSerializer
 
     def get(self, request: Request) -> Response:
-        members = User.objects.filter(
-            bank_sampah=current_bank(request), role=User.Role.PENGELOLA, is_active=True
-        ).order_by("-is_primary_pengelola", "nama")
-        return Response(
-            {"members": TeamMemberSerializer(members, many=True, context={"request": request}).data}
-        )
+        return Response(team_payload(request))
+
+
+def team_payload(request: Request) -> dict[str, Any]:
+    """The team list, shared so every team endpoint answers in the same shape."""
+    members = User.objects.filter(
+        bank_sampah=current_bank(request), role=User.Role.PENGELOLA, is_active=True
+    ).order_by("-is_primary_pengelola", "nama")
+    return {"members": TeamMemberSerializer(members, many=True, context={"request": request}).data}
+
+
+class TeamTransferView(APIView):
+    permission_classes = [IsPrimaryPengelola]
+    serializer_class = TeamTransferSerializer
+
+    def post(self, request: Request) -> Response:
+        serializer = TeamTransferSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            TeamService.transfer_primary(current_user(request), serializer.validated_data["id"])
+        except PermissionError as exc:
+            return Response({"error": str(exc)}, status=403)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
+        except LookupError as exc:
+            return Response({"error": str(exc)}, status=404)
+        return Response(team_payload(request))
 
 
 class GenerateInviteView(APIView):
