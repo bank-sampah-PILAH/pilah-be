@@ -130,6 +130,30 @@ class ScheduleReminderTests(TestCase):
         self.assertEqual(schedule.reminder_queued_at, self.now)
         self.assertFalse(PushNotification.objects.filter(title="Pengingat jadwal").exists())
 
+    def test_reminder_skips_a_bank_that_stopped_being_active(self) -> None:
+        """The bank can die between publication and the reminder window.
+
+        Pins the two bank-level conditions of the recipient rule, which no
+        other test reaches: a pengurus of a dead bank cannot publish in the
+        first place, so only this later path can observe them.
+        """
+        for field, value in (("is_active", False), ("status", BankSampah.Status.PENDING)):
+            with self.subTest(field=field):
+                schedule = self.make_schedule()
+                setattr(self.bank, field, value)
+                self.bank.save(update_fields=[field])
+                self.addCleanup(PushNotification.objects.all().delete)
+
+                self.assertEqual(queue_due_schedule_reminders(self.now), 0)
+
+                self.assertFalse(PushNotification.objects.exists())
+                schedule.refresh_from_db()
+                self.assertIsNotNone(schedule.reminder_queued_at)
+                BankSampah.objects.filter(pk=self.bank.pk).update(
+                    is_active=True, status=BankSampah.Status.ACTIVE
+                )
+                self.bank.refresh_from_db()
+
     def test_schedule_locked_by_another_worker_is_left_for_that_worker(self) -> None:
         from unittest.mock import patch
 
