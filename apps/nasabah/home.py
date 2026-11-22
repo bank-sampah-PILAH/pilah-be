@@ -15,6 +15,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from api.models import BankSampah, Nasabah, Pencairan, Transaksi, TransaksiQuerySet, User
 from apps.ledger.api import activity_query, apply_period
 from apps.ledger.serializers import TransactionDetailSerializer
+from apps.nasabah.keanggotaan import filter_dapat_dibuka
 from apps.reporting.api import StatementPeriodError, export_statement_pdf
 from shared_kernel.http_headers import CONTENT_DISPOSITION
 from shared_kernel.pagination import StandardPagination
@@ -105,7 +106,7 @@ class MembershipService:
         except (ValueError, TypeError, AttributeError) as exc:
             raise ValidationError({"keanggotaan_id": "UUID tidak valid."}) from exc
         selected = memberships.filter(pk=member_id)
-        member = MembershipService._eligible_memberships(selected).first()
+        member = filter_dapat_dibuka(selected).first()
         if member is not None:
             return member
         if selected.exists():
@@ -113,17 +114,8 @@ class MembershipService:
         raise NotFound()
 
     @staticmethod
-    def _eligible_memberships(memberships: QuerySet[Nasabah]) -> QuerySet[Nasabah]:
-        return memberships.filter(
-            status=Nasabah.Status.APPROVED,
-            is_active=True,
-            bank_sampah__is_active=True,
-            bank_sampah__status=BankSampah.Status.ACTIVE,
-        )
-
-    @staticmethod
     def _get_default_membership(memberships: QuerySet[Nasabah]) -> Nasabah:
-        eligible = list(MembershipService._eligible_memberships(memberships))
+        eligible = list(filter_dapat_dibuka(memberships))
         if not eligible:
             raise PermissionDenied("Keanggotaan aktif diperlukan.")
         if len(eligible) > 1:
