@@ -217,6 +217,16 @@ class ResolveKoordinatApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 503)
 
+    def test_short_link_that_exceeds_the_time_budget_is_service_unavailable(self) -> None:
+        with (
+            patch("apps.bank_sampah.tautan.BATAS_DETIK", -1),
+            patch(TAUTAN_GET) as get,
+        ):
+            response = self._post({"sumber": "tautan", "tautan": "https://maps.app.goo.gl/abc123"})
+
+        self.assertEqual(response.status_code, 503)
+        get.assert_not_called()
+
     def test_short_link_that_does_not_redirect_is_parsed_as_is(self) -> None:
         with patch(TAUTAN_GET, return_value=_RedirectResponse(200)):
             response = self._post({"sumber": "tautan", "tautan": "https://maps.app.goo.gl/abc123"})
