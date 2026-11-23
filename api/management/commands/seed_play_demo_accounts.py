@@ -20,7 +20,9 @@ from api.models import (
     User,
 )
 from api.seed_sample_data import (
-    WASTE_TYPE_FIXTURES,
+    WASTE_TYPE_FIXTURES as WASTE_TYPE_FIXTURES,
+)
+from api.seed_sample_data import (
     SampleIds,
     ensure_schedules,
     ensure_transactions,

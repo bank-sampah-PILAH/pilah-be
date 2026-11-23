@@ -10,6 +10,13 @@ from django.db.models import Q
 
 from api.management.commands.seed_testing_data import ACTIVE_BANK_ID
 from api.models import BankSampah, Nasabah, User
+from api.seed_sample_data import (
+    REVIEWER_SAMPLE_IDS,
+    ensure_schedules,
+    ensure_transactions,
+    ensure_waste_types,
+    recalculate_balance,
+)
 from apps.bank_sampah.constants import REVIEW_BANK_ID
 from shared_kernel.permissions import (
     email_verification_exempt_allowlist,
@@ -19,11 +26,12 @@ from shared_kernel.permissions import (
 
 CONFIRMATION = "SEED-PILAH-STAGING-REVIEW-ACCOUNT"
 REVIEW_PENGELOLA_EMAIL = "pilah.pengelola@pilah.com"
+REVIEW_PENGURUS_EMAIL = "pilah.pengurus@pilah.com"
 REVIEW_NASABAH_EMAIL = "pilah.nasabah@pilah.com"
 REVIEW_SUPERADMIN_EMAIL = "pilah.superadmin@pilah.com"
 REVIEW_ACCOUNTS = (
     (REVIEW_PENGELOLA_EMAIL, "Demo Pengelola PILAH", User.Role.PENGELOLA),
-    ("pilah.pengurus@pilah.com", "Demo Pengurus PILAH", User.Role.PENGELOLA),
+    (REVIEW_PENGURUS_EMAIL, "Demo Pengurus PILAH", User.Role.PENGELOLA),
     (REVIEW_NASABAH_EMAIL, "Demo Nasabah PILAH", User.Role.NASABAH),
     (REVIEW_SUPERADMIN_EMAIL, "SuperAdmin PILAH", User.Role.SUPERADMIN),
 )
@@ -57,15 +65,32 @@ class Command(BaseCommand):
             existing = [
                 self._existing_user(email, role, bank) for email, _, role in REVIEW_ACCOUNTS
             ]
+            users: dict[str, User] = {}
             for (email, name, role), user in zip(REVIEW_ACCOUNTS, existing, strict=True):
                 if user is None:
                     user = self._create_user(email, name, role, bank, password)
                 else:
                     self._update_user(user, email, name, role, bank, password)
+                users[email] = user
                 if role == User.Role.NASABAH:
                     self._ensure_nasabah_membership(bank, user)
+            self._ensure_sample_data(bank, users[REVIEW_PENGURUS_EMAIL])
 
         self.stdout.write(self.style.SUCCESS("Staging reviewer accounts are ready."))
+
+    @staticmethod
+    def _ensure_sample_data(bank: BankSampah, pengurus: User) -> None:
+        """Fill the reviewers' bank with the same sample data as the production demo.
+
+        Rows the nasabah already has in other banks (an older run seeded the
+        membership into the E2E bank) are left where they are; the saldo counts
+        them because it is the nasabah's.
+        """
+        membership = Nasabah.objects.get(pk=REVIEW_NASABAH_ID)
+        waste_types = ensure_waste_types(bank, REVIEWER_SAMPLE_IDS)
+        ensure_transactions(bank, pengurus, membership, waste_types, REVIEWER_SAMPLE_IDS)
+        ensure_schedules(bank, pengurus, REVIEWER_SAMPLE_IDS, REVIEW_OWN_BANK_NAME)
+        recalculate_balance(membership)
 
     @staticmethod
     def _create_user(email: str, name: str, role: str, bank: BankSampah, password: str) -> User:

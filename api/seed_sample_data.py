@@ -44,6 +44,15 @@ class SampleIds:
     schedules: tuple[UUID, ...]
 
 
+# The staging reviewers' bank; apart from the production demo's 362-378 and the
+# E2E fixture so neither seeder can overwrite the other's rows.
+REVIEWER_SAMPLE_IDS = SampleIds(
+    waste_types=tuple(UUID(f"00000000-0000-4000-8000-000000000{n}") for n in range(380, 384)),
+    transactions=tuple(UUID(f"00000000-0000-4000-8000-000000000{n}") for n in range(384, 387)),
+    details=tuple(UUID(f"00000000-0000-4000-8000-000000000{n}") for n in range(387, 391)),
+    schedules=tuple(UUID(f"00000000-0000-4000-8000-000000000{n}") for n in range(391, 393)),
+)
+
 WASTE_TYPE_FIXTURES = (
     (
         "JS-0001",
