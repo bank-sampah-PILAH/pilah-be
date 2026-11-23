@@ -357,6 +357,13 @@ class CariTempatApiTests(APITestCase):
         )
         self.assertEqual(get.call_args.kwargs["params"]["limit"], "5")
 
+    def test_result_without_display_name_falls_back_to_coordinates(self) -> None:
+        with patch(GEOCODER, return_value=_GeocoderResponse([{"lat": "-6.2", "lon": "106.8"}])):
+            response = self.client.get(CARI_TEMPAT_URL, {"q": "tanpa nama"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["hasil"][0]["nama"], "-6.2, 106.8")
+
     def test_short_query_is_rejected_without_a_geocoder_call(self) -> None:
         with patch(GEOCODER) as get:
             response = self.client.get(CARI_TEMPAT_URL, {"q": "ui"})
