@@ -1,6 +1,7 @@
 import uuid
 from typing import Any
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 
@@ -114,7 +115,7 @@ class BankSampahApprovalLog(models.Model):
         BankSampah, on_delete=models.CASCADE, related_name="approval_logs"
     )
     superadmin = models.ForeignKey(
-        "api.User", on_delete=models.PROTECT, related_name="approval_logs"
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="approval_logs"
     )
     status = models.CharField(max_length=20, choices=Status.choices)
     catatan = models.TextField(blank=True)
@@ -135,12 +136,14 @@ class PengurusDikeluarkan(models.Model):
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey("api.User", on_delete=models.PROTECT, related_name="pengeluaran")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="pengeluaran"
+    )
     bank_sampah = models.ForeignKey(
         BankSampah, on_delete=models.PROTECT, related_name="pengurus_dikeluarkan"
     )
     dikeluarkan_oleh = models.ForeignKey(
-        "api.User", on_delete=models.PROTECT, related_name="pengeluaran_dilakukan"
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="pengeluaran_dilakukan"
     )
     created_at = models.DateTimeField(auto_now_add=True)
 

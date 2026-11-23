@@ -8,7 +8,7 @@ from api.models import BankSampah, PengurusDikeluarkan, User
 
 PENGURUS_DIKELUARKAN = "pengurus_dikeluarkan"
 PENGURUS_DIKELUARKAN_MESSAGE = (
-    "Anda telah dikeluarkan dari bank sampah ini oleh Pengurus Utama. "
+    "Anda telah dikeluarkan dari bank sampah oleh Pengurus Utama. "
     "Hubungi Pengurus Utama atau bergabunglah ke bank sampah lain."
 )
 
