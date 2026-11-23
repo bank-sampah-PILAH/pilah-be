@@ -227,6 +227,8 @@ class TeamMemberView(APIView):
     def delete(self, request: Request, pk: uuid.UUID) -> Response:
         try:
             TeamService.remove_member(current_user(request), pk)
+        except PermissionError as exc:
+            return Response({"error": str(exc)}, status=403)
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         except LookupError as exc:

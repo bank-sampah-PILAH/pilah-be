@@ -201,13 +201,19 @@ class TeamService:
 
         Only the bank link is cut; the account, its transactions and its
         approval records stay. The invite link is rotated away because it may
-        have been shared with the person being removed.
+        have been shared with the person being removed. Like ``transfer_primary``
+        it re-reads the caller under the bank lock: a handover that committed
+        while this request waited must not let the stale caller remove the new
+        Pengurus Utama.
         """
         assert caller.bank_sampah_id is not None  # ponytail: IsPrimaryPengelola gates this
         if member_id == caller.pk:
             raise ValueError("Tidak dapat mengeluarkan diri sendiri dari bank sampah")
         with transaction.atomic():
             bank = BankSampah.objects.select_for_update().get(pk=caller.bank_sampah_id)
+            current = User.objects.select_for_update().get(pk=caller.pk)
+            if not current.is_primary_pengelola or current.bank_sampah_id != bank.pk:
+                raise PermissionError("Hanya Pengurus Utama yang dapat mengeluarkan pengurus")
             member = (
                 User.objects.select_for_update()
                 .filter(pk=member_id, bank_sampah=bank, role=User.Role.PENGELOLA, is_active=True)
@@ -219,7 +225,7 @@ class TeamService:
             member.is_primary_pengelola = False
             member.save(update_fields=["bank_sampah", "is_primary_pengelola", "updated_at"])
             PengurusDikeluarkan.objects.create(
-                user=member, bank_sampah=bank, dikeluarkan_oleh=caller
+                user=member, bank_sampah=bank, dikeluarkan_oleh=current
             )
             bank.invite_token = ""
             bank.invite_token_expires = None
