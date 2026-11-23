@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError
@@ -22,7 +24,17 @@ from api.management.commands.seed_testing_data import (
     PENDING_BANK_ID,
 )
 from api.management.commands.seed_testing_data import CONFIRMATION as E2E_CONFIRMATION
-from api.models import BankSampah, Nasabah, User
+from api.models import (
+    BankSampah,
+    DetailTransaksi,
+    HargaSampah,
+    JadwalKegiatan,
+    JenisSampah,
+    Nasabah,
+    Saldo,
+    Transaksi,
+    User,
+)
 from apps.bank_sampah.constants import REVIEW_BANK_ID
 
 REVIEWER_EMAIL = "pilah.superadmin@pilah.com"
@@ -204,6 +216,125 @@ class SeedStagingReviewAccountTests(TestCase):
                 )
             ),
             [REVIEW_PENGELOLA_EMAIL],
+        )
+
+    def _sample_counts(self) -> dict[str, int]:
+        return {
+            "jenis": JenisSampah.objects.filter(bank_sampah_id=REVIEW_OWN_BANK_ID).count(),
+            "harga": HargaSampah.objects.filter(
+                jenis_sampah__bank_sampah_id=REVIEW_OWN_BANK_ID
+            ).count(),
+            "transaksi": Transaksi.objects.filter(bank_sampah_id=REVIEW_OWN_BANK_ID).count(),
+            "detail": DetailTransaksi.objects.filter(
+                transaksi__bank_sampah_id=REVIEW_OWN_BANK_ID
+            ).count(),
+            "jadwal": JadwalKegiatan.objects.filter(bank_sampah_id=REVIEW_OWN_BANK_ID).count(),
+        }
+
+    def test_reviewer_bank_has_catalog_setoran_schedules_and_a_nasabah_balance(self) -> None:
+        call_command("seed_staging_review_account", confirm=CONFIRMATION)
+
+        self.assertEqual(
+            self._sample_counts(),
+            {"jenis": 4, "harga": 4, "transaksi": 3, "detail": 4, "jadwal": 2},
+        )
+        membership = Nasabah.objects.get(pk=REVIEW_NASABAH_ID)
+        total = sum(
+            (t.total_nilai for t in Transaksi.objects.filter(nasabah=membership)),
+            start=Decimal(0),
+        )
+        self.assertGreater(total, 0)
+        self.assertEqual(Saldo.objects.get(nasabah=membership).total_saldo, total)
+        pengurus = User.objects.get(email="pilah.pengurus@pilah.com")
+        self.assertEqual(
+            set(
+                Transaksi.objects.filter(bank_sampah_id=REVIEW_OWN_BANK_ID).values_list(
+                    "dicatat_oleh", flat=True
+                )
+            ),
+            {pengurus.pk},
+        )
+
+    def test_sample_data_is_not_duplicated_by_a_second_run(self) -> None:
+        call_command("seed_staging_review_account", confirm=CONFIRMATION)
+        first = self._sample_counts()
+        saldo = Saldo.objects.get(nasabah_id=REVIEW_NASABAH_ID).total_saldo
+
+        call_command("seed_staging_review_account", confirm=CONFIRMATION)
+
+        self.assertEqual(self._sample_counts(), first)
+        self.assertEqual(Saldo.objects.get(nasabah_id=REVIEW_NASABAH_ID).total_saldo, saldo)
+
+    def test_sample_data_ids_do_not_collide_with_the_production_demo_or_e2e_fixture(self) -> None:
+        from api.management.commands import seed_play_demo_accounts as demo
+        from api.seed_sample_data import REVIEWER_SAMPLE_IDS
+
+        used = {
+            *demo.WASTE_TYPE_IDS,
+            *demo.TRANSACTION_IDS,
+            *demo.DETAIL_IDS,
+            *demo.SCHEDULE_IDS,
+            demo.DEMO_NASABAH_ID,
+            demo.REVIEW_OWNER_ID,
+            REVIEW_NASABAH_ID,
+        }
+        mine = {
+            *REVIEWER_SAMPLE_IDS.waste_types,
+            *REVIEWER_SAMPLE_IDS.transactions,
+            *REVIEWER_SAMPLE_IDS.details,
+            *REVIEWER_SAMPLE_IDS.schedules,
+        }
+        self.assertFalse(mine & used)
+        self.assertEqual(len(mine), 13)
+
+    def test_e2e_bank_history_of_the_reviewer_nasabah_is_left_where_it_is(self) -> None:
+        user = User.objects.create_user(
+            email=REVIEW_NASABAH_EMAIL,
+            nama="Demo Nasabah PILAH",
+            role=User.Role.NASABAH,
+            password=REVIEWER_PASSWORD,
+        )
+        membership = Nasabah.objects.create(
+            id=REVIEW_NASABAH_ID,
+            user=user,
+            bank_sampah_id=ACTIVE_BANK_ID,
+            nomor=REVIEW_NASABAH_NUMBER,
+            nama="Demo Nasabah PILAH",
+            alamat=REVIEW_NASABAH_ADDRESS,
+            no_hp=REVIEW_NASABAH_PHONE,
+            email=REVIEW_NASABAH_EMAIL,
+        )
+        recorder = User.objects.create_user(
+            email="old.recorder@example.com",
+            nama="Old recorder",
+            role=User.Role.PENGELOLA,
+            bank_sampah_id=ACTIVE_BANK_ID,
+            password=REVIEWER_PASSWORD,
+        )
+        old = Transaksi.objects.create(
+            dicatat_oleh=recorder,
+            nasabah=membership,
+            bank_sampah_id=ACTIVE_BANK_ID,
+            tipe=Transaksi.Tipe.SETORAN,
+            total_nilai=Decimal(1000),
+        )
+
+        call_command("seed_staging_review_account", confirm=CONFIRMATION)
+
+        old.refresh_from_db()
+        self.assertEqual(old.bank_sampah_id, ACTIVE_BANK_ID)
+        membership.refresh_from_db()
+        self.assertEqual(membership.bank_sampah_id, REVIEW_OWN_BANK_ID)
+        self.assertEqual(
+            Saldo.objects.get(nasabah=membership).total_saldo,
+            old.total_nilai
+            + sum(
+                (
+                    t.total_nilai
+                    for t in Transaksi.objects.filter(bank_sampah_id=REVIEW_OWN_BANK_ID)
+                ),
+                start=Decimal(0),
+            ),
         )
 
     def test_seed_does_not_need_the_e2e_bank(self) -> None:
@@ -636,6 +767,23 @@ class SeedersKeepOnePrimaryPerBankTests(TestCase):
         self._seed_e2e()
 
         self._assert_one_primary_per_bank()
+
+    def test_e2e_bank_data_is_not_touched_by_the_reviewer_seeder(self) -> None:
+        self._seed_e2e()
+        before = (
+            JenisSampah.objects.filter(bank_sampah_id=ACTIVE_BANK_ID).count(),
+            Transaksi.objects.filter(bank_sampah_id=ACTIVE_BANK_ID).count(),
+            JadwalKegiatan.objects.filter(bank_sampah_id=ACTIVE_BANK_ID).count(),
+        )
+
+        self._seed_reviewers()
+
+        after = (
+            JenisSampah.objects.filter(bank_sampah_id=ACTIVE_BANK_ID).count(),
+            Transaksi.objects.filter(bank_sampah_id=ACTIVE_BANK_ID).count(),
+            JadwalKegiatan.objects.filter(bank_sampah_id=ACTIVE_BANK_ID).count(),
+        )
+        self.assertEqual(before, after)
 
     def test_both_twice_is_idempotent(self) -> None:
         for _ in range(2):
