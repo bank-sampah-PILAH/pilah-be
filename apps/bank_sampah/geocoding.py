@@ -15,15 +15,19 @@ from dataclasses import dataclass
 from typing import Any
 
 import requests
-from django.core.cache import cache
+from django.core.cache import caches
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-DEFAULT_USER_AGENT = "pilah-app/1.0 (bank sampah directory)"
-CACHE_TTL_DETIK = 7 * 24 * 60 * 60
+DEFAULT_USER_AGENT = "pilah-app/1.0 (+https://github.com/bank-sampah-PILAH/pilah-be)"
+CACHE_TTL_DETIK = 24 * 60 * 60
 # Provider policy is one request per second. Overridable only so tests and
 # local runs don't have to sleep the full second.
 MIN_INTERVAL_DETIK = float(os.getenv("PILAH_GEOCODER_MIN_INTERVAL", "1"))
 BATAS_HASIL = 5
+
+# The database-backed alias keeps hits shared across gunicorn workers; the
+# default LocMemCache would cache per process only.
+_cache = caches["auth_rate_limit"]
 
 # Serializes every outbound call in this process: concurrent searches from
 # different users share the provider's quota instead of racing it.
@@ -113,10 +117,10 @@ def _baris_ke_hasil(baris: Any) -> HasilGeocode | None:
 
 def _cari(kueri: str) -> list[HasilGeocode]:
     kunci = _kunci_cache(kueri)
-    tersimpan = cache.get(kunci)
+    tersimpan = _cache.get(kunci)
     if tersimpan is None:
         tersimpan = _ambil_dari_nominatim(kueri)
-        cache.set(kunci, tersimpan, CACHE_TTL_DETIK)
+        _cache.set(kunci, tersimpan, CACHE_TTL_DETIK)
     return [hasil for hasil in (_baris_ke_hasil(baris) for baris in tersimpan) if hasil is not None]
 
 

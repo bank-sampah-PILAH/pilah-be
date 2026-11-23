@@ -37,6 +37,7 @@ from apps.bank_sampah.serializers import (
 )
 from apps.bank_sampah.services import ApprovalService, BankOnboardingService, TeamService
 from apps.bank_sampah.tautan import (
+    AKURASI_VIEWPORT_M,
     TautanTidakTersedia,
     TautanTidakValid,
     koordinat_dari_tautan,
@@ -166,13 +167,15 @@ class ResolveKoordinatView(APIView):
             return Response({"detail": "Tautan tidak dapat diperluas"}, status=503)
         if koordinat is None:
             return Response({"detail": "Tautan tidak memuat koordinat"}, status=400)
+        latitude, longitude, jenis = koordinat
         return Response(
             {
-                "latitude": koordinat[0],
-                "longitude": koordinat[1],
+                "latitude": latitude,
+                "longitude": longitude,
                 "sumber": "tautan",
                 "alamat_hasil": None,
-                "akurasi_m": None,
+                # A viewport centre is a guess; the app shows it as one.
+                "akurasi_m": None if jenis == "pin" else AKURASI_VIEWPORT_M,
             }
         )
 

@@ -1,6 +1,7 @@
 """Google Maps link parsing and safe short-link expansion."""
 
 import re
+import time
 from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
 import requests
@@ -16,6 +17,12 @@ HOST_DIIZINKAN = {
 }
 HOST_PERSETUJUAN = "consent.google.com"
 MAKS_LOMPATAN = 5
+# One request budget for the whole chain: gunicorn's default 30 s worker kill
+# would otherwise fire mid-hop and skip the 503 the view prepares.
+BATAS_DETIK = 8
+# The viewport centre drifts as soon as the map is panned before sharing, so a
+# fallback coordinate is reported with a coarse accuracy instead of none.
+AKURASI_VIEWPORT_M = 1000.0
 
 _POLA_PIN = re.compile(r"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)")
 _POLA_VIEWPORT = re.compile(r"@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)")
@@ -36,24 +43,28 @@ class TautanTidakTersedia(Exception):
     """Expanding the short link failed upstream."""
 
 
-def koordinat_dari_tautan(url: str) -> tuple[float, float] | None:
+def koordinat_dari_tautan(url: str) -> tuple[float, float, str] | None:
+    """(latitude, longitude, sumber_koordinat), the last being pin or viewport."""
     # Percent-encoded separators ("%2C", "%21") hide the patterns below.
     teks = unquote(url)
     # (1) is the pin of the place actually selected; (2) is only the viewport
     # centre, which drifts whenever the map is panned before sharing.
-    for pola in (_POLA_PIN, _POLA_VIEWPORT):
+    for pola, jenis in ((_POLA_PIN, "pin"), (_POLA_VIEWPORT, "viewport")):
         cocok = pola.search(teks)
         if cocok:
-            return _pasangan(cocok.group(1), cocok.group(2))
+            pasangan = _pasangan(cocok.group(1), cocok.group(2))
+            return (*pasangan, jenis) if pasangan else None
     params = parse_qs(urlparse(teks).query)
     for kunci in _PARAM_KOORDINAT:
         nilai = (params.get(kunci) or [""])[0]
         cocok = _POLA_PARAM.fullmatch(nilai)
         if cocok:
-            return _pasangan(cocok.group(1), cocok.group(2))
+            pasangan = _pasangan(cocok.group(1), cocok.group(2))
+            return (*pasangan, "pin") if pasangan else None
     cocok = _POLA_PLACE.search(teks)
     if cocok:
-        return _pasangan(cocok.group(1), cocok.group(2))
+        pasangan = _pasangan(cocok.group(1), cocok.group(2))
+        return (*pasangan, "pin") if pasangan else None
     return None
 
 
@@ -78,6 +89,7 @@ def _tautan_pendek(host: str, path: str) -> bool:
 
 def perluas_tautan_pendek(url: str) -> str:
     sekarang = url
+    batas = time.monotonic() + BATAS_DETIK
     for _ in range(MAKS_LOMPATAN):
         bagian = urlparse(sekarang)
         host = (bagian.hostname or "").lower()
@@ -86,11 +98,14 @@ def perluas_tautan_pendek(url: str) -> str:
             return sekarang
         # Manual redirects: requests' own follow would visit arbitrary hosts
         # (SSRF), so every hop is checked against the whitelist above.
+        sisa = batas - time.monotonic()
+        if sisa <= 0:
+            raise TautanTidakTersedia("Tautan pendek terlalu lambat dijawab")
         try:
             respons = requests.get(
                 sekarang,
                 allow_redirects=False,
-                timeout=10,
+                timeout=min(3, sisa),
                 stream=True,
                 headers={"User-Agent": user_agent()},
             )

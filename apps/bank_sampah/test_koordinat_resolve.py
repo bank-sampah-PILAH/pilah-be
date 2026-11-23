@@ -6,7 +6,8 @@ from unittest.mock import patch
 
 import requests
 from django.conf import settings
-from django.core.cache import cache
+from django.core.cache import cache, caches
+from django.core.cache.backends.locmem import LocMemCache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APITestCase
 from rest_framework.throttling import ScopedRateThrottle
@@ -37,6 +38,11 @@ LINK_PIN = (
 )
 
 
+def _bersihkan_cache() -> None:
+    cache.clear()
+    caches["auth_rate_limit"].clear()
+
+
 class _GeocoderResponse:
     def __init__(self, payload: Any) -> None:
         self.payload = payload
@@ -61,7 +67,7 @@ class _RedirectResponse:
 
 class ResolveKoordinatApiTests(APITestCase):
     def setUp(self) -> None:
-        cache.clear()
+        _bersihkan_cache()
         self.user = User.objects.create_user(
             email="pengelola@example.test", nama="Pengelola", role=User.Role.PENGELOLA
         )
@@ -120,6 +126,8 @@ class ResolveKoordinatApiTests(APITestCase):
         self.assertEqual(response.data["longitude"], 106.8270541)
         self.assertEqual(response.data["sumber"], "tautan")
         self.assertIsNone(response.data["alamat_hasil"])
+        # A real place pin carries no invented accuracy.
+        self.assertIsNone(response.data["akurasi_m"])
 
     def test_link_with_only_viewport_centre_falls_back(self) -> None:
         response = self._post(
@@ -131,6 +139,8 @@ class ResolveKoordinatApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["latitude"], -6.36)
+        # A viewport centre drifts from the shared pin, so it says so.
+        self.assertEqual(response.data["akurasi_m"], 1000.0)
 
     def test_link_without_coordinates_is_rejected(self) -> None:
         response = self._post(
@@ -181,6 +191,8 @@ class ResolveKoordinatApiTests(APITestCase):
         self.assertEqual(response.data["latitude"], -6.21)
         self.assertEqual(response.data["longitude"], 106.81)
         self.assertFalse(get.call_args.kwargs["allow_redirects"])
+        # The whole chain gets one short budget, far inside gunicorn's kill.
+        self.assertLessEqual(get.call_args.kwargs["timeout"], 3)
 
     def test_short_link_to_foreign_host_is_rejected(self) -> None:
         with patch(TAUTAN_GET, return_value=_RedirectResponse(302, "https://evil.example/x")):
@@ -334,7 +346,7 @@ class BankKoordinatMetadataTests(APITestCase):
 
 class CariTempatApiTests(APITestCase):
     def setUp(self) -> None:
-        cache.clear()
+        _bersihkan_cache()
         self.user = User.objects.create_user(
             email="nasabah@pencari.test", nama="Pencari", role=User.Role.NASABAH
         )
@@ -395,10 +407,13 @@ class CariTempatApiTests(APITestCase):
             return _GeocoderResponse(NOMINATIM_RESULT)
 
         query = ["kota bandung", "kota surabaya"]
+        # Threads and the sqlite-backed shared cache don't mix; the limit is
+        # what this test is about, so give it an in-memory cache.
         with (
             patch(GEOCODER, side_effect=fake_get),
             patch.object(geocoding, "MIN_INTERVAL_DETIK", 0.15),
             patch.object(geocoding, "_panggilan_terakhir", 0.0),
+            patch.object(geocoding, "_cache", LocMemCache("uji-geocode", {})),
         ):
             threads = [threading.Thread(target=cari_tempat, args=(kueri,)) for kueri in query]
             for thread in threads:
