@@ -106,7 +106,11 @@ class BankSampahRegistrationSerializer(serializers.Serializer[Any]):
         error_messages={"invalid_choice": "Sumber koordinat tidak dikenal"},
     )
     koordinat_akurasi_m = serializers.DecimalField(
-        required=False, allow_null=True, max_digits=8, decimal_places=2
+        required=False,
+        allow_null=True,
+        max_digits=8,
+        decimal_places=2,
+        min_value=0,
     )
 
     def validate_latitude(self, value: Any) -> Any:

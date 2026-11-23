@@ -134,6 +134,36 @@ class ResolveKoordinatApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 400)
 
+    def test_link_with_coordinate_query_parameter_is_parsed(self) -> None:
+        response = self._post(
+            {"sumber": "tautan", "tautan": "https://www.google.com/maps?q=-6.2,106.8"}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["latitude"], -6.2)
+        self.assertEqual(response.data["longitude"], 106.8)
+
+    def test_link_with_place_coordinate_path_is_parsed(self) -> None:
+        response = self._post(
+            {"sumber": "tautan", "tautan": "https://www.google.com/maps/place/-6.2,106.8"}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["latitude"], -6.2)
+
+    def test_malformed_geocoder_payloads_are_not_found(self) -> None:
+        payloads = [
+            [{"lon": "106.8270541"}],
+            [{"lat": "bukan-angka", "lon": "106.8270541"}],
+            "bukan-daftar",
+            [{"lat": "100", "lon": "106.8270541"}],
+        ]
+        for payload in payloads:
+            with self.subTest(payload=payload):
+                with patch(GEOCODER, return_value=_GeocoderResponse(payload)):
+                    response = self._post({"sumber": "alamat", "alamat": "Jalan Entah"})
+                self.assertEqual(response.status_code, 404)
+
     def test_short_link_redirects_are_followed_manually(self) -> None:
         tujuan = (
             "https://www.google.com/maps/place/Bank+Sampah/"
@@ -163,6 +193,32 @@ class ResolveKoordinatApiTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         detail = str(response.data["detail"])
         self.assertIn("panjang", detail)
+
+    def test_short_link_upstream_failure_is_service_unavailable(self) -> None:
+        with patch(TAUTAN_GET, side_effect=requests.RequestException("timeout")):
+            response = self._post({"sumber": "tautan", "tautan": "https://maps.app.goo.gl/abc123"})
+
+        self.assertEqual(response.status_code, 503)
+
+    def test_short_link_that_does_not_redirect_is_parsed_as_is(self) -> None:
+        with patch(TAUTAN_GET, return_value=_RedirectResponse(200)):
+            response = self._post({"sumber": "tautan", "tautan": "https://maps.app.goo.gl/abc123"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("koordinat", str(response.data["detail"]))
+
+    def test_short_link_redirect_without_location_is_rejected(self) -> None:
+        with patch(TAUTAN_GET, return_value=_RedirectResponse(302)):
+            response = self._post({"sumber": "tautan", "tautan": "https://maps.app.goo.gl/abc123"})
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_short_link_redirect_loop_is_rejected(self) -> None:
+        lompatan = [_RedirectResponse(302, "https://maps.app.goo.gl/abc123") for _ in range(5)]
+        with patch(TAUTAN_GET, side_effect=lompatan):
+            response = self._post({"sumber": "tautan", "tautan": "https://maps.app.goo.gl/abc123"})
+
+        self.assertEqual(response.status_code, 400)
 
     def test_throttle_scope_is_registered(self) -> None:
         self.assertEqual(ResolveKoordinatView.throttle_scope, "resolve_koordinat")
@@ -232,6 +288,28 @@ class BankKoordinatMetadataTests(APITestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertIn("koordinat_sumber", response.data["errors"])
+
+    def test_negative_accuracy_is_rejected(self) -> None:
+        response = self.client.post(
+            "/api/v1/onboarding/bank-sampah",
+            {
+                "nama": "Bank Sampah Akurasi Negatif",
+                "alamat": "Jl. Melati No. 10, Depok",
+                "kota": "Depok",
+                "no_hp_pic": "081234567890",
+                "foto_kegiatan": SimpleUploadedFile(
+                    "kegiatan.png", b"x" * 16, content_type="image/png"
+                ),
+                "latitude": "-6.362829",
+                "longitude": "106.828655",
+                "koordinat_sumber": "gps",
+                "koordinat_akurasi_m": "-1.00",
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("koordinat_akurasi_m", response.data["errors"])
 
     def test_fields_are_exposed_where_coordinates_are(self) -> None:
         bank = BankSampah.objects.create(
