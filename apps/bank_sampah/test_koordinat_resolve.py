@@ -1,3 +1,5 @@
+import threading
+import time
 from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import patch
@@ -10,10 +12,13 @@ from rest_framework.test import APITestCase
 from rest_framework.throttling import ScopedRateThrottle
 
 from api.models import BankSampah, User
+from apps.bank_sampah import geocoding
+from apps.bank_sampah.geocoding import cari_tempat
 from apps.bank_sampah.serializers import BankSampahSerializer
 from apps.bank_sampah.views import ResolveKoordinatView
 
 URL = "/api/v1/bank-sampah/resolve-koordinat"
+CARI_TEMPAT_URL = "/api/v1/bank-sampah/cari-tempat"
 GEOCODER = "apps.bank_sampah.geocoding.requests.get"
 TAUTAN_GET = "apps.bank_sampah.tautan.requests.get"
 
@@ -325,3 +330,76 @@ class BankKoordinatMetadataTests(APITestCase):
         data = BankSampahSerializer(bank).data
         self.assertEqual(data["koordinat_sumber"], "tautan")
         self.assertIsNone(data["koordinat_akurasi_m"])
+
+
+class CariTempatApiTests(APITestCase):
+    def setUp(self) -> None:
+        cache.clear()
+        self.user = User.objects.create_user(
+            email="nasabah@pencari.test", nama="Pencari", role=User.Role.NASABAH
+        )
+        self.client.force_authenticate(self.user)
+
+    def test_place_search_returns_shaped_results(self) -> None:
+        with patch(GEOCODER, return_value=_GeocoderResponse(NOMINATIM_RESULT)) as get:
+            response = self.client.get(CARI_TEMPAT_URL, {"q": "kampus ui"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["hasil"],
+            [
+                {
+                    "nama": "Fakultas Ilmu Komputer UI, Depok",
+                    "latitude": -6.3703237,
+                    "longitude": 106.8270541,
+                }
+            ],
+        )
+        self.assertEqual(get.call_args.kwargs["params"]["limit"], "5")
+
+    def test_short_query_is_rejected_without_a_geocoder_call(self) -> None:
+        with patch(GEOCODER) as get:
+            response = self.client.get(CARI_TEMPAT_URL, {"q": "ui"})
+
+        self.assertEqual(response.status_code, 400)
+        get.assert_not_called()
+
+    def test_unreachable_geocoder_is_service_unavailable(self) -> None:
+        with patch(GEOCODER, side_effect=requests.RequestException("timeout")):
+            response = self.client.get(CARI_TEMPAT_URL, {"q": "kampus ui"})
+
+        self.assertEqual(response.status_code, 503)
+
+    def test_repeated_queries_share_one_outbound_call(self) -> None:
+        with patch(GEOCODER, return_value=_GeocoderResponse(NOMINATIM_RESULT)) as get:
+            pertama = self.client.get(CARI_TEMPAT_URL, {"q": "Jl. Margonda Raya 5 Depok"})
+            kedua = self.client.get(CARI_TEMPAT_URL, {"q": "  jl.  MARGONDA raya 5 depok "})
+
+        self.assertEqual(pertama.status_code, 200)
+        self.assertEqual(kedua.status_code, 200)
+        self.assertEqual(kedua.data, pertama.data)
+        self.assertEqual(get.call_count, 1)
+
+    def test_outbound_calls_are_serialized_by_the_shared_limit(self) -> None:
+        waktu: list[float] = []
+
+        def fake_get(*args: Any, **kwargs: Any) -> _GeocoderResponse:
+            waktu.append(time.monotonic())
+            return _GeocoderResponse(NOMINATIM_RESULT)
+
+        query = ["kota bandung", "kota surabaya"]
+        with (
+            patch(GEOCODER, side_effect=fake_get),
+            patch.object(geocoding, "MIN_INTERVAL_DETIK", 0.15),
+            patch.object(geocoding, "_panggilan_terakhir", 0.0),
+        ):
+            threads = [threading.Thread(target=cari_tempat, args=(kueri,)) for kueri in query]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        self.assertEqual(len(waktu), 2)
+        # The second call waited out the provider's one-per-second slot
+        # instead of racing the first one.
+        self.assertGreaterEqual(waktu[1] - waktu[0], 0.15)

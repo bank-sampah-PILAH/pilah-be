@@ -23,7 +23,7 @@ from api.models import BankSampah, User
 from apps.authentication.api import user_state_hint
 from apps.bank_sampah.constants import REVIEW_BANK_ID
 from apps.bank_sampah.geo import haversine_km
-from apps.bank_sampah.geocoding import GeocoderTidakTersedia, geocode_alamat
+from apps.bank_sampah.geocoding import GeocoderTidakTersedia, cari_tempat, geocode_alamat
 from apps.bank_sampah.serializers import (
     ApprovalDecisionSerializer,
     ApprovalLogSerializer,
@@ -173,6 +173,40 @@ class ResolveKoordinatView(APIView):
                 "sumber": "tautan",
                 "alamat_hasil": None,
                 "akurasi_m": None,
+            }
+        )
+
+
+class CariTempatView(APIView):
+    """Address search for the map picker, kept behind our own geocoder cache.
+
+    The app can't set User-Agent in a browser and cross-origin calls to
+    Nominatim are blocked; the backend also owns the provider's shared
+    request limit (apps.bank_sampah.geocoding).
+    """
+
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "cari_tempat"
+
+    def get(self, request: Request) -> Response:
+        kueri = request.query_params.get("q", "").strip()
+        if len(kueri) < 3:
+            return Response({"detail": "Kata kunci minimal 3 karakter"}, status=400)
+        try:
+            hasil = cari_tempat(kueri)
+        except GeocoderTidakTersedia:
+            return Response({"detail": "Layanan geocoder tidak dapat dihubungi"}, status=503)
+        return Response(
+            {
+                "hasil": [
+                    {
+                        "nama": h.alamat_hasil or f"{h.latitude}, {h.longitude}",
+                        "latitude": h.latitude,
+                        "longitude": h.longitude,
+                    }
+                    for h in hasil
+                ]
             }
         )
 

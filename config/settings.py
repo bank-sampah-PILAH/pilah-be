@@ -242,6 +242,7 @@ REST_FRAMEWORK = {
         "statement_pdf": "10/min",
         "password_login": "5/min",
         "resolve_koordinat": "20/min",
+        "cari_tempat": "20/min",
     },
 }
 

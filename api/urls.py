@@ -28,6 +28,7 @@ from apps.bank_sampah.views import (
     BankSampahDetailView,
     BankSampahDirectoryView,
     BankSampahMeView,
+    CariTempatView,
     GenerateInviteView,
     RegisterBankSampahView,
     ResolveKoordinatView,
@@ -138,6 +139,11 @@ urlpatterns = [
     path("invites/accept", AcceptInviteView.as_view(), name="invite-accept"),
     path("bank-sampah/invite/join", AcceptInviteView.as_view(), name="bank-sampah-invite-join"),
     path("bank-sampah/me", BankSampahMeView.as_view(), name="bank-sampah-me"),
+    path(
+        "bank-sampah/cari-tempat",
+        CariTempatView.as_view(),
+        name="bank-sampah-cari-tempat",
+    ),
     path(
         "bank-sampah/resolve-koordinat",
         ResolveKoordinatView.as_view(),

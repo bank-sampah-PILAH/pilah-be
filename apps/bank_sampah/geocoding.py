@@ -1,17 +1,34 @@
 """Nominatim geocoding for the "map may be down" fallback.
 
 The mobile app never calls Google or a geocoder itself; this module is the
-only outbound lookup, and it stays on a free provider.
+only outbound lookup, and it stays on a free provider. Nominatim's usage
+policy (max 1 request/second, cache results) is enforced here, not per
+client: one process-wide cache and one serialized outbound queue.
 """
 
+import hashlib
 import math
 import os
+import threading
+import time
 from dataclasses import dataclass
+from typing import Any
 
 import requests
+from django.core.cache import cache
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 DEFAULT_USER_AGENT = "pilah-app/1.0 (bank sampah directory)"
+CACHE_TTL_DETIK = 7 * 24 * 60 * 60
+# Provider policy is one request per second. Overridable only so tests and
+# local runs don't have to sleep the full second.
+MIN_INTERVAL_DETIK = float(os.getenv("PILAH_GEOCODER_MIN_INTERVAL", "1"))
+BATAS_HASIL = 5
+
+# Serializes every outbound call in this process: concurrent searches from
+# different users share the provider's quota instead of racing it.
+_kunci_keluar = threading.Lock()
+_panggilan_terakhir = 0.0
 
 
 class GeocoderTidakTersedia(Exception):
@@ -40,23 +57,46 @@ def koordinat_valid(latitude: float, longitude: float) -> bool:
     )
 
 
-def geocode_alamat(query: str) -> HasilGeocode | None:
+def _normalisasi(kueri: str) -> str:
+    return " ".join(kueri.casefold().split())
+
+
+def _kunci_cache(kueri: str) -> str:
+    sidik = hashlib.sha256(_normalisasi(kueri).encode("utf-8")).hexdigest()
+    return f"geocode:{sidik}"
+
+
+def _ambil_dari_nominatim(kueri: str) -> list[dict[str, Any]]:
+    """One outbound call, spaced from the previous one by the provider limit."""
+    global _panggilan_terakhir
+    with _kunci_keluar:
+        jeda = _panggilan_terakhir + MIN_INTERVAL_DETIK - time.monotonic()
+        if jeda > 0:
+            time.sleep(jeda)
+        _panggilan_terakhir = time.monotonic()
+        try:
+            response = requests.get(
+                NOMINATIM_URL,
+                params={
+                    "q": kueri,
+                    "format": "jsonv2",
+                    "limit": str(BATAS_HASIL),
+                    "countrycodes": "id",
+                },
+                headers={"User-Agent": user_agent()},
+                timeout=10,
+            )
+            response.raise_for_status()
+            hasil = response.json()
+        except requests.RequestException as exc:
+            raise GeocoderTidakTersedia(str(exc)) from exc
+    return hasil if isinstance(hasil, list) else []
+
+
+def _baris_ke_hasil(baris: Any) -> HasilGeocode | None:
     try:
-        response = requests.get(
-            NOMINATIM_URL,
-            params={"q": query, "format": "jsonv2", "limit": "1", "countrycodes": "id"},
-            headers={"User-Agent": user_agent()},
-            timeout=10,
-        )
-        response.raise_for_status()
-        results = response.json()
-    except requests.RequestException as exc:
-        raise GeocoderTidakTersedia(str(exc)) from exc
-    if not results:
-        return None
-    try:
-        latitude = float(results[0]["lat"])
-        longitude = float(results[0]["lon"])
+        latitude = float(baris["lat"])
+        longitude = float(baris["lon"])
     except (KeyError, TypeError, ValueError):
         return None
     if not koordinat_valid(latitude, longitude):
@@ -66,6 +106,25 @@ def geocode_alamat(query: str) -> HasilGeocode | None:
     return HasilGeocode(
         latitude=latitude,
         longitude=longitude,
-        alamat_hasil=results[0].get("display_name"),
+        alamat_hasil=baris.get("display_name"),
         akurasi_m=None,
     )
+
+
+def _cari(kueri: str) -> list[HasilGeocode]:
+    kunci = _kunci_cache(kueri)
+    tersimpan = cache.get(kunci)
+    if tersimpan is None:
+        tersimpan = _ambil_dari_nominatim(kueri)
+        cache.set(kunci, tersimpan, CACHE_TTL_DETIK)
+    return [hasil for hasil in (_baris_ke_hasil(baris) for baris in tersimpan) if hasil is not None]
+
+
+def geocode_alamat(query: str) -> HasilGeocode | None:
+    hasil = _cari(query)
+    return hasil[0] if hasil else None
+
+
+def cari_tempat(kueri: str) -> list[HasilGeocode]:
+    """Address search for the map picker; same cached rows, several results."""
+    return _cari(kueri)
