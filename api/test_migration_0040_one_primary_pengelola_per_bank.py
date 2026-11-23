@@ -104,7 +104,7 @@ class OnePrimaryMigrationTests(TransactionTestCase):
 
         _migrate(AFTER)
 
-        primaries = User.objects.filter(is_primary_pengelola=True, bank_sampah_id=bank_id)
+        primaries = User.objects.filter(is_primary_pengelola=True, bank_sampah__pk=bank_id)
         self.assertEqual([user.email for user in primaries], ["p0@example.com"])
         reviewer = User.objects.get(email__iexact="pilah.pengelola@pilah.com")
         self.assertEqual(str(reviewer.bank_sampah_id), bank_id)
