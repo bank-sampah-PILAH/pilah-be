@@ -80,7 +80,9 @@ class IsActivePengelolaOrNasabah(BasePermission):
 
 
 class IsPrimaryPengelola(IsActivePengelola):
-    message = "Hanya pengelola utama yang dapat melakukan aksi ini"
+    message = (
+        "Hanya Pengurus Utama bank sampah Anda yang dapat melihat atau membuat tautan undangan"
+    )
 
     def has_permission(self, request: Request, view: APIView) -> bool:
         return super().has_permission(request, view) and _auth_user(request).is_primary_pengelola
