@@ -1,9 +1,11 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from api.management.commands.seed_staging_review_account import (
@@ -35,7 +37,9 @@ from api.models import (
     Transaksi,
     User,
 )
+from api.seed_sample_data import REVIEWER_SAMPLE_IDS
 from apps.bank_sampah.constants import REVIEW_BANK_ID
+from apps.waste_catalog.services import catat_harga
 
 REVIEWER_EMAIL = "pilah.superadmin@pilah.com"
 REVIEWER_EMAILS = tuple(email for email, _name, _role in REVIEW_ACCOUNTS)
@@ -265,9 +269,17 @@ class SeedStagingReviewAccountTests(TestCase):
         self.assertEqual(self._sample_counts(), first)
         self.assertEqual(Saldo.objects.get(nasabah_id=REVIEW_NASABAH_ID).total_saldo, saldo)
 
+    def test_a_waste_type_whose_only_price_is_still_in_the_future_aborts_the_seed(self) -> None:
+        call_command("seed_staging_review_account", confirm=CONFIRMATION)
+        jenis = JenisSampah.objects.get(pk=REVIEWER_SAMPLE_IDS.waste_types[0])
+        HargaSampah.objects.filter(jenis_sampah=jenis).delete()
+        catat_harga(jenis, Decimal(3500), timezone.now() + timedelta(days=30), oleh=None)
+
+        with self.assertRaisesMessage(CommandError, f"waste type {jenis.pk} has no active price"):
+            call_command("seed_staging_review_account", confirm=CONFIRMATION)
+
     def test_sample_data_ids_do_not_collide_with_the_production_demo_or_e2e_fixture(self) -> None:
         from api.management.commands import seed_play_demo_accounts as demo
-        from api.seed_sample_data import REVIEWER_SAMPLE_IDS
 
         used = {
             *demo.WASTE_TYPE_IDS,
