@@ -10,12 +10,54 @@ Semua pemeriksaan wewenang atas data nasabah harus lewat modul ini supaya
 aturannya tidak tersebar di beberapa view.
 """
 
-from typing import Any, Mapping
+from typing import Any, Final, Mapping
 
+from django.db.models import QuerySet
 from rest_framework.exceptions import ValidationError
 
-from api.models import Nasabah
+from api.models import BankSampah, Nasabah
 from shared_kernel.validators import normalize_indonesian_phone
+
+# Syarat sebuah keanggotaan dapat dibuka: empat kondisi yang dipakai endpoint
+# beranda untuk menerima atau menolak sebuah keanggotaan, dan juga oleh penanda
+# `dapat_dibuka` pada daftar keanggotaan milik nasabah sendiri (PIL-236). Satu
+# sumber, supaya layar "Bank sampah saya" tidak pernah menawarkan bank yang
+# dijawab 403 pada permintaan berikutnya.
+#
+# Hanya lookup persamaan: `filter_dapat_dibuka` meneruskan isinya ke `filter()`,
+# sedangkan `dapat_dibuka` menelusuri atribut dengan nama bagian yang sama. Bila
+# suatu syarat nanti butuh lookup seperti `__lte`, kedua jalur itu harus
+# dipisah, bukan ditambahkan di sini.
+SYARAT_DAPAT_DIBUKA: Final[Mapping[str, Any]] = {
+    "status": Nasabah.Status.APPROVED,
+    "is_active": True,
+    "bank_sampah__is_active": True,
+    "bank_sampah__status": BankSampah.Status.ACTIVE,
+}
+
+
+def filter_dapat_dibuka(keanggotaan: QuerySet[Nasabah]) -> QuerySet[Nasabah]:
+    """Baris dalam ``keanggotaan`` yang memenuhi `SYARAT_DAPAT_DIBUKA`."""
+    return keanggotaan.filter(**SYARAT_DAPAT_DIBUKA)
+
+
+def dapat_dibuka(nasabah: Nasabah) -> bool:
+    """``True`` bila satu baris keanggotaan memenuhi syarat yang sama.
+
+    Pasangan dari `filter_dapat_dibuka` untuk objek yang sudah di tangan, agar
+    serializer tidak perlu query ulang.
+    """
+    return all(
+        _nilai_lookup(nasabah, lookup) == nilai for lookup, nilai in SYARAT_DAPAT_DIBUKA.items()
+    )
+
+
+def _nilai_lookup(nasabah: Nasabah, lookup: str) -> Any:
+    nilai: Any = nasabah
+    for bagian in lookup.split("__"):
+        nilai = getattr(nilai, bagian)
+    return nilai
+
 
 # Email adalah kunci penautan keanggotaan ke akun Google, dan tidak ada
 # penjaga lain pada jalur update: pemeriksaan email yang ada hanya keunikan
