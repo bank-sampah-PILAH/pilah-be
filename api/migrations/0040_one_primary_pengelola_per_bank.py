@@ -1,6 +1,30 @@
 from django.db import migrations, models
 from django.db.models import Count
 
+# Hardcoded on purpose: a migration must not import app code. This is the staging
+# reviewer account (seed_staging_review_account.REVIEW_PENGELOLA_EMAIL). Older
+# seeds put it into the E2E bank, already led by the fixture pengurus, so staging
+# holds two primaries there. Stepping it down here (and only it) lets this
+# migration apply; the seeder, run after deploy, moves it to its own bank and
+# makes it that bank's Pengurus Utama again.
+REVIEWER_EMAIL = "pilah.pengelola@pilah.com"
+
+
+def step_down_reviewer_where_it_shares_a_primary(apps, schema_editor):  # type: ignore[no-untyped-def]
+    User = apps.get_model("api", "User")
+    shared = (
+        User.objects.filter(is_primary_pengelola=True, bank_sampah__isnull=False)
+        .values("bank_sampah")
+        .annotate(total=Count("pk"))
+        .filter(total__gt=1)
+        .values("bank_sampah")
+    )
+    User.objects.filter(
+        email__iexact=REVIEWER_EMAIL,
+        is_primary_pengelola=True,
+        bank_sampah__in=shared,
+    ).update(is_primary_pengelola=False)
+
 
 def refuse_banks_with_several_primaries(apps, schema_editor):  # type: ignore[no-untyped-def]
     """Fail loudly instead of letting AddConstraint die with a bare IntegrityError.
@@ -30,6 +54,9 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.RunPython(
+            step_down_reviewer_where_it_shares_a_primary, migrations.RunPython.noop
+        ),
         migrations.RunPython(refuse_banks_with_several_primaries, migrations.RunPython.noop),
         migrations.AddConstraint(
             model_name="user",
