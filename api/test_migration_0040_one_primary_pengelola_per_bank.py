@@ -87,3 +87,57 @@ class OnePrimaryMigrationTests(TransactionTestCase):
             _migrate(AFTER)
         self.assertIn(bank_id, str(ctx.exception))
         self.assertIn("lebih dari satu Pengurus Utama", str(ctx.exception))
+
+    def _add_primary(self, bank_id: str, email: str) -> None:
+        apps = MigrationExecutor(connection).loader.project_state(BEFORE).apps
+        apps.get_model("api", "User").objects.create(
+            email=email,
+            nama=email,
+            role="pengelola",
+            bank_sampah_id=bank_id,
+            is_primary_pengelola=True,
+        )
+
+    def test_duplicate_of_the_staging_reviewer_and_another_primary_is_resolved(self) -> None:
+        bank_id = self._seed(primaries=1)
+        self._add_primary(bank_id, "Pilah.Pengelola@pilah.com")
+
+        _migrate(AFTER)
+
+        primaries = User.objects.filter(is_primary_pengelola=True, bank_sampah_id=bank_id)
+        self.assertEqual([user.email for user in primaries], ["p0@example.com"])
+        reviewer = User.objects.get(email__iexact="pilah.pengelola@pilah.com")
+        self.assertEqual(str(reviewer.bank_sampah_id), bank_id)
+        self.assertFalse(reviewer.is_primary_pengelola)
+
+    def test_other_duplicates_are_still_refused_with_the_bank_id(self) -> None:
+        bank_id = self._seed(primaries=2)
+
+        with self.assertRaises(RuntimeError) as ctx:
+            _migrate(AFTER)
+
+        self.assertIn(bank_id, str(ctx.exception))
+        self.assertEqual(User.objects.filter(is_primary_pengelola=True).count(), 2)
+
+    def test_reviewer_with_two_other_primaries_is_demoted_but_the_bank_is_still_refused(
+        self,
+    ) -> None:
+        bank_id = self._seed(primaries=2)
+        self._add_primary(bank_id, "pilah.pengelola@pilah.com")
+
+        with self.assertRaises(RuntimeError) as ctx:
+            _migrate(AFTER)
+
+        self.assertIn(bank_id, str(ctx.exception))
+
+    def test_sole_reviewer_primary_in_its_own_bank_is_untouched(self) -> None:
+        executor = _migrate(BEFORE)
+        apps = executor.loader.project_state(BEFORE).apps
+        bank = apps.get_model("api", "BankSampah").objects.create(
+            nama="Bank Review", alamat="Depok", kota="Depok", no_hp_pic="+628111111111"
+        )
+        self._add_primary(str(bank.pk), "pilah.pengelola@pilah.com")
+
+        _migrate(AFTER)
+
+        self.assertTrue(User.objects.get(email="pilah.pengelola@pilah.com").is_primary_pengelola)
