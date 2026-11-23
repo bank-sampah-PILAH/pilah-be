@@ -79,8 +79,6 @@ jobs:
       - name: Mint dev token
         # PILAH_ALLOW_FAKE_GOOGLE_TOKEN=true lets the OAuth endpoint mint a
         # real access token for a dev pengelola without touching Google.
-        env:
-          ACCESS: /tmp/access_token
         run: |
           token="$(curl --silent --show-error \
             --header 'Content-Type: application/json' \
