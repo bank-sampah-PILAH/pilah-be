@@ -5,6 +5,7 @@ from typing import Any
 from rest_framework.test import APIClient, APITestCase
 
 from api.models import BankSampah, Nasabah, PengurusDikeluarkan, Transaksi, User
+from apps.bank_sampah.services import TeamService
 from apps.bank_sampah.test_team_transfer import make_bank, make_pengurus
 
 CODE = "pengurus_dikeluarkan"
@@ -157,3 +158,27 @@ class TeamRemoveTests(APITestCase):
 
     def test_anonymous_is_rejected(self) -> None:
         self.assertEqual(APIClient().delete(f"/api/v1/team/{self.member.id}").status_code, 401)
+
+    def test_stale_caller_demoted_by_a_transfer_cannot_remove_the_new_primary(self) -> None:
+        stale_owner = User.objects.get(pk=self.owner.pk)
+        TeamService.transfer_primary(self.owner, self.member.id)
+
+        with self.assertRaises(PermissionError):
+            TeamService.remove_member(stale_owner, self.member.id)
+
+        self.member.refresh_from_db()
+        self.assertTrue(self.member.is_primary_pengelola)
+        self.assertEqual(self.member.bank_sampah, self.bank)
+        self.assertFalse(PengurusDikeluarkan.objects.exists())
+
+    def test_stale_remove_after_transfer_answers_403_over_http(self) -> None:
+        stale_owner = User.objects.get(pk=self.owner.pk)
+        TeamService.transfer_primary(self.owner, self.member.id)
+        self.client.force_authenticate(stale_owner)
+
+        response = self.client.delete(f"/api/v1/team/{self.member.id}")
+
+        self.assertEqual(response.status_code, 403)
+        self.member.refresh_from_db()
+        self.assertTrue(self.member.is_primary_pengelola)
+        self.assertEqual(self.member.bank_sampah, self.bank)
