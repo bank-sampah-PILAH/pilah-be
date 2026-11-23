@@ -54,6 +54,7 @@ class TeamRemoveTests(APITestCase):
                 body = response.json()
                 self.assertEqual(body["code"], CODE)
                 self.assertIn("dikeluarkan", body["error"])
+                self.assertNotIn("bank sampah ini", body["error"])
 
     def test_removed_pengurus_cannot_use_primary_only_endpoints(self) -> None:
         self._remove(self.member)
