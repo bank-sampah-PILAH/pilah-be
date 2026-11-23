@@ -3560,10 +3560,55 @@ class APISpecTests(APITransactionTestCase):
         entry = response.data[0]
         self.assertEqual(entry["id"], str(membership.id))
         self.assertEqual(entry["status"], "pending")
+        self.assertEqual(entry["total_saldo"], "0.00")
         self.assertEqual(entry["bank_sampah"]["id"], str(self.bank.id))
         self.assertEqual(entry["bank_sampah"]["nama"], self.bank.nama)
         self.assertEqual(entry["bank_sampah"]["alamat"], self.bank.alamat)
         self.assertIsNone(entry["alasan_penolakan"])
+
+    def test_nasabah_self_view_returns_each_membership_balance(self) -> None:
+        customer = User.objects.create_user(
+            email="membership-balances@example.com",
+            nama="Nasabah Dua Bank",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        other_bank = BankSampah.objects.create(
+            nama="Bank Sampah Lain", alamat="Depok", kota="Depok", no_hp_pic="+628111222445"
+        )
+        approved = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0708",
+            nama=customer.nama,
+            alamat="Jl. Melati",
+            no_hp="+628555555040",
+            status=Nasabah.Status.APPROVED,
+            is_active=True,
+        )
+        rejected = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=other_bank,
+            nomor="NAS-0002",
+            nama=customer.nama,
+            alamat="Jl. Melati",
+            no_hp="+628555555041",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        Saldo.objects.create(nasabah=approved, total_saldo=Decimal("12345.67"))
+        Saldo.objects.create(nasabah=rejected, total_saldo=Decimal("890.10"))
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get("/api/v1/nasabah/me")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIsInstance(response.json(), list)
+        by_id = {entry["id"]: entry for entry in response.json()}
+        self.assertEqual(set(by_id), {str(approved.id), str(rejected.id)})
+        self.assertEqual(by_id[str(approved.id)]["total_saldo"], "12345.67")
+        self.assertEqual(by_id[str(rejected.id)]["total_saldo"], "890.10")
 
     def test_nasabah_self_view_accessible_before_profile_is_complete(self) -> None:
         """PIL-204's redesign lets a pengurus-entered record auto-link on
