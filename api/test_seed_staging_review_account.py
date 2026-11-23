@@ -1,5 +1,6 @@
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import IntegrityError
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
@@ -12,9 +13,15 @@ from api.management.commands.seed_staging_review_account import (
     REVIEW_NASABAH_ID,
     REVIEW_NASABAH_NUMBER,
     REVIEW_NASABAH_PHONE,
+    REVIEW_OWN_BANK_ID,
+    REVIEW_OWN_BANK_NAME,
     REVIEW_PENGELOLA_EMAIL,
 )
-from api.management.commands.seed_testing_data import ACTIVE_BANK_ID, PENDING_BANK_ID
+from api.management.commands.seed_testing_data import (
+    ACTIVE_BANK_ID,
+    PENDING_BANK_ID,
+)
+from api.management.commands.seed_testing_data import CONFIRMATION as E2E_CONFIRMATION
 from api.models import BankSampah, Nasabah, User
 from apps.bank_sampah.constants import REVIEW_BANK_ID
 
@@ -116,8 +123,10 @@ class SeedStagingReviewAccountTests(TestCase):
         )
         self.assertEqual(
             User.objects.get(email="pilah.pengelola@pilah.com").bank_sampah_id,
-            ACTIVE_BANK_ID,
+            REVIEW_OWN_BANK_ID,
         )
+        nasabah_membership = Nasabah.objects.get(pk=REVIEW_NASABAH_ID)
+        self.assertEqual(nasabah_membership.bank_sampah_id, REVIEW_OWN_BANK_ID)
 
     def test_seed_repairs_safe_existing_account_but_rejects_role_conflict(self) -> None:
         email, name, _role = REVIEW_ACCOUNTS[0]
@@ -134,7 +143,7 @@ class SeedStagingReviewAccountTests(TestCase):
         self.assertEqual(reviewer.nama, name)
         self.assertTrue(reviewer.is_profile_complete)
         self.assertTrue(reviewer.check_password(REVIEWER_PASSWORD))
-        self.assertEqual(reviewer.bank_sampah_id, ACTIVE_BANK_ID)
+        self.assertEqual(reviewer.bank_sampah_id, REVIEW_OWN_BANK_ID)
         self.assertTrue(reviewer.is_primary_pengelola)
 
         reviewer.role = User.Role.NASABAH
@@ -160,7 +169,7 @@ class SeedStagingReviewAccountTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["keanggotaan"]["id"], str(REVIEW_NASABAH_ID))
 
-    def test_seed_repairs_owner_flag_when_bank_is_already_assigned(self) -> None:
+    def test_seed_moves_an_existing_reviewer_out_of_the_e2e_bank(self) -> None:
         owner = User.objects.create_user(
             email=REVIEW_PENGELOLA_EMAIL,
             nama="Existing reviewer",
@@ -173,8 +182,82 @@ class SeedStagingReviewAccountTests(TestCase):
         call_command("seed_staging_review_account", confirm=CONFIRMATION)
 
         owner.refresh_from_db()
+        self.assertEqual(owner.bank_sampah_id, REVIEW_OWN_BANK_ID)
         self.assertTrue(owner.is_primary_pengelola)
         self.assertEqual(owner.nama, "Existing reviewer")
+
+    def test_reviewer_bank_is_active_standalone_and_holds_one_primary(self) -> None:
+        call_command("seed_staging_review_account", confirm=CONFIRMATION)
+
+        bank = BankSampah.objects.get(pk=REVIEW_OWN_BANK_ID)
+        self.assertEqual(bank.nama, REVIEW_OWN_BANK_NAME)
+        self.assertEqual(bank.jenis_organisasi, BankSampah.OrganizationType.MANDIRI)
+        self.assertEqual((bank.status, bank.is_active), (BankSampah.Status.ACTIVE, True))
+        self.assertEqual(
+            sorted(User.objects.filter(bank_sampah=bank).values_list("email", flat=True)),
+            ["pilah.pengelola@pilah.com", "pilah.pengurus@pilah.com"],
+        )
+        self.assertEqual(
+            list(
+                User.objects.filter(bank_sampah=bank, is_primary_pengelola=True).values_list(
+                    "email", flat=True
+                )
+            ),
+            [REVIEW_PENGELOLA_EMAIL],
+        )
+
+    def test_seed_does_not_need_the_e2e_bank(self) -> None:
+        BankSampah.objects.filter(pk=ACTIVE_BANK_ID).delete()
+
+        call_command("seed_staging_review_account", confirm=CONFIRMATION)
+
+        self.assertEqual(
+            User.objects.get(email=REVIEW_PENGELOLA_EMAIL).bank_sampah_id, REVIEW_OWN_BANK_ID
+        )
+
+    def test_seed_moves_the_legacy_reviewer_pair_and_leaves_other_accounts_alone(self) -> None:
+        other = User.objects.create_user(
+            email="someone.else@example.com",
+            nama="Someone else",
+            role=User.Role.PENGELOLA,
+            bank_sampah_id=ACTIVE_BANK_ID,
+            is_primary_pengelola=True,
+            password="old-password",
+        )
+        for email in (REVIEW_PENGELOLA_EMAIL, "pilah.pengurus@pilah.com"):
+            User.objects.create_user(
+                email=email,
+                nama=email,
+                role=User.Role.PENGELOLA,
+                bank_sampah_id=ACTIVE_BANK_ID,
+                password=REVIEWER_PASSWORD,
+            )
+
+        for _ in range(2):
+            call_command("seed_staging_review_account", confirm=CONFIRMATION)
+
+        other.refresh_from_db()
+        self.assertEqual((other.bank_sampah_id, other.is_primary_pengelola), (ACTIVE_BANK_ID, True))
+        for email, primary in ((REVIEW_PENGELOLA_EMAIL, True), ("pilah.pengurus@pilah.com", False)):
+            user = User.objects.get(email=email)
+            self.assertEqual(
+                (user.bank_sampah_id, user.is_primary_pengelola), (REVIEW_OWN_BANK_ID, primary)
+            )
+
+    def test_seed_rejects_a_reviewer_who_belongs_to_another_bank(self) -> None:
+        elsewhere = BankSampah.objects.create(
+            nama="Elsewhere", no_hp_pic="", status=BankSampah.Status.ACTIVE, is_active=True
+        )
+        User.objects.create_user(
+            email=REVIEW_PENGELOLA_EMAIL,
+            nama="Reviewer",
+            role=User.Role.PENGELOLA,
+            bank_sampah=elsewhere,
+            password=REVIEWER_PASSWORD,
+        )
+
+        with self.assertRaisesMessage(CommandError, "identity conflicts"):
+            call_command("seed_staging_review_account", confirm=CONFIRMATION)
 
     def test_seed_rejects_primary_permissions_on_the_pengurus_identity(self) -> None:
         pengurus = User.objects.create_user(
@@ -314,25 +397,24 @@ class SeedStagingReviewAccountTests(TestCase):
         with self.assertRaisesMessage(CommandError, "identity conflicts"):
             call_command("seed_staging_review_account", confirm=CONFIRMATION)
 
-    def test_seed_requires_the_staging_e2e_bank(self) -> None:
-        BankSampah.objects.filter(pk=ACTIVE_BANK_ID).delete()
-
-        with self.assertRaisesMessage(CommandError, "staging E2E bank is required"):
-            call_command("seed_staging_review_account", confirm=CONFIRMATION)
-
-    def test_seed_rejects_an_unusable_fixture_bank_without_changing_it(self) -> None:
-        for active, status in (
-            (False, BankSampah.Status.ACTIVE),
-            (True, BankSampah.Status.PENDING),
-            (True, BankSampah.Status.REJECTED),
+    def test_seed_rejects_a_conflicting_reviewer_bank_without_creating_accounts(self) -> None:
+        for name, status, active in (
+            ("Unrelated bank", BankSampah.Status.ACTIVE, True),
+            (REVIEW_OWN_BANK_NAME, BankSampah.Status.PENDING, False),
+            (REVIEW_OWN_BANK_NAME, BankSampah.Status.ACTIVE, False),
         ):
-            with self.subTest(active=active, status=status):
-                BankSampah.objects.filter(pk=ACTIVE_BANK_ID).update(is_active=active, status=status)
-                with self.assertRaisesMessage(CommandError, "active staging E2E bank is required"):
+            with self.subTest(name=name, status=status, active=active):
+                bank = BankSampah.objects.create(
+                    id=REVIEW_OWN_BANK_ID,
+                    nama=name,
+                    no_hp_pic="",
+                    status=status,
+                    is_active=active,
+                )
+                with self.assertRaisesMessage(CommandError, "reviewer bank identity conflicts"):
                     call_command("seed_staging_review_account", confirm=CONFIRMATION)
-                bank = BankSampah.objects.get(pk=ACTIVE_BANK_ID)
-                self.assertEqual((bank.is_active, bank.status), (active, status))
                 self.assertFalse(User.objects.filter(email__in=REVIEWER_EMAILS).exists())
+                bank.delete()
 
     def test_seed_rejects_unusable_memberships_and_rolls_back_account_repairs(self) -> None:
         for linked in (False, True):
@@ -416,6 +498,7 @@ class SeedStagingReviewAccountTests(TestCase):
             membership.user_id,
             User.objects.get(email="pilah.nasabah@pilah.com").pk,
         )
+        self.assertEqual(membership.bank_sampah_id, REVIEW_OWN_BANK_ID)
 
     def test_seed_preserves_memberships_registered_with_other_banks(self) -> None:
         call_command("seed_staging_review_account", confirm=CONFIRMATION)
@@ -487,3 +570,144 @@ class SeedStagingReviewAccountTests(TestCase):
 
         with self.assertRaisesMessage(CommandError, "membership identity conflicts"):
             call_command("seed_staging_review_account", confirm=CONFIRMATION)
+
+
+E2E_SUPERADMIN_EMAIL = "e2e.superadmin@example.com"
+
+
+@override_settings(
+    DEBUG=False,
+    PILAH_ENVIRONMENT="staging",
+    PILAH_SUPERADMIN_EMAILS=(E2E_SUPERADMIN_EMAIL,),
+    PILAH_REVIEW_SUPERADMIN_EMAILS=(REVIEWER_EMAIL,),
+    PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS=REVIEWER_EMAILS,
+    PILAH_REVIEW_ACCOUNT_PASSWORD=REVIEWER_PASSWORD,
+)
+class SeedersKeepOnePrimaryPerBankTests(TestCase):
+    """seed_testing_data and the reviewer seeder must never put two primaries in a bank."""
+
+    @staticmethod
+    def _seed_e2e() -> None:
+        call_command(
+            "seed_testing_data",
+            environment="staging",
+            confirm=E2E_CONFIRMATION,
+            superadmin_email=E2E_SUPERADMIN_EMAIL,
+        )
+
+    @staticmethod
+    def _seed_reviewers() -> None:
+        call_command("seed_staging_review_account", confirm=CONFIRMATION)
+
+    def _assert_one_primary_per_bank(self) -> None:
+        self.assertEqual(
+            list(
+                User.objects.filter(
+                    bank_sampah_id=ACTIVE_BANK_ID, is_primary_pengelola=True
+                ).values_list("email", flat=True)
+            ),
+            ["pengurus.demo@example.com"],
+        )
+        self.assertEqual(
+            list(
+                User.objects.filter(
+                    bank_sampah_id=REVIEW_OWN_BANK_ID, is_primary_pengelola=True
+                ).values_list("email", flat=True)
+            ),
+            [REVIEW_PENGELOLA_EMAIL],
+        )
+
+    def test_e2e_then_reviewers(self) -> None:
+        self._seed_e2e()
+        self._seed_reviewers()
+
+        self._assert_one_primary_per_bank()
+
+    def test_reviewers_then_e2e(self) -> None:
+        BankSampah.objects.create(
+            id=ACTIVE_BANK_ID,
+            nama="Bank Sampah PILAH E2E",
+            no_hp_pic="+628111111111",
+            jenis_organisasi=BankSampah.OrganizationType.MANDIRI,
+            status=BankSampah.Status.ACTIVE,
+            is_active=True,
+        )
+        self._seed_reviewers()
+        self._seed_e2e()
+
+        self._assert_one_primary_per_bank()
+
+    def test_both_twice_is_idempotent(self) -> None:
+        for _ in range(2):
+            self._seed_e2e()
+            self._seed_reviewers()
+
+        self._assert_one_primary_per_bank()
+
+    def test_database_where_the_reviewer_was_primary_in_the_e2e_bank(self) -> None:
+        # The state staging was in: reviewer primary in ACTIVE_BANK_ID. The
+        # one-primary constraint forbids it beside the E2E primary, so the
+        # migration demotes the reviewer first; the seeder then re-promotes it.
+        self._seed_e2e()
+        User.objects.create_user(
+            email=REVIEW_PENGELOLA_EMAIL,
+            nama="Demo Pengelola PILAH",
+            role=User.Role.PENGELOLA,
+            bank_sampah_id=ACTIVE_BANK_ID,
+            is_profile_complete=True,
+            is_primary_pengelola=False,
+            password=REVIEWER_PASSWORD,
+        )
+
+        for _ in range(2):
+            self._seed_reviewers()
+
+        self._assert_one_primary_per_bank()
+
+    def test_reviewer_primary_in_e2e_bank_before_e2e_pengurus_exists(self) -> None:
+        BankSampah.objects.create(
+            id=ACTIVE_BANK_ID,
+            nama="Bank Sampah PILAH E2E",
+            no_hp_pic="+628111111111",
+            jenis_organisasi=BankSampah.OrganizationType.MANDIRI,
+            status=BankSampah.Status.ACTIVE,
+            is_active=True,
+        )
+        User.objects.create_user(
+            email=REVIEW_PENGELOLA_EMAIL,
+            nama="Demo Pengelola PILAH",
+            role=User.Role.PENGELOLA,
+            bank_sampah_id=ACTIVE_BANK_ID,
+            is_profile_complete=True,
+            is_primary_pengelola=True,
+            password=REVIEWER_PASSWORD,
+        )
+
+        self._seed_reviewers()
+        self._seed_e2e()
+
+        self._assert_one_primary_per_bank()
+
+    def test_e2e_seeder_still_refuses_to_share_a_bank_with_an_unrelated_primary(self) -> None:
+        BankSampah.objects.create(
+            id=ACTIVE_BANK_ID,
+            nama="Bank Sampah PILAH E2E",
+            no_hp_pic="+628111111111",
+            jenis_organisasi=BankSampah.OrganizationType.MANDIRI,
+            status=BankSampah.Status.ACTIVE,
+            is_active=True,
+        )
+        other = User.objects.create_user(
+            email="someone.else@example.com",
+            nama="Someone else",
+            role=User.Role.PENGELOLA,
+            bank_sampah_id=ACTIVE_BANK_ID,
+            is_primary_pengelola=True,
+            password=REVIEWER_PASSWORD,
+        )
+
+        with self.assertRaises(IntegrityError):
+            self._seed_e2e()
+
+        other.refresh_from_db()
+        self.assertTrue(other.is_primary_pengelola)
