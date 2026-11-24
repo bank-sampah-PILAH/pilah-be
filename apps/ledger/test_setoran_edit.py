@@ -412,3 +412,20 @@ class SetoranEditTests(APITestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(list(response.data["errors"]), ["items[1].jenis_sampah_id"])
+
+    def test_catatan_can_be_cleared_with_null(self) -> None:
+        response = self._patch(catatan=None)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["catatan"], "")
+        self.transaksi.refresh_from_db()
+        self.assertEqual(self.transaksi.catatan, "")
+
+    def test_sending_the_same_catatan_is_not_a_change(self) -> None:
+        response = self._patch(catatan="awal")
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data["errors"]["non_field_errors"], ["Tidak ada data yang diubah"]
+        )
+        self.assertEqual(self.transaksi.revisi.count(), 0)
