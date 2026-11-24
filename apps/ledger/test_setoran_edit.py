@@ -10,7 +10,16 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from api.models import BankSampah, HargaSampah, Nasabah, Pencairan, Saldo, Transaksi, User
+from api.models import (
+    BankSampah,
+    HargaSampah,
+    JenisSampah,
+    Nasabah,
+    Pencairan,
+    Saldo,
+    Transaksi,
+    User,
+)
 from apps.ledger.services import PencairanService
 from apps.waste_catalog.api import buat_jenis_sampah
 
@@ -35,10 +44,18 @@ class SetoranEditTests(APITestCase):
             alamat="Jl. A",
         )
         self.pet = buat_jenis_sampah(
-            bank_sampah=self.bank, nomor="PET", nama_sampah="Botol PET", harga_per_kg=Decimal(3000)
+            bank_sampah=self.bank,
+            nomor="PET",
+            nama_sampah="Botol PET",
+            kategori=JenisSampah.Kategori.PLASTIK,
+            harga_per_kg=Decimal(3000),
         )
         self.kardus = buat_jenis_sampah(
-            bank_sampah=self.bank, nomor="KRT", nama_sampah="Kardus", harga_per_kg=Decimal(1000)
+            bank_sampah=self.bank,
+            nomor="KRT",
+            nama_sampah="Kardus",
+            kategori=JenisSampah.Kategori.KERTAS,
+            harga_per_kg=Decimal(1000),
         )
         self.client.force_authenticate(self.pengelola)
         response = self.client.post(
@@ -335,3 +352,12 @@ class SetoranEditTests(APITestCase):
         self.assertEqual((cair.saldo_sebelum, cair.saldo_sesudah), (Decimal(2000), Decimal(1000)))
         self.assertEqual(Saldo.objects.get(nasabah=citra).total_saldo, Decimal(1000))
         self.assertEqual(self._saldo(), Decimal(3000))
+
+    def test_edit_stores_the_category_of_the_new_item(self) -> None:
+        # Reports and the Excel export group setoran by kategori_snapshot.
+        response = self._patch(items=[{"jenis_sampah_id": str(self.kardus.id), "berat": "2.000"}])
+
+        self.assertEqual(response.status_code, 200)
+        item = self.transaksi.items.get()
+        self.assertEqual(item.nama_sampah_snapshot, "Kardus")
+        self.assertEqual(item.kategori_snapshot, "kertas")
