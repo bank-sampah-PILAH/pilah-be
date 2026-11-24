@@ -389,3 +389,26 @@ class SetoranEditTests(APITestCase):
         cair.refresh_from_db()
         self.assertEqual((cair.saldo_sebelum, cair.saldo_sesudah), (Decimal(3000), Decimal(0)))
         self.assertEqual(self._saldo(), Decimal(0))
+
+    def test_edit_to_an_item_worth_exactly_one_rupiah_is_accepted(self) -> None:
+        murah = buat_jenis_sampah(
+            bank_sampah=self.bank, nomor="MRH", nama_sampah="Murah", harga_per_kg=Decimal(1)
+        )
+        Transaksi.objects.filter(pk=self.transaksi.pk).update(tanggal=timezone.now())
+
+        response = self._patch(items=[{"jenis_sampah_id": str(murah.id), "berat": "1.000"}])
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(Decimal(response.data["total_nilai"]), Decimal(1))
+        self.assertEqual(self._saldo(), Decimal(1))
+
+    def test_unknown_waste_type_error_names_the_item_that_failed(self) -> None:
+        response = self._patch(
+            items=[
+                {"jenis_sampah_id": str(self.pet.id), "berat": "1.000"},
+                {"jenis_sampah_id": str(uuid.uuid4()), "berat": "1.000"},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(list(response.data["errors"]), ["items[1].jenis_sampah_id"])
