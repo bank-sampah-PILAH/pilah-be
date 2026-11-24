@@ -5,6 +5,7 @@ from typing import Any
 from unittest import mock
 
 from django.db import connection
+from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 
 from api.models import BankSampah, DraftPencairan, Nasabah, Pencairan, Saldo, User
@@ -284,6 +285,19 @@ class DraftPencairanTests(DraftTestBase):
 
         self.assertEqual(otomatis.data["nama"], "Pencairan 8 Okt 2026, 05:35")
         self.assertEqual(bernama.data["nama"], "Cair Lebaran")
+
+    def test_nama_default_memakai_wib_walau_zona_waktu_server_berubah(self) -> None:
+        # The name follows the pengurus' clock (WIB), not whatever TIME_ZONE the server uses.
+        item = [{"nasabah_id": str(self.nasabah.id)}]
+        sekarang = datetime(2026, 10, 7, 22, 35, 12, tzinfo=UTC)
+
+        with (
+            override_settings(TIME_ZONE="UTC"),
+            mock.patch("django.utils.timezone.now", return_value=sekarang),
+        ):
+            otomatis = self._buat(item)
+
+        self.assertEqual(otomatis.data["nama"], "Pencairan 8 Okt 2026, 05:35")
 
     def test_draft_memuat_pembuat_dan_waktu(self) -> None:
         response = self._buat([{"nasabah_id": str(self.nasabah.id)}])
