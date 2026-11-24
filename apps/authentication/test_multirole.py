@@ -262,6 +262,7 @@ class AssignedRolesTest(TestCase):
         self.assertEqual(AccessToken(session["access_token"])["role"], "nasabah")
         self.assertEqual(RefreshToken(session["refresh_token"])["role"], "nasabah")
         self.assertEqual(session["user"]["role"], "nasabah")
+        self.assertEqual(session["user"]["roles"], [User.Role.NASABAH, User.Role.PENGELOLA])
 
     def test_invalid_assigned_role_lists_cannot_be_saved(self) -> None:
         user = User.objects.create_user(email="invalid-roles@example.com")

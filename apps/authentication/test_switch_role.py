@@ -72,6 +72,7 @@ class SwitchRoleTest(TestCase):
             self.assertEqual(token["role"], User.Role.NASABAH)
             self.assertEqual(str(token["user_id"]), str(self.user.pk))
         self.assertNotEqual(response.data["refresh_token"], str(self.refresh))
+        self.assertEqual(response.data["user"]["roles"], [User.Role.PENGELOLA, User.Role.NASABAH])
         self.user.refresh_from_db()
         self.assertEqual(self.user.role, User.Role.PENGELOLA)
         self.assertEqual(self.user.roles, [User.Role.PENGELOLA, User.Role.NASABAH])
@@ -125,6 +126,8 @@ class SwitchRoleTest(TestCase):
         response = self.client.get("/api/v1/auth/me")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["role"], User.Role.NASABAH)
+        self.assertEqual(response.data["roles"], [User.Role.PENGELOLA, User.Role.NASABAH])
+        self.assertNotIn("user", response.data)
         self.assertEqual(response.data["state"], "register_nasabah")
 
     def test_switch_security_events_omit_tokens_and_untrusted_input(self) -> None:

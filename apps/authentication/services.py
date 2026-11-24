@@ -352,6 +352,7 @@ class AuthService:
                 "tanggal_lahir": user.tanggal_lahir.isoformat() if user.tanggal_lahir else None,
                 "alamat": user.alamat,
                 "role": role,
+                "roles": list(user.roles),
                 "bank_sampah_id": str(user.bank_sampah_id) if user.bank_sampah_id else None,
                 "bank_sampah_nama": bank.nama if bank else None,
                 "bank_sampah_status": bank.status if bank else None,

@@ -23,12 +23,14 @@ class AuthUserSerializer(serializers.ModelSerializer[Model]):
             "tanggal_lahir",
             "alamat",
             "role",
+            "roles",
             "bank_sampah_id",
             "bank_sampah_nama",
             "bank_sampah_status",
             "is_profile_complete",
             "is_primary_pengelola",
         ]
+        read_only_fields = ["roles"]
 
 
 class UserProfileSerializer(ProfilFieldRules, serializers.ModelSerializer[Model]):
