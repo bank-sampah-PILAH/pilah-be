@@ -362,6 +362,22 @@ class SetoranEditTests(APITestCase):
         self.assertEqual(item.nama_sampah_snapshot, "Kardus")
         self.assertEqual(item.kategori_snapshot, "kertas")
 
+    def test_revision_stores_the_replaced_items_as_they_were(self) -> None:
+        self._patch(items=[{"jenis_sampah_id": str(self.kardus.id), "berat": "2.000"}])
+
+        revisi = self.transaksi.revisi.get()
+        self.assertEqual(
+            revisi.items,
+            [
+                {
+                    "nama_sampah": "Botol PET",
+                    "harga": "3000.00",
+                    "berat": "2.000",
+                    "subtotal": "6000.00",
+                }
+            ],
+        )
+
     def test_edit_may_leave_the_saldo_and_a_later_pencairan_at_exactly_zero(self) -> None:
         # 6.000 deposited, 3.000 paid out. Correcting the setoran to 3.000 leaves a saldo of
         # exactly 0 and the pencairan paid from 3.000 down to 0: valid, not "negative".
