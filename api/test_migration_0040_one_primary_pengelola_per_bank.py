@@ -102,7 +102,8 @@ class OnePrimaryMigrationTests(TransactionTestCase):
         bank_id = self._seed(primaries=1)
         self._add_primary(bank_id, "Pilah.Pengelola@pilah.com")
 
-        _migrate(AFTER)
+        executor = _migrate(AFTER)
+        User = executor.loader.project_state(AFTER).apps.get_model("api", "User")
 
         primaries = User.objects.filter(is_primary_pengelola=True, bank_sampah__pk=bank_id)
         self.assertEqual([user.email for user in primaries], ["p0@example.com"])
@@ -117,6 +118,9 @@ class OnePrimaryMigrationTests(TransactionTestCase):
             _migrate(AFTER)
 
         self.assertIn(bank_id, str(ctx.exception))
+        User = (
+            MigrationExecutor(connection).loader.project_state(BEFORE).apps.get_model("api", "User")
+        )
         self.assertEqual(User.objects.filter(is_primary_pengelola=True).count(), 2)
 
     def test_reviewer_with_two_other_primaries_is_demoted_but_the_bank_is_still_refused(
@@ -138,6 +142,7 @@ class OnePrimaryMigrationTests(TransactionTestCase):
         )
         self._add_primary(str(bank.pk), "pilah.pengelola@pilah.com")
 
-        _migrate(AFTER)
+        executor = _migrate(AFTER)
+        User = executor.loader.project_state(AFTER).apps.get_model("api", "User")
 
         self.assertTrue(User.objects.get(email="pilah.pengelola@pilah.com").is_primary_pengelola)
