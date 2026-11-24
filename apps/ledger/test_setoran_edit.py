@@ -207,11 +207,12 @@ class SetoranEditTests(APITestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(self.transaksi.revisi.count(), 0)
 
-    def _cairkan(self, nominal: int, tanggal: Any) -> Pencairan:
-        saldo = Saldo.objects.get(nasabah=self.nasabah)
+    def _cairkan(self, nominal: int, tanggal: Any, nasabah: Nasabah | None = None) -> Pencairan:
+        nasabah = nasabah or self.nasabah
+        saldo = Saldo.objects.get(nasabah=nasabah)
         return PencairanService.realisasi(
             user=self.pengelola,
-            nasabah=self.nasabah,
+            nasabah=nasabah,
             saldo=saldo,
             nominal=Decimal(nominal),
             metode="tunai",
@@ -304,3 +305,33 @@ class SetoranEditTests(APITestCase):
         detail = self.client.get(f"/api/v1/transaksi/{self.transaksi.id}")
 
         self.assertEqual(detail.data["harga_pada_tanggal"], {})
+
+    # --- Celah yang ditemukan mutation testing (23 Nov 2026), lihat 09-optimizing-test-design-celah.md ---
+
+    def _nasabah_lain(self, saldo: int) -> Nasabah:
+        lain = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0002",
+            nama="Citra",
+            no_hp="+628122222222",
+            email="citra@example.test",
+            alamat="Jl. B",
+        )
+        Saldo.objects.create(nasabah=lain, total_saldo=Decimal(saldo))
+        return lain
+
+    def test_edit_leaves_the_pencairan_of_other_nasabah_alone(self) -> None:
+        # Citra paid out after Budi's setoran. Her snapshots come from her own ledger, so
+        # correcting Budi's setoran (-3.000) must neither move them nor refuse the edit
+        # because her snapshots "would go negative".
+        citra = self._nasabah_lain(saldo=2000)
+        cair = self._cairkan(1000, self.transaksi.tanggal + timedelta(hours=1), citra)
+        self.assertEqual((cair.saldo_sebelum, cair.saldo_sesudah), (Decimal(2000), Decimal(1000)))
+
+        response = self._patch(items=[{"jenis_sampah_id": str(self.pet.id), "berat": "1.000"}])
+
+        self.assertEqual(response.status_code, 200)
+        cair.refresh_from_db()
+        self.assertEqual((cair.saldo_sebelum, cair.saldo_sesudah), (Decimal(2000), Decimal(1000)))
+        self.assertEqual(Saldo.objects.get(nasabah=citra).total_saldo, Decimal(1000))
+        self.assertEqual(self._saldo(), Decimal(3000))
