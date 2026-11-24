@@ -361,3 +361,15 @@ class SetoranEditTests(APITestCase):
         item = self.transaksi.items.get()
         self.assertEqual(item.nama_sampah_snapshot, "Kardus")
         self.assertEqual(item.kategori_snapshot, "kertas")
+
+    def test_edit_may_leave_the_saldo_and_a_later_pencairan_at_exactly_zero(self) -> None:
+        # 6.000 deposited, 3.000 paid out. Correcting the setoran to 3.000 leaves a saldo of
+        # exactly 0 and the pencairan paid from 3.000 down to 0: valid, not "negative".
+        cair = self._cairkan(3000, self.transaksi.tanggal + timedelta(hours=1))
+
+        response = self._patch(items=[{"jenis_sampah_id": str(self.pet.id), "berat": "1.000"}])
+
+        self.assertEqual(response.status_code, 200, response.data)
+        cair.refresh_from_db()
+        self.assertEqual((cair.saldo_sebelum, cair.saldo_sesudah), (Decimal(3000), Decimal(0)))
+        self.assertEqual(self._saldo(), Decimal(0))

@@ -220,6 +220,23 @@ class SetoranVoidTests(APITestCase):
         cair.refresh_from_db()
         self.assertEqual(cair.saldo_sebelum, Decimal(6000))
 
+    def test_void_may_leave_a_later_pencairan_paid_down_to_exactly_zero(self) -> None:
+        # 6.000 + 3.000 deposited, 6.000 paid out (9.000 down to 3.000). Voiding the 3.000
+        # setoran leaves that pencairan paid from 6.000 down to exactly 0: still funded.
+        batal = self._setor("1.000")
+        Transaksi.objects.filter(pk=batal.pk).update(
+            tanggal=self.transaksi.tanggal + timedelta(minutes=30)
+        )
+        cair = self._cairkan(6000, self.transaksi.tanggal + timedelta(hours=1))
+        self.assertEqual((cair.saldo_sebelum, cair.saldo_sesudah), (Decimal(9000), Decimal(3000)))
+
+        response = self._batalkan(batal)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        cair.refresh_from_db()
+        self.assertEqual((cair.saldo_sebelum, cair.saldo_sesudah), (Decimal(6000), Decimal(0)))
+        self.assertEqual(self._saldo(), Decimal(0))
+
     def test_saldo_after_a_later_setoran_leaves_the_voided_one_out(self) -> None:
         self._batalkan()
         kedua = self._setor("1.000")
