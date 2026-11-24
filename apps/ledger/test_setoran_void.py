@@ -237,6 +237,17 @@ class SetoranVoidTests(APITestCase):
         self.assertEqual((cair.saldo_sebelum, cair.saldo_sesudah), (Decimal(6000), Decimal(0)))
         self.assertEqual(self._saldo(), Decimal(0))
 
+    def test_void_of_money_already_paid_out_says_why(self) -> None:
+        self._cairkan(5000, self.transaksi.tanggal + timedelta(hours=1))
+
+        response = self._batalkan()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.data["error"],
+            "Setoran ini tidak bisa dibatalkan karena sebagian saldonya sudah dicairkan",
+        )
+
     def test_saldo_after_a_later_setoran_leaves_the_voided_one_out(self) -> None:
         self._batalkan()
         kedua = self._setor("1.000")

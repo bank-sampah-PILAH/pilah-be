@@ -429,3 +429,15 @@ class SetoranEditTests(APITestCase):
             response.data["errors"]["non_field_errors"], ["Tidak ada data yang diubah"]
         )
         self.assertEqual(self.transaksi.revisi.count(), 0)
+
+    def test_edit_that_overdraws_the_saldo_says_why(self) -> None:
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal(1000))
+
+        response = self._patch(items=[{"jenis_sampah_id": str(self.pet.id), "berat": "0.500"}])
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.data["error"],
+            "Perubahan ini membuat saldo nasabah menjadi negatif, "
+            "karena sebagian saldo sudah dicairkan",
+        )
