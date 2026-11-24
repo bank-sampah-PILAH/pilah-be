@@ -76,7 +76,10 @@ class DashboardStatsView(APIView):
     serializer_class = AuthUserSerializer
 
     def get(self, request: Request) -> Response:
-        return Response(DashboardService.stats(current_user(request)))
+        return Response(
+            DashboardService.stats(current_user(request)),
+            headers={"Cache-Control": "no-store, private"},
+        )
 
 
 class DashboardRecentTransactionsView(APIView):
