@@ -6,7 +6,7 @@ from django.test import TransactionTestCase
 class RolesMigrationTest(TransactionTestCase):
     def test_existing_accounts_receive_their_primary_role(self) -> None:
         executor = MigrationExecutor(connection)
-        before = [("api", "0039_user_role_change_log")]
+        before = [("api", "0041_pengurus_dikeluarkan")]
         executor.migrate(before)
         try:
             OldUser = executor.loader.project_state(before).apps.get_model("api", "User")
@@ -15,7 +15,7 @@ class RolesMigrationTest(TransactionTestCase):
                 user = OldUser.objects.create(email=f"old-{role}@example.com", role=role)
                 ids[user.pk] = role
             executor = MigrationExecutor(connection)
-            after = [("api", "0040_user_roles")]
+            after = [("api", "0042_user_roles")]
             executor.migrate(after)
             NewUser = executor.loader.project_state(after).apps.get_model("api", "User")
             for pk, role in ids.items():

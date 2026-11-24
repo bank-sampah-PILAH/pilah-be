@@ -14,7 +14,7 @@ def backfill_roles(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0039_user_role_change_log"),
+        ("api", "0041_pengurus_dikeluarkan"),
     ]
 
     operations = [

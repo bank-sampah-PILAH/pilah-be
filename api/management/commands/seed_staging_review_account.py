@@ -10,6 +10,13 @@ from django.db.models import Q
 
 from api.management.commands.seed_testing_data import ACTIVE_BANK_ID
 from api.models import BankSampah, Nasabah, User
+from api.seed_sample_data import (
+    REVIEWER_SAMPLE_IDS,
+    ensure_schedules,
+    ensure_transactions,
+    ensure_waste_types,
+    recalculate_balance,
+)
 from apps.bank_sampah.constants import REVIEW_BANK_ID
 from shared_kernel.permissions import (
     email_verification_exempt_allowlist,
@@ -19,11 +26,12 @@ from shared_kernel.permissions import (
 
 CONFIRMATION = "SEED-PILAH-STAGING-REVIEW-ACCOUNT"
 REVIEW_PENGELOLA_EMAIL = "pilah.pengelola@pilah.com"
+REVIEW_PENGURUS_EMAIL = "pilah.pengurus@pilah.com"
 REVIEW_NASABAH_EMAIL = "pilah.nasabah@pilah.com"
 REVIEW_SUPERADMIN_EMAIL = "pilah.superadmin@pilah.com"
 REVIEW_ACCOUNTS = (
     (REVIEW_PENGELOLA_EMAIL, "Demo Pengelola PILAH", User.Role.PENGELOLA),
-    ("pilah.pengurus@pilah.com", "Demo Pengurus PILAH", User.Role.PENGELOLA),
+    (REVIEW_PENGURUS_EMAIL, "Demo Pengurus PILAH", User.Role.PENGELOLA),
     (REVIEW_NASABAH_EMAIL, "Demo Nasabah PILAH", User.Role.NASABAH),
     (REVIEW_SUPERADMIN_EMAIL, "SuperAdmin PILAH", User.Role.SUPERADMIN),
 )
@@ -32,6 +40,10 @@ REVIEW_NASABAH_NUMBER = "NAS-REVIEWER"
 REVIEW_NASABAH_PHONE = "+6285550000800"
 REVIEW_NASABAH_ADDRESS = "Alamat demo untuk akun nasabah PILAH"
 REVIEW_BANK_NAME = "Bank Sampah PILAH Review Pending"
+# The reviewers' own active bank. pilah.pengelola is its Pengurus Utama, so it
+# must not share ACTIVE_BANK_ID with the E2E pengurus (one primary per bank).
+REVIEW_OWN_BANK_ID = UUID("00000000-0000-4000-8000-000000000366")
+REVIEW_OWN_BANK_NAME = "Bank Sampah PILAH Review"
 
 
 class Command(BaseCommand):
@@ -45,18 +57,40 @@ class Command(BaseCommand):
         password = settings.PILAH_REVIEW_ACCOUNT_PASSWORD
 
         with transaction.atomic():
-            bank = self._review_bank()
+            bank = self._ensure_own_bank()
             self._ensure_review_bank()
-            for email, name, role in REVIEW_ACCOUNTS:
-                user = self._existing_user(email, role, bank)
+            # Validate every identity before writing any: the one-primary-per-bank
+            # constraint would otherwise surface as an IntegrityError on the
+            # reviewer insert instead of the identity-conflict CommandError.
+            existing = [
+                self._existing_user(email, role, bank) for email, _, role in REVIEW_ACCOUNTS
+            ]
+            users: dict[str, User] = {}
+            for (email, name, role), user in zip(REVIEW_ACCOUNTS, existing, strict=True):
                 if user is None:
                     user = self._create_user(email, name, role, bank, password)
                 else:
                     self._update_user(user, email, name, role, bank, password)
+                users[email] = user
                 if role == User.Role.NASABAH:
                     self._ensure_nasabah_membership(bank, user)
+            self._ensure_sample_data(bank, users[REVIEW_PENGURUS_EMAIL])
 
         self.stdout.write(self.style.SUCCESS("Staging reviewer accounts are ready."))
+
+    @staticmethod
+    def _ensure_sample_data(bank: BankSampah, pengurus: User) -> None:
+        """Fill the reviewers' bank with the same sample data as the production demo.
+
+        Rows the nasabah already has in other banks (an older run seeded the
+        membership into the E2E bank) are left where they are; the saldo counts
+        them because it is the nasabah's.
+        """
+        membership = Nasabah.objects.get(pk=REVIEW_NASABAH_ID)
+        waste_types = ensure_waste_types(bank, REVIEWER_SAMPLE_IDS)
+        ensure_transactions(bank, pengurus, membership, waste_types, REVIEWER_SAMPLE_IDS)
+        ensure_schedules(bank, pengurus, REVIEWER_SAMPLE_IDS, REVIEW_OWN_BANK_NAME)
+        recalculate_balance(membership)
 
     @staticmethod
     def _create_user(email: str, name: str, role: str, bank: BankSampah, password: str) -> User:
@@ -77,7 +111,9 @@ class Command(BaseCommand):
         user: User, email: str, name: str, role: str, bank: BankSampah, password: str
     ) -> None:
         fields: list[str] = []
-        if user.bank_sampah_id is None and role == User.Role.PENGELOLA:
+        # Reviewers an older run left in the E2E bank move to their own: that bank
+        # already has the E2E pengurus as its single primary.
+        if user.bank_sampah_id in (None, ACTIVE_BANK_ID) and role == User.Role.PENGELOLA:
             user.bank_sampah = bank
             fields.append("bank_sampah")
         primary = email == REVIEW_PENGELOLA_EMAIL
@@ -138,10 +174,27 @@ class Command(BaseCommand):
             ) from exc
 
     @staticmethod
-    def _review_bank() -> BankSampah:
-        bank = BankSampah.objects.select_for_update().filter(pk=ACTIVE_BANK_ID).first()
-        if bank is None or not bank.is_active or bank.status != BankSampah.Status.ACTIVE:
-            raise CommandError("An active staging E2E bank is required before reviewer accounts")
+    def _ensure_own_bank() -> BankSampah:
+        bank = BankSampah.objects.select_for_update().filter(pk=REVIEW_OWN_BANK_ID).first()
+        if bank is None:
+            return BankSampah.objects.create(
+                id=REVIEW_OWN_BANK_ID,
+                nama=REVIEW_OWN_BANK_NAME,
+                alamat="Alamat sintetis untuk peninjauan PILAH",
+                kota="Depok",
+                no_hp_pic="",
+                jenis_organisasi=BankSampah.OrganizationType.MANDIRI,
+                status=BankSampah.Status.ACTIVE,
+                is_active=True,
+            )
+        if (
+            bank.nama != REVIEW_OWN_BANK_NAME
+            or bank.jenis_organisasi != BankSampah.OrganizationType.MANDIRI
+            or bank.parent_id is not None
+            or bank.status != BankSampah.Status.ACTIVE
+            or not bank.is_active
+        ):
+            raise CommandError("Staging reviewer bank identity conflicts with existing data")
         return bank
 
     @staticmethod
@@ -180,10 +233,11 @@ class Command(BaseCommand):
 
         user = matches[0]
         expected_bank_id = bank.pk if role == User.Role.PENGELOLA else None
+        legacy_bank_id = ACTIVE_BANK_ID if role == User.Role.PENGELOLA else None
         if (
             user.role != role
             or not user.is_active
-            or user.bank_sampah_id not in (None, expected_bank_id)
+            or user.bank_sampah_id not in (None, expected_bank_id, legacy_bank_id)
             or (user.is_primary_pengelola and email != REVIEW_PENGELOLA_EMAIL)
             or (role != User.Role.NASABAH and user.keanggotaan_nasabah.exists())
             or user.google_id is not None
@@ -199,7 +253,10 @@ class Command(BaseCommand):
             Nasabah.objects.select_for_update()
             .filter(
                 Q(pk=REVIEW_NASABAH_ID)
-                | (Q(bank_sampah=bank) & (Q(user=user) | Q(email__iexact=REVIEW_NASABAH_EMAIL)))
+                | (
+                    Q(bank_sampah__in=(bank.pk, ACTIVE_BANK_ID))
+                    & (Q(user=user) | Q(email__iexact=REVIEW_NASABAH_EMAIL))
+                )
             )
             .order_by("pk")[:2]
         )
@@ -223,13 +280,21 @@ class Command(BaseCommand):
         membership = matches[0]
         if (
             membership.pk != REVIEW_NASABAH_ID
-            or membership.bank_sampah_id != bank.pk
+            or membership.bank_sampah_id not in (bank.pk, ACTIVE_BANK_ID)
             or membership.user_id not in (None, user.pk)
             or membership.email.lower() != REVIEW_NASABAH_EMAIL
             or not membership.is_active
             or membership.status != Nasabah.Status.APPROVED
         ):
             raise CommandError("Staging reviewer membership identity conflicts with existing data")
+        fields: list[str] = []
         if membership.user_id is None:
             membership.user = user
-            membership.save(update_fields=["user", "updated_at"])
+            fields.append("user")
+        if membership.bank_sampah_id != bank.pk:
+            # Seeded into the E2E bank by an older run; the reviewers' own bank
+            # is where this membership belongs now.
+            membership.bank_sampah = bank
+            fields.append("bank_sampah")
+        if fields:
+            membership.save(update_fields=[*fields, "updated_at"])
