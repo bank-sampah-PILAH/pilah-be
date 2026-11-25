@@ -1,5 +1,5 @@
-from datetime import timedelta
 import logging
+from datetime import timedelta
 from io import StringIO
 from typing import Any
 from unittest.mock import patch
@@ -166,7 +166,9 @@ class SwitchRoleTest(TestCase):
         request_id = "7127cc89-e204-4ee6-81b3-a57998001431"
         try:
             response = self.client.post(
-                "/api/v1/auth/switch-role", {"role": "nasabah"}, format="json",
+                "/api/v1/auth/switch-role",
+                {"role": "nasabah"},
+                format="json",
                 HTTP_X_REQUEST_ID=request_id,
             )
         finally:
