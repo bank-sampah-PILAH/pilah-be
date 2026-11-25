@@ -10,33 +10,31 @@ from apps.bank_sampah.services import BankOnboardingService
 
 
 class MultiroleTeamTest(TestCase):
-    def test_invite_http_endpoints_require_active_pengelola_role(self) -> None:
+    def test_invite_http_endpoints_accept_a_nasabah_or_pengelola_session(self) -> None:
+        # PIL-542: an account signed in as a Nasabah can accept an invite
+        # without switching role first; before, only a Pengurus session could.
         bank = BankSampah.objects.create(
             nama="Inviting Bank",
             no_hp_pic="+628123456789",
             invite_token="role-bound-invite",
             invite_token_expires=timezone.now() + timedelta(days=1),
         )
-        user = User.objects.create_user(
-            email="invite-active-role@example.com", roles=["pengelola", "nasabah"]
-        )
-        token = AccessToken.for_user(user)
-        token["role"] = "nasabah"
-        client = APIClient()
-        client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
-        for url in ("/api/v1/invites/accept", "/api/v1/bank-sampah/invite/join"):
-            response = client.post(url, {"token": bank.invite_token}, format="json")
-            self.assertEqual(response.status_code, 403)
-            user.refresh_from_db()
-            self.assertIsNone(user.bank_sampah_id)
-        token["role"] = "pengelola"
-        client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
-        response = client.post(
-            "/api/v1/invites/accept", {"token": bank.invite_token}, format="json"
-        )
-        self.assertEqual(response.status_code, 200)
-        user.refresh_from_db()
-        self.assertEqual(user.bank_sampah_id, bank.pk)
+        for active_role in ("nasabah", "pengelola"):
+            with self.subTest(active_role=active_role):
+                user = User.objects.create_user(
+                    email=f"invite-{active_role}@example.com", roles=["pengelola", "nasabah"]
+                )
+                token = AccessToken.for_user(user)
+                token["role"] = active_role
+                client = APIClient()
+                client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+                outcomes = [
+                    client.post(url, {"token": bank.invite_token}, format="json").data["outcome"]
+                    for url in ("/api/v1/invites/accept", "/api/v1/bank-sampah/invite/join")
+                ]
+                self.assertEqual(outcomes, ["join_success", "already_member"])
+                user.refresh_from_db()
+                self.assertEqual(user.bank_sampah_id, bank.pk)
 
     def test_team_includes_assigned_pengelola_independently_of_primary_and_active_role(
         self,

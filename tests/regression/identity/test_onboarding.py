@@ -90,8 +90,11 @@ class OnboardingRegressionTests(RegressionTestCase):
                 )
                 self.assertGreaterEqual(response.status_code, 400)
 
-    def test_register_rejects_non_pengelola_role(self) -> None:
-        user = User.objects.create_user(email="nb@example.com", nama="Nb", role=User.Role.NASABAH)
+    def test_register_rejects_an_account_with_neither_role(self) -> None:
+        # A Nasabah may register a bank since PIL-542; a superadmin still may not.
+        user = User.objects.create_user(
+            email="nb@example.com", nama="Nb", role=User.Role.SUPERADMIN
+        )
         with self.assertRaises(PermissionError):
             OnboardingService.register_bank_sampah(user, {})
 

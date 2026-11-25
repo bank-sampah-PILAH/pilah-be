@@ -2341,7 +2341,9 @@ class APISpecTests(APITransactionTestCase):
         )
 
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.data["error"], "Hanya pengelola yang dapat menerima undangan")
+        self.assertEqual(
+            response.data["error"], "Hanya pengelola atau nasabah yang dapat menerima undangan"
+        )
 
     def test_invite_join_rejects_active_and_pending_other_bank(self) -> None:
         target_bank = BankSampah.objects.create(
