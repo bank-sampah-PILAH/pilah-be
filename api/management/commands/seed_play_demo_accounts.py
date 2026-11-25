@@ -1,5 +1,5 @@
 from argparse import ArgumentParser
-from datetime import datetime, time, timedelta
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -8,25 +8,29 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from django.db.models import F, Q, Sum
-from django.utils import timezone
+from django.db.models import Q
 
 from api.models import (
     BankSampah,
     DetailTransaksi,
-    HargaSampah,
     JadwalKegiatan,
     JenisSampah,
     Nasabah,
-    Pencairan,
-    Saldo,
     Transaksi,
     User,
 )
+from api.seed_sample_data import (
+    WASTE_TYPE_FIXTURES as WASTE_TYPE_FIXTURES,
+)
+from api.seed_sample_data import (
+    SampleIds,
+    ensure_schedules,
+    ensure_transactions,
+    ensure_waste_types,
+    recalculate_balance,
+)
 from apps.bank_sampah.constants import REVIEW_BANK_ID
 from apps.waste_catalog.api import harga_berlaku
-from apps.waste_catalog.services import catat_harga
-from shared_kernel.kalkulasi import hitung_subtotal, total_setoran
 from shared_kernel.permissions import (
     email_verification_exempt_allowlist,
     review_superadmin_allowlist,
@@ -44,6 +48,7 @@ TRANSACTION_IDS = tuple(
 )
 DETAIL_IDS = tuple(UUID(f"00000000-0000-4000-8000-000000000{value}") for value in range(373, 377))
 SCHEDULE_IDS = tuple(UUID(f"00000000-0000-4000-8000-000000000{value}") for value in range(377, 379))
+SAMPLE_IDS = SampleIds(WASTE_TYPE_IDS, TRANSACTION_IDS, DETAIL_IDS, SCHEDULE_IDS)
 DEMO_BANK_NAME = "Bank Sampah PILAH Demo"
 REVIEW_BANK_NAME = "Bank Sampah PILAH Review Pending"
 DEMO_NASABAH_NUMBER = "DEMO-0001"
@@ -59,33 +64,6 @@ LEGACY_ACCOUNT_EMAILS = {
 }
 REVIEW_OWNER_EMAIL = "pilah.review-owner@example.test"
 DEMO_NASABAH_ADDRESS = "Alamat demo untuk akun nasabah PILAH"
-SEED_HARGA_SEJAK_HARI = 400
-
-WASTE_TYPE_FIXTURES = (
-    (
-        "JS-0001",
-        "Plastik PET",
-        JenisSampah.Kategori.PLASTIK,
-        "Botol plastik bening",
-        Decimal("3500.00"),
-    ),
-    (
-        "JS-0002",
-        "Kardus",
-        JenisSampah.Kategori.KERTAS,
-        "Kardus dan kertas tebal",
-        Decimal("2000.00"),
-    ),
-    ("JS-0003", "Botol Kaca", JenisSampah.Kategori.KACA, "Botol kaca bersih", Decimal("1000.00")),
-    (
-        "JS-0004",
-        "Kaleng Aluminium",
-        JenisSampah.Kategori.LOGAM,
-        "Kaleng aluminium",
-        Decimal("5000.00"),
-    ),
-)
-
 ACCOUNTS = {
     "owner": (DEMO_PENGELOLA_EMAIL, "Demo Pengelola PILAH", User.Role.PENGELOLA),
     "pengurus": (DEMO_PENGURUS_EMAIL, "Demo Pengurus PILAH", User.Role.PENGELOLA),
@@ -607,29 +585,7 @@ class Command(BaseCommand):
 
     @staticmethod
     def _ensure_waste_types(bank: BankSampah) -> dict[str, JenisSampah]:
-        result = {}
-        for type_id, fixture in zip(WASTE_TYPE_IDS, WASTE_TYPE_FIXTURES, strict=True):
-            number, name, category, description, price = fixture
-            jenis, _ = JenisSampah.objects.update_or_create(
-                pk=type_id,
-                defaults={
-                    "bank_sampah": bank,
-                    "nomor": number,
-                    "nama_sampah": name,
-                    "kategori": category,
-                    "deskripsi": description,
-                    "is_active": True,
-                },
-            )
-            if not HargaSampah.objects.filter(jenis_sampah=jenis).exists():
-                catat_harga(
-                    jenis,
-                    price,
-                    timezone.now() - timedelta(days=SEED_HARGA_SEJAK_HARI),
-                    oleh=None,
-                )
-            result[name] = jenis
-        return result
+        return ensure_waste_types(bank, SAMPLE_IDS)
 
     @staticmethod
     def _ensure_transactions(
@@ -638,133 +594,15 @@ class Command(BaseCommand):
         membership: Nasabah,
         waste_types: dict[str, JenisSampah],
     ) -> None:
-        now = timezone.now()
-        fixtures = (
-            (
-                TRANSACTION_IDS[0],
-                (DETAIL_IDS[0], DETAIL_IDS[1]),
-                now - timedelta(days=3),
-                "Setoran demo PET dan Kardus",
-                (("Plastik PET", Decimal("2.500")), ("Kardus", Decimal("1.000"))),
-            ),
-            (
-                TRANSACTION_IDS[1],
-                (DETAIL_IDS[2],),
-                now - timedelta(days=1),
-                "Setoran demo Botol Kaca",
-                (("Botol Kaca", Decimal("3.000")),),
-            ),
-            (
-                TRANSACTION_IDS[2],
-                (DETAIL_IDS[3],),
-                now - timedelta(hours=4),
-                "Setoran demo Kaleng Aluminium",
-                (("Kaleng Aluminium", Decimal("1.500")),),
-            ),
-        )
-        for transaction_id, detail_ids, date, note, items in fixtures:
-            priced_items = tuple((waste_types[name], weight) for name, weight in items)
-            transaction_date = (
-                Transaksi.objects.filter(pk=transaction_id)
-                .values_list("tanggal", flat=True)
-                .first()
-                or date
-            )
-            prices = tuple(_seed_price(jenis, transaction_date) for jenis, _weight in priced_items)
-            subtotals = tuple(
-                hitung_subtotal(price, weight)
-                for price, (_jenis, weight) in zip(prices, priced_items, strict=True)
-            )
-            total = total_setoran(subtotals)
-            transaksi, created = Transaksi.objects.get_or_create(
-                pk=transaction_id,
-                defaults={
-                    "nasabah": membership,
-                    "bank_sampah": bank,
-                    "dicatat_oleh": pengurus,
-                    "tanggal": date,
-                    "total_nilai": total,
-                    "tipe": Transaksi.Tipe.SETORAN,
-                    "catatan": note,
-                },
-            )
-            if not created:
-                transaksi.nasabah = membership
-                transaksi.bank_sampah = bank
-                transaksi.dicatat_oleh = pengurus
-                transaksi.total_nilai = total
-                transaksi.tipe = Transaksi.Tipe.SETORAN
-                transaksi.catatan = note
-                transaksi.save(
-                    update_fields=[
-                        "nasabah",
-                        "bank_sampah",
-                        "dicatat_oleh",
-                        "total_nilai",
-                        "tipe",
-                        "catatan",
-                        "updated_at",
-                    ]
-                )
-            for detail_id, (jenis, weight), price, subtotal in zip(
-                detail_ids, priced_items, prices, subtotals, strict=True
-            ):
-                DetailTransaksi.objects.update_or_create(
-                    pk=detail_id,
-                    defaults={
-                        "transaksi": transaksi,
-                        "jenis_sampah": jenis,
-                        "nama_sampah_snapshot": jenis.nama_sampah,
-                        "kategori_snapshot": jenis.kategori,
-                        "harga_snapshot": price,
-                        "berat": weight,
-                        "subtotal": subtotal,
-                    },
-                )
+        ensure_transactions(bank, pengurus, membership, waste_types, SAMPLE_IDS, _seed_price)
 
     @staticmethod
     def _ensure_schedules(bank: BankSampah, pengurus: User) -> None:
-        today = timezone.localdate()
-        fixtures = (
-            (SCHEDULE_IDS[0], JadwalKegiatan.JenisKegiatan.PENIMBANGAN, 7),
-            (SCHEDULE_IDS[1], JadwalKegiatan.JenisKegiatan.PENCAIRAN, 14),
-        )
-        tz = timezone.get_current_timezone()
-        for schedule_id, activity, days in fixtures:
-            date = today + timedelta(days=days)
-            starts_at = timezone.make_aware(datetime.combine(date, time(9, 0)), tz)
-            ends_at = timezone.make_aware(datetime.combine(date, time(11, 0)), tz)
-            JadwalKegiatan.objects.update_or_create(
-                pk=schedule_id,
-                defaults={
-                    "bank_sampah": bank,
-                    "dibuat_oleh": pengurus,
-                    "jenis_kegiatan": activity,
-                    "mulai_pada": starts_at,
-                    "selesai_pada": ends_at,
-                    "lokasi": "Bank Sampah PILAH Demo",
-                    "keterangan": "Jadwal sintetis untuk akun review PILAH",
-                    "cakupan_penerima": JadwalKegiatan.CakupanPenerima.SEMUA_NASABAH,
-                    "status": JadwalKegiatan.Status.DITERBITKAN,
-                },
-            )
+        ensure_schedules(bank, pengurus, SAMPLE_IDS, DEMO_BANK_NAME)
 
     @staticmethod
     def _recalculate_balance(membership: Nasabah) -> None:
-        # A voided setoran stays in the table but not in the saldo (PIL-428).
-        setoran = Transaksi.objects.tercatat().filter(
-            nasabah=membership, tipe=Transaksi.Tipe.SETORAN
-        ).aggregate(total=Sum("total_nilai"))["total"] or Decimal("0.00")
-        pencairan = Pencairan.objects.filter(nasabah=membership).aggregate(
-            total=Sum(F("saldo_sebelum") - F("saldo_sesudah"))
-        )["total"] or Decimal("0.00")
-        saldo, _ = Saldo.objects.get_or_create(
-            nasabah=membership, defaults={"total_saldo": Decimal("0.00")}
-        )
-        total_saldo = setoran - pencairan
-        if saldo.total_saldo != total_saldo:
-            saldo.total_saldo = total_saldo
-            saldo.save(update_fields=["total_saldo", "updated_at"])
+        recalculate_balance(membership)
 
 
 def _seed_price(jenis: JenisSampah, pada: datetime) -> Decimal:

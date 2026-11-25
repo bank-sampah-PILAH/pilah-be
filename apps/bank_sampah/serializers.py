@@ -222,3 +222,7 @@ class BankSampahDirectorySerializer(serializers.ModelSerializer[Model]):
     class Meta:
         model = BankSampah
         fields = ["id", "nama", "alamat", "kota", "latitude", "longitude", "foto_logo"]
+
+
+class TeamTransferSerializer(serializers.Serializer[Any]):
+    id = serializers.UUIDField()

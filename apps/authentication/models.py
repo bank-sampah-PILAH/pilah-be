@@ -74,6 +74,16 @@ class User(AbstractBaseUser, PermissionsMixin, TimestampedModel):
         app_label = "api"
         db_table = "users"
         ordering = ["nama"]
+        constraints = [
+            # CPBI-36: a bank has exactly one Pengurus Utama. Not deferrable on
+            # purpose: a handover must demote the old holder before promoting
+            # the new one.
+            models.UniqueConstraint(
+                fields=["bank_sampah"],
+                condition=models.Q(is_primary_pengelola=True),
+                name="uniq_primary_pengelola_per_bank",
+            )
+        ]
 
     def clean(self) -> None:
         super().clean()

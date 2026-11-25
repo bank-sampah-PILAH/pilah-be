@@ -1,6 +1,7 @@
 import uuid
 from typing import Any
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 
@@ -124,7 +125,7 @@ class BankSampahApprovalLog(models.Model):
         BankSampah, on_delete=models.CASCADE, related_name="approval_logs"
     )
     superadmin = models.ForeignKey(
-        "api.User", on_delete=models.PROTECT, related_name="approval_logs"
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="approval_logs"
     )
     status = models.CharField(max_length=20, choices=Status.choices)
     catatan = models.TextField(blank=True)
@@ -133,3 +134,30 @@ class BankSampahApprovalLog(models.Model):
     class Meta:
         app_label = "api"
         db_table = "bs_approval_log"
+
+
+class PengurusDikeluarkan(models.Model):
+    """A pengurus the Pengurus Utama removed from a bank (CPBI-36).
+
+    Removal clears ``User.bank_sampah`` (the account and its transactions stay);
+    this row is what lets the API answer the removed pengurus with
+    ``pengurus_dikeluarkan`` instead of the generic "not active" refusal, and it
+    is the audit trail of who removed whom. Rows are never edited.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="pengeluaran"
+    )
+    bank_sampah = models.ForeignKey(
+        BankSampah, on_delete=models.PROTECT, related_name="pengurus_dikeluarkan"
+    )
+    dikeluarkan_oleh = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="pengeluaran_dilakukan"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "api"
+        db_table = "pengurus_dikeluarkan"
+        ordering = ["-created_at"]
