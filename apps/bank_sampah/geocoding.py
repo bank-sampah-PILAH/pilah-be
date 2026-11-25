@@ -29,10 +29,23 @@ BATAS_HASIL = 5
 # default LocMemCache would cache per process only.
 _cache = caches["geocoding"]
 
-# Spaces request starts within this process. A slow response must not hold
-# the lock and prevent other searches from taking their next slot.
-_kunci_keluar = threading.Lock()
-_panggilan_terakhir = 0.0
+
+class _PembatasPermintaan:
+    """Space request starts within one process without waiting for responses."""
+
+    def __init__(self) -> None:
+        self._kunci = threading.Lock()
+        self._panggilan_terakhir = 0.0
+
+    def tunggu_slot(self) -> None:
+        with self._kunci:
+            jeda = self._panggilan_terakhir + MIN_INTERVAL_DETIK - time.monotonic()
+            if jeda > 0:
+                time.sleep(jeda)
+            self._panggilan_terakhir = time.monotonic()
+
+
+_pembatas = _PembatasPermintaan()
 
 
 class GeocoderTidakTersedia(Exception):
@@ -72,12 +85,7 @@ def _kunci_cache(kueri: str) -> str:
 
 def _ambil_dari_nominatim(kueri: str) -> list[dict[str, Any]]:
     """One outbound call, spaced from the previous one by the provider limit."""
-    global _panggilan_terakhir
-    with _kunci_keluar:
-        jeda = _panggilan_terakhir + MIN_INTERVAL_DETIK - time.monotonic()
-        if jeda > 0:
-            time.sleep(jeda)
-        _panggilan_terakhir = time.monotonic()
+    _pembatas.tunggu_slot()
     try:
         response = requests.get(
             NOMINATIM_URL,

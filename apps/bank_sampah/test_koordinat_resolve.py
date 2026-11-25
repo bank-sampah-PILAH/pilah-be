@@ -456,7 +456,7 @@ class CariTempatApiTests(APITestCase):
         with (
             patch(GEOCODER, side_effect=fake_get),
             patch.object(geocoding, "MIN_INTERVAL_DETIK", 0.15),
-            patch.object(geocoding, "_panggilan_terakhir", 0.0),
+            patch.object(geocoding, "_pembatas", geocoding._PembatasPermintaan()),
             patch.object(geocoding, "_cache", LocMemCache("uji-geocode", {})),
         ):
             thread_pertama = threading.Thread(target=cari_tempat, args=(pertama,))

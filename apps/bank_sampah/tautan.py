@@ -2,6 +2,7 @@
 
 import re
 import time
+from enum import Enum
 from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
 import requests
@@ -31,12 +32,22 @@ _POLA_PARAM = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$")
 _PARAM_KOORDINAT = ("q", "ll", "center", "sll", "destination")
 
 
+class AlasanTautanTidakValid(Enum):
+    HOST = "Hanya tautan Google Maps yang dapat diproses"
+    PERSETUJUAN = (
+        "Google meminta persetujuan sebelum membuka tautan ini. "
+        "Tempel tautan Google Maps yang panjang, bukan tautan pendek."
+    )
+    TANPA_TUJUAN = "Tautan pendek tidak mengarah ke mana pun"
+    TERLALU_BANYAK_PENGALIHAN = "Tautan pendek dialihkan terlalu banyak kali"
+
+
 class TautanTidakValid(Exception):
     """The pasted link cannot be turned into coordinates."""
 
-
-class TautanPersetujuan(TautanTidakValid):
-    """Google redirected to its consent page, hiding the original link."""
+    def __init__(self, alasan: AlasanTautanTidakValid) -> None:
+        super().__init__(alasan.value)
+        self.alasan = alasan
 
 
 class TautanTidakTersedia(Exception):
@@ -70,12 +81,9 @@ def _koordinat_dari_cocok(cocok: re.Match[str], jenis: str) -> tuple[float, floa
 
 def _periksa_host(host: str) -> None:
     if host == HOST_PERSETUJUAN:
-        raise TautanPersetujuan(
-            "Google meminta persetujuan sebelum membuka tautan ini. "
-            "Tempel tautan Google Maps yang panjang, bukan tautan pendek."
-        )
+        raise TautanTidakValid(AlasanTautanTidakValid.PERSETUJUAN)
     if host not in HOST_DIIZINKAN:
-        raise TautanTidakValid("Hanya tautan Google Maps yang dapat diproses")
+        raise TautanTidakValid(AlasanTautanTidakValid.HOST)
 
 
 def _tautan_pendek(host: str, path: str) -> bool:
@@ -113,8 +121,8 @@ def perluas_tautan_pendek(url: str) -> str:
             # source scan from flagging it as an unregistered client header.
             lokasi = respons.headers.copy().get("Location")
             if not lokasi:
-                raise TautanTidakValid("Tautan pendek tidak mengarah ke mana pun")
+                raise TautanTidakValid(AlasanTautanTidakValid.TANPA_TUJUAN)
             sekarang = urljoin(sekarang, lokasi)
         finally:
             respons.close()
-    raise TautanTidakValid("Tautan pendek dialihkan terlalu banyak kali")
+    raise TautanTidakValid(AlasanTautanTidakValid.TERLALU_BANYAK_PENGALIHAN)

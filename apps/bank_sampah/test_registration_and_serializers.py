@@ -513,7 +513,7 @@ class BankDirectoryLocationSearchTests(APITestCase):
         # Page 1 would be [Dekat, Menengah]; page 2 must skip to ranks 3-4.
         self.assertEqual(ranks, ["Bank Jauh", "Bank K3"])
         jarak = [float(b["jarak_km"]) for b in data["results"]]
-        self.assertTrue(jarak[0] < jarak[1])
+        self.assertLess(jarak[0], jarak[1])
 
     def test_non_finite_coordinate_and_radius_values_are_422(self) -> None:
         # float() menerima NaN/Infinity; NaN lolos semua perbandingan rentang.

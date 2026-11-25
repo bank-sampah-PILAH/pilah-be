@@ -164,7 +164,7 @@ class ResolveKoordinatView(APIView):
         try:
             koordinat = koordinat_dari_tautan(perluas_tautan_pendek(data["tautan"].strip()))
         except TautanTidakValid as exc:
-            return Response({"detail": str(exc)}, status=400)
+            return Response({"detail": exc.alasan.value}, status=400)
         except TautanTidakTersedia:
             return Response({"detail": "Tautan tidak dapat diperluas"}, status=503)
         if koordinat is None:
