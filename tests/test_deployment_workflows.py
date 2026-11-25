@@ -449,6 +449,15 @@ class NucleiScanWorkflowTests(SimpleTestCase):
         self.assertIn("-update-templates", script)
         self.assertNotIn("-duc", script)
 
+    def test_downloaded_templates_can_be_read_by_the_runner_user(self) -> None:
+        # The container runs as root and creates the template directories as 0700 root,
+        # so the runner user cannot even test whether a template file exists. Without this
+        # the missing-template check below would fail every run for the wrong reason.
+        script = str(_nuclei_steps()["Fetch templates"]["run"])
+        self.assertIn("--entrypoint chmod", script)
+        self.assertIn("a+rX", script)
+        self.assertLess(script.index("-update-templates"), script.index("a+rX"))
+
     def test_scan_stops_when_a_template_it_needs_is_missing(self) -> None:
         # Nuclei only prints [ERR] for a missing template and scans with the rest, which
         # narrows coverage without a red run; and with none it dies on a confusing error.
