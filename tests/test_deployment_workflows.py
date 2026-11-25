@@ -221,6 +221,7 @@ def _run_nuclei_step(
 
 
 OWN_REPOSITORY = "bank-sampah-PILAH/pilah-be"
+COOKIE_TEMPLATE = "http/misconfiguration/cookies-without-secure"
 
 
 class NucleiScanWorkflowTests(SimpleTestCase):
@@ -419,28 +420,36 @@ class NucleiScanWorkflowTests(SimpleTestCase):
         ssl = [f"ssl/{name}" for name in ssl_block.group(1).replace("\\", " ").split()]
         return [*http, *ssl]
 
-    def _scan(self, present: list[str]) -> subprocess.CompletedProcess[str]:
+    def _scan_with_calls(
+        self, present: list[str]
+    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
             (work / "bin").mkdir()
+            calls = work / "docker_calls.txt"
             fake_docker = work / "bin" / "docker"
-            fake_docker.write_text("#!/bin/sh\nexit 0\n")
+            fake_docker.write_text('#!/bin/sh\necho "$@" >> "$DOCKER_CALLS"\nexit 0\n')
             fake_docker.chmod(0o700)
             for template in present:
                 path = work / "nuclei-templates" / f"{template}.yaml"
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("id: x\n")
-            return _run_nuclei_step(
+            result = _run_nuclei_step(
                 "Scan",
                 {
                     "NUCLEI_IMAGE": "nuclei:test",
                     "TARGET": "https://api.example",
                     "TLS_TARGET": "api.example:443",
                     "RESULT_NAME": "api.example-443",
+                    "DOCKER_CALLS": str(calls),
                     "PATH": f"{work / 'bin'}:{os.environ['PATH']}",
                 },
                 work,
             )
+            return result, calls.read_text().splitlines() if calls.exists() else []
+
+    def _scan(self, present: list[str]) -> subprocess.CompletedProcess[str]:
+        return self._scan_with_calls(present)[0]
 
     def test_templates_are_downloaded_with_the_update_check_left_on(self) -> None:
         # With -duc, `-update-templates` downloads nothing into an empty directory and
@@ -462,15 +471,63 @@ class NucleiScanWorkflowTests(SimpleTestCase):
         # Nuclei only prints [ERR] for a missing template and scans with the rest, which
         # narrows coverage without a red run; and with none it dies on a confusing error.
         paths = self._template_paths()
-        self.assertEqual(len(paths), 24)
-        complete = self._scan(paths)
+        self.assertEqual(len(paths), 25)
+        self.assertIn("http/miscellaneous/http-trace", paths)
+        needed = [*paths, COOKIE_TEMPLATE]
+        complete = self._scan(needed)
         self.assertEqual(complete.returncode, 0, complete.stdout + complete.stderr)
-        for absent in (paths[0], paths[-1]):
+        for absent in (paths[0], paths[-1], COOKIE_TEMPLATE):
             with self.subTest(absent=absent):
-                partial = self._scan([p for p in paths if p != absent])
+                partial = self._scan([p for p in needed if p != absent])
                 self.assertNotEqual(partial.returncode, 0)
                 self.assertIn(absent, partial.stdout + partial.stderr)
         self.assertNotEqual(self._scan([]).returncode, 0)
+
+    def test_cookies_are_checked_on_the_page_that_sets_them(self) -> None:
+        # The only cookie this API sends is Django's CSRF cookie on the admin login page
+        # (staging: csrftoken, Secure, SameSite=Lax). The cookie template only looks at the
+        # URL it is given, so on the API root it would find nothing and prove nothing.
+        result, calls = self._scan_with_calls([*self._template_paths(), COOKIE_TEMPLATE])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        cookie_calls = [call for call in calls if "cookies-without-secure" in call]
+        self.assertEqual(len(cookie_calls), 1, calls)
+        self.assertIn("-u https://api.example/admin/login/", cookie_calls[0])
+        self.assertIn("-o /results/api.example-443-cookies.jsonl", cookie_calls[0])
+        # The other templates keep scanning the root, never the admin path.
+        others = [call for call in calls if "cookies-without-secure" not in call]
+        self.assertTrue(others)
+        self.assertFalse(any("/admin/login/" in call for call in others))
+
+    @skipUnless(shutil.which("jq"), "jq is not installed")
+    def test_gate_turns_red_on_trace_and_on_cookies_without_secure(self) -> None:
+        def gate(finding: dict[str, object]) -> subprocess.CompletedProcess[str]:
+            with tempfile.TemporaryDirectory() as directory:
+                results = Path(directory) / "results"
+                results.mkdir()
+                (results / "scan.jsonl").write_text(json.dumps(finding) + "\n")
+                return _run_nuclei_step("Gate", {}, Path(directory))
+
+        base = {"host": "api.example", "info": {"severity": "info"}}
+        trace = gate(
+            {
+                **base,
+                "template-id": "http-trace",
+                "matcher-name": "trace-request",
+                "matched-at": "https://api.example",
+            }
+        )
+        self.assertNotEqual(trace.returncode, 0)
+        self.assertIn("http-trace", trace.stdout + trace.stderr)
+        cookie = gate(
+            {
+                **base,
+                "template-id": "cookies-without-secure",
+                "extracted-results": ["csrftoken"],
+                "matched-at": "https://api.example/admin/login/",
+            }
+        )
+        self.assertNotEqual(cookie.returncode, 0)
+        self.assertIn("cookies-without-secure", cookie.stdout + cookie.stderr)
 
     def test_third_party_code_is_pinned_to_an_immutable_reference(self) -> None:
         # A tag (v4, v3.11.0) can be moved by its owner, so the scan would start running
