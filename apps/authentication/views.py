@@ -239,16 +239,23 @@ class CompleteProfileView(APIView):
     serializer_class = UserProfileSerializer
 
     def put(self, request: Request) -> Response:
+        role = (
+            token_role(current_user(request), request.auth)
+            if request.auth is not None and "role" in request.auth
+            else None
+        )
         serializer = UserProfileSerializer(current_user(request), data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         try:
             user = OnboardingService.complete_profile(
-                current_user(request), serializer.validated_data
+                current_user(request), serializer.validated_data, active_role=role
             )
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         data = UserProfileSerializer(user).data
-        data["next_step"] = AuthService.user_state(user)
+        role = token_role(user, request.auth)
+        data["role"] = role
+        data["next_step"] = AuthService.user_state(user, active_role=role)
         return Response(data)
 
 

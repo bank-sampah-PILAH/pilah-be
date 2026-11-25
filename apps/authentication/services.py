@@ -17,6 +17,7 @@ from shared_kernel.permissions import (
     is_app_superadmin_allowlisted,
     superadmin_allowlist,
 )
+from shared_kernel.roles import token_role
 
 REGISTRATION_TOKEN_MAX_AGE = 600
 REGISTRATION_TOKEN_SALT = "pilah-google-registration"
@@ -372,12 +373,13 @@ class AuthService:
             nasabah.save(update_fields=["user", "updated_at"])
 
     @staticmethod
-    def user_state(user: User) -> str:
-        if user.role == User.Role.SUPERADMIN:
+    def user_state(user: User, *, active_role: str | None = None) -> str:
+        role = active_role if active_role is not None else user.role
+        if role == User.Role.SUPERADMIN:
             return "superadmin_dashboard"
         if not user.is_profile_complete:
             return "complete_profile"
-        if user.role == User.Role.NASABAH:
+        if role == User.Role.NASABAH:
             # Routing doesn't gate on approval: a membership application, once
             # submitted, sends the user straight to their own beranda
             # regardless of status. Pending/rejected states — and appealing a
@@ -492,16 +494,19 @@ class OnboardingService:
 
     @staticmethod
     @transaction.atomic
-    def complete_profile(user: User, profile_data: Mapping[str, Any]) -> User:
+    def complete_profile(
+        user: User, profile_data: Mapping[str, Any], *, active_role: str | None = None
+    ) -> User:
         # A completed profile commits the account to its role, so this takes
         # the role-change lock too (PIL-451). The reload also means the
         # checks below, and the role the caller answers with, are the
         # account's current ones, not those of the object the request loaded.
         OnboardingService.lock_account(user)
+        role = token_role(user, {"role": active_role} if active_role is not None else None)
         # One-shot for pengelola, whose profile step gates their bank
         # registration. A nasabah owns their profile and may re-submit it at
         # any time, whatever their membership status.
-        if user.is_profile_complete and user.role != User.Role.NASABAH:
+        if user.is_profile_complete and role != User.Role.NASABAH:
             raise ValueError("Profil sudah lengkap")
         for field, value in profile_data.items():
             setattr(user, field, value)
