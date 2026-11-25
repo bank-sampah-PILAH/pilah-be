@@ -32,8 +32,12 @@ class SeedTestingDataCommandTests(TestCase):
         )
         for _ in range(2):
             seeded = Command._upsert_user(
-                user_id=account.pk, email=account.email, name="Fixture User",
-                role=User.Role.PENGELOLA, bank=None, is_primary=False,
+                user_id=account.pk,
+                email=account.email,
+                name="Fixture User",
+                role=User.Role.PENGELOLA,
+                bank=None,
+                is_primary=False,
             )
             self.assertEqual(seeded.pk, account.pk)
             seeded.refresh_from_db()

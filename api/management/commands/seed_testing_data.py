@@ -570,6 +570,8 @@ class Command(BaseCommand):
         user.email = email
         user.nama = name
         user.role = role
+        if role not in user.roles:
+            user.roles = [*user.roles, role]
         user.is_profile_complete = True
         user.bank_sampah = bank
         user.is_primary_pengelola = is_primary
@@ -590,6 +592,7 @@ class Command(BaseCommand):
                 "email",
                 "nama",
                 "role",
+                "roles",
                 "is_profile_complete",
                 "bank_sampah",
                 "is_primary_pengelola",
