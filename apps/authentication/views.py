@@ -230,7 +230,9 @@ class AuthMeView(APIView):
 
     def get(self, request: Request) -> Response:
         data = AuthUserSerializer(current_user(request)).data
-        data["state"] = AuthService.user_state(current_user(request))
+        role = token_role(current_user(request), request.auth)
+        data["role"] = role
+        data["state"] = AuthService.user_state(current_user(request), active_role=role)
         return Response(data)
 
 

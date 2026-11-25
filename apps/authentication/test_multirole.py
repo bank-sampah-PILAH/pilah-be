@@ -14,6 +14,46 @@ from shared_kernel.permissions import IsNasabah, IsPengelola
 
 
 class AssignedRolesTest(TestCase):
+    def test_session_restore_keeps_bearer_role_and_state_after_primary_role_correction(
+        self,
+    ) -> None:
+        states = {
+            User.Role.PENGELOLA: "register_bank_sampah",
+            User.Role.NASABAH: "register_nasabah",
+        }
+        for former, primary in (
+            (User.Role.PENGELOLA, User.Role.NASABAH),
+            (User.Role.NASABAH, User.Role.PENGELOLA),
+        ):
+            with self.subTest(former=former, primary=primary):
+                user = User.objects.create_user(
+                    email=f"restore-{former}@example.com",
+                    role=former,
+                    roles=[User.Role.PENGELOLA, User.Role.NASABAH],
+                )
+                bearer = AccessToken.for_user(user)
+                bearer["role"] = former
+                AuthService.change_role(user, primary)
+                user.is_profile_complete = True
+                user.save(update_fields=["is_profile_complete"])
+
+                client = APIClient()
+                client.credentials(HTTP_AUTHORIZATION=f"Bearer {bearer}")
+                response = client.get("/api/v1/auth/me")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.data["role"], former)
+                self.assertEqual(response.data["state"], states[former])
+
+                legacy = AccessToken.for_user(user)
+                client.credentials(HTTP_AUTHORIZATION=f"Bearer {legacy}")
+                response = client.get("/api/v1/auth/me")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.data["role"], primary)
+                self.assertEqual(response.data["state"], states[primary])
+                user.refresh_from_db()
+                self.assertEqual(user.role, primary)
+                self.assertEqual(user.roles, [User.Role.PENGELOLA, User.Role.NASABAH])
+
     def test_role_queries_without_json_containment_match_assignments_in_any_order(self) -> None:
         manager = User.objects.create_user(email="fallback-manager@example.com")
         customer = User.objects.create_user(
