@@ -80,12 +80,16 @@ class SwitchRoleTest(TestCase):
         self.assertEqual(self.user.roles, [User.Role.PENGELOLA, User.Role.NASABAH])
 
     @override_settings(PILAH_SUPERADMIN_EMAILS=(), PILAH_REVIEW_SUPERADMIN_EMAILS=())
-    def test_unallowlisted_superadmin_switch_is_denied_for_primary_and_secondary_roles(self) -> None:
+    def test_unallowlisted_superadmin_switch_is_denied_for_primary_and_secondary_roles(
+        self,
+    ) -> None:
         for primary in (User.Role.SUPERADMIN, User.Role.NASABAH):
             with self.subTest(primary=primary):
                 account = User.objects.create_user(
-                    email=f"blocked-{primary}@example.com", role=primary,
-                    roles=[User.Role.SUPERADMIN, User.Role.NASABAH], is_profile_complete=True,
+                    email=f"blocked-{primary}@example.com",
+                    role=primary,
+                    roles=[User.Role.SUPERADMIN, User.Role.NASABAH],
+                    is_profile_complete=True,
                 )
                 access = AccessToken.for_user(account)
                 access["role"] = User.Role.NASABAH

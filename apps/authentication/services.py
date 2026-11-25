@@ -152,10 +152,14 @@ class AuthService:
         )
 
     @staticmethod
-    def _enforce_superadmin_allowlist(user: User, email: str) -> None:
-        if user.role != User.Role.SUPERADMIN:
+    def _enforce_superadmin_allowlist(
+        user: User, email: str, *, active_role: str | None = None
+    ) -> None:
+        role = active_role if active_role is not None else user.role
+        if role != User.Role.SUPERADMIN:
             return
-        AuthService._sync_superadmin_admin_flags(user, email)
+        if user.role == User.Role.SUPERADMIN:
+            AuthService._sync_superadmin_admin_flags(user, email)
         if not is_app_superadmin_allowlisted(email):
             raise AuthService._superadmin_not_allowlisted()
 
@@ -318,6 +322,13 @@ class AuthService:
                 raise AuthServiceError(
                     "Role tujuan tidak dimiliki akun", code="role_not_owned", status_code=403
                 )
+            try:
+                AuthService._enforce_superadmin_allowlist(account, account.email, active_role=role)
+            except AuthServiceError:
+                security_logger.warning(
+                    "role_switch.denied account_id=%s policy=superadmin_allowlist", account.pk
+                )
+                raise
             response = AuthService._session_response(account, is_new_user=False, active_role=role)
         security_logger.info("role_switch.succeeded account_id=%s role=%s", user.pk, role)
         return response
