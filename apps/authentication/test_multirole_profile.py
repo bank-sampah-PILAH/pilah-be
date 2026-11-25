@@ -28,3 +28,12 @@ class ActiveRoleProfileTests(APITestCase):
         self.assertEqual(self.user.nama, "Nama Baru")
         self.assertEqual(self.user.role, User.Role.PENGELOLA)
         self.assertEqual(self.user.roles, [User.Role.PENGELOLA, User.Role.NASABAH])
+
+    def test_active_nasabah_address_validation_does_not_use_primary_pengurus_role(self) -> None:
+        token = AccessToken.for_user(self.user)
+        token["role"] = User.Role.NASABAH
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+        response = self.client.put("/api/v1/onboarding/profile", {"alamat": " "}, format="json")
+        self.assertEqual(response.status_code, 422)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.alamat, "Jl. Test")
