@@ -4,12 +4,21 @@ from typing import Any
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models.functions import Now
 
 from shared_kernel.models import TimestampedModel
 
 # Where a bank's coordinate came from (PIL-326). Kept beside the model so the
 # registration payload validates against the same four values the app sends.
 SUMBER_KOORDINAT = ("gps", "geocode", "tautan", "manual")
+
+
+class GeocodingRequestSlot(models.Model):
+    tersedia_pada = models.DateTimeField(db_default=Now())
+
+    class Meta:
+        app_label = "api"
+        db_table = "geocoding_request_slot"
 
 
 class BankSampah(TimestampedModel):

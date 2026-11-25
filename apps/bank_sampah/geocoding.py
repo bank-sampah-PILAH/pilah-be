@@ -3,26 +3,30 @@
 The mobile app never calls Google or a geocoder itself; this module is the
 only outbound lookup, and it stays on a free provider. Nominatim's usage
 policy (max 1 request/second, cache results) is handled here with a shared
-database cache and a per-process limit on when outbound requests can start.
+database cache and a database-backed limit on outbound request starts.
 """
 
 import hashlib
 import math
 import os
-import threading
 import time
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 import requests
 from django.core.cache import caches
+from django.db import DatabaseError
+from django.db.models.functions import Now
+
+from apps.bank_sampah.models import GeocodingRequestSlot
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 DEFAULT_USER_AGENT = "pilah-app/1.0 (+https://github.com/bank-sampah-PILAH/pilah-be)"
 CACHE_TTL_DETIK = 24 * 60 * 60
-# Provider policy is one request per second. Overridable only so tests and
-# local runs don't have to sleep the full second.
-MIN_INTERVAL_DETIK = float(os.getenv("PILAH_GEOCODER_MIN_INTERVAL", "1"))
+INTERVAL_PERMINTAAN = timedelta(seconds=1)
+BATAS_TUNGGU_SLOT_DETIK = 3
+JEDA_PERIKSA_SLOT_DETIK = 0.1
 BATAS_HASIL = 5
 
 # The database-backed alias keeps hits shared across gunicorn workers; the
@@ -30,26 +34,23 @@ BATAS_HASIL = 5
 _cache = caches["geocoding"]
 
 
-class _PembatasPermintaan:
-    """Space request starts within one process without waiting for responses."""
-
-    def __init__(self) -> None:
-        self._kunci = threading.Lock()
-        self._panggilan_terakhir = 0.0
-
-    def tunggu_slot(self) -> None:
-        with self._kunci:
-            jeda = self._panggilan_terakhir + MIN_INTERVAL_DETIK - time.monotonic()
-            if jeda > 0:
-                time.sleep(jeda)
-            self._panggilan_terakhir = time.monotonic()
-
-
-_pembatas = _PembatasPermintaan()
-
-
 class GeocoderTidakTersedia(Exception):
     """Nominatim is unreachable or answered with an error."""
+
+
+def _tunggu_slot() -> None:
+    """Claim the shared slot atomically, using the database clock."""
+    batas = time.monotonic() + BATAS_TUNGGU_SLOT_DETIK
+    try:
+        slot, _ = GeocodingRequestSlot.objects.get_or_create(pk=1)
+        tersedia = GeocodingRequestSlot.objects.filter(pk=slot.pk, tersedia_pada__lte=Now())
+        while tersedia.update(tersedia_pada=Now() + INTERVAL_PERMINTAAN) == 0:
+            sisa = batas - time.monotonic()
+            if sisa <= 0:
+                raise GeocoderTidakTersedia("Batas tunggu layanan geocoding habis")
+            time.sleep(min(JEDA_PERIKSA_SLOT_DETIK, sisa))
+    except DatabaseError as exc:
+        raise GeocoderTidakTersedia("Pembatas layanan geocoding tidak tersedia") from exc
 
 
 @dataclass(frozen=True)
@@ -85,7 +86,7 @@ def _kunci_cache(kueri: str) -> str:
 
 def _ambil_dari_nominatim(kueri: str) -> list[dict[str, Any]]:
     """One outbound call, spaced from the previous one by the provider limit."""
-    _pembatas.tunggu_slot()
+    _tunggu_slot()
     try:
         response = requests.get(
             NOMINATIM_URL,

@@ -1,5 +1,7 @@
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import patch
@@ -7,14 +9,17 @@ from unittest.mock import patch
 import requests
 from django.conf import settings
 from django.core.cache import cache, caches
-from django.core.cache.backends.locmem import LocMemCache
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import DatabaseError, connections
+from django.test import TransactionTestCase
+from django.utils import timezone
 from rest_framework.test import APITestCase
 from rest_framework.throttling import ScopedRateThrottle
 
 from api.models import BankSampah, User
 from apps.bank_sampah import geocoding
-from apps.bank_sampah.geocoding import cari_tempat
+from apps.bank_sampah.geocoding import cari_tempat, geocode_alamat
+from apps.bank_sampah.models import GeocodingRequestSlot
 from apps.bank_sampah.serializers import BankSampahSerializer
 from apps.bank_sampah.views import ResolveKoordinatView
 
@@ -105,6 +110,26 @@ class ResolveKoordinatApiTests(APITestCase):
             response = self._post({"sumber": "alamat", "alamat": "Jalan Entah"})
 
         self.assertEqual(response.status_code, 503)
+
+    def test_unavailable_shared_slot_is_service_unavailable(self) -> None:
+        with (
+            patch.object(GeocodingRequestSlot.objects, "get_or_create", side_effect=DatabaseError),
+            patch(GEOCODER) as get,
+        ):
+            response = self._post({"sumber": "alamat", "alamat": "kampus ui"})
+
+        self.assertEqual(response.status_code, 503)
+        get.assert_not_called()
+
+    def test_busy_shared_slot_is_service_unavailable_after_wait_budget(self) -> None:
+        GeocodingRequestSlot.objects.create(
+            pk=1, tersedia_pada=timezone.now() + timedelta(minutes=1)
+        )
+        with patch.object(geocoding, "BATAS_TUNGGU_SLOT_DETIK", 0), patch(GEOCODER) as get:
+            response = self.client.get(CARI_TEMPAT_URL, {"q": "kampus ui"})
+
+        self.assertEqual(response.status_code, 503)
+        get.assert_not_called()
 
     def test_malformed_bodies_are_rejected(self) -> None:
         bodies = [
@@ -434,43 +459,49 @@ class CariTempatApiTests(APITestCase):
         self.assertEqual(caches["geocoding"].get(kunci), NOMINATIM_RESULT)
         self.assertEqual(auth_cache.get(kunci), "login throttle")
 
-    def test_request_starts_are_spaced_even_while_the_first_response_is_pending(self) -> None:
+
+class GeocodingRequestSlotTests(TransactionTestCase):
+    def test_two_workers_space_cache_misses_across_both_lookup_paths(self) -> None:
+        _bersihkan_cache()
         pertama_dimulai = threading.Event()
         kedua_dimulai = threading.Event()
         selesaikan_pertama = threading.Event()
         waktu: list[float] = []
-        pertama = "kota bandung"
-        kedua = "kota surabaya"
 
         def fake_get(*args: Any, params: dict[str, str], **kwargs: Any) -> _GeocoderResponse:
             waktu.append(time.monotonic())
-            if params["q"] == pertama:
+            if params["q"] == "kota bandung":
                 pertama_dimulai.set()
-                selesaikan_pertama.wait()
+                selesaikan_pertama.wait(timeout=5)
             else:
                 kedua_dimulai.set()
             return _GeocoderResponse(NOMINATIM_RESULT)
 
-        # Use an in-memory cache for this threaded test; SQLite's test
-        # transaction locks the database independently of the rate limiter.
-        with (
-            patch(GEOCODER, side_effect=fake_get),
-            patch.object(geocoding, "MIN_INTERVAL_DETIK", 0.15),
-            patch.object(geocoding, "_pembatas", geocoding._PembatasPermintaan()),
-            patch.object(geocoding, "_cache", LocMemCache("uji-geocode", {})),
-        ):
-            thread_pertama = threading.Thread(target=cari_tempat, args=(pertama,))
-            thread_kedua = threading.Thread(target=cari_tempat, args=(kedua,))
-            thread_pertama.start()
+        def resolve_address() -> geocoding.HasilGeocode | None:
+            try:
+                return geocode_alamat("kota bandung")
+            finally:
+                connections.close_all()
+
+        def search_places() -> list[geocoding.HasilGeocode]:
+            try:
+                return cari_tempat("kota surabaya")
+            finally:
+                connections.close_all()
+
+        # Each worker uses its own database connection. Keep the first response
+        # pending while the second miss claims the next shared slot.
+        with patch(GEOCODER, side_effect=fake_get), ThreadPoolExecutor(max_workers=2) as workers:
+            pertama = workers.submit(resolve_address)
             try:
                 self.assertTrue(pertama_dimulai.wait(timeout=2))
-                thread_kedua.start()
-                self.assertTrue(kedua_dimulai.wait(timeout=2))
+                self.assertTrue(GeocodingRequestSlot.objects.filter(pk=1).exists())
+                kedua = workers.submit(search_places)
+                self.assertTrue(kedua_dimulai.wait(timeout=4))
+                self.assertEqual(len(kedua.result(timeout=4)), 1)
             finally:
                 selesaikan_pertama.set()
-                thread_pertama.join()
-                if thread_kedua.ident is not None:
-                    thread_kedua.join()
+            self.assertIsNotNone(pertama.result(timeout=4))
 
         self.assertEqual(len(waktu), 2)
-        self.assertGreaterEqual(waktu[1] - waktu[0], 0.15)
+        self.assertGreaterEqual(waktu[1] - waktu[0], 1)
