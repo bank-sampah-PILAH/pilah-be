@@ -82,8 +82,10 @@ class BankOnboardingService:
     @transaction.atomic
     def register_bank_sampah(user: User, payload: Mapping[str, Any]) -> BankSampah:
         lock_for_onboarding(user)
-        if User.Role.PENGELOLA not in user.roles:
-            raise PermissionError("Hanya pengelola yang dapat mendaftarkan bank sampah")
+        if not BankOnboardingService._may_become_pengurus(user):
+            raise PermissionError(
+                "Hanya pengelola atau nasabah yang dapat mendaftarkan bank sampah"
+            )
         bank = user.bank_sampah
         if bank and bank.status == BankSampah.Status.ACTIVE:
             raise ValueError("Bank sampah sudah aktif")
@@ -102,7 +104,8 @@ class BankOnboardingService:
         bank.save()
         user.bank_sampah = bank
         user.is_primary_pengelola = True
-        user.save(update_fields=["bank_sampah", "is_primary_pengelola", "updated_at"])
+        BankOnboardingService._grant_pengurus_role(user)
+        user.save(update_fields=["bank_sampah", "is_primary_pengelola", "roles", "updated_at"])
         for admin in User.objects.with_role(User.Role.SUPERADMIN).filter(is_active=True):
             queue_push(
                 admin,
@@ -122,8 +125,8 @@ class BankOnboardingService:
             raise ValueError("Tautan undangan tidak valid atau sudah kedaluwarsa")
         if bank.status != BankSampah.Status.ACTIVE or not bank.is_active:
             raise ValueError("Undangan tidak dapat digunakan karena bank sampah tidak aktif")
-        if User.Role.PENGELOLA not in user.roles:
-            raise PermissionError("Hanya pengelola yang dapat menerima undangan")
+        if not BankOnboardingService._may_become_pengurus(user):
+            raise PermissionError("Hanya pengelola atau nasabah yang dapat menerima undangan")
         if user.bank_sampah_id == bank.id:
             return bank, "already_member"
         user_bank = user.bank_sampah
@@ -137,15 +140,35 @@ class BankOnboardingService:
         user.is_primary_pengelola = False
         if user.nama and user.no_hp and user.jenis_kelamin and user.tanggal_lahir:
             user.is_profile_complete = True
+        BankOnboardingService._grant_pengurus_role(user)
         user.save(
             update_fields=[
                 "bank_sampah",
                 "is_primary_pengelola",
                 "is_profile_complete",
+                "roles",
                 "updated_at",
             ]
         )
         return bank, outcome
+
+    @staticmethod
+    def _may_become_pengurus(user: User) -> bool:
+        """A Pengurus, or a Nasabah taking on the Pengurus role (PIL-542)."""
+        return User.Role.PENGELOLA in user.roles or User.Role.NASABAH in user.roles
+
+    @staticmethod
+    def _grant_pengurus_role(user: User) -> None:
+        """Add the Pengurus role to an account that is joining a bank's team.
+
+        Called only by the two flows that prove the right to it, a valid
+        invite and a bank registration, after their checks pass. The caller
+        saves it with the bank link in its own transaction, so `roles` and
+        `bank_sampah` change together or not at all. Pengurus features still
+        need an active bank (`IsActivePengelola`).
+        """
+        if User.Role.PENGELOLA not in user.roles:
+            user.roles = [*user.roles, User.Role.PENGELOLA]
 
 
 class TeamService:

@@ -33,8 +33,8 @@ from apps.bank_sampah.serializers import (
 from apps.bank_sampah.services import ApprovalService, BankOnboardingService, TeamService
 from shared_kernel.permissions import (
     IsActivePengelola,
-    IsPengelola,
     IsPrimaryPengelola,
+    IsRegistrationRole,
     IsSuperAdmin,
     is_review_superadmin,
 )
@@ -138,8 +138,17 @@ class SuperAdminBankSampahViewSet(viewsets.GenericViewSet):  # type: ignore[type
         )
 
 
+class CanBecomePengurus(IsRegistrationRole):
+    """A Pengurus session, or a Nasabah one taking on the Pengurus role
+    (PIL-542). Only the session's role is screened here: whether the account
+    may become a Pengurus, and granting the role, is `BankOnboardingService`'s
+    job."""
+
+    message = "Hanya pengelola atau nasabah yang dapat bergabung dengan bank sampah"
+
+
 class RegisterBankSampahView(APIView):
-    permission_classes = [IsPengelola]
+    permission_classes = [CanBecomePengurus]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     serializer_class = BankSampahRegistrationSerializer
 
@@ -159,8 +168,8 @@ class RegisterBankSampahView(APIView):
         return Response(data, status=201)
 
 
-class CanAcceptInvite(IsPengelola):
-    message = "Hanya pengelola yang dapat menerima undangan"
+class CanAcceptInvite(CanBecomePengurus):
+    message = "Hanya pengelola atau nasabah yang dapat menerima undangan"
 
 
 class AcceptInviteView(APIView):
