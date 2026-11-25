@@ -271,3 +271,7 @@ class BankSampahDetailSerializer(serializers.ModelSerializer[Model]):
             key=lambda jenis: jenis.nomor,
         )
         return DirectoryLayananSerializer(active, many=True).data
+
+
+class TeamTransferSerializer(serializers.Serializer[Any]):
+    id = serializers.UUIDField()

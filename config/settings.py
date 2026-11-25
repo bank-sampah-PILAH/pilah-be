@@ -74,6 +74,10 @@ if os.getenv("MIGRATION_LINTER") == "1":
     INSTALLED_APPS += ["django_migration_linter"]
 
 MIDDLEWARE = [
+    # Paling luar dari semuanya: id permintaan harus sudah ada saat middleware
+    # lain mencatat log, dan respons yang dibuat tanpa mencapai view
+    # (preflight CORS, pengalihan HTTPS) pun harus membawanya.
+    "shared_kernel.request_id.RequestIdMiddleware",
     # Paling luar, supaya SETIAP respons membawa header — termasuk yang dibuat
     # middleware di bawahnya tanpa pernah mencapai view: preflight CORS,
     # pengalihan 301 ke HTTPS oleh SecurityMiddleware, berkas statis WhiteNoise,
@@ -146,6 +150,11 @@ CACHES = {
     "auth_rate_limit": {
         "BACKEND": "django.core.cache.backends.db.DatabaseCache",
         "LOCATION": "auth_rate_limit_cache",
+    },
+    "geocoding": {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "geocoding_cache",
+        "OPTIONS": {"MAX_ENTRIES": 10_000},
     },
 }
 
@@ -300,6 +309,33 @@ CORS_ALLOW_HEADERS = (
     *(header.lower() for header in HEADER_PERMINTAAN_KUSTOM),
 )
 CORS_EXPOSE_HEADERS = HEADER_RESPONS_TEREKSPOS
+
+# Log ke stdout, yang ditangkap Cloud Run apa adanya. Setiap baris memuat id
+# permintaan (shared_kernel/request_id.py) supaya kegagalan yang dilaporkan
+# aplikasi bisa dicari dari id-nya. Hanya WARNING ke atas: yang berubah di
+# sini adalah format baris, bukan seberapa banyak yang dicatat. Logger Django
+# bawaan tetap dipertahankan (disable_existing_loggers=False).
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "request_id": {"()": "shared_kernel.request_id.RequestIdFilter"},
+    },
+    "formatters": {
+        "dengan_id": {
+            "format": "%(asctime)s %(levelname)s %(name)s [%(request_id)s] %(message)s",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+            "filters": ["request_id"],
+            "formatter": "dengan_id",
+        },
+    },
+    "root": {"handlers": ["console"], "level": "WARNING"},
+}
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")

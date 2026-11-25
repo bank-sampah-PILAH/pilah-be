@@ -1,0 +1,59 @@
+# CodeQL SAST: OWASP-mapped static analysis (injection, broken access
+# control patterns, misconfiguration). Complements SonarCloud hotspots with a
+# vulnerability-focused query set. Runs per PR and weekly.
+name: CodeQL
+
+on:
+  pull_request:
+    branches:
+      - staging
+      - main
+  push:
+    branches:
+      - staging
+      - main
+  schedule:
+    - cron: "11 3 * * 3"
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (python)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        # CodeQL extracts Python from source; runtime deps only make
+        # imports resolvable for higher-fidelity analysis.
+        run: pip install -r requirements.txt
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          # Vulnerability-focused default suite; OWASP Top-10-style coverage.
+          queries: security-extended,security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:python"

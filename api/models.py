@@ -3,7 +3,11 @@
 # untouched; all logic lives in apps/*.
 from apps.announcement.models import Pengumuman, PengumumanDibaca  # noqa: F401
 from apps.authentication.models import User, UserManager, UserRoleChangeLog  # noqa: F401
-from apps.bank_sampah.models import BankSampah, BankSampahApprovalLog  # noqa: F401
+from apps.bank_sampah.models import (  # noqa: F401
+    BankSampah,
+    BankSampahApprovalLog,
+    PengurusDikeluarkan,
+)
 from apps.jadwal.models import JadwalKegiatan  # noqa: F401
 from apps.ledger.models import (  # noqa: F401
     DetailTransaksi,
@@ -35,6 +39,7 @@ __all__ = [
     "NasabahApprovalLog",
     "Pengumuman",
     "PengumumanDibaca",
+    "PengurusDikeluarkan",
     "PushDelivery",
     "PushNotification",
     "Pencairan",

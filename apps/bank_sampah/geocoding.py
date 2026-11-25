@@ -2,8 +2,8 @@
 
 The mobile app never calls Google or a geocoder itself; this module is the
 only outbound lookup, and it stays on a free provider. Nominatim's usage
-policy (max 1 request/second, cache results) is enforced here, not per
-client: one process-wide cache and one serialized outbound queue.
+policy (max 1 request/second, cache results) is handled here with a shared
+database cache and a per-process limit on when outbound requests can start.
 """
 
 import hashlib
@@ -27,10 +27,10 @@ BATAS_HASIL = 5
 
 # The database-backed alias keeps hits shared across gunicorn workers; the
 # default LocMemCache would cache per process only.
-_cache = caches["auth_rate_limit"]
+_cache = caches["geocoding"]
 
-# Serializes every outbound call in this process: concurrent searches from
-# different users share the provider's quota instead of racing it.
+# Spaces request starts within this process. A slow response must not hold
+# the lock and prevent other searches from taking their next slot.
 _kunci_keluar = threading.Lock()
 _panggilan_terakhir = 0.0
 
@@ -78,22 +78,22 @@ def _ambil_dari_nominatim(kueri: str) -> list[dict[str, Any]]:
         if jeda > 0:
             time.sleep(jeda)
         _panggilan_terakhir = time.monotonic()
-        try:
-            response = requests.get(
-                NOMINATIM_URL,
-                params={
-                    "q": kueri,
-                    "format": "jsonv2",
-                    "limit": str(BATAS_HASIL),
-                    "countrycodes": "id",
-                },
-                headers={"User-Agent": user_agent()},
-                timeout=10,
-            )
-            response.raise_for_status()
-            hasil = response.json()
-        except requests.RequestException as exc:
-            raise GeocoderTidakTersedia(str(exc)) from exc
+    try:
+        response = requests.get(
+            NOMINATIM_URL,
+            params={
+                "q": kueri,
+                "format": "jsonv2",
+                "limit": str(BATAS_HASIL),
+                "countrycodes": "id",
+            },
+            headers={"User-Agent": user_agent()},
+            timeout=10,
+        )
+        response.raise_for_status()
+        hasil = response.json()
+    except requests.RequestException as exc:
+        raise GeocoderTidakTersedia(str(exc)) from exc
     return hasil if isinstance(hasil, list) else []
 
 

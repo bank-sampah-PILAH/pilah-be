@@ -1,9 +1,16 @@
 from django.conf import settings
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.views import APIView
 
-from api.models import BankSampah, User
+from api.models import BankSampah, PengurusDikeluarkan, User
+
+PENGURUS_DIKELUARKAN = "pengurus_dikeluarkan"
+PENGURUS_DIKELUARKAN_MESSAGE = (
+    "Anda telah dikeluarkan dari bank sampah oleh Pengurus Utama. "
+    "Hubungi Pengurus Utama atau bergabunglah ke bank sampah lain."
+)
 
 
 def _auth_user(request: Request) -> User:
@@ -60,6 +67,10 @@ class IsActivePengelola(IsPengelola):
         if not super().has_permission(request, view):
             return False
         user = _auth_user(request)
+        if user.bank_sampah_id is None and PengurusDikeluarkan.objects.filter(user=user).exists():
+            # Raised, not returned: the composite permissions below build fresh
+            # instances and only look at the bool, which would lose the code.
+            raise PermissionDenied(PENGURUS_DIKELUARKAN_MESSAGE, code=PENGURUS_DIKELUARKAN)
         bank = user.bank_sampah
         return bool(
             user.bank_sampah_id

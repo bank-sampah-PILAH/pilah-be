@@ -40,7 +40,7 @@ LINK_PIN = (
 
 def _bersihkan_cache() -> None:
     cache.clear()
-    caches["auth_rate_limit"].clear()
+    caches["geocoding"].clear()
 
 
 class _GeocoderResponse:
@@ -173,11 +173,12 @@ class ResolveKoordinatApiTests(APITestCase):
             "bukan-daftar",
             [{"lat": "100", "lon": "106.8270541"}],
         ]
-        for payload in payloads:
+        for index, payload in enumerate(payloads):
             with self.subTest(payload=payload):
-                with patch(GEOCODER, return_value=_GeocoderResponse(payload)):
-                    response = self._post({"sumber": "alamat", "alamat": "Jalan Entah"})
+                with patch(GEOCODER, return_value=_GeocoderResponse(payload)) as get:
+                    response = self._post({"sumber": "alamat", "alamat": f"Jalan Entah {index}"})
                 self.assertEqual(response.status_code, 404)
+                get.assert_called_once()
 
     def test_short_link_redirects_are_followed_manually(self) -> None:
         tujuan = (
@@ -409,29 +410,57 @@ class CariTempatApiTests(APITestCase):
         self.assertEqual(kedua.data, pertama.data)
         self.assertEqual(get.call_count, 1)
 
-    def test_outbound_calls_are_serialized_by_the_shared_limit(self) -> None:
-        waktu: list[float] = []
+    def test_geocoder_cache_keeps_results_out_of_the_login_throttle(self) -> None:
+        kueri = "Jl. Margonda Raya 5 Depok"
+        kunci = geocoding._kunci_cache(kueri)
+        auth_cache = caches["auth_rate_limit"]
+        auth_cache.set(kunci, "login throttle")
+        self.addCleanup(auth_cache.delete, kunci)
 
-        def fake_get(*args: Any, **kwargs: Any) -> _GeocoderResponse:
+        with patch(GEOCODER, return_value=_GeocoderResponse(NOMINATIM_RESULT)) as get:
+            self.assertEqual(len(cari_tempat(kueri)), 1)
+
+        get.assert_called_once()
+        self.assertEqual(caches["geocoding"].get(kunci), NOMINATIM_RESULT)
+        self.assertEqual(auth_cache.get(kunci), "login throttle")
+
+    def test_request_starts_are_spaced_even_while_the_first_response_is_pending(self) -> None:
+        pertama_dimulai = threading.Event()
+        kedua_dimulai = threading.Event()
+        selesaikan_pertama = threading.Event()
+        waktu: list[float] = []
+        pertama = "kota bandung"
+        kedua = "kota surabaya"
+
+        def fake_get(*args: Any, params: dict[str, str], **kwargs: Any) -> _GeocoderResponse:
             waktu.append(time.monotonic())
+            if params["q"] == pertama:
+                pertama_dimulai.set()
+                selesaikan_pertama.wait()
+            else:
+                kedua_dimulai.set()
             return _GeocoderResponse(NOMINATIM_RESULT)
 
-        query = ["kota bandung", "kota surabaya"]
-        # Threads and the sqlite-backed shared cache don't mix; the limit is
-        # what this test is about, so give it an in-memory cache.
+        # Use an in-memory cache for this threaded test; SQLite's test
+        # transaction locks the database independently of the rate limiter.
         with (
             patch(GEOCODER, side_effect=fake_get),
             patch.object(geocoding, "MIN_INTERVAL_DETIK", 0.15),
             patch.object(geocoding, "_panggilan_terakhir", 0.0),
             patch.object(geocoding, "_cache", LocMemCache("uji-geocode", {})),
         ):
-            threads = [threading.Thread(target=cari_tempat, args=(kueri,)) for kueri in query]
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join()
+            thread_pertama = threading.Thread(target=cari_tempat, args=(pertama,))
+            thread_kedua = threading.Thread(target=cari_tempat, args=(kedua,))
+            thread_pertama.start()
+            try:
+                self.assertTrue(pertama_dimulai.wait(timeout=2))
+                thread_kedua.start()
+                self.assertTrue(kedua_dimulai.wait(timeout=2))
+            finally:
+                selesaikan_pertama.set()
+                thread_pertama.join()
+                if thread_kedua.ident is not None:
+                    thread_kedua.join()
 
         self.assertEqual(len(waktu), 2)
-        # The second call waited out the provider's one-per-second slot
-        # instead of racing the first one.
         self.assertGreaterEqual(waktu[1] - waktu[0], 0.15)

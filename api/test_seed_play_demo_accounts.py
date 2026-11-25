@@ -339,7 +339,7 @@ class SeedPlayDemoAccountsTests(TestCase):
             role=User.Role.PENGELOLA,
             bank_sampah=bank,
             is_profile_complete=True,
-            is_primary_pengelola=True,
+            is_primary_pengelola=False,
         )
         users_before = list(User.objects.order_by("pk").values())
 
