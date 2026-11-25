@@ -219,10 +219,17 @@ def _run_nuclei_step(
     )
 
 
+OWN_REPOSITORY = "bank-sampah-PILAH/pilah-be"
+
+
 class NucleiScanWorkflowTests(SimpleTestCase):
-    def _resolve(
-        self, url: str, target_url: str = "", environment: str = "staging"
-    ) -> dict[str, str]:
+    def _resolve_run(
+        self,
+        url: str,
+        target_url: str = "",
+        environment: str = "staging",
+        repository: str = OWN_REPOSITORY,
+    ) -> tuple[subprocess.CompletedProcess[str], str]:
         with tempfile.TemporaryDirectory() as directory:
             github_env = Path(directory) / "github_env"
             github_env.write_text("")
@@ -234,41 +241,34 @@ class NucleiScanWorkflowTests(SimpleTestCase):
                     "STAGING_API_URL": url,
                     "PRODUCTION_API_URL": "",
                     "GITHUB_ENV": str(github_env),
+                    "GITHUB_REPOSITORY": repository,
                 },
                 Path(directory),
             )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            return dict(line.split("=", 1) for line in github_env.read_text().splitlines())
+            return result, github_env.read_text()
 
-    def _resolve_fails(self, url: str) -> str:
-        with tempfile.TemporaryDirectory() as directory:
-            github_env = Path(directory) / "github_env"
-            github_env.write_text("")
-            result = _run_nuclei_step(
-                "Resolve target",
-                {
-                    "ENVIRONMENT": "staging",
-                    "TARGET_URL_INPUT": "",
-                    "STAGING_API_URL": url,
-                    "PRODUCTION_API_URL": "",
-                    "GITHUB_ENV": str(github_env),
-                },
-                Path(directory),
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(github_env.read_text(), "")
-            return result.stdout + result.stderr
+    def _resolve(
+        self, url: str, target_url: str = "", environment: str = "staging"
+    ) -> dict[str, str]:
+        result, written = self._resolve_run(url, target_url, environment)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return dict(line.split("=", 1) for line in written.splitlines())
+
+    def _resolve_fails(
+        self, url: str, target_url: str = "", repository: str = OWN_REPOSITORY
+    ) -> str:
+        result, written = self._resolve_run(url, target_url, repository=repository)
+        self.assertNotEqual(result.returncode, 0)
+        # A rejected target must never reach $GITHUB_ENV, not even partially.
+        self.assertEqual(written, "")
+        return result.stdout + result.stderr
 
     def test_scan_targets_are_reduced_to_host_and_port(self) -> None:
         plain = self._resolve("https://api.example")
         self.assertEqual(plain["TARGET"], "https://api.example")
         self.assertEqual(plain["TLS_TARGET"], "api.example:443")
-        # A trailing slash, a path and an explicit :443 must not leak into the TLS target.
-        for url in (
-            "https://api.example/",
-            "https://api.example/path?q=1",
-            "https://api.example:443",
-        ):
+        # A trailing slash and an explicit :443 must not leak into the TLS target.
+        for url in ("https://api.example/", "https://api.example:443"):
             with self.subTest(url=url):
                 resolved = self._resolve(url)
                 self.assertEqual(resolved["TARGET"], "https://api.example")
@@ -277,6 +277,46 @@ class NucleiScanWorkflowTests(SimpleTestCase):
         custom = self._resolve("https://api.example:8443/")
         self.assertEqual(custom["TARGET"], "https://api.example:8443")
         self.assertEqual(custom["TLS_TARGET"], "api.example:8443")
+
+    def test_scan_rejects_urls_that_would_change_the_scan_scope(self) -> None:
+        # STAGING_API_URL=https://host/api/v1 used to scan https://host without a word.
+        for url in (
+            "https://api.example/api/v1",
+            "https://api.example/path?q=1",
+            "https://api.example?q=1",
+            "https://api.example#frag",
+        ):
+            with self.subTest(url=url):
+                self.assertIn("::error::", self._resolve_fails(url))
+
+    def test_scan_rejects_a_target_that_smuggles_environment_variables(self) -> None:
+        # The target lands in $GITHUB_ENV one KEY=value per line; a newline in it would
+        # let a caller define any variable for the later steps.
+        for url in (
+            "https://ok.example\nEVIL=injected",
+            "https://ok.example\r\nEVIL=injected",
+            "https://ok.example EVIL=injected",
+        ):
+            with self.subTest(url=repr(url)):
+                self.assertIn("::error::", self._resolve_fails("", target_url=url))
+
+    def test_scan_only_takes_target_url_from_this_repository(self) -> None:
+        # The workflow is reusable from a public repository, so another repository could
+        # otherwise point the scan at any host.
+        self.assertIn(
+            "::error::",
+            self._resolve_fails(
+                "", target_url="https://deployed.run.app", repository="someone/else"
+            ),
+        )
+        # Variables resolve in the caller's repository too, so the check is not limited to
+        # the target_url input.
+        self.assertIn(
+            "::error::", self._resolve_fails("https://api.example", repository="someone/else")
+        )
+        # Its own callers (the staging and production deploys) keep working.
+        resolved = self._resolve("", target_url="https://deployed.run.app")
+        self.assertEqual(resolved["TARGET"], "https://deployed.run.app")
 
     def test_scan_target_from_the_caller_overrides_the_variable(self) -> None:
         resolved = self._resolve(
@@ -302,6 +342,35 @@ class NucleiScanWorkflowTests(SimpleTestCase):
         self.assertIn("path=/api/v1/", script)
         self.assertIn("path=/healthz", script)
         self.assertLess(script.index("production"), script.index("path=/api/v1/"))
+
+    def _up_check(self, environment: str, status: str) -> subprocess.CompletedProcess[str]:
+        with tempfile.TemporaryDirectory() as directory:
+            fake_curl = Path(directory) / "curl"
+            fake_curl.write_text('#!/bin/sh\nprintf "%s" "$FAKE_STATUS"\n')
+            fake_curl.chmod(0o700)
+            return _run_nuclei_step(
+                "Check target is up",
+                {
+                    "ENVIRONMENT": environment,
+                    "TARGET": "https://api.example",
+                    "FAKE_STATUS": status,
+                    "PATH": f"{directory}:{os.environ['PATH']}",
+                },
+                Path(directory),
+            )
+
+    def test_production_up_check_does_not_mistake_a_proxy_for_the_api(self) -> None:
+        # 401 is Django refusing an anonymous request. A 403 can be Cloud Run, IAP or a WAF
+        # answering instead, and the scan would then inspect the proxy's error page and
+        # stay green without ever reaching the API.
+        for status in ("200", "401"):
+            with self.subTest(status=status):
+                self.assertEqual(self._up_check("production", status).returncode, 0)
+        for status in ("403", "404", "500", "000"):
+            with self.subTest(status=status):
+                self.assertNotEqual(self._up_check("production", status).returncode, 0)
+        self.assertEqual(self._up_check("staging", "200").returncode, 0)
+        self.assertNotEqual(self._up_check("staging", "401").returncode, 0)
 
     @skipUnless(shutil.which("jq"), "jq is not installed")
     def test_gate_names_the_header_that_is_not_accepted(self) -> None:
@@ -346,7 +415,17 @@ class NucleiScanWorkflowTests(SimpleTestCase):
             "nuclei_post_deploy"
         ]
         self.assertEqual(ci["needs"], "deploy_staging")
-        self.assertEqual(ci["with"], {"environment": "staging"})
+        # The scan targets the URL the staging deploy just used, not a repository variable
+        # that can drift or be mistyped.
+        self.assertEqual(
+            ci["with"],
+            {"environment": "staging", "target_url": "${{ needs.deploy_staging.outputs.url }}"},
+        )
+        ci_workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertEqual(ci_workflow.count("pilah-be-staging.fly.dev"), 1)
+        deploy = yaml.safe_load(ci_workflow)["jobs"]["deploy_staging"]
+        self.assertEqual(deploy["outputs"], {"url": "${{ env.STAGING_URL }}"})
+        self.assertEqual(deploy["environment"]["url"], "${{ env.STAGING_URL }}")
         production = yaml.safe_load((ROOT / ".github/workflows/deploy-cloud-run.yml").read_text())
         scan = production["jobs"]["nuclei_post_deploy"]
         self.assertEqual(scan["needs"], "deploy")
