@@ -244,7 +244,12 @@ class CompleteProfileView(APIView):
             if request.auth is not None and "role" in request.auth
             else None
         )
-        serializer = UserProfileSerializer(current_user(request), data=request.data, partial=True)
+        serializer = UserProfileSerializer(
+            current_user(request),
+            data=request.data,
+            partial=True,
+            context={"active_role": token_role(current_user(request), request.auth)},
+        )
         serializer.is_valid(raise_exception=True)
         try:
             user = OnboardingService.complete_profile(
