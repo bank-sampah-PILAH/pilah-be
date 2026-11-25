@@ -98,7 +98,7 @@ class NasabahSerializerGuardTests(APITestCase):
 
 class NasabahSelfRegistrationEdgeCaseTests(APITestCase):
     def test_permission_error_from_the_port_is_reported_as_forbidden(self) -> None:
-        # IsNasabah screens the role already; the 403 mapping is the second
+        # IsMembershipApplicant screens the role already; the 403 mapping is the second
         # line of defence, so drive it through the authentication port.
         user = User.objects.create_user(
             email="warga@example.test",

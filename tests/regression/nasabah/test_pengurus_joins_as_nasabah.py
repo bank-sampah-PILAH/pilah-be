@@ -34,7 +34,8 @@ class PengurusJoinsAsNasabahTests(RegressionTestCase):
     def roles(self, user: User | None = None) -> list[str]:
         user = user or self.user
         user.refresh_from_db()
-        return user.roles
+        roles: list[str] = user.roles
+        return roles
 
     def test_a_pengurus_can_join_its_own_bank_and_another_as_a_nasabah(self) -> None:
         for bank in (self.bank, self.other_bank):
@@ -56,7 +57,7 @@ class PengurusJoinsAsNasabahTests(RegressionTestCase):
             {self.bank.id, self.other_bank.id},
         )
         self.auth_as(self.user)
-        self.assertEqual(self.client.get("/api/v1/nasabah/").status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/nasabah").status_code, 200)
 
     def test_the_new_membership_waits_for_that_banks_pengurus(self) -> None:
         pengurus_b = self.make_user("pengurus-b@example.com", PENGELOLA, self.other_bank)
@@ -97,7 +98,9 @@ class PengurusJoinsAsNasabahTests(RegressionTestCase):
         response = self.apply(pending_bank)
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.data, {"error": "Bank sampah tidak ditemukan atau belum tersedia"})
+        self.assertEqual(
+            response.data, {"error": "Bank sampah tidak ditemukan atau belum tersedia"}
+        )
         self.assertEqual(self.roles(), [PENGELOLA])
 
     def test_a_pengurus_without_an_address_gets_no_role(self) -> None:

@@ -26,7 +26,11 @@ from apps.nasabah.serializers import (
 )
 from apps.nasabah.services import NasabahApprovalService
 from shared_kernel.pencarian import validasi_pencarian
-from shared_kernel.permissions import IsActivePengelola, IsNasabah, IsNasabahRole
+from shared_kernel.permissions import (
+    IsActivePengelola,
+    IsMembershipApplicant,
+    IsNasabahRole,
+)
 from shared_kernel.scoping import current_bank, current_user
 
 _NO_HP_TERPAKAI = "Nomor HP nasabah sudah digunakan"
@@ -271,7 +275,7 @@ class SaldoView(APIView):
 
 
 class RegisterNasabahView(APIView):
-    permission_classes = [IsNasabah]
+    permission_classes = [IsMembershipApplicant]
     serializer_class = NasabahSelfRegistrationSerializer
 
     def post(self, request: Request) -> Response:
