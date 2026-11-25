@@ -38,7 +38,9 @@ class TeamRemoveTests(APITestCase):
         self.assertTrue(self.member.is_active)
         self.assertEqual(self.member.role, User.Role.NASABAH)
         self.assertEqual(self.member.roles, [User.Role.NASABAH, User.Role.PENGELOLA])
-        self.assertTrue(PengurusDikeluarkan.objects.filter(user=self.member, bank_sampah=self.bank).exists())
+        self.assertTrue(
+            PengurusDikeluarkan.objects.filter(user=self.member, bank_sampah=self.bank).exists()
+        )
 
     def test_primary_removes_a_member_and_the_team_list_drops_them(self) -> None:
         response = self._remove(self.member)

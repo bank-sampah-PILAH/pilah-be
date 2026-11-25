@@ -174,7 +174,8 @@ class TeamService:
             if target_id == current.pk:
                 raise ValueError("Tidak dapat menyerahkan jabatan kepada diri sendiri")
             target = (
-                User.objects.with_role(User.Role.PENGELOLA).select_for_update()
+                User.objects.with_role(User.Role.PENGELOLA)
+                .select_for_update()
                 .filter(pk=target_id, bank_sampah=bank, is_active=True)
                 .first()
             )
@@ -215,8 +216,9 @@ class TeamService:
             if not current.is_primary_pengelola or current.bank_sampah_id != bank.pk:
                 raise PermissionError("Hanya Pengurus Utama yang dapat mengeluarkan pengurus")
             member = (
-                User.objects.select_for_update()
-                .filter(pk=member_id, bank_sampah=bank, role=User.Role.PENGELOLA, is_active=True)
+                User.objects.with_role(User.Role.PENGELOLA)
+                .select_for_update()
+                .filter(pk=member_id, bank_sampah=bank, is_active=True)
                 .first()
             )
             if member is None:
