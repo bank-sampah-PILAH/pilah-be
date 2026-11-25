@@ -3436,14 +3436,15 @@ class APISpecTests(APITransactionTestCase):
             response.data["error"], "Anda sudah terdaftar sebagai nasabah di bank sampah ini"
         )
 
-    def test_nasabah_self_registration_rejects_non_nasabah_role(self) -> None:
-        pengelola = User.objects.create_user(
-            email="pengelola-trying-nasabah@example.com",
-            nama="Pengelola",
-            role=User.Role.PENGELOLA,
+    def test_nasabah_self_registration_rejects_an_account_with_neither_role(self) -> None:
+        # A Pengurus may apply since PIL-541; a superadmin still may not.
+        admin = User.objects.create_user(
+            email="admin-trying-nasabah@example.com",
+            nama="Admin",
+            role=User.Role.SUPERADMIN,
             is_profile_complete=True,
         )
-        refresh = RefreshToken.for_user(pengelola)
+        refresh = RefreshToken.for_user(admin)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
         response = self.client.post(

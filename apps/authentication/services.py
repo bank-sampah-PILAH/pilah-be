@@ -578,8 +578,8 @@ class OnboardingService:
     @transaction.atomic
     def register_nasabah(user: User, payload: Mapping[str, Any]) -> Nasabah:
         OnboardingService.lock_account(user)
-        if User.Role.NASABAH not in user.roles:
-            raise PermissionError("Hanya nasabah yang dapat mengajukan keanggotaan")
+        if User.Role.NASABAH not in user.roles and User.Role.PENGELOLA not in user.roles:
+            raise PermissionError("Hanya nasabah atau pengurus yang dapat mengajukan keanggotaan")
         if not user.alamat.strip():
             raise ValueError("Lengkapi alamat pada profil Anda terlebih dahulu")
 
@@ -607,6 +607,7 @@ class OnboardingService:
         if Nasabah.objects.filter(bank_sampah=bank, no_hp=user.no_hp).exists():
             raise ValueError(NO_HP_TERPAKAI_DI_BANK)
 
+        OnboardingService._grant_nasabah_role(user)
         nasabah = Nasabah(
             bank_sampah=bank,
             user=user,
@@ -633,6 +634,19 @@ class OnboardingService:
             raise ValueError("Gagal membuat nomor nasabah, silakan coba lagi")
         Saldo.objects.create(nasabah=nasabah)
         return nasabah
+
+    @staticmethod
+    def _grant_nasabah_role(user: User) -> None:
+        """A Pengurus joining a bank sampah becomes a Nasabah too (PIL-541).
+
+        The role comes only with a membership application, after its checks
+        pass. It is written in `register_nasabah`'s transaction, so an
+        application that fails afterwards leaves `roles` as it was.
+        """
+        if User.Role.NASABAH in user.roles:
+            return
+        user.roles = [*user.roles, User.Role.NASABAH]
+        user.save(update_fields=["roles", "updated_at"])
 
     @staticmethod
     def _next_nasabah_nomor(bank: BankSampah) -> str:

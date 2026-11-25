@@ -46,6 +46,24 @@ class IsNasabah(BasePermission):
         )
 
 
+class IsMembershipApplicant(BasePermission):
+    """A Nasabah, or a Pengurus joining a bank sampah as one (PIL-541).
+
+    Only the session's role is screened here. Whether the account may hold
+    the Nasabah role, and granting it, is `register_nasabah`'s job.
+    """
+
+    APPLICANT_ROLES = (User.Role.NASABAH, User.Role.PENGELOLA)
+    message = "Endpoint ini hanya untuk nasabah atau pengurus dengan profil lengkap"
+
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        return (
+            request.user.is_authenticated
+            and active_role(request) in self.APPLICANT_ROLES
+            and request.user.is_profile_complete
+        )
+
+
 class IsNasabahRole(BasePermission):
     """Like `IsNasabah`, but without the `is_profile_complete` requirement.
 

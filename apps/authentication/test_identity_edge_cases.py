@@ -173,15 +173,17 @@ class NasabahSelfRegistrationServiceTests(APITestCase):
             status=BankSampah.Status.ACTIVE,
         )
 
-    def test_only_nasabah_accounts_may_apply_for_membership(self) -> None:
-        pengelola = User.objects.create_user(
-            email="p@example.com", nama="Pengelola", role=User.Role.PENGELOLA
+    def test_only_nasabah_or_pengurus_accounts_may_apply_for_membership(self) -> None:
+        admin = User.objects.create_user(
+            email="p@example.com", nama="Admin", role=User.Role.SUPERADMIN, alamat="Jl. A"
         )
 
-        with self.assertRaisesRegex(PermissionError, "Hanya nasabah"):
-            register_nasabah(pengelola, {"bank_sampah_id": self.bank.id})
+        with self.assertRaisesRegex(PermissionError, "Hanya nasabah atau pengurus"):
+            register_nasabah(admin, {"bank_sampah_id": self.bank.id})
 
         self.assertFalse(Nasabah.objects.exists())
+        admin.refresh_from_db()
+        self.assertEqual(admin.roles, [User.Role.SUPERADMIN])
 
     def test_gives_up_when_no_free_member_number_can_be_found(self) -> None:
         # Number NAS-0002 is taken while the bank holds one row, so the next
