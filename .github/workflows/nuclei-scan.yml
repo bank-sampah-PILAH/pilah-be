@@ -11,12 +11,12 @@
 # no PR and never rolls back a deploy; it only flags the commit.
 #
 # No -dast: fuzzing a deployed environment can trigger WhatsApp/GCS and change data.
-# The target is a fixed choice, not a free URL. Only a workflow in this repo can pass
-# target_url (the production deploy does, with the URL it just read from Cloud Run).
-# Otherwise URLs come from repository variables
-# (Settings -> Secrets and variables -> Actions -> Variables):
-#   STAGING_API_URL      (required for staging)
-#   PRODUCTION_API_URL   (production cron and manual runs; the deploy passes its own)
+# The target is a fixed choice, not a free URL. Only a workflow in this repo can use this
+# one at all, and only those can pass target_url: the staging deploy passes its own URL and
+# the production deploy the URL it just read from Cloud Run. Cron and manual runs read
+# repository variables (Settings -> Secrets and variables -> Actions -> Variables):
+#   STAGING_API_URL      (staging cron and manual runs)
+#   PRODUCTION_API_URL   (production cron and manual runs)
 name: Nuclei scan
 
 on:
@@ -66,24 +66,31 @@ jobs:
     steps:
       - name: Resolve target
         run: |
+          # This workflow is reusable from a public repository. The target_url input and
+          # the repository variables both resolve in the caller's repository, so any other
+          # repository could point the scan at a host of its choosing.
+          if [ "$GITHUB_REPOSITORY" != "bank-sampah-PILAH/pilah-be" ]; then
+            echo "::error::This scan only runs from bank-sampah-PILAH/pilah-be, not '$GITHUB_REPOSITORY'."; exit 1
+          fi
           case "$ENVIRONMENT" in
             staging) url="$STAGING_API_URL" ;;
             production) url="$PRODUCTION_API_URL" ;;
             *) echo "::error::environment must be staging or production, got '$ENVIRONMENT'."; exit 1 ;;
           esac
-          # A caller (the production deploy) can pass the URL it just deployed.
+          # A caller (the staging and production deploys) passes the URL it just deployed.
           url="${TARGET_URL_INPUT:-$url}"
-          case "$url" in
-            https://*) ;;
-            *) echo "::error::Missing or non-HTTPS API URL for $ENVIRONMENT; set the ${ENVIRONMENT^^}_API_URL repository variable."; exit 1 ;;
-          esac
-          # Reduce the URL to host[:port]: a trailing slash, a path or an explicit port
-          # must not leak into the TLS target (host:443:443) or the result file names.
+          # Exactly https://host[:port] with an optional trailing slash. The result is written
+          # to $GITHUB_ENV one KEY=value per line, so a newline (or any other character
+          # outside this shape) must not get through, and a path or query is rejected rather
+          # than silently dropped, which would change what gets scanned. The value is not
+          # echoed back: it is untrusted and could carry workflow commands.
+          if ! [[ "$url" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?$ ]]; then
+            echo "::error::Missing or unsupported API URL for $ENVIRONMENT: expected https://host[:port] with no path, query, userinfo or IPv6 literal (repository variable ${ENVIRONMENT^^}_API_URL)."; exit 1
+          fi
+          # Reduce the URL to host[:port]: a trailing slash or an explicit port must not
+          # leak into the TLS target (host:443:443) or the result file names.
           hostport="${url#https://}"
-          hostport="${hostport%%[/?#]*}"
-          case "$hostport" in
-            ""|*@*|*\[*) echo "::error::Unsupported API URL '$url' (userinfo and IPv6 literals are not allowed)."; exit 1 ;;
-          esac
+          hostport="${hostport%/}"
           host="${hostport%%:*}"
           port=443
           case "$hostport" in *:*) port="${hostport#*:}" ;; esac
@@ -99,11 +106,13 @@ jobs:
 
       # A scan of an unreachable host finds nothing and would look green.
       # Cloud Run's frontend reserves /healthz and answers 404 itself, so production is
-      # checked on the API root instead: unauthenticated it answers 401 (or 200/403).
+      # checked on the API root instead: unauthenticated it answers 401 (or 200). A 403 is
+      # not accepted: it can be Cloud Run, IAP or a WAF answering instead of Django, and the
+      # scan would then inspect that error page and stay green without reaching the API.
       - name: Check target is up
         run: |
           if [ "$ENVIRONMENT" = production ]; then
-            path=/api/v1/; ok='^(200|401|403)$'
+            path=/api/v1/; ok='^(200|401)$'
           else
             path=/healthz; ok='^200$'
           fi
