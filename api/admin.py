@@ -1,5 +1,8 @@
+from typing import Any
+
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.contrib.auth.forms import AdminUserCreationForm, UserChangeForm
 from django.http import HttpRequest
 
 from api.models import (
@@ -16,8 +19,33 @@ from api.models import (
 )
 
 
+def _prepare_admin_roles(user: User, role: str) -> None:
+    # Admin exposes the primary role, not the assignment list. Prepare that
+    # hidden value before ModelForm calls User.clean(), preserving other roles.
+    if user._state.adding and user.roles == []:
+        user.roles = [role]
+    elif isinstance(user.roles, list) and role in User.Role.values and role not in user.roles:
+        user.roles = [*user.roles, role]
+
+
+class AssignedRolesCreationForm(AdminUserCreationForm):  # type: ignore[type-arg]
+    def clean(self) -> dict[str, Any] | None:
+        data = super().clean()
+        _prepare_admin_roles(self.instance, self.cleaned_data.get("role", self.instance.role))
+        return data
+
+
+class AssignedRolesChangeForm(UserChangeForm):  # type: ignore[type-arg]
+    def clean(self) -> dict[str, Any] | None:
+        data = super().clean()
+        _prepare_admin_roles(self.instance, self.cleaned_data.get("role", self.instance.role))
+        return data
+
+
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):  # type: ignore[type-arg]  # stubs are generic, runtime is not
+    add_form = AssignedRolesCreationForm
+    form = AssignedRolesChangeForm
     ordering = ("email",)
     list_display = (
         "email",
