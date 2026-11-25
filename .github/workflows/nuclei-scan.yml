@@ -58,7 +58,8 @@ jobs:
       group: nuclei-scan-${{ matrix.environment }}
       cancel-in-progress: false
     env:
-      NUCLEI_IMAGE: projectdiscovery/nuclei:v3.11.0
+      # Pinned by digest as well as tag: a tag can be moved by its owner, a digest cannot.
+      NUCLEI_IMAGE: projectdiscovery/nuclei:v3.11.0@sha256:e677842fb1f50f29747565ba274a1d35dcf8c684132a42b0cb406e71fccae9fc
       ENVIRONMENT: ${{ matrix.environment }}
       TARGET_URL_INPUT: ${{ inputs.target_url }}
       STAGING_API_URL: ${{ vars.STAGING_API_URL }}
@@ -123,8 +124,15 @@ jobs:
       - name: Fetch templates
         run: |
           mkdir -p nuclei-templates results
+          # Do not switch the update check off here: then -update-templates downloads
+          # nothing into an empty directory and still exits 0, so a fresh runner would
+          # scan with no templates.
           docker run --rm -v "$PWD/nuclei-templates":/root/nuclei-templates \
-            "$NUCLEI_IMAGE" -update-templates -duc -nc
+            "$NUCLEI_IMAGE" -update-templates -nc
+          # The container runs as root and creates the template directories as 0700
+          # root, so the runner user could not even test whether a template exists.
+          docker run --rm --entrypoint chmod -v "$PWD/nuclei-templates":/root/nuclei-templates \
+            "$NUCLEI_IMAGE" -R a+rX /root/nuclei-templates
 
       # A curated list, not -tags: tags pull in ~3,300 templates (~7,700 requests, over
       # an hour at a polite rate). These 16 http + 8 ssl templates make ~200 requests and
@@ -132,6 +140,10 @@ jobs:
       - name: Scan
         run: |
           http_templates=""
+          missing=""
+          # Nuclei only prints [ERR] for a template it cannot find and scans with the rest,
+          # which narrows coverage without a red run. Name what is missing instead.
+          need() { [ -f "nuclei-templates/$1.yaml" ] || missing="$missing $1"; }
           for t in \
             http/exposures/apis/swagger-api \
             http/misconfiguration/django-debug-config-enabled \
@@ -149,14 +161,17 @@ jobs:
             http/exposures/configs/exposed-vscode \
             http/exposures/configs/docker-compose-config \
             http/exposures/configs/dockerfile-hidden-disclosure; do
+            need "$t"
             http_templates="$http_templates,/root/nuclei-templates/$t.yaml"
           done
           ssl_templates=""
           for t in expired-ssl deprecated-tls weak-cipher-suites insecure-cipher-suite-detect \
                    self-signed-ssl mismatched-ssl-certificate revoked-ssl-certificate \
                    untrusted-root-certificate; do
+            need "ssl/$t"
             ssl_templates="$ssl_templates,/root/nuclei-templates/ssl/$t.yaml"
           done
+          [ -z "$missing" ] || { echo "::error::Templates missing from the downloaded set:$missing"; exit 1; }
           run_nuclei() {
             docker run --rm -v "$PWD/nuclei-templates":/root/nuclei-templates \
               -v "$PWD/results":/results "$NUCLEI_IMAGE" \
@@ -183,7 +198,8 @@ jobs:
 
       - name: Upload results
         if: always()
-        uses: actions/upload-artifact@v4
+        # Pinned to the v4.6.2 commit: a tag can be moved by its owner, a SHA cannot.
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: nuclei-results-${{ env.ENVIRONMENT }}
           path: results/
