@@ -100,6 +100,7 @@ class HapusPendaftaranBelumLengkapTests(APITestCase):
         bank = BankSampah.objects.create(nama="Bank Terkait", alamat="Depok", kota="Depok")
         # Keanggotaan hanya boleh mengikat akun berperan nasabah (models.clean).
         self.akun.role = User.Role.NASABAH
+        self.akun.roles = [User.Role.NASABAH]
         self.akun.save()
         Nasabah.objects.create(
             user=self.akun,

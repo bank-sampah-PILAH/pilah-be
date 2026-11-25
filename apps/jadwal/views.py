@@ -21,6 +21,7 @@ from apps.jadwal.api import schedule_recipients
 from apps.jadwal.serializers import JadwalKegiatanSerializer
 from apps.notification.api import queue_push_bulk
 from shared_kernel.permissions import IsActivePengelola, IsJadwalViewer
+from shared_kernel.roles import active_role
 
 
 def _user(request: Request) -> User:
@@ -84,7 +85,7 @@ class JadwalKegiatanViewSet(viewsets.ModelViewSet):  # type: ignore[type-arg]  #
     def get_queryset(self) -> QuerySet[JadwalKegiatan]:
         user = _user(self.request)
         queryset = JadwalKegiatan.objects.select_related("bank_sampah", "dibuat_oleh")
-        if user.role == User.Role.NASABAH:
+        if active_role(self.request) == User.Role.NASABAH:
             queryset = (
                 queryset.filter(
                     bank_sampah__status=BankSampah.Status.ACTIVE,

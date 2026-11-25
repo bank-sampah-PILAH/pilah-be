@@ -664,7 +664,7 @@ class APISpecTests(APITransactionTestCase):
             is_profile_complete=False,
         )
         view = cast(Any, JadwalKegiatanViewSet())
-        view.request = Mock(user=nasabah_user)
+        view.request = Mock(user=nasabah_user, auth=None)
         view.action = "list"
 
         queryset = view.get_queryset()

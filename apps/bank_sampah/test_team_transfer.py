@@ -59,6 +59,17 @@ class TeamTransferTests(APITestCase):
         self.assertTrue(members[1]["is_current_user"])
         self.assertEqual(members, self.client.get("/api/v1/team").json()["members"])
 
+    def test_transfer_accepts_assigned_pengurus_with_nasabah_primary(self) -> None:
+        self.other.role = User.Role.NASABAH
+        self.other.roles = [User.Role.NASABAH, User.Role.PENGELOLA]
+        self.other.save(update_fields=["role", "roles"])
+        response = self._as(self.owner).post(URL, {"id": str(self.other.pk)}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self._primaries(), [self.other])
+        self.other.refresh_from_db()
+        self.assertEqual(self.other.role, User.Role.NASABAH)
+        self.assertEqual(self.other.roles, [User.Role.NASABAH, User.Role.PENGELOLA])
+
     def test_new_primary_is_notified_without_naming_anyone(self) -> None:
         self._as(self.owner).post(URL, {"id": str(self.other.id)}, format="json")
 

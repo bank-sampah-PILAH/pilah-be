@@ -41,6 +41,8 @@ class CreateSuperadminCommandTests(TestCase):
         self.assertEqual(User.objects.filter(email="root@example.test").count(), 1)
         self.assertEqual(user.role, User.Role.SUPERADMIN)
         self.assertEqual(user.nama, "SuperAdmin PILAH")
+        self.assertIn(User.Role.SUPERADMIN, user.roles)
+        self.assertIn(User.Role.NASABAH, user.roles)
         self.assertTrue(user.check_password("new-password"))
         self.assertIn("Updated SuperAdmin root@example.test", out.getvalue())
 

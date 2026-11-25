@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 import requests
 from django.conf import settings
@@ -34,10 +34,12 @@ from shared_kernel.keluaran_dokumen import LITERAL_SKRIP, TEKS_HTML
 from shared_kernel.permissions import (
     IsRegistrationRole,
 )
+from shared_kernel.roles import token_role
 from shared_kernel.scoping import current_user
 
 # Local page a finished OAuth popup redirects to when no `next` URL survives.
 _OAUTH_FALLBACK_PATH = "/api-test/"
+REFRESH_TOKEN_INVALID_MESSAGE = "Refresh token invalid / expired"
 
 
 def _local_next_path(value: str) -> str:
@@ -190,22 +192,24 @@ class RefreshTokenView(APIView):
     def post(self, request: Request) -> Response:
         raw_refresh = request.data.get("refresh_token")  # type: ignore[union-attr]  # DRF types request.data as dict | list; these payloads are objects
         if not raw_refresh:
-            return Response({"error": "Refresh token invalid / expired"}, status=401)
+            return Response({"error": REFRESH_TOKEN_INVALID_MESSAGE}, status=401)
         try:
             refresh = RefreshToken(raw_refresh)
             access = refresh.access_token
             user = User.objects.filter(id=refresh["user_id"]).first()
-            if user:
+            if user and user.is_active:
                 AuthService._enforce_superadmin_allowlist(user, user.email)
                 if user.bank_sampah_id:
                     access["bank_sampah_id"] = str(user.bank_sampah_id)
-                access["role"] = user.role
+                access["role"] = token_role(user, refresh)
                 access["email"] = user.email
+            else:
+                return Response({"error": REFRESH_TOKEN_INVALID_MESSAGE}, status=401)
             return Response({"access_token": str(access), "expires_in": 86400})
         except AuthServiceError as exc:
             return Response({"error": str(exc), "code": exc.code}, status=exc.status_code)
         except Exception:
-            return Response({"error": "Refresh token invalid / expired"}, status=401)
+            return Response({"error": REFRESH_TOKEN_INVALID_MESSAGE}, status=401)
 
 
 class LogoutView(APIView):
@@ -226,7 +230,9 @@ class AuthMeView(APIView):
 
     def get(self, request: Request) -> Response:
         data = AuthUserSerializer(current_user(request)).data
-        data["state"] = AuthService.user_state(current_user(request))
+        role = token_role(current_user(request), request.auth)
+        data["role"] = role
+        data["state"] = AuthService.user_state(current_user(request), active_role=role)
         return Response(data)
 
 
@@ -235,16 +241,29 @@ class CompleteProfileView(APIView):
     serializer_class = UserProfileSerializer
 
     def put(self, request: Request) -> Response:
-        serializer = UserProfileSerializer(current_user(request), data=request.data, partial=True)
+        auth = cast(Any, request.auth)  # SimpleJWT's Token stub omits its mapping API.
+        role = (
+            token_role(current_user(request), auth)
+            if auth is not None and auth.get("role") is not None
+            else None
+        )
+        serializer = UserProfileSerializer(
+            current_user(request),
+            data=request.data,
+            partial=True,
+            context={"active_role": token_role(current_user(request), request.auth)},
+        )
         serializer.is_valid(raise_exception=True)
         try:
             user = OnboardingService.complete_profile(
-                current_user(request), serializer.validated_data
+                current_user(request), serializer.validated_data, active_role=role
             )
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         data = UserProfileSerializer(user).data
-        data["next_step"] = AuthService.user_state(user)
+        role = token_role(user, request.auth)
+        data["role"] = role
+        data["next_step"] = AuthService.user_state(user, active_role=role)
         return Response(data)
 
 

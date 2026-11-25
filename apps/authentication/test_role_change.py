@@ -13,6 +13,32 @@ URL = "/api/v1/onboarding/role"
 
 
 class RoleChangeTests(APITestCase):
+    def test_correction_to_an_assigned_role_preserves_other_assignments(self) -> None:
+        user = User.objects.create_user(
+            email="dual-correction@example.com", roles=[User.Role.PENGELOLA, User.Role.NASABAH]
+        )
+        AuthService.change_role(user, User.Role.NASABAH)
+        user.refresh_from_db()
+        self.assertEqual(user.roles, [User.Role.PENGELOLA, User.Role.NASABAH])
+        self.assertEqual(user.role, User.Role.NASABAH)
+
+    def test_corrected_role_assignments_and_tokens_remain_consistent(self) -> None:
+        user = self._fresh()
+        self.client.force_authenticate(user)
+        response = self.client.patch(URL, {"role": User.Role.NASABAH}, format="json")
+        self.assertEqual(response.status_code, 200)
+        user.refresh_from_db()
+        self.assertEqual(user.roles, [User.Role.NASABAH])
+        self.client.force_authenticate(None)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access_token']}")
+        self.assertEqual(self.client.get("/api/v1/auth/me").status_code, 200)
+        refresh = self.client.post(
+            "/api/v1/auth/refresh", {"refresh_token": response.data["refresh_token"]}, format="json"
+        )
+        self.assertEqual(refresh.status_code, 200)
+        self.assertEqual(AccessToken(refresh.data["access_token"])["role"], User.Role.NASABAH)
+        self.assertEqual(user.role_change_logs.count(), 1)
+
     def _fresh(self, role: str = User.Role.PENGELOLA) -> User:
         return User.objects.create_user(email=f"{role}@example.com", nama="Baru", role=role)
 
@@ -164,7 +190,9 @@ class RoleChangeTests(APITestCase):
             alamat="Jl. Mawar",
         )
         stale = User.objects.get(pk=user.pk)
-        User.objects.filter(pk=user.pk).update(role=User.Role.PENGELOLA)
+        User.objects.filter(pk=user.pk).update(
+            role=User.Role.PENGELOLA, roles=[User.Role.PENGELOLA]
+        )
         verify.return_value = {
             "sub": "google-stale",
             "email": user.email,

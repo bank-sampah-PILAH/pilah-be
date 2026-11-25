@@ -228,9 +228,7 @@ if DEBUG:
 
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": tuple(_RENDERER),
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
-    ),
+    "DEFAULT_AUTHENTICATION_CLASSES": ("shared_kernel.authentication.RoleJWTAuthentication",),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_PAGINATION_CLASS": "shared_kernel.pagination.StandardPagination",
     "PAGE_SIZE": 20,

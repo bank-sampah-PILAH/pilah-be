@@ -82,7 +82,7 @@ class BankOnboardingService:
     @transaction.atomic
     def register_bank_sampah(user: User, payload: Mapping[str, Any]) -> BankSampah:
         lock_for_onboarding(user)
-        if user.role != User.Role.PENGELOLA:
+        if User.Role.PENGELOLA not in user.roles:
             raise PermissionError("Hanya pengelola yang dapat mendaftarkan bank sampah")
         bank = user.bank_sampah
         if bank and bank.status == BankSampah.Status.ACTIVE:
@@ -103,7 +103,7 @@ class BankOnboardingService:
         user.bank_sampah = bank
         user.is_primary_pengelola = True
         user.save(update_fields=["bank_sampah", "is_primary_pengelola", "updated_at"])
-        for admin in User.objects.filter(role=User.Role.SUPERADMIN, is_active=True):
+        for admin in User.objects.with_role(User.Role.SUPERADMIN).filter(is_active=True):
             queue_push(
                 admin,
                 title="Pendaftaran bank sampah baru",
@@ -122,7 +122,7 @@ class BankOnboardingService:
             raise ValueError("Tautan undangan tidak valid atau sudah kedaluwarsa")
         if bank.status != BankSampah.Status.ACTIVE or not bank.is_active:
             raise ValueError("Undangan tidak dapat digunakan karena bank sampah tidak aktif")
-        if user.role != User.Role.PENGELOLA:
+        if User.Role.PENGELOLA not in user.roles:
             raise PermissionError("Hanya pengelola yang dapat menerima undangan")
         if user.bank_sampah_id == bank.id:
             return bank, "already_member"
@@ -174,8 +174,9 @@ class TeamService:
             if target_id == current.pk:
                 raise ValueError("Tidak dapat menyerahkan jabatan kepada diri sendiri")
             target = (
-                User.objects.select_for_update()
-                .filter(pk=target_id, bank_sampah=bank, role=User.Role.PENGELOLA, is_active=True)
+                User.objects.with_role(User.Role.PENGELOLA)
+                .select_for_update()
+                .filter(pk=target_id, bank_sampah=bank, is_active=True)
                 .first()
             )
             if target is None:
@@ -215,8 +216,9 @@ class TeamService:
             if not current.is_primary_pengelola or current.bank_sampah_id != bank.pk:
                 raise PermissionError("Hanya Pengurus Utama yang dapat mengeluarkan pengurus")
             member = (
-                User.objects.select_for_update()
-                .filter(pk=member_id, bank_sampah=bank, role=User.Role.PENGELOLA, is_active=True)
+                User.objects.with_role(User.Role.PENGELOLA)
+                .select_for_update()
+                .filter(pk=member_id, bank_sampah=bank, is_active=True)
                 .first()
             )
             if member is None:

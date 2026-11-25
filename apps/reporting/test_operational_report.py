@@ -228,7 +228,8 @@ class OperationalReportTests(OperationalReportFixture):
     def test_nasabah_superadmin_and_anonymous_are_denied(self) -> None:
         for role in (User.Role.NASABAH, User.Role.SUPERADMIN):
             self.manager.role = role
-            self.manager.save(update_fields=["role"])
+            self.manager.roles = [role]
+            self.manager.save(update_fields=["role", "roles"])
             for url in (self.feed_url, self.export_url):
                 self.assertEqual(self.client.get(url, self.params).status_code, 403)
         self.client.force_authenticate(None)

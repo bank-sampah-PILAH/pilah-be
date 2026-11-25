@@ -17,6 +17,7 @@ from shared_kernel.permissions import (
     is_app_superadmin_allowlisted,
     superadmin_allowlist,
 )
+from shared_kernel.roles import token_role
 
 REGISTRATION_TOKEN_MAX_AGE = 600
 REGISTRATION_TOKEN_SALT = "pilah-google-registration"
@@ -109,7 +110,14 @@ class AuthService:
                 )
             previous = user.role
             if previous != role:
-                User.objects.filter(pk=user.pk).update(role=role, updated_at=timezone.now())
+                roles = (
+                    user.roles
+                    if role in user.roles
+                    else [role if assigned == previous else assigned for assigned in user.roles]
+                )
+                User.objects.filter(pk=user.pk).update(
+                    role=role, roles=roles, updated_at=timezone.now()
+                )
                 UserRoleChangeLog.objects.create(user=user, from_role=previous, to_role=role)
         user.refresh_from_db()
         return AuthService._session_response(user, is_new_user=False)
@@ -295,6 +303,7 @@ class AuthService:
     @staticmethod
     def _session_response(user: User, *, is_new_user: bool) -> dict[str, Any]:
         refresh = RefreshToken.for_user(user)
+        refresh["role"] = user.role
         access = refresh.access_token
         if user.bank_sampah_id:
             access["bank_sampah_id"] = str(user.bank_sampah_id)
@@ -347,7 +356,7 @@ class AuthService:
         lock and decides on the role it reads under it. Logins with nothing
         to claim skip the lock.
         """
-        if user.role != User.Role.NASABAH:
+        if User.Role.NASABAH not in user.roles:
             return
         nasabah = Nasabah.objects.filter(
             email__iexact=user.email, is_active=True, user__isnull=True
@@ -358,18 +367,19 @@ class AuthService:
         # claim the record meanwhile, and linking it to itself again is harmless.
         with transaction.atomic():
             OnboardingService.lock_account(user)
-            if user.role != User.Role.NASABAH:
+            if User.Role.NASABAH not in user.roles:
                 return
             nasabah.user = user
             nasabah.save(update_fields=["user", "updated_at"])
 
     @staticmethod
-    def user_state(user: User) -> str:
-        if user.role == User.Role.SUPERADMIN:
+    def user_state(user: User, *, active_role: str | None = None) -> str:
+        role = active_role if active_role is not None else user.role
+        if role == User.Role.SUPERADMIN:
             return "superadmin_dashboard"
         if not user.is_profile_complete:
             return "complete_profile"
-        if user.role == User.Role.NASABAH:
+        if role == User.Role.NASABAH:
             # Routing doesn't gate on approval: a membership application, once
             # submitted, sends the user straight to their own beranda
             # regardless of status. Pending/rejected states — and appealing a
@@ -484,16 +494,19 @@ class OnboardingService:
 
     @staticmethod
     @transaction.atomic
-    def complete_profile(user: User, profile_data: Mapping[str, Any]) -> User:
+    def complete_profile(
+        user: User, profile_data: Mapping[str, Any], *, active_role: str | None = None
+    ) -> User:
         # A completed profile commits the account to its role, so this takes
         # the role-change lock too (PIL-451). The reload also means the
         # checks below, and the role the caller answers with, are the
         # account's current ones, not those of the object the request loaded.
         OnboardingService.lock_account(user)
+        role = token_role(user, {"role": active_role} if active_role is not None else None)
         # One-shot for pengelola, whose profile step gates their bank
         # registration. A nasabah owns their profile and may re-submit it at
         # any time, whatever their membership status.
-        if user.is_profile_complete and user.role != User.Role.NASABAH:
+        if user.is_profile_complete and role != User.Role.NASABAH:
             raise ValueError("Profil sudah lengkap")
         for field, value in profile_data.items():
             setattr(user, field, value)
@@ -565,7 +578,7 @@ class OnboardingService:
     @transaction.atomic
     def register_nasabah(user: User, payload: Mapping[str, Any]) -> Nasabah:
         OnboardingService.lock_account(user)
-        if user.role != User.Role.NASABAH:
+        if User.Role.NASABAH not in user.roles:
             raise PermissionError("Hanya nasabah yang dapat mengajukan keanggotaan")
         if not user.alamat.strip():
             raise ValueError("Lengkapi alamat pada profil Anda terlebih dahulu")

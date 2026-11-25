@@ -55,7 +55,7 @@ class BankSampahSerializer(serializers.ModelSerializer[Model]):
         return validate_image_upload(value, "Foto logo")
 
     def get_pengelola(self, obj: Any) -> Any:
-        user = obj.users.filter(role="pengelola", is_active=True).first()
+        user = obj.users.with_role("pengelola").filter(is_active=True).first()
         if not user:
             return None
         return {"id": str(user.id), "nama": user.nama, "email": user.email}
