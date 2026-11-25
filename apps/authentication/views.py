@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 import requests
 from django.conf import settings
@@ -239,9 +239,10 @@ class CompleteProfileView(APIView):
     serializer_class = UserProfileSerializer
 
     def put(self, request: Request) -> Response:
+        auth = cast(Any, request.auth)  # SimpleJWT's Token stub omits its mapping API.
         role = (
-            token_role(current_user(request), request.auth)
-            if request.auth is not None and "role" in request.auth
+            token_role(current_user(request), auth)
+            if auth is not None and auth.get("role") is not None
             else None
         )
         serializer = UserProfileSerializer(
