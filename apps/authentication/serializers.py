@@ -59,7 +59,10 @@ class UserProfileSerializer(ProfilFieldRules, serializers.ModelSerializer[Model]
         # pengelola give their organization's address on a
         # separate step and have no use for a personal one here.
         instance = self.instance
-        if isinstance(instance, User) and instance.role == User.Role.NASABAH:
+        if (
+            isinstance(instance, User)
+            and self.context.get("active_role", instance.role) == User.Role.NASABAH
+        ):
             alamat = attrs.get("alamat", instance.alamat).strip()
             if not alamat:
                 raise serializers.ValidationError({"alamat": "Alamat wajib diisi"})

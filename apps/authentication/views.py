@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 import requests
 from django.conf import settings
@@ -266,16 +266,29 @@ class CompleteProfileView(APIView):
     serializer_class = UserProfileSerializer
 
     def put(self, request: Request) -> Response:
-        serializer = UserProfileSerializer(current_user(request), data=request.data, partial=True)
+        auth = cast(Any, request.auth)  # SimpleJWT's Token stub omits its mapping API.
+        role = (
+            token_role(current_user(request), auth)
+            if auth is not None and auth.get("role") is not None
+            else None
+        )
+        serializer = UserProfileSerializer(
+            current_user(request),
+            data=request.data,
+            partial=True,
+            context={"active_role": token_role(current_user(request), request.auth)},
+        )
         serializer.is_valid(raise_exception=True)
         try:
             user = OnboardingService.complete_profile(
-                current_user(request), serializer.validated_data
+                current_user(request), serializer.validated_data, active_role=role
             )
         except ValueError as exc:
             return Response({"error": str(exc)}, status=400)
         data = UserProfileSerializer(user).data
-        data["next_step"] = AuthService.user_state(user)
+        role = token_role(user, request.auth)
+        data["role"] = role
+        data["next_step"] = AuthService.user_state(user, active_role=role)
         return Response(data)
 
 
