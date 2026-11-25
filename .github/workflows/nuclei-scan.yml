@@ -135,7 +135,7 @@ jobs:
             "$NUCLEI_IMAGE" -R a+rX /root/nuclei-templates
 
       # A curated list, not -tags: tags pull in ~3,300 templates (~7,700 requests, over
-      # an hour at a polite rate). These 16 http + 8 ssl templates make ~200 requests and
+      # an hour at a polite rate). These 17 http + 8 ssl templates (plus one cookie check) make ~200 requests and
       # finish in about a minute.
       - name: Scan
         run: |
@@ -155,6 +155,7 @@ jobs:
             http/vulnerabilities/generic/cors-misconfig \
             http/vulnerabilities/generic/open-redirect-generic \
             http/vulnerabilities/generic/host-header-injection \
+            http/miscellaneous/http-trace \
             http/vulnerabilities/generic/generic-env \
             http/exposures/configs/exposed-gitignore \
             http/exposures/configs/git-config \
@@ -171,6 +172,7 @@ jobs:
             need "ssl/$t"
             ssl_templates="$ssl_templates,/root/nuclei-templates/ssl/$t.yaml"
           done
+          need http/misconfiguration/cookies-without-secure
           [ -z "$missing" ] || { echo "::error::Templates missing from the downloaded set:$missing"; exit 1; }
           run_nuclei() {
             docker run --rm -v "$PWD/nuclei-templates":/root/nuclei-templates \
@@ -179,6 +181,12 @@ jobs:
           }
           run_nuclei -u "$TARGET" -t "${http_templates#,}" -o "/results/$RESULT_NAME-http.jsonl"
           run_nuclei -u "$TLS_TARGET" -t "${ssl_templates#,}" -o "/results/$RESULT_NAME-ssl.jsonl"
+          # The only cookie the API sends is Django's CSRF cookie on the admin login page,
+          # and this template only inspects the URL it is given, so point it there. On the
+          # API root it would find nothing and prove nothing.
+          run_nuclei -u "$TARGET/admin/login/" \
+            -t /root/nuclei-templates/http/misconfiguration/cookies-without-secure.yaml \
+            -o "/results/$RESULT_NAME-cookies.jsonl"
 
       - name: Summary
         if: always()
