@@ -223,10 +223,11 @@ class RefreshTokenView(APIView):
             access = refresh.access_token
             user = User.objects.filter(id=refresh["user_id"]).first()
             if user and user.is_active:
-                AuthService._enforce_superadmin_allowlist(user, user.email)
+                role = token_role(user, refresh)
+                AuthService._enforce_superadmin_allowlist(user, user.email, active_role=role)
                 if user.bank_sampah_id:
                     access["bank_sampah_id"] = str(user.bank_sampah_id)
-                access["role"] = token_role(user, refresh)
+                access["role"] = role
                 access["email"] = user.email
             else:
                 return Response({"error": REFRESH_TOKEN_INVALID_MESSAGE}, status=401)

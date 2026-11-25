@@ -108,8 +108,10 @@ class SwitchRoleTest(TestCase):
     )
     def test_secondary_superadmin_refresh_enforces_allowlist_after_successful_switch(self) -> None:
         account = User.objects.create_user(
-            email="secondary-admin@example.com", role=User.Role.NASABAH,
-            roles=[User.Role.NASABAH, User.Role.SUPERADMIN], is_profile_complete=True,
+            email="secondary-admin@example.com",
+            role=User.Role.NASABAH,
+            roles=[User.Role.NASABAH, User.Role.SUPERADMIN],
+            is_profile_complete=True,
         )
         access = AccessToken.for_user(account)
         access["role"] = User.Role.NASABAH
@@ -127,7 +129,9 @@ class SwitchRoleTest(TestCase):
         self.assertFalse(account.is_superuser)
         with self.settings(PILAH_SUPERADMIN_EMAILS=()):
             refreshed = APIClient().post(
-                "/api/v1/auth/refresh", {"refresh_token": switched.data["refresh_token"]}, format="json"
+                "/api/v1/auth/refresh",
+                {"refresh_token": switched.data["refresh_token"]},
+                format="json",
             )
         self.assertEqual(refreshed.status_code, 403)
         self.assertEqual(refreshed.data["code"], "superadmin_not_allowlisted")
