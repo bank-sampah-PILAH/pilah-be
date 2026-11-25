@@ -103,6 +103,36 @@ class SwitchRoleTest(TestCase):
                 self.assertNotIn("access_token", response.data)
                 self.assertEqual(OutstandingToken.objects.count(), count)
 
+    @override_settings(
+        PILAH_SUPERADMIN_EMAILS=("secondary-admin@example.com",), PILAH_REVIEW_SUPERADMIN_EMAILS=()
+    )
+    def test_secondary_superadmin_refresh_enforces_allowlist_after_successful_switch(self) -> None:
+        account = User.objects.create_user(
+            email="secondary-admin@example.com", role=User.Role.NASABAH,
+            roles=[User.Role.NASABAH, User.Role.SUPERADMIN], is_profile_complete=True,
+        )
+        access = AccessToken.for_user(account)
+        access["role"] = User.Role.NASABAH
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+        switched = self.client.post(
+            "/api/v1/auth/switch-role", {"role": User.Role.SUPERADMIN}, format="json"
+        )
+        self.assertEqual(switched.status_code, 200)
+        self.assertEqual(AccessToken(switched.data["access_token"])["role"], User.Role.SUPERADMIN)
+        self.assertEqual(RefreshToken(switched.data["refresh_token"])["role"], User.Role.SUPERADMIN)
+        self.assertEqual(switched.data["next_step"], "superadmin_dashboard")
+        account.refresh_from_db()
+        self.assertEqual(account.role, User.Role.NASABAH)
+        self.assertFalse(account.is_staff)
+        self.assertFalse(account.is_superuser)
+        with self.settings(PILAH_SUPERADMIN_EMAILS=()):
+            refreshed = APIClient().post(
+                "/api/v1/auth/refresh", {"refresh_token": switched.data["refresh_token"]}, format="json"
+            )
+        self.assertEqual(refreshed.status_code, 403)
+        self.assertEqual(refreshed.data["code"], "superadmin_not_allowlisted")
+        self.assertNotIn("access_token", refreshed.data)
+
     def test_switch_responses_cannot_be_cached_including_errors(self) -> None:
         for payload, expected in (
             ({"role": "nasabah"}, 200),
