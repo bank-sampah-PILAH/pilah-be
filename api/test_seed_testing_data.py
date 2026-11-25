@@ -26,6 +26,20 @@ from apps.waste_catalog.services import catat_harga
 
 
 class SeedTestingDataCommandTests(TestCase):
+    def test_reseeding_fixture_primary_role_preserves_existing_assignments(self) -> None:
+        account = User.objects.create_user(
+            pk=CUSTOMER_ONE_ID, email="reseed@example.com", role=User.Role.NASABAH
+        )
+        for _ in range(2):
+            seeded = Command._upsert_user(
+                user_id=account.pk, email=account.email, name="Fixture User",
+                role=User.Role.PENGELOLA, bank=None, is_primary=False,
+            )
+            self.assertEqual(seeded.pk, account.pk)
+            seeded.refresh_from_db()
+            self.assertEqual(seeded.role, User.Role.PENGELOLA)
+            self.assertEqual(seeded.roles, [User.Role.NASABAH, User.Role.PENGELOLA])
+
     @staticmethod
     def _parse_seed_arguments(*arguments: str) -> Namespace:
         parser = ArgumentParser()
