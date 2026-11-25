@@ -81,7 +81,14 @@ def authenticate(path: Path, base: str, interval: float = 16) -> None:
         print(f"Authenticated account {index + 1}/{len(manifest['accounts'])}", flush=True)
 
 
-def fixture(args: argparse.Namespace, action: str, expected: int | None = None) -> dict[str, Any]:
+def fixture(
+    args: argparse.Namespace,
+    action: str,
+    expected: int | None = None,
+    *,
+    expected_drafts: int | None = None,
+    expected_payouts: int | None = None,
+) -> dict[str, Any]:
     run_id = validate_run_id(args.run_id)
     try:
         action = FIXTURE_ACTIONS[action]
@@ -106,6 +113,10 @@ def fixture(args: argparse.Namespace, action: str, expected: int | None = None) 
     ]
     if expected is not None:
         command += ["--expected-writes", str(expected)]
+    if expected_drafts is not None:
+        command += ["--expected-drafts", str(expected_drafts)]
+    if expected_payouts is not None:
+        command += ["--expected-payouts", str(expected_payouts)]
     if base_url == STAGING:
         source = (
             "import os,sys; sys.path.insert(0, '/app'); "
@@ -272,7 +283,15 @@ def run_trial(
     expected = (
         int(metrics.get("new_writes", {}).get("values", {}).get("count", 0)) + args.probe_writes
     )
-    audit = fixture(args, "audit", expected)
+    expected_drafts = int(metrics.get("payout_drafts", {}).get("values", {}).get("count", 0))
+    expected_payouts = int(metrics.get("payout_writes", {}).get("values", {}).get("count", 0))
+    audit = fixture(
+        args,
+        "audit",
+        expected,
+        expected_drafts=expected_drafts,
+        expected_payouts=expected_payouts,
+    )
     private_write(folder / "audit.json", audit)
     snapshot(folder / "after.json")
     passed = result.returncode == 0 and audit["integrity_errors"] == 0

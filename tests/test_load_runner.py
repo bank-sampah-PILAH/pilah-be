@@ -215,10 +215,15 @@ class LoadRunnerTests(SimpleTestCase):
                 return_value=CompletedProcess([], 0, stdout='{"run_id":"test-run"}\n', stderr=""),
             ) as run,
         ):
-            self.assertEqual(runner.fixture(args, "audit", expected=3), {"run_id": "test-run"})
+            self.assertEqual(
+                runner.fixture(args, "audit", expected=3, expected_drafts=2, expected_payouts=1),
+                {"run_id": "test-run"},
+            )
         command = run.call_args.args[0]
         self.assertEqual(command[:5], ["flyctl", "ssh", "console", "--app", runner.APP])
         self.assertIn("--expected-writes 3", command[-1])
+        self.assertIn("--expected-drafts 2", command[-1])
+        self.assertIn("--expected-payouts 1", command[-1])
         self.assertIs(run.call_args.kwargs["shell"], False)
 
     def test_staging_fixture_stops_before_access_when_health_check_fails(self) -> None:
@@ -266,6 +271,26 @@ class LoadRunnerTests(SimpleTestCase):
             runner._build_trials(args),
             [("realistic", 20, "probe-20-nasabah", "separate", "pengelola")],
         )
+
+    def test_pil529_journeys_validate_business_scope_and_export_types(self) -> None:
+        source = (Path(__file__).parent / "load" / "journeys.js").read_text()
+        for contract in (
+            "function managerJourneys(account)",
+            "function correctionJourneys(account, slot)",
+            "function teamJourney(account)",
+            "pencairan_batch_draft",
+            "pencairan_single_draft",
+            "pencairan_confirm",
+            "pencairan_history",
+            "row.data.bank_sampah_id === manifest.bank_id",
+            "response.headers['Content-Type'].includes(contentType)",
+            "voided.status !== 'dibatalkan'",
+            "joined.body.bank_sampah_id !== manifest.bank_id",
+            "nasabah/me/riwayat/export-pdf",
+            "transaksi/export?${query}",
+        ):
+            with self.subTest(contract=contract):
+                self.assertIn(contract, source)
 
     def test_local_trial_audits_writes_and_saves_result(self) -> None:
         with TemporaryDirectory() as folder:
@@ -425,7 +450,7 @@ class LoadRunnerTests(SimpleTestCase):
 
     def test_staging_trial_stops_monitor_and_counts_actual_client_writes(self) -> None:
         def make_fixture(recorded: list[tuple[str, tuple[Any, ...]]]) -> Any:
-            def fixture(_args: Any, action: str, *values: Any) -> dict[str, Any]:
+            def fixture(_args: Any, action: str, *values: Any, **_kwargs: Any) -> dict[str, Any]:
                 recorded.append((action, values))
                 return {"integrity_errors": 0}
 

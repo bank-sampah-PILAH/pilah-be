@@ -67,6 +67,14 @@ const ordinaryActions = [
   'jadwal', 'pengurus_history', 'nasabah_home', 'nasabah_balance', 'nasabah_history',
   'transaction_detail', 'nasabah_picker', 'jadwal_calendar',
 ];
+const managerActions = [
+  'period_report', 'excel_export', 'setoran_edit', 'setoran_void',
+  'pencairan_single_draft', 'pencairan_batch_draft', 'pencairan_confirm', 'pencairan_history',
+  'team', 'team_invite', 'team_transfer', 'team_remove', 'team_rejoin',
+];
+const customerActions = ['nasabah_bank', 'bank_directory', 'pdf_export'];
+const draftWrites = new Counter('payout_drafts');
+const payoutWrites = new Counter('payout_writes');
 const actionLatency = new Trend('action_latency', true);
 const failures = new Rate('action_failure');
 const samples = new Counter('action_samples');
@@ -81,16 +89,16 @@ if (mode === 'realistic') {
   thresholds['action_failure{action:login,phase:steady}'] = ['rate<0.01'];
   thresholds['action_samples{action:login,phase:steady}'] = ['count>0'];
 }
-let expectedActions = ordinaryActions;
+let expectedActions = [...ordinaryActions];
+if (selected.some(a => a.role === 'pengelola')) expectedActions.push(...managerActions);
+if (selected.some(a => a.role === 'nasabah')) expectedActions.push(...customerActions);
 if (users === 1) {
-  const pengurusSmoke = selected[0].role === 'pengelola';
-  expectedActions = ordinaryActions.filter(action => {
-    if (pengurusSmoke) return !action.startsWith('nasabah_h') && action !== 'nasabah_balance';
-    return ['auth_me', 'jadwal', 'nasabah_home', 'nasabah_balance', 'nasabah_history', 'jadwal_calendar'].includes(action);
-  });
+  expectedActions = selected[0].role === 'pengelola'
+    ? [...ordinaryActions.filter(action => !['nasabah_home', 'nasabah_balance', 'nasabah_history'].includes(action)), ...managerActions]
+    : ['login', 'auth_me', 'jadwal', 'nasabah_home', 'nasabah_balance', 'nasabah_history', 'jadwal_calendar', ...customerActions];
 }
 for (const action of [...expectedActions, ...(selected.some(a => a.role === 'pengelola') ? ['setoran'] : []), ...(burst ? ['recipient_balance', 'idempotency_replay'] : [])]) {
-  const limit = ['setoran', 'idempotency_replay'].includes(action) ? 2000 : 1000;
+  const limit = ['setoran', 'idempotency_replay', 'excel_export', 'pdf_export'].includes(action) ? 10000 : 1000;
   // Burst cases intentionally exercise only saves, balance checks and Nasabah reads.
   if (burst && !['setoran', 'auth_me', 'nasabah_home', 'nasabah_balance', 'nasabah_history', 'jadwal', 'jadwal_calendar', 'recipient_balance', 'idempotency_replay'].includes(action)) continue;
   thresholds[`action_latency{action:${action},phase:steady}`] = [`p(95)<=${limit}`];
@@ -125,7 +133,8 @@ export function setup() {
     [pengurus, `/nasabah/${manifest.recipient_ids[0]}`], [pengurus, '/jenis-sampah'],
     [pengurus, '/jadwal'], [pengurus, '/aktivitas'],
     [nasabah, '/nasabah/me/beranda'], [nasabah, '/nasabah/me/saldo'],
-    [nasabah, '/nasabah/me/riwayat'],
+    [nasabah, '/nasabah/me/riwayat'], [nasabah, '/nasabah/me/bank-sampah'],
+    [nasabah, '/bank-sampah'], [pengurus, '/team'],
   ];
   for (const [account, path] of endpoints) {
     const r = http.get(`${base}${path}`, {
@@ -147,24 +156,40 @@ function phase() {
   if (elapsed < 360000) return 'steady';
   return 'drain';
 }
-function request(account, action, path, payload, key) {
+function request(account, action, path, payload, key, method) {
   const tags = { action, phase: phase(), role: account.role };
   const params = {
     headers: { Authorization: `Bearer ${account.access_token}`, 'Content-Type': 'application/json' },
     tags: { ...tags, name: action }, timeout: '15s', redirects: 0,
   };
   if (key) params.headers['Idempotency-Key'] = key;
-  const response = payload === undefined ? http.get(`${base}${path}`, params) :
-    http.post(`${base}${path}`, JSON.stringify(payload), params);
+  const response = http.request(method || (payload === undefined ? 'GET' : 'POST'),
+    `${base}${path}`, payload === undefined ? null : JSON.stringify(payload), params);
   let body;
-  try { body = response.json(); } catch (_) { body = null; }
-  const ok = response.status >= 200 && response.status < 300 && body !== null;
+  try { body = response.json(); } catch { body = null; }
+  const ok = response.status >= 200 && response.status < 300 && (body !== null || response.status === 204);
   actionLatency.add(response.timings.duration, tags);
   samples.add(1, tags);
   failures.add(!ok, tags);
   check(response, { [`${action}: successful response`]: () => ok });
   if (!ok) exec.test.abort(`${action} failed with HTTP ${response.status}; inspect redacted metrics`);
-  return { body, status: response.status };
+  return { body, status: response.status, response };
+}
+function requestFile(account, action, path, contentType) {
+  const tags = { action, phase: phase(), role: account.role };
+  const response = http.get(`${base}${path}`, {
+    headers: { Authorization: `Bearer ${account.access_token}` },
+    tags: { ...tags, name: action }, timeout: '30s', redirects: 0,
+  });
+  const ok = response.status === 200 && response.body.length > 0 &&
+    response.headers['Content-Type'].includes(contentType) &&
+    Boolean(response.headers['Content-Disposition']);
+  actionLatency.add(response.timings.duration, tags);
+  samples.add(1, tags);
+  failures.add(!ok, tags);
+  check(response, { [`${action}: valid export`]: () => ok });
+  if (!ok) exec.test.abort(`${action} failed with HTTP ${response.status}; inspect redacted metrics`);
+  return response;
 }
 function rows(body) {
   if (Array.isArray(body)) return body;
@@ -183,6 +208,9 @@ function pause(min = 3, max = 8) {
 }
 let verified = false;
 let lastLogin = 0;
+let managerOperationsDone = false;
+let reportExportsDone = false;
+let teamOperationsDone = false;
 
 function verifyIdentity(account) {
   const me = request(account, 'auth_me', '/auth/me').body;
@@ -223,19 +251,185 @@ function runPengurus(account) {
   calendar(account);
   pause();
   list(account, 'pengurus_history', '/aktivitas', row => row.tipe === 'setoran' && manifest.recipient_ids.includes(row.data.nasabah_id));
+  managerJourneys(account);
   measureLogin(account);
 }
 
+function periodQuery() {
+  const today = new Date(Date.now() + 7 * 3600000);
+  const end = today.toISOString().slice(0, 10);
+  const start = new Date(today.getTime() - 365 * 86400000).toISOString().slice(0, 10);
+  return `periode=custom&dari_tanggal=${start}&sampai_tanggal=${end}`;
+}
+
+function managerJourneys(account) {
+  const slot = Math.min(exec.vu.idInTest - 1, manifest.staff_ids.length - 1);
+  if (!reportExportsDone) managerReports(account);
+  if (!managerOperationsDone) {
+    payoutJourneys(account, slot);
+    correctionJourneys(account, slot);
+    managerOperationsDone = true;
+  }
+  if (exec.vu.idInTest === 1 && !teamOperationsDone) teamJourney(account);
+}
+
+function managerReports(account) {
+  const query = periodQuery();
+  const report = request(account, 'period_report', `/aktivitas?${query}`).body;
+  const reportRows = rows(report);
+  if (!report.summary || reportRows.length === 0 ||
+      !reportRows.every(row => row.data.bank_sampah_id === manifest.bank_id)) {
+    fault('Period report is empty or contains activity outside the fixture bank');
+  }
+  requestFile(account, 'excel_export', `/transaksi/export?${query}`, 'spreadsheetml');
+  reportExportsDone = true;
+}
+
+function payoutJourneys(account, slot) {
+  const recipient = manifest.recipient_ids[slot];
+  const neighbor = manifest.recipient_ids[slot + 1];
+  const batch = createBatchDraft(account, recipient, neighbor, slot);
+  const single = createSingleDraft(account, recipient, slot);
+  confirmPayout(account, single, recipient);
+  checkPayoutHistory(account, single.body.id, recipient);
+  const drafts = rows(request(account, 'pencairan_batch_draft', '/draft-pencairan?page=1&page_size=100').body);
+  const batchDetail = request(account, 'pencairan_batch_draft', `/draft-pencairan/${batch.body.id}`).body;
+  if (!drafts.some(row => row.id === batch.body.id) ||
+      !batchDetail.items.every(item => manifest.recipient_ids.includes(item.nasabah_id))) {
+    fault('Batch draft is missing or contains a member outside the fixture bank');
+  }
+}
+
+function createBatchDraft(account, recipient, neighbor, slot) {
+  const result = request(account, 'pencairan_batch_draft', '/draft-pencairan/batch', {
+    nama: `PIL-529 batch ${manifest.run_id} ${slot}`,
+    nasabah_ids: [recipient, neighbor],
+    metode: 'tunai',
+  });
+  if (result.status !== 201 || !result.body.items || result.body.items.length !== 2 ||
+      !result.body.items.every(item => [recipient, neighbor].includes(item.nasabah_id))) {
+    fault('Batch payout draft is not scoped to its selected fixture members');
+  }
+  draftWrites.add(1);
+  return result;
+}
+
+function createSingleDraft(account, recipient, slot) {
+  const result = request(account, 'pencairan_single_draft', '/draft-pencairan', {
+    nama: `PIL-529 single ${manifest.run_id} ${slot}`,
+    items: [{ nasabah_id: recipient, nominal: '1', metode: 'tunai' }],
+  });
+  if (result.status !== 201 || result.body.items.length !== 1 ||
+      result.body.items[0].nasabah_id !== recipient) {
+    fault('Single payout draft has incorrect membership scope');
+  }
+  draftWrites.add(1);
+  return result;
+}
+
+function confirmPayout(account, single, recipient) {
+  const confirmed = request(account, 'pencairan_confirm',
+    `/draft-pencairan/${single.body.id}/konfirmasi`, {});
+  if (confirmed.status !== 200 || confirmed.body.status !== 'dikonfirmasi' ||
+      confirmed.body.items.length !== 1 || confirmed.body.items[0].nasabah_id !== recipient) {
+    fault('Confirmed payout draft has incorrect status or recipient');
+  }
+  payoutWrites.add(1);
+}
+
+function checkPayoutHistory(account, draftId, recipient) {
+  const history = list(account, 'pencairan_history', '/pencairan?page=1&page_size=100',
+    row => row.bank_sampah_id === manifest.bank_id);
+  const payout = history.find(row => row.draft_id === draftId && row.nasabah_id === recipient);
+  if (!payout) fault('Confirmed payout is missing from bank-scoped history');
+  const revisions = request(account, 'pencairan_history', `/pencairan/${payout.id}/riwayat`).body;
+  if (revisions.pencairan.id !== payout.id ||
+      revisions.pencairan.bank_sampah_id !== manifest.bank_id || !Array.isArray(revisions.revisi)) {
+    fault('Payout revision history is incorrectly scoped');
+  }
+}
+
+function correctionJourneys(account, slot) {
+  const member = manifest.recipient_ids[slot];
+  const deposit = manifest.edit_transaction_ids[slot];
+  const edited = request(account, 'setoran_edit', `/transaksi/${deposit}`, {
+    alasan: 'PIL-529 synthetic correction',
+    catatan: `PIL-529 correction ${manifest.run_id} ${slot}`,
+  }, undefined, 'PATCH').body;
+  if (edited.id !== deposit || edited.bank_sampah_id !== manifest.bank_id || edited.nasabah_id !== member) {
+    fault('Corrected setoran has incorrect fixture identity or bank scope');
+  }
+  const voidId = manifest.void_transaction_ids[slot];
+  const voided = request(account, 'setoran_void', `/transaksi/${voidId}/batalkan`, {
+    alasan: 'PIL-529 synthetic void',
+  }).body;
+  if (voided.id !== voidId || voided.bank_sampah_id !== manifest.bank_id ||
+      voided.nasabah_id !== member || voided.status !== 'dibatalkan') {
+    fault('Voided setoran has incorrect fixture identity, status or bank scope');
+  }
+}
+
+function teamJourney(account) {
+  const staffIds = manifest.staff_ids;
+  const team = request(account, 'team', '/team').body.members;
+  if (!Array.isArray(team) || team.length !== staffIds.length ||
+      !team.every(member => staffIds.includes(member.id))) {
+    fault('Team list contains missing or out-of-fixture members');
+  }
+  const primary = team.find(member => member.is_primary_pengelola);
+  if (!primary || primary.id !== account.id) fault('Team primary identity differs from fixture');
+  let invite = request(account, 'team_invite', '/team/invite', {}).body;
+  if (!invite.token || !invite.invite_url.endsWith(invite.token) || !invite.expires_at) {
+    fault('Team invite response is incomplete');
+  }
+  const successor = manifest.accounts.find(row => row.id === staffIds[1]);
+  const removed = manifest.accounts.find(row => row.id === staffIds[2]);
+  let transferred = request(account, 'team_transfer', '/team/transfer', { id: successor.id }).body.members;
+  if (!transferred.some(row => row.id === successor.id && row.is_primary_pengelola) ||
+      !transferred.some(row => row.id === account.id && !row.is_primary_pengelola)) {
+    fault('Team transfer did not move the primary role');
+  }
+  transferred = request(successor, 'team_transfer', '/team/transfer', { id: account.id }).body.members;
+  if (!transferred.some(row => row.id === account.id && row.is_primary_pengelola)) {
+    fault('Team transfer back did not restore the fixture owner');
+  }
+  const removal = request(account, 'team_remove', `/team/${removed.id}`, undefined, undefined, 'DELETE');
+  if (removal.status !== 204) fault('Team removal did not return no-content');
+  invite = request(account, 'team_invite', '/team/invite', {}).body;
+  const joined = request(removed, 'team_rejoin', '/invites/accept', { token: invite.token });
+  if (joined.status !== 200 || joined.body.bank_sampah_id !== manifest.bank_id ||
+      joined.body.outcome !== 'join_success') {
+    fault('Removed fixture manager could not rejoin the same bank via its invite');
+  }
+  const restored = request(account, 'team', '/team').body.members;
+  if (restored.length !== staffIds.length || !restored.some(row => row.id === removed.id) ||
+      !restored.some(row => row.id === account.id && row.is_primary_pengelola)) {
+    fault('Team state was not restored to the fixture baseline');
+  }
+}
+
 function measureLogin(account) {
-  if (mode !== 'realistic' || exec.vu.idInTest !== 1 || Date.now() - lastLogin < 20000) return;
+  if (!shouldMeasureLogin(account)) return;
   const response = http.post(`${base}/auth/login`, JSON.stringify({ email: account.email, password: account.password }),
     { headers: { 'Content-Type': 'application/json' }, tags: { name: 'login', action: 'login', phase: phase() }, timeout: '15s', redirects: 0 });
   lastLogin = Date.now();
   throttles.add(response.status === 429 ? 1 : 0);
+  let body;
+  try { body = response.json(); } catch { body = null; }
+  const user = body && (body.user || body);
+  const ok = response.status === 200 && user.id === account.id && user.role === account.role &&
+    user.bank_sampah_id === manifest.bank_id && Boolean(body.access_token);
   actionLatency.add(response.timings.duration, { action: 'login', phase: phase() });
-  failures.add(response.status !== 200, { action: 'login', phase: phase() });
+  failures.add(!ok, { action: 'login', phase: phase() });
   samples.add(1, { action: 'login', phase: phase() });
-  if (response.status !== 200) exec.test.abort(`Permitted login returned HTTP ${response.status}`);
+  check(response, { 'login: correct fixture identity': () => ok });
+  if (!ok) exec.test.abort(`Login returned HTTP ${response.status} or the wrong fixture identity`);
+}
+
+function shouldMeasureLogin(account) {
+  if (exec.vu.idInTest !== 1 || lastLogin) return false;
+  if (mode === 'smoke') return account.role === 'nasabah';
+  return mode === 'realistic' && Date.now() - lastLogin >= 20000;
 }
 
 export default function journey() {
@@ -267,6 +461,18 @@ function customer(account) {
   calendar(account);
   pause();
   list(account, 'nasabah_history', '/nasabah/me/riwayat', r => typeof r.id === 'string');
+  const bank = request(account, 'nasabah_bank', '/nasabah/me/bank-sampah').body;
+  if (bank.id !== manifest.bank_id) fault('Nasabah bank detail is outside its fixture membership');
+  const directory = rows(request(account, 'bank_directory', '/bank-sampah').body);
+  if (!directory.some(row => row.id === manifest.bank_id) ||
+      !directory.every(row => typeof row.id === 'string')) {
+    fault('Bank directory is empty or malformed');
+  }
+  if (!reportExportsDone) {
+    requestFile(account, 'pdf_export', '/nasabah/me/riwayat/export-pdf', 'application/pdf');
+    reportExportsDone = true;
+  }
+  measureLogin(account);
 }
 function calendar(account) {
   const local = new Date(Date.now() + 7 * 3600000);

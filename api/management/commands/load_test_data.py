@@ -30,8 +30,10 @@ from api.models import (
     Nasabah,
     Pencairan,
     PencairanRevisi,
+    PengurusDikeluarkan,
     Saldo,
     Transaksi,
+    TransaksiRevisi,
     User,
 )
 from apps.waste_catalog.services import catat_harga
@@ -61,6 +63,8 @@ class Command(BaseCommand):
         parser.add_argument("--confirm", required=True)
         parser.add_argument("--manifest", type=Path)
         parser.add_argument("--expected-writes", type=int)
+        parser.add_argument("--expected-drafts", type=int)
+        parser.add_argument("--expected-payouts", type=int)
 
     def handle(self, *args: Any, **options: Any) -> None:
         run_id = options["run_id"]
@@ -136,17 +140,28 @@ class Command(BaseCommand):
             private_json(manifest_path, manifest)
             return result
 
+        if action == "reset" and BankSampah.objects.filter(pk=bank_id, is_active=False).exists():
+            raise CommandError("Fixture bank is archived; refusing reset")
         self.check_owner(run_id)
         if action == "telemetry":
             return self.telemetry()
         if action == "audit":
-            return self.audit(run_id, options["expected_writes"])
-        self._guard_payouts_and_drafts(run_id, bank_id, action)
+            return self.audit(
+                run_id,
+                options["expected_writes"],
+                options["expected_drafts"],
+                options["expected_payouts"],
+            )
+        if action == "cleanup":
+            self._guard_payouts_and_drafts(run_id, bank_id, action)
+            self.reset_activity(run_id, bank_id)
         if action == "reset":
             if not BankSampah.objects.filter(pk=bank_id, is_active=True).exists():
                 raise CommandError("Fixture bank is archived; refusing reset")
+            self.reset_activity(run_id, bank_id)
             self.history(run_id)
-            return self.audit(run_id, 0)
+            self.restore_team(run_id, bank_id)
+            return self.audit(run_id, 0, 0, 0)
         Transaksi.objects.filter(bank_sampah_id=bank_id).delete()
         JadwalKegiatan.objects.filter(bank_sampah_id=bank_id).delete()
         Nasabah.objects.filter(bank_sampah_id=bank_id).delete()
@@ -164,23 +179,41 @@ class Command(BaseCommand):
         }
 
     def _guard_payouts_and_drafts(self, run_id: str, bank_id: UUID, action: str) -> None:
-        payouts = Q(bank_sampah_id=bank_id) | Q(nasabah__bank_sampah_id=bank_id)
-        if action == "cleanup":
-            user_ids = self.user_ids(run_id)
-            payouts |= Q(dicatat_oleh_id__in=user_ids)
-            if PencairanRevisi.objects.filter(diubah_oleh_id__in=user_ids).exists():
-                raise CommandError("Fixture bank has payouts; refusing cleanup")
-        if action in ("reset", "cleanup") and Pencairan.objects.filter(payouts).exists():
-            raise CommandError("Fixture bank has payouts; refusing reset or cleanup")
-        if action == "cleanup" and (
-            DraftPencairan.objects.filter(
-                Q(bank_sampah_id=bank_id)
-                | Q(dibuat_oleh_id__in=self.user_ids(run_id))
-                | Q(diubah_oleh_id__in=self.user_ids(run_id))
-            ).exists()
-            or DraftPencairanItem.objects.filter(nasabah__bank_sampah_id=bank_id).exists()
+        if action != "cleanup":
+            return
+        user_ids = self.user_ids(run_id)
+        foreign_payouts = Pencairan.objects.filter(
+            Q(nasabah__bank_sampah_id=bank_id) | Q(dicatat_oleh_id__in=user_ids)
+        ).exclude(bank_sampah_id=bank_id)
+        foreign_revisions = PencairanRevisi.objects.filter(diubah_oleh_id__in=user_ids).exclude(
+            pencairan__bank_sampah_id=bank_id
+        )
+        foreign_drafts = DraftPencairan.objects.filter(
+            Q(dibuat_oleh_id__in=user_ids) | Q(diubah_oleh_id__in=user_ids)
+        ).exclude(bank_sampah_id=bank_id)
+        foreign_transactions = TransaksiRevisi.objects.filter(diubah_oleh_id__in=user_ids).exclude(
+            transaksi__bank_sampah_id=bank_id
+        )
+        foreign_team_logs = PengurusDikeluarkan.objects.filter(
+            Q(user_id__in=user_ids) | Q(dikeluarkan_oleh_id__in=user_ids)
+        ).exclude(bank_sampah_id=bank_id)
+        foreign_draft_items = DraftPencairanItem.objects.filter(
+            nasabah__bank_sampah_id=bank_id
+        ).exclude(draft__bank_sampah_id=bank_id)
+        if any(
+            query.exists()
+            for query in (
+                foreign_payouts,
+                foreign_revisions,
+                foreign_drafts,
+                foreign_transactions,
+                foreign_team_logs,
+                foreign_draft_items,
+            )
         ):
-            raise CommandError("Fixture bank has payout drafts; refusing cleanup")
+            raise CommandError(
+                "Fixture bank has foreign financial or team records; refusing cleanup"
+            )
 
     @staticmethod
     def user_ids(run_id: str) -> list[UUID]:
@@ -192,12 +225,17 @@ class Command(BaseCommand):
         if not bank:
             raise CommandError("Owned fixture bank not found")
         users = User.objects.filter(bank_sampah_id=bank_id)
+        fixture_users = User.objects.filter(pk__in=self.user_ids(run_id))
         members = Nasabah.objects.filter(bank_sampah_id=bank_id)
         if (
             Transaksi.objects.filter(bank_sampah_id=bank_id)
             .exclude(dicatat_oleh_id__in=self.user_ids(run_id))
             .exists()
             or users.exclude(pk__in=self.user_ids(run_id)).exists()
+            or fixture_users.count() != 30
+            or fixture_users.exclude(bank_sampah__isnull=True)
+            .exclude(bank_sampah_id=bank_id)
+            .exists()
             or users.filter(is_staff=True).exists()
             or users.filter(is_superuser=True).exists()
             or users.exclude(email__endswith=f"@{run_id}.load.invalid").exists()
@@ -288,11 +326,72 @@ class Command(BaseCommand):
             "customers": CUSTOMERS,
             "history": HISTORY,
             "recipient_ids": [str(member.id) for member in members],
+            "staff_ids": [account["id"] for account in accounts if account["role"] == "pengelola"],
+            "edit_transaction_ids": [str(fixture_id(run_id, "history", i)) for i in range(21)],
+            "void_transaction_ids": [
+                str(fixture_id(run_id, "history", 1000 + i)) for i in range(21)
+            ],
             "accounts": accounts,
         }
 
+    def reset_activity(self, run_id: str, bank_id: UUID) -> None:
+        user_ids = self.user_ids(run_id)
+        bank_payouts = Pencairan.objects.filter(bank_sampah_id=bank_id)
+        if (
+            bank_payouts.exclude(dicatat_oleh_id__in=user_ids).exists()
+            or bank_payouts.exclude(nasabah__bank_sampah_id=bank_id).exists()
+            or Pencairan.objects.filter(
+                Q(nasabah__bank_sampah_id=bank_id) | Q(dicatat_oleh_id__in=user_ids)
+            )
+            .exclude(bank_sampah_id=bank_id)
+            .exists()
+        ):
+            raise CommandError("Foreign payout found in fixture bank; refusing reset")
+        drafts = DraftPencairan.objects.filter(bank_sampah_id=bank_id)
+        if (
+            drafts.exclude(dibuat_oleh_id__in=user_ids, diubah_oleh_id__in=user_ids).exists()
+            or DraftPencairanItem.objects.filter(draft__bank_sampah_id=bank_id)
+            .exclude(nasabah__bank_sampah_id=bank_id)
+            .exists()
+            or DraftPencairan.objects.filter(
+                Q(dibuat_oleh_id__in=user_ids) | Q(diubah_oleh_id__in=user_ids)
+            )
+            .exclude(bank_sampah_id=bank_id)
+            .exists()
+        ):
+            raise CommandError("Foreign payout draft found in fixture bank; refusing reset")
+        if (
+            TransaksiRevisi.objects.filter(transaksi__bank_sampah_id=bank_id)
+            .exclude(diubah_oleh_id__in=user_ids)
+            .exists()
+        ):
+            raise CommandError("Foreign setoran revision found in fixture bank; refusing reset")
+        if (
+            PencairanRevisi.objects.filter(pencairan__bank_sampah_id=bank_id)
+            .exclude(diubah_oleh_id__in=user_ids)
+            .exists()
+            or PengurusDikeluarkan.objects.filter(bank_sampah_id=bank_id)
+            .exclude(dikeluarkan_oleh_id__in=user_ids)
+            .exists()
+        ):
+            raise CommandError("Foreign payout/team revision found in fixture bank; refusing reset")
+        PencairanRevisi.objects.filter(pencairan__bank_sampah_id=bank_id).delete()
+        bank_payouts.delete()
+        drafts.delete()
+        TransaksiRevisi.objects.filter(transaksi__bank_sampah_id=bank_id).delete()
+        PengurusDikeluarkan.objects.filter(bank_sampah_id=bank_id).delete()
+
+    def restore_team(self, run_id: str, bank_id: UUID) -> None:
+        staff_ids = [fixture_id(run_id, "user", index) for index in range(21)]
+        staff = User.objects.filter(pk__in=staff_ids, role=User.Role.PENGELOLA, is_active=True)
+        if staff.count() != len(staff_ids):
+            raise CommandError("Fixture team changed unexpectedly; refusing reset")
+        staff.update(bank_sampah_id=bank_id, is_primary_pengelola=False)
+        User.objects.filter(pk=staff_ids[0]).update(is_primary_pengelola=True)
+
     def history(self, run_id: str) -> None:
         bank_id = fixture_id(run_id, "bank")
+        TransaksiRevisi.objects.filter(transaksi__bank_sampah_id=bank_id).delete()
         Transaksi.objects.filter(bank_sampah_id=bank_id).delete()
         now = timezone.now()
         transactions = [
@@ -327,14 +426,28 @@ class Command(BaseCommand):
             total_saldo=PRICE * (HISTORY // CUSTOMERS)
         )
 
-    def audit(self, run_id: str, expected_writes: int | None) -> dict[str, Any]:
+    def audit(
+        self,
+        run_id: str,
+        expected_writes: int | None,
+        expected_drafts: int | None = None,
+        expected_payouts: int | None = None,
+    ) -> dict[str, Any]:
         bank_id = fixture_id(run_id, "bank")
         rows = Transaksi.objects.filter(bank_sampah_id=bank_id)
         members = Nasabah.objects.filter(bank_sampah_id=bank_id)
         errors = []
         writes = rows.count() - HISTORY
+        draft_rows = DraftPencairan.objects.filter(bank_sampah_id=bank_id)
+        payout_rows = Pencairan.objects.filter(bank_sampah_id=bank_id)
+        drafts = draft_rows.count()
+        payouts = payout_rows.count()
         if expected_writes is not None and writes != expected_writes:
             errors.append(f"Expected {expected_writes} new writes, found {writes}")
+        if expected_drafts is not None and drafts != expected_drafts:
+            errors.append(f"Expected {expected_drafts} payout drafts, found {drafts}")
+        if expected_payouts is not None and payouts != expected_payouts:
+            errors.append(f"Expected {expected_payouts} payouts, found {payouts}")
         if (
             members.count() != CUSTOMERS
             or User.objects.filter(bank_sampah_id=bank_id).count() != 30
@@ -356,8 +469,16 @@ class Command(BaseCommand):
         if rows.exclude(nasabah__bank_sampah_id=bank_id).exists():
             errors.append("Cross-bank recipient found")
         if (
+            payout_rows.exclude(nasabah__bank_sampah_id=bank_id).exists()
+            or DraftPencairanItem.objects.filter(draft__bank_sampah_id=bank_id)
+            .exclude(nasabah__bank_sampah_id=bank_id)
+            .exists()
+        ):
+            errors.append("Cross-bank payout recipient found")
+        if (
             rows.exclude(catatan=f"PIL-393 baseline {run_id}")
             .filter(idempotency_key__isnull=True)
+            .exclude(revisi__isnull=False)
             .exists()
         ):
             errors.append("A new write lacks an idempotency key")
@@ -369,11 +490,28 @@ class Command(BaseCommand):
             .exists()
         ):
             errors.append("Duplicate idempotency key")
-        for member in members.annotate(expected=Sum("transaksi__total_nilai")).select_related(
-            "saldo"
-        ):
-            if member.saldo.total_saldo != member.expected:
-                errors.append(f"Incorrect balance for {member.id}")
+        deposit_totals = dict(
+            rows.filter(status=Transaksi.Status.TERCATAT)
+            .values("nasabah_id")
+            .annotate(total=Sum("total_nilai"))
+            .values_list("nasabah_id", "total")
+        )
+        payout_totals = dict(
+            payout_rows.values("nasabah_id")
+            .annotate(total=Sum("nominal"))
+            .values_list("nasabah_id", "total")
+        )
+        balances = dict(
+            Saldo.objects.filter(nasabah__bank_sampah_id=bank_id).values_list(
+                "nasabah_id", "total_saldo"
+            )
+        )
+        for member_id in members.values_list("pk", flat=True):
+            expected = deposit_totals.get(member_id, Decimal(0)) - payout_totals.get(
+                member_id, Decimal(0)
+            )
+            if balances.get(member_id, Decimal(0)) != expected:
+                errors.append(f"Incorrect balance for {member_id}")
                 break
         if errors:
             raise CommandError("Integrity failure: " + "; ".join(errors))
@@ -382,6 +520,8 @@ class Command(BaseCommand):
             "customers": members.count(),
             "history": HISTORY,
             "new_writes": writes,
+            "payout_drafts": drafts,
+            "payouts": payouts,
             "integrity_errors": 0,
         }
 

@@ -193,6 +193,9 @@ class LoadTestDataTests(TestCase):
             manifest = json.loads(path.read_text())
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
             self.assertEqual(baseline["customers"], 1000)
+            self.assertEqual(len(manifest["staff_ids"]), 21)
+            self.assertEqual(len(manifest["edit_transaction_ids"]), 21)
+            self.assertEqual(len(manifest["void_transaction_ids"]), 21)
             price = HargaSampah.objects.get(bank_sampah_id=fixture_id("test-pil-393", "bank"))
             self.assertLessEqual(price.berlaku_mulai, timezone.now())
             self.assertGreater(price.berlaku_mulai, timezone.now() - timedelta(days=1))
@@ -210,7 +213,7 @@ class LoadTestDataTests(TestCase):
                 )
             with self.assertRaises(CommandError):
                 self.command("seed", manifest=Path(folder) / "accounts-again.json")
-            client = APIClient()
+            client: Any = APIClient()
             for index, endpoints in (
                 (0, ("nasabah?search=Load", "jenis-sampah", "jadwal", "aktivitas")),
                 (21, ("nasabah/me/beranda", "nasabah/me/saldo", "jadwal", "nasabah/me/riwayat")),
@@ -277,6 +280,122 @@ class LoadTestDataTests(TestCase):
             self.assertEqual(HargaSampah.objects.filter(bank_sampah=archived_bank).count(), 1)
             self.assertFalse(User.objects.exists())
             self.assertFalse(Transaksi.objects.exists())
+
+    def test_pil529_synthetic_journeys_are_scoped_and_resettable(self) -> None:
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / "accounts.json"
+            self.command("seed", manifest=path)
+            manifest = json.loads(path.read_text())
+        client: Any = APIClient()
+        owner = User.objects.get(pk=manifest["accounts"][0]["id"])
+        client.force_authenticate(owner)
+
+        team = client.get("/api/v1/team")
+        self.assertEqual(team.status_code, 200)
+        self.assertEqual(
+            {member["id"] for member in team.data["members"]}, set(manifest["staff_ids"])
+        )
+        invite = client.post("/api/v1/team/invite")
+        self.assertEqual(invite.status_code, 201)
+        successor = User.objects.get(pk=manifest["staff_ids"][1])
+        transfer = client.post("/api/v1/team/transfer", {"id": str(successor.id)}, format="json")
+        self.assertTrue(
+            next(row for row in transfer.data["members"] if row["id"] == str(successor.id))[
+                "is_primary_pengelola"
+            ]
+        )
+        successor.refresh_from_db()
+        client.force_authenticate(successor)
+        transfer_back = client.post("/api/v1/team/transfer", {"id": str(owner.id)}, format="json")
+        self.assertTrue(
+            next(row for row in transfer_back.data["members"] if row["id"] == str(owner.id))[
+                "is_primary_pengelola"
+            ]
+        )
+        client.force_authenticate(owner)
+        removed = User.objects.get(pk=manifest["staff_ids"][2])
+        self.assertEqual(client.delete(f"/api/v1/team/{removed.id}").status_code, 204)
+        invite = client.post("/api/v1/team/invite")
+        client.force_authenticate(removed)
+        joined = client.post(
+            "/api/v1/invites/accept", {"token": invite.data["token"]}, format="json"
+        )
+        self.assertEqual(joined.data["bank_sampah_id"], manifest["bank_id"])
+
+        client.force_authenticate(owner)
+        batch = client.post(
+            "/api/v1/draft-pencairan/batch",
+            {"nasabah_ids": manifest["recipient_ids"][:2], "nama": "PIL-529 batch"},
+            format="json",
+        )
+        self.assertEqual(batch.status_code, 201, batch.data)
+        self.assertEqual(
+            {row["nasabah_id"] for row in batch.data["items"]}, set(manifest["recipient_ids"][:2])
+        )
+        single = client.post(
+            "/api/v1/draft-pencairan",
+            {"items": [{"nasabah_id": manifest["recipient_ids"][0], "nominal": "1"}]},
+            format="json",
+        )
+        self.assertEqual(single.status_code, 201, single.data)
+        confirmed = client.post(f"/api/v1/draft-pencairan/{single.data['id']}/konfirmasi")
+        self.assertEqual(confirmed.data["status"], "dikonfirmasi")
+        payout = client.get("/api/v1/pencairan?page=1")
+        self.assertEqual(payout.status_code, 200)
+        row = next(
+            (item for item in payout.data["results"] if str(item["draft_id"]) == single.data["id"]),
+            None,
+        )
+        self.assertIsNotNone(row, payout.data)
+        assert row is not None
+        self.assertEqual(row["bank_sampah_id"], manifest["bank_id"])
+        history = client.get(f"/api/v1/pencairan/{row['id']}/riwayat")
+        self.assertEqual(history.data["pencairan"]["id"], row["id"])
+
+        correction = client.patch(
+            f"/api/v1/transaksi/{manifest['edit_transaction_ids'][0]}",
+            {"alasan": "PIL-529 fixture correction", "catatan": "Corrected fixture"},
+            format="json",
+        )
+        self.assertEqual(correction.status_code, 200, correction.data)
+        void = client.post(
+            f"/api/v1/transaksi/{manifest['void_transaction_ids'][0]}/batalkan",
+            {"alasan": "PIL-529 fixture void"},
+            format="json",
+        )
+        self.assertEqual(void.data["status"], "dibatalkan")
+        period = client.get("/api/v1/aktivitas", {"periode": "semua"})
+        self.assertEqual(period.status_code, 200)
+        self.assertGreater(period.data["summary"]["jumlah_transaksi"], 0)
+        excel = client.get("/api/v1/transaksi/export", {"periode": "semua"})
+        self.assertEqual(
+            excel["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        member_user = User.objects.get(pk=manifest["accounts"][21]["id"])
+        client.force_authenticate(member_user)
+        own_bank = client.get("/api/v1/nasabah/me/bank-sampah")
+        self.assertEqual(own_bank.data["id"], manifest["bank_id"])
+        directory = client.get("/api/v1/bank-sampah")
+        self.assertIn(manifest["bank_id"], {row["id"] for row in directory.data})
+        pdf = client.get("/api/v1/nasabah/me/riwayat/export-pdf")
+        self.assertEqual(pdf["Content-Type"], "application/pdf")
+
+        self.assertEqual(
+            self.command("audit", expected_writes=0, expected_drafts=2, expected_payouts=1)[
+                "integrity_errors"
+            ],
+            0,
+        )
+        reset = self.command("reset")
+        self.assertEqual((reset["payout_drafts"], reset["payouts"]), (0, 0))
+        self.assertTrue(
+            User.objects.filter(
+                pk=owner.pk, bank_sampah_id=fixture_id("test-pil-393", "bank")
+            ).exists()
+        )
+        self.command("cleanup")
 
     def test_audit_rejects_inconsistent_fixture_rows(self) -> None:
         with TemporaryDirectory() as folder:
@@ -368,13 +487,15 @@ class LoadTestDataTests(TestCase):
             )
         connection.cursor.assert_not_called()
 
-    def test_reset_and_cleanup_refuse_fixture_bank_with_payouts(self) -> None:
+    def test_reset_removes_fixture_payouts_and_drafts_before_reseeding(self) -> None:
         with TemporaryDirectory() as folder:
             self.command("seed", manifest=Path(folder) / "accounts.json")
         bank = BankSampah.objects.get(pk=fixture_id("test-pil-393", "bank"))
         member = Nasabah.objects.filter(bank_sampah=bank).first()
         assert member is not None
         user = User.objects.get(pk=fixture_id("test-pil-393", "user", 0))
+        draft = DraftPencairan.objects.create(bank_sampah=bank, dibuat_oleh=user, diubah_oleh=user)
+        DraftPencairanItem.objects.create(draft=draft, nasabah=member, nominal=1)
         Pencairan.objects.create(
             bank_sampah=bank,
             nasabah=member,
@@ -383,15 +504,18 @@ class LoadTestDataTests(TestCase):
             metode=Pencairan.Metode.TUNAI,
             saldo_sebelum=25000,
             saldo_sesudah=24999,
+            draft=draft,
         )
-        for action in ("reset", "cleanup"):
-            with (
-                self.subTest(action=action),
-                self.assertRaisesMessage(CommandError, "Fixture bank has payouts"),
-            ):
-                self.command(action)
+
+        reset = self.command("reset")
+
+        self.assertEqual(reset["payouts"], 0)
+        self.assertEqual(reset["payout_drafts"], 0)
+        self.assertFalse(Pencairan.objects.filter(bank_sampah=bank).exists())
+        self.assertFalse(DraftPencairan.objects.filter(bank_sampah=bank).exists())
         self.assertEqual(Transaksi.objects.filter(bank_sampah=bank).count(), 10000)
         self.assertTrue(BankSampah.objects.filter(pk=bank.pk).exists())
+        self.command("cleanup")
 
     def test_cleanup_refuses_payout_referencing_fixture_user_from_other_bank(self) -> None:
         with TemporaryDirectory() as folder:
@@ -415,7 +539,7 @@ class LoadTestDataTests(TestCase):
             saldo_sesudah=0,
         )
 
-        with self.assertRaisesMessage(CommandError, "Fixture bank has payouts"):
+        with self.assertRaisesMessage(CommandError, "foreign financial or team records"):
             self.command("cleanup")
         self.assertTrue(User.objects.filter(pk=fixture_user.pk).exists())
 
@@ -455,11 +579,11 @@ class LoadTestDataTests(TestCase):
             diubah_oleh=fixture_user,
         )
 
-        with self.assertRaisesMessage(CommandError, "Fixture bank has payouts"):
+        with self.assertRaisesMessage(CommandError, "foreign financial or team records"):
             self.command("cleanup")
         self.assertTrue(User.objects.filter(pk=fixture_user.pk).exists())
 
-    def test_cleanup_refuses_fixture_with_payout_drafts(self) -> None:
+    def test_cleanup_clears_fixture_payout_drafts_before_archiving(self) -> None:
         with TemporaryDirectory() as folder:
             self.command("seed", manifest=Path(folder) / "accounts.json")
         bank = BankSampah.objects.get(pk=fixture_id("test-pil-393", "bank"))
@@ -469,10 +593,11 @@ class LoadTestDataTests(TestCase):
         draft = DraftPencairan.objects.create(bank_sampah=bank, dibuat_oleh=user, diubah_oleh=user)
         DraftPencairanItem.objects.create(draft=draft, nasabah=member, nominal=1)
 
-        with self.assertRaisesMessage(CommandError, "Fixture bank has payout drafts"):
-            self.command("cleanup")
-        self.assertTrue(Nasabah.objects.filter(pk=member.pk).exists())
-        self.assertTrue(User.objects.filter(pk=user.pk).exists())
+        cleanup = self.command("cleanup")
+        self.assertTrue(cleanup["cleaned"])
+        self.assertFalse(DraftPencairan.objects.filter(bank_sampah=bank).exists())
+        self.assertFalse(Nasabah.objects.filter(pk=member.pk).exists())
+        self.assertFalse(User.objects.filter(pk=user.pk).exists())
 
     def test_cleanup_refuses_missing_owned_fixture(self) -> None:
         with self.assertRaisesMessage(CommandError, "Owned fixture bank not found"):
