@@ -13,7 +13,7 @@ from uuid import uuid4
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection as db_connection
-from django.test import TestCase, override_settings
+from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -35,7 +35,7 @@ from api.models import (
 
 
 @override_settings(DEBUG=True, PILAH_ENVIRONMENT="local")
-class LoadTestDataTests(TestCase):
+class LoadTestDataTests(TransactionTestCase):
     def command(self, action: str, **kwargs: object) -> dict[str, Any]:
         output = StringIO()
         call_command(
