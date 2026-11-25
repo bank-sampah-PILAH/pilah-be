@@ -52,25 +52,20 @@ def koordinat_dari_tautan(url: str) -> tuple[float, float, str] | None:
     for pola, jenis in ((_POLA_PIN, "pin"), (_POLA_VIEWPORT, "viewport")):
         cocok = pola.search(teks)
         if cocok:
-            pasangan = _pasangan(cocok.group(1), cocok.group(2))
-            return (*pasangan, jenis) if pasangan else None
+            return _koordinat_dari_cocok(cocok, jenis)
     params = parse_qs(urlparse(teks).query)
     for kunci in _PARAM_KOORDINAT:
         nilai = (params.get(kunci) or [""])[0]
         cocok = _POLA_PARAM.fullmatch(nilai)
         if cocok:
-            pasangan = _pasangan(cocok.group(1), cocok.group(2))
-            return (*pasangan, "pin") if pasangan else None
+            return _koordinat_dari_cocok(cocok, "pin")
     cocok = _POLA_PLACE.search(teks)
-    if cocok:
-        pasangan = _pasangan(cocok.group(1), cocok.group(2))
-        return (*pasangan, "pin") if pasangan else None
-    return None
+    return _koordinat_dari_cocok(cocok, "pin") if cocok else None
 
 
-def _pasangan(latitude: str, longitude: str) -> tuple[float, float] | None:
-    lat, lng = float(latitude), float(longitude)
-    return (lat, lng) if koordinat_valid(lat, lng) else None
+def _koordinat_dari_cocok(cocok: re.Match[str], jenis: str) -> tuple[float, float, str] | None:
+    lat, lng = float(cocok.group(1)), float(cocok.group(2))
+    return (lat, lng, jenis) if koordinat_valid(lat, lng) else None
 
 
 def _periksa_host(host: str) -> None:

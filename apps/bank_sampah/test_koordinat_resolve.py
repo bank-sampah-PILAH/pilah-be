@@ -149,6 +149,16 @@ class ResolveKoordinatApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 400)
 
+    def test_link_with_invalid_pin_is_rejected_even_with_valid_viewport(self) -> None:
+        response = self._post(
+            {
+                "sumber": "tautan",
+                "tautan": "https://www.google.com/maps/place/Bank/@-6.2,106.8,17z/data=!3d100!4d106.8",
+            }
+        )
+
+        self.assertEqual(response.status_code, 400)
+
     def test_link_with_coordinate_query_parameter_is_parsed(self) -> None:
         response = self._post(
             {"sumber": "tautan", "tautan": "https://www.google.com/maps?q=-6.2,106.8"}
