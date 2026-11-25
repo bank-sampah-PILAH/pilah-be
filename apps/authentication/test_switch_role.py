@@ -1,4 +1,6 @@
 from datetime import timedelta
+import logging
+from io import StringIO
 from typing import Any
 from unittest.mock import patch
 
@@ -152,6 +154,28 @@ class SwitchRoleTest(TestCase):
             "\n",
         ):
             self.assertNotIn(secret, logs)
+
+    def test_effective_audit_logger_emits_info_with_request_id_without_level_override(self) -> None:
+        logger = logging.getLogger("pilah.security.role_switch")
+        self.assertTrue(logger.isEnabledFor(logging.INFO))
+        handler = next(h for h in logger.handlers if h.name == "console")
+        self.assertIn(handler, logging.getLogger().handlers)
+        assert isinstance(handler, logging.StreamHandler)
+        stream = StringIO()
+        original = handler.setStream(stream)
+        request_id = "7127cc89-e204-4ee6-81b3-a57998001431"
+        try:
+            response = self.client.post(
+                "/api/v1/auth/switch-role", {"role": "nasabah"}, format="json",
+                HTTP_X_REQUEST_ID=request_id,
+            )
+        finally:
+            handler.setStream(original)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(f"[{request_id}]", stream.getvalue())
+        self.assertIn("INFO pilah.security.role_switch", stream.getvalue())
+        self.assertIn("role_switch.succeeded", stream.getvalue())
+        self.assertNotIn(response.data["access_token"], stream.getvalue())
 
     def test_service_rechecks_role_revoked_after_authentication(self) -> None:
         User.objects.filter(pk=self.user.pk).update(roles=[User.Role.PENGELOLA])
