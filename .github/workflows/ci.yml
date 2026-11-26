@@ -24,6 +24,8 @@ concurrency:
   # Do not interrupt a staging deploy/seed pair with a newer push.
   cancel-in-progress: ${{ github.ref != 'refs/heads/staging' }}
 
+permissions: {}
+
 env:
   # Env shared by all management-command steps. Placeholders only — CI never
   # talks to real Google/Twilio/WhatsApp; the tests mock those clients.
@@ -37,6 +39,8 @@ jobs:
   verify:
     name: Verify (lint, tests, migrations, checks, types)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     # Postgres service container (postgres:16 = what prod Cloud SQL runs).
     # Service containers are always reachable on localhost, so DB_HOST stays
     # 127.0.0.1.
@@ -62,12 +66,13 @@ jobs:
       DB_HOST: 127.0.0.1
       DB_PORT: "5432"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
           # PR diff coverage compares against the actual stacked base branch.
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
           cache: pip
@@ -119,9 +124,11 @@ jobs:
       # from GitHub so stacked PRs compare against their immediate parent.
       - name: PR diff coverage (fail under 80%)
         if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: >-
           diff-cover coverage.xml
-          --compare-branch=origin/${{ github.base_ref }}
+          --compare-branch="origin/${BASE_REF}"
           --fail-under=80
           --total-percent-float
           --show-uncovered
@@ -172,7 +179,7 @@ jobs:
       # calls api.sonarcloud.io/analysis/jres (GitHub runner IPs get a
       # deterministic 403 from SonarCloud's CDN), it just runs on this JDK.
       - name: Set up Java 21 (scanner engine)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: temurin
           java-version: "21"
@@ -186,7 +193,7 @@ jobs:
       - name: SonarCloud analysis
         id: sonar_scan
         continue-on-error: true
-        uses: SonarSource/sonarqube-scan-action@v8.3.0
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
@@ -204,7 +211,7 @@ jobs:
 
       - name: SonarCloud analysis (retry)
         if: steps.sonar_scan.outcome == 'failure'
-        uses: SonarSource/sonarqube-scan-action@v8.3.0
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
@@ -225,13 +232,18 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
     needs: verify
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      IMAGE_URI: registry.fly.io/pilah-be-staging:${{ github.sha }}
     environment:
       name: staging
       url: https://pilah-be-staging.fly.dev
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # 1.5
 
       - name: Verify staging reviewer secrets
         run: |
@@ -245,8 +257,27 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
+      - name: Build staging image
+        run: docker build --tag "$IMAGE_URI" .
+
+      - name: Trivy scan staging image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_URI }}
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      - name: Authenticate Fly Docker registry
+        run: flyctl auth docker
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Push verified image
+        run: docker push "$IMAGE_URI"
+
       - name: Deploy verified commit
-        run: flyctl deploy --local-only
+        run: flyctl deploy --app pilah-be-staging --image "$IMAGE_URI"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
