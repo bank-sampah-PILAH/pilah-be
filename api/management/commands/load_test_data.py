@@ -439,7 +439,7 @@ class Command(BaseCommand):
         draft_rows = DraftPencairan.objects.filter(bank_sampah_id=bank_id)
         payout_rows = Pencairan.objects.filter(bank_sampah_id=bank_id)
         writes, drafts, payouts = rows.count() - HISTORY, draft_rows.count(), payout_rows.count()
-        errors = []
+        errors: list[str] = []
         self._audit_counts(
             errors,
             bank_id,
