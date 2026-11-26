@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any, cast
@@ -21,6 +22,7 @@ from shared_kernel.roles import token_role
 
 REGISTRATION_TOKEN_MAX_AGE = 600
 REGISTRATION_TOKEN_SALT = "pilah-google-registration"
+security_logger = logging.getLogger("pilah.security.role_switch")
 
 
 class AuthServiceError(Exception):
@@ -150,10 +152,14 @@ class AuthService:
         )
 
     @staticmethod
-    def _enforce_superadmin_allowlist(user: User, email: str) -> None:
-        if user.role != User.Role.SUPERADMIN:
+    def _enforce_superadmin_allowlist(
+        user: User, email: str, *, active_role: str | None = None
+    ) -> None:
+        role = active_role if active_role is not None else user.role
+        if role != User.Role.SUPERADMIN:
             return
-        AuthService._sync_superadmin_admin_flags(user, email)
+        if user.role == User.Role.SUPERADMIN:
+            AuthService._sync_superadmin_admin_flags(user, email)
         if not is_app_superadmin_allowlisted(email):
             raise AuthService._superadmin_not_allowlisted()
 
@@ -301,16 +307,64 @@ class AuthService:
         return AuthService._session_response(user, is_new_user=False)
 
     @staticmethod
-    def _session_response(user: User, *, is_new_user: bool) -> dict[str, Any]:
-        refresh = RefreshToken.for_user(user)
-        refresh["role"] = user.role
-        access = refresh.access_token
-        if user.bank_sampah_id:
-            access["bank_sampah_id"] = str(user.bank_sampah_id)
-        access["role"] = user.role
-        access["email"] = user.email
+    def switch_role(user: User, role: str) -> dict[str, Any]:
+        with transaction.atomic():
+            # Serialize issuance with role/account updates; never trust the
+            # account snapshot loaded earlier by authentication.
+            account = User.objects.select_for_update().filter(pk=user.pk, is_active=True).first()
+            if account is None:
+                security_logger.warning("role_switch.denied account_id=%s", user.pk)
+                raise AuthServiceError(
+                    "Akun tidak tersedia", code="account_unavailable", status_code=401
+                )
+            if role not in User.Role.values or role not in account.roles:
+                security_logger.warning("role_switch.denied account_id=%s", account.pk)
+                raise AuthServiceError(
+                    "Role tujuan tidak dimiliki akun", code="role_not_owned", status_code=403
+                )
+            try:
+                AuthService._enforce_superadmin_allowlist(account, account.email, active_role=role)
+            except AuthServiceError:
+                security_logger.warning(
+                    "role_switch.denied account_id=%s policy=superadmin_allowlist", account.pk
+                )
+                raise
+            response = AuthService._session_response(account, is_new_user=False, active_role=role)
+        security_logger.info("role_switch.succeeded account_id=%s role=%s", user.pk, role)
+        return response
+
+    @staticmethod
+    def session_bank_data(user: User, *, active_role: str) -> dict[str, str | None]:
         bank = user.bank_sampah
-        state = AuthService.user_state(user)
+        if active_role == User.Role.NASABAH:
+            memberships = list(
+                user.keanggotaan_nasabah.filter(
+                    is_active=True, status=Nasabah.Status.APPROVED
+                ).select_related("bank_sampah")[:2]
+            )
+            # Organisation selection for multiple memberships belongs to
+            # PIL-492. Never guess or fall back to the managed bank.
+            bank = memberships[0].bank_sampah if len(memberships) == 1 else None
+        return {
+            "bank_sampah_id": str(bank.pk) if bank else None,
+            "bank_sampah_nama": bank.nama if bank else None,
+            "bank_sampah_status": bank.status if bank else None,
+        }
+
+    @staticmethod
+    def _session_response(
+        user: User, *, is_new_user: bool, active_role: str | None = None
+    ) -> dict[str, Any]:
+        role = active_role if active_role is not None else user.role
+        refresh = RefreshToken.for_user(user)
+        refresh["role"] = role
+        access = refresh.access_token
+        bank_data = AuthService.session_bank_data(user, active_role=role)
+        if bank_data["bank_sampah_id"]:
+            access["bank_sampah_id"] = bank_data["bank_sampah_id"]
+        access["role"] = role
+        access["email"] = user.email
+        state = AuthService.user_state(user, active_role=role)
         return {
             "access_token": str(access),
             "refresh_token": str(refresh),
@@ -327,10 +381,9 @@ class AuthService:
                 "jenis_kelamin": user.jenis_kelamin,
                 "tanggal_lahir": user.tanggal_lahir.isoformat() if user.tanggal_lahir else None,
                 "alamat": user.alamat,
-                "role": user.role,
-                "bank_sampah_id": str(user.bank_sampah_id) if user.bank_sampah_id else None,
-                "bank_sampah_nama": bank.nama if bank else None,
-                "bank_sampah_status": bank.status if bank else None,
+                "role": role,
+                "roles": list(user.roles),
+                **bank_data,
                 "is_profile_complete": user.is_profile_complete,
                 "is_primary_pengelola": user.is_primary_pengelola,
                 "state": state,

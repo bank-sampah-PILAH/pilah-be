@@ -5,7 +5,9 @@ from django.conf import settings
 from django.core.cache import caches
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.http import HttpResponse, HttpResponseRedirect
+from django.utils.decorators import method_decorator
 from django.utils.http import url_has_allowed_host_and_scheme, urlencode
+from django.views.decorators.cache import never_cache
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -22,6 +24,7 @@ from apps.authentication.serializers import (
     PasswordLoginSerializer,
     RefreshTokenSerializer,
     RoleChangeSerializer,
+    SwitchRoleSerializer,
     UserProfileSerializer,
 )
 from apps.authentication.services import (
@@ -185,6 +188,28 @@ class GoogleOAuthCallbackView(APIView):
         return response
 
 
+class SwitchRoleThrottle(ScopedRateThrottle):
+    cache = caches["auth_rate_limit"]
+
+
+@method_decorator(never_cache, name="dispatch")
+class SwitchRoleView(APIView):
+    serializer_class = SwitchRoleSerializer
+    throttle_classes = [SwitchRoleThrottle]
+    throttle_scope = "switch_role"
+
+    def post(self, request: Request) -> Response:
+        serializer = SwitchRoleSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({"errors": serializer.errors}, status=422)
+        try:
+            return Response(
+                AuthService.switch_role(current_user(request), serializer.validated_data["role"])
+            )
+        except AuthServiceError as exc:
+            return _auth_service_error_response(exc)
+
+
 class RefreshTokenView(APIView):
     permission_classes = [AllowAny]
     serializer_class = RefreshTokenSerializer
@@ -198,10 +223,13 @@ class RefreshTokenView(APIView):
             access = refresh.access_token
             user = User.objects.filter(id=refresh["user_id"]).first()
             if user and user.is_active:
-                AuthService._enforce_superadmin_allowlist(user, user.email)
-                if user.bank_sampah_id:
-                    access["bank_sampah_id"] = str(user.bank_sampah_id)
-                access["role"] = token_role(user, refresh)
+                role = token_role(user, refresh)
+                AuthService._enforce_superadmin_allowlist(user, user.email, active_role=role)
+                bank_data = AuthService.session_bank_data(user, active_role=role)
+                access.payload.pop("bank_sampah_id", None)
+                if bank_data["bank_sampah_id"]:
+                    access["bank_sampah_id"] = bank_data["bank_sampah_id"]
+                access["role"] = role
                 access["email"] = user.email
             else:
                 return Response({"error": REFRESH_TOKEN_INVALID_MESSAGE}, status=401)
@@ -232,6 +260,7 @@ class AuthMeView(APIView):
         data = AuthUserSerializer(current_user(request)).data
         role = token_role(current_user(request), request.auth)
         data["role"] = role
+        data.update(AuthService.session_bank_data(current_user(request), active_role=role))
         data["state"] = AuthService.user_state(current_user(request), active_role=role)
         return Response(data)
 

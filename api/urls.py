@@ -22,6 +22,7 @@ from apps.authentication.views import (
     PasswordLoginView,
     RefreshTokenView,
     RoleChangeView,
+    SwitchRoleView,
 )
 from apps.bank_sampah.views import (
     AcceptInviteView,
@@ -124,6 +125,7 @@ urlpatterns = [
     path("auth/google/start", GoogleOAuthStartView.as_view(), name="auth-google-start"),
     path("auth/google/callback", GoogleOAuthCallbackView.as_view(), name="auth-google-callback"),
     path("auth/refresh", RefreshTokenView.as_view(), name="auth-refresh"),
+    path("auth/switch-role", SwitchRoleView.as_view(), name="auth-switch-role"),
     path("auth/logout", LogoutView.as_view(), name="auth-logout"),
     path("auth/me", AuthMeView.as_view(), name="auth-me"),
     path("onboarding/profile", CompleteProfileView.as_view(), name="onboarding-profile"),

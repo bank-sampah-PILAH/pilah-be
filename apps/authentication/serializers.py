@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 from django.db.models import Model
 from rest_framework import serializers
@@ -23,12 +23,14 @@ class AuthUserSerializer(serializers.ModelSerializer[Model]):
             "tanggal_lahir",
             "alamat",
             "role",
+            "roles",
             "bank_sampah_id",
             "bank_sampah_nama",
             "bank_sampah_status",
             "is_profile_complete",
             "is_primary_pengelola",
         ]
+        read_only_fields = ["roles"]
 
 
 class UserProfileSerializer(ProfilFieldRules, serializers.ModelSerializer[Model]):
@@ -75,6 +77,17 @@ class GoogleAuthSerializer(serializers.Serializer[Any]):
 class PasswordLoginSerializer(serializers.Serializer[Any]):
     email = serializers.EmailField(required=True)
     password = serializers.CharField(required=True, trim_whitespace=False, write_only=True)
+
+
+class SwitchRoleSerializer(serializers.Serializer[Any]):
+    role = serializers.ChoiceField(choices=User.Role.choices)
+
+    def to_internal_value(self, data: Any) -> dict[str, Any]:
+        if isinstance(data, dict) and set(data) - {"role"}:
+            raise serializers.ValidationError(
+                {"non_field_errors": ["Hanya field role yang diizinkan"]}
+            )
+        return cast(dict[str, Any], super().to_internal_value(data))
 
 
 class RefreshTokenSerializer(serializers.Serializer[Any]):
