@@ -306,7 +306,7 @@ function createBatchDraft(account, recipient, neighbor, slot) {
     nasabah_ids: [recipient, neighbor],
     metode: 'tunai',
   });
-  if (result.status !== 201 || !result.body.items || result.body.items.length !== 2 ||
+  if (result.status !== 201 || result.body.items?.length !== 2 ||
       !result.body.items.every(item => [recipient, neighbor].includes(item.nasabah_id))) {
     fault('Batch payout draft is not scoped to its selected fixture members');
   }

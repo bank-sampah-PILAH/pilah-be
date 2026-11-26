@@ -30,6 +30,7 @@ from api.models import (
     PencairanRevisi,
     Saldo,
     Transaksi,
+    TransaksiRevisi,
     User,
 )
 
@@ -417,6 +418,12 @@ class LoadTestDataTests(TransactionTestCase):
         )
         transaction = Transaksi.objects.filter(bank_sampah=bank).first()
         assert transaction is not None
+        draft = DraftPencairan.objects.create(
+            bank_sampah=bank,
+            dibuat_oleh_id=fixture_id(run_id, "user", 0),
+            diubah_oleh_id=fixture_id(run_id, "user", 0),
+        )
+        DraftPencairanItem.objects.create(draft=draft, nasabah=foreign_member, nominal=1)
         transaction.nasabah = foreign_member
         transaction.catatan = "manual write without key"
         transaction.save(update_fields=["nasabah", "catatan"])
@@ -427,11 +434,14 @@ class LoadTestDataTests(TransactionTestCase):
         detail.save(update_fields=["subtotal", "harga_snapshot"])
 
         with self.assertRaises(CommandError) as raised:
-            Command().audit(run_id, expected_writes=1)
+            Command().audit(run_id, expected_writes=1, expected_drafts=2, expected_payouts=1)
         message = str(raised.exception)
         for expected in (
             "Expected 1 new writes, found 0",
+            "Expected 2 payout drafts, found 1",
+            "Expected 1 payouts, found 0",
             "Fixture account/customer count changed",
+            "Cross-bank payout recipient found",
             "Transaction and item totals differ",
             "Item amount differs from fixture price and weight",
             "Cross-bank recipient found",
@@ -486,6 +496,53 @@ class LoadTestDataTests(TransactionTestCase):
                 {"database_metrics": "unavailable for non-PostgreSQL database"},
             )
         connection.cursor.assert_not_called()
+
+    def test_reset_guards_reject_foreign_records_and_changed_team(self) -> None:
+        run_id = "test-pil-393"
+        bank_id = fixture_id(run_id, "bank")
+
+        with patch.object(Pencairan.objects, "filter") as payout_filter:
+            Command()._guard_payouts_and_drafts(run_id, bank_id, "reset")
+            payout_filter.assert_not_called()
+
+        def query(exists: bool = False) -> MagicMock:
+            result = MagicMock()
+            result.exclude.return_value.exists.return_value = exists
+            return result
+
+        with self.assertRaisesMessage(CommandError, "Foreign payout found"):
+            with patch.object(Pencairan.objects, "filter", return_value=query(True)):
+                Command().reset_activity(run_id, bank_id)
+
+        with self.assertRaisesMessage(CommandError, "Foreign payout draft found"):
+            with (
+                patch.object(Pencairan.objects, "filter", return_value=query()),
+                patch.object(DraftPencairan.objects, "filter", return_value=query(True)),
+            ):
+                Command().reset_activity(run_id, bank_id)
+
+        with self.assertRaisesMessage(CommandError, "Foreign setoran revision found"):
+            with (
+                patch.object(Pencairan.objects, "filter", return_value=query()),
+                patch.object(DraftPencairan.objects, "filter", return_value=query()),
+                patch.object(DraftPencairanItem.objects, "filter", return_value=query()),
+                patch.object(TransaksiRevisi.objects, "filter", return_value=query(True)),
+            ):
+                Command().reset_activity(run_id, bank_id)
+
+        with self.assertRaisesMessage(CommandError, "Foreign payout/team revision found"):
+            with (
+                patch.object(Pencairan.objects, "filter", return_value=query()),
+                patch.object(DraftPencairan.objects, "filter", return_value=query()),
+                patch.object(DraftPencairanItem.objects, "filter", return_value=query()),
+                patch.object(TransaksiRevisi.objects, "filter", return_value=query()),
+                patch.object(PencairanRevisi.objects, "filter", return_value=query(True)),
+            ):
+                Command().reset_activity(run_id, bank_id)
+
+        with self.assertRaisesMessage(CommandError, "Fixture team changed"):
+            with patch.object(User.objects, "filter", return_value=query()):
+                Command().restore_team(run_id, bank_id)
 
     def test_reset_removes_fixture_payouts_and_drafts_before_reseeding(self) -> None:
         with TemporaryDirectory() as folder:

@@ -436,12 +436,47 @@ class Command(BaseCommand):
         bank_id = fixture_id(run_id, "bank")
         rows = Transaksi.objects.filter(bank_sampah_id=bank_id)
         members = Nasabah.objects.filter(bank_sampah_id=bank_id)
-        errors = []
-        writes = rows.count() - HISTORY
         draft_rows = DraftPencairan.objects.filter(bank_sampah_id=bank_id)
         payout_rows = Pencairan.objects.filter(bank_sampah_id=bank_id)
-        drafts = draft_rows.count()
-        payouts = payout_rows.count()
+        writes, drafts, payouts = rows.count() - HISTORY, draft_rows.count(), payout_rows.count()
+        errors = []
+        self._audit_counts(
+            errors,
+            bank_id,
+            members,
+            writes,
+            drafts,
+            payouts,
+            expected_writes,
+            expected_drafts,
+            expected_payouts,
+        )
+        self._audit_integrity(errors, run_id, bank_id, rows, payout_rows)
+        self._audit_balances(errors, bank_id, members, rows, payout_rows)
+        if errors:
+            raise CommandError("Integrity failure: " + "; ".join(errors))
+        return {
+            "run_id": run_id,
+            "customers": members.count(),
+            "history": HISTORY,
+            "new_writes": writes,
+            "payout_drafts": drafts,
+            "payouts": payouts,
+            "integrity_errors": 0,
+        }
+
+    @staticmethod
+    def _audit_counts(
+        errors: list[str],
+        bank_id: UUID,
+        members: Any,
+        writes: int,
+        drafts: int,
+        payouts: int,
+        expected_writes: int | None,
+        expected_drafts: int | None,
+        expected_payouts: int | None,
+    ) -> None:
         if expected_writes is not None and writes != expected_writes:
             errors.append(f"Expected {expected_writes} new writes, found {writes}")
         if expected_drafts is not None and drafts != expected_drafts:
@@ -453,6 +488,11 @@ class Command(BaseCommand):
             or User.objects.filter(bank_sampah_id=bank_id).count() != 30
         ):
             errors.append("Fixture account/customer count changed")
+
+    @staticmethod
+    def _audit_integrity(
+        errors: list[str], run_id: str, bank_id: UUID, rows: Any, payout_rows: Any
+    ) -> None:
         if (
             rows.annotate(items_total=Sum("items__subtotal"))
             .exclude(items_total=F("total_nilai"))
@@ -490,6 +530,11 @@ class Command(BaseCommand):
             .exists()
         ):
             errors.append("Duplicate idempotency key")
+
+    @staticmethod
+    def _audit_balances(
+        errors: list[str], bank_id: UUID, members: Any, rows: Any, payout_rows: Any
+    ) -> None:
         deposit_totals = dict(
             rows.filter(status=Transaksi.Status.TERCATAT)
             .values("nasabah_id")
@@ -513,17 +558,6 @@ class Command(BaseCommand):
             if balances.get(member_id, Decimal(0)) != expected:
                 errors.append(f"Incorrect balance for {member_id}")
                 break
-        if errors:
-            raise CommandError("Integrity failure: " + "; ".join(errors))
-        return {
-            "run_id": run_id,
-            "customers": members.count(),
-            "history": HISTORY,
-            "new_writes": writes,
-            "payout_drafts": drafts,
-            "payouts": payouts,
-            "integrity_errors": 0,
-        }
 
     @staticmethod
     def telemetry() -> dict[str, Any]:
