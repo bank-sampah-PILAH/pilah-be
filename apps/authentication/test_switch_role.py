@@ -32,6 +32,102 @@ class SwitchRoleTest(TestCase):
         self.client = APIClient()
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.refresh.access_token}")
 
+    def test_session_organisation_follows_role_across_switch_restore_and_refresh(self) -> None:
+        managed = BankSampah.objects.create(nama="Managed Bank A", no_hp_pic="+628111111111")
+        member_bank = BankSampah.objects.create(nama="Member Bank B", no_hp_pic="+628222222222")
+        self.user.bank_sampah = managed
+        self.user.save(update_fields=["bank_sampah"])
+        membership = Nasabah.objects.create(
+            user=self.user,
+            bank_sampah=member_bank,
+            nomor="NAS-001",
+            nama="Member",
+            alamat="Jl. Test",
+            no_hp="+628123456789",
+            email=self.user.email,
+        )
+        for role, bank in ((User.Role.NASABAH, member_bank), (User.Role.PENGELOLA, managed)):
+            with self.subTest(role=role):
+                switched = self.client.post(
+                    "/api/v1/auth/switch-role", {"role": role}, format="json"
+                )
+                self.assertEqual(switched.status_code, 200)
+                expected = {
+                    "bank_sampah_id": str(bank.pk),
+                    "bank_sampah_nama": bank.nama,
+                    "bank_sampah_status": bank.status,
+                }
+                for field, value in expected.items():
+                    self.assertEqual(switched.data["user"][field], value)
+                self.assertEqual(
+                    AccessToken(switched.data["access_token"])["bank_sampah_id"], str(bank.pk)
+                )
+                self.client.credentials(
+                    HTTP_AUTHORIZATION=f"Bearer {switched.data['access_token']}"
+                )
+                restored = self.client.get("/api/v1/auth/me")
+                self.assertEqual(restored.status_code, 200)
+                for field, value in expected.items():
+                    self.assertEqual(restored.data[field], value)
+                refreshed = APIClient().post(
+                    "/api/v1/auth/refresh",
+                    {"refresh_token": switched.data["refresh_token"]},
+                    format="json",
+                )
+                self.assertEqual(refreshed.status_code, 200)
+                self.assertEqual(
+                    AccessToken(refreshed.data["access_token"])["bank_sampah_id"], str(bank.pk)
+                )
+        self.user.refresh_from_db()
+        membership.refresh_from_db()
+        self.assertEqual(self.user.bank_sampah_id, managed.pk)
+        self.assertEqual(membership.bank_sampah_id, member_bank.pk)
+
+    def test_nasabah_without_one_eligible_membership_never_inherits_managed_bank(self) -> None:
+        managed = BankSampah.objects.create(nama="Managed", no_hp_pic="+628111111111")
+        self.user.bank_sampah = managed
+        self.user.save(update_fields=["bank_sampah"])
+        for case in ("none", "inactive", "pending", "rejected", "multiple"):
+            with self.subTest(case=case):
+                self.user.keanggotaan_nasabah.all().delete()
+                if case != "none":
+                    for index in range(2 if case == "multiple" else 1):
+                        bank = BankSampah.objects.create(
+                            nama=f"{case}-{index}", no_hp_pic="+628111111111"
+                        )
+                        Nasabah.objects.create(
+                            user=self.user,
+                            bank_sampah=bank,
+                            nomor="NAS-001",
+                            nama="Member",
+                            alamat="Jl. Test",
+                            no_hp="+628123456789",
+                            email=self.user.email,
+                            is_active=case != "inactive",
+                            status=case
+                            if case in ("pending", "rejected")
+                            else Nasabah.Status.APPROVED,
+                        )
+                switched = self.client.post(
+                    "/api/v1/auth/switch-role", {"role": User.Role.NASABAH}, format="json"
+                )
+                self.assertEqual(switched.status_code, 200)
+                for field in ("bank_sampah_id", "bank_sampah_nama", "bank_sampah_status"):
+                    self.assertIsNone(switched.data["user"][field])
+                self.assertNotIn(
+                    "bank_sampah_id", AccessToken(switched.data["access_token"]).payload
+                )
+                # A stale legacy refresh claim must not reintroduce a bank.
+                refresh = RefreshToken(switched.data["refresh_token"])
+                refresh["bank_sampah_id"] = str(managed.pk)
+                refreshed = APIClient().post(
+                    "/api/v1/auth/refresh", {"refresh_token": str(refresh)}, format="json"
+                )
+                self.assertEqual(refreshed.status_code, 200)
+                self.assertNotIn(
+                    "bank_sampah_id", AccessToken(refreshed.data["access_token"]).payload
+                )
+
     def test_rate_limit_is_shared_per_account_despite_token_and_ip_changes(self) -> None:
         other_session = RefreshToken.for_user(self.user)
         other_session["role"] = "nasabah"

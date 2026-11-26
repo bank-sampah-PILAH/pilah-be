@@ -334,6 +334,24 @@ class AuthService:
         return response
 
     @staticmethod
+    def session_bank_data(user: User, *, active_role: str) -> dict[str, str | None]:
+        bank = user.bank_sampah
+        if active_role == User.Role.NASABAH:
+            memberships = list(
+                user.keanggotaan_nasabah.filter(
+                    is_active=True, status=Nasabah.Status.APPROVED
+                ).select_related("bank_sampah")[:2]
+            )
+            # Organisation selection for multiple memberships belongs to
+            # PIL-492. Never guess or fall back to the managed bank.
+            bank = memberships[0].bank_sampah if len(memberships) == 1 else None
+        return {
+            "bank_sampah_id": str(bank.pk) if bank else None,
+            "bank_sampah_nama": bank.nama if bank else None,
+            "bank_sampah_status": bank.status if bank else None,
+        }
+
+    @staticmethod
     def _session_response(
         user: User, *, is_new_user: bool, active_role: str | None = None
     ) -> dict[str, Any]:
@@ -341,11 +359,11 @@ class AuthService:
         refresh = RefreshToken.for_user(user)
         refresh["role"] = role
         access = refresh.access_token
-        if user.bank_sampah_id:
-            access["bank_sampah_id"] = str(user.bank_sampah_id)
+        bank_data = AuthService.session_bank_data(user, active_role=role)
+        if bank_data["bank_sampah_id"]:
+            access["bank_sampah_id"] = bank_data["bank_sampah_id"]
         access["role"] = role
         access["email"] = user.email
-        bank = user.bank_sampah
         state = AuthService.user_state(user, active_role=role)
         return {
             "access_token": str(access),
@@ -365,9 +383,7 @@ class AuthService:
                 "alamat": user.alamat,
                 "role": role,
                 "roles": list(user.roles),
-                "bank_sampah_id": str(user.bank_sampah_id) if user.bank_sampah_id else None,
-                "bank_sampah_nama": bank.nama if bank else None,
-                "bank_sampah_status": bank.status if bank else None,
+                **bank_data,
                 "is_profile_complete": user.is_profile_complete,
                 "is_primary_pengelola": user.is_primary_pengelola,
                 "state": state,

@@ -225,8 +225,10 @@ class RefreshTokenView(APIView):
             if user and user.is_active:
                 role = token_role(user, refresh)
                 AuthService._enforce_superadmin_allowlist(user, user.email, active_role=role)
-                if user.bank_sampah_id:
-                    access["bank_sampah_id"] = str(user.bank_sampah_id)
+                bank_data = AuthService.session_bank_data(user, active_role=role)
+                access.payload.pop("bank_sampah_id", None)
+                if bank_data["bank_sampah_id"]:
+                    access["bank_sampah_id"] = bank_data["bank_sampah_id"]
                 access["role"] = role
                 access["email"] = user.email
             else:
@@ -258,6 +260,7 @@ class AuthMeView(APIView):
         data = AuthUserSerializer(current_user(request)).data
         role = token_role(current_user(request), request.auth)
         data["role"] = role
+        data.update(AuthService.session_bank_data(current_user(request), active_role=role))
         data["state"] = AuthService.user_state(current_user(request), active_role=role)
         return Response(data)
 
