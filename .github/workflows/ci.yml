@@ -7,6 +7,8 @@
 # Not here on purpose:
 #   - gitleaks / pip-audit / migration-linter -> scheduled-checks.yml
 #     (weekly cron + manual dispatch)
+#   - Nuclei exposure scan -> nuclei-scan.yml (called below after the staging deploy;
+#     also weekly + manual dispatch)
 #   - docker build + trivy -> deploy-cloud-run.yml (built once for deploy,
 #     scanned there; no duplicate image build in CI)
 name: CI
@@ -225,9 +227,15 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
     needs: verify
     runs-on: ubuntu-latest
+    # The one place the staging origin is written down. The smoke check, the environment
+    # link and the Nuclei scan (through the url output) all use it.
+    env:
+      STAGING_URL: https://pilah-be-staging.fly.dev
+    outputs:
+      url: ${{ env.STAGING_URL }}
     environment:
       name: staging
-      url: https://pilah-be-staging.fly.dev
+      url: ${{ env.STAGING_URL }}
     steps:
       - uses: actions/checkout@v4
 
@@ -255,7 +263,7 @@ jobs:
       - name: Smoke check /healthz
         run: |
           for i in $(seq 1 12); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 https://pilah-be-staging.fly.dev/healthz || true)
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$STAGING_URL/healthz" || true)
             if [ "$code" = "200" ]; then echo "healthz OK"; exit 0; fi
             echo "healthz=$code, retrying in 10s ($i/12)"; sleep 10
           done
@@ -271,3 +279,18 @@ jobs:
           PILAH_SEED_SUPERADMIN_EMAIL: ${{ vars.PILAH_SEED_SUPERADMIN_EMAIL }}
           PILAH_SEED_PENDING_PENGURUS_EMAIL: ${{ vars.PILAH_SEED_PENDING_PENGURUS_EMAIL || vars.PILAH_SEED_PENDING_OPERATOR_EMAIL }}
           PILAH_SEED_INDUK_EMAIL: ${{ vars.PILAH_SEED_INDUK_EMAIL || 'induk.demo@example.com' }}
+
+  # Read-only exposure scan of the just-deployed staging API. Runs only when verify and
+  # deploy_staging succeeded (skipped otherwise). It does not undo the deploy; a finding
+  # outside KNOWN_NOISE makes this job, and so the commit's CI run, red. It scans the URL
+  # the deploy just used, so no STAGING_API_URL variable is needed on this path.
+  nuclei_post_deploy:
+    name: Exposure scan (Nuclei, staging API)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    needs: deploy_staging
+    permissions:
+      contents: read
+    uses: ./.github/workflows/nuclei-scan.yml
+    with:
+      environment: staging
+      target_url: ${{ needs.deploy_staging.outputs.url }}
