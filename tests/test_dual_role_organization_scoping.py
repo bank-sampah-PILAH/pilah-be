@@ -7,11 +7,15 @@ another, and nothing covered it. These tests pin that: switching the active
 role has to move the organization with it, not only the permission.
 """
 
+from datetime import timedelta
+
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory
 
-from api.models import BankSampah, Nasabah, Pencairan, User
+from api.models import BankSampah, JadwalKegiatan, Nasabah, Pencairan, User
+from apps.jadwal.views import JadwalKegiatanViewSet
 from apps.ledger.views import PencairanViewSet
 
 
@@ -92,3 +96,38 @@ class DualRoleOrganizationScopingTest(TestCase):
         # even though both rows belong to the one account.
         self.assertEqual(self._pencairan_ids("pengelola"), {managed_a.pk})
         self.assertNotIn(own_b.pk, self._pencairan_ids("pengelola"))
+
+    def _jadwal(self, bank: BankSampah, status: str) -> JadwalKegiatan:
+        now = timezone.now()
+        return JadwalKegiatan.objects.create(
+            bank_sampah=bank,
+            dibuat_oleh=self.user,
+            jenis_kegiatan="penimbangan",
+            mulai_pada=now + timedelta(days=1),
+            selesai_pada=now + timedelta(days=2),
+            lokasi=bank.nama,
+            status=status,
+        )
+
+    def _jadwal_ids(self, role: str) -> set[object]:
+        view = JadwalKegiatanViewSet()
+        view.action = "list"
+        view.request = self.request(role)
+        return set(view.get_queryset().values_list("pk", flat=True))
+
+    def test_nasabah_mode_sees_the_bank_it_saves_at_not_the_bank_it_manages(self) -> None:
+        # Bank A's schedule is published and the account manages that bank, but
+        # it holds no membership there, so the nasabah side must not see it.
+        managed_a = self._jadwal(self.bank_a, "diterbitkan")
+        saved_at_b = self._jadwal(self.bank_b, "diterbitkan")
+
+        self.assertEqual(self._jadwal_ids("nasabah"), {saved_at_b.pk})
+        self.assertNotIn(managed_a.pk, self._jadwal_ids("nasabah"))
+
+    def test_pengelola_mode_sees_its_own_bank_including_drafts_and_not_the_other(self) -> None:
+        published_a = self._jadwal(self.bank_a, "diterbitkan")
+        draft_a = self._jadwal(self.bank_a, "draft")
+        saved_at_b = self._jadwal(self.bank_b, "diterbitkan")
+
+        self.assertEqual(self._jadwal_ids("pengelola"), {published_a.pk, draft_a.pk})
+        self.assertNotIn(saved_at_b.pk, self._jadwal_ids("pengelola"))
