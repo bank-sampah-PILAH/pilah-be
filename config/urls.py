@@ -24,7 +24,6 @@ from django.http import (
     HttpRequest,
     HttpResponse,
     HttpResponseRedirect,
-    HttpResponseServerError,
     JsonResponse,
 )
 from django.urls import include, path, re_path
@@ -105,11 +104,13 @@ class SwaggerUIView(SpectacularSwaggerSplitView):
 
 
 @require_GET
-def invite_redirect(
-    request: HttpRequest, token: str | None = None
-) -> HttpResponseRedirect | HttpResponseServerError:
+def invite_redirect(request: HttpRequest, token: str | None = None) -> HttpResponse:
     if not settings.PILAH_WEB_ORIGIN:
-        return HttpResponseServerError("PILAH_WEB_ORIGIN is not configured.")
+        return HttpResponse(
+            "Tautan undangan sementara tidak tersedia.",
+            status=503,
+            content_type="text/plain; charset=utf-8",
+        )
     origin = settings.PILAH_WEB_ORIGIN.rstrip("/")
     invite_path = f"/#/invite/{quote(token, safe='')}" if token else "/#/invite"
     return HttpResponseRedirect(f"{origin}{invite_path}")
