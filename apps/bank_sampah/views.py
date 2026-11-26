@@ -1,28 +1,35 @@
+import math
 import mimetypes
+import re
 import uuid
 from typing import Any
 
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 from django.http import FileResponse, Http404, HttpRequest
 from django.views.decorators.http import require_GET
-from rest_framework import viewsets
+from rest_framework import serializers, viewsets
 from rest_framework.decorators import action
+from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from api.models import BankSampah, User
 from apps.authentication.api import user_state_hint
 from apps.bank_sampah.constants import REVIEW_BANK_ID
+from apps.bank_sampah.geo import haversine_km
+from apps.bank_sampah.geocoding import GeocoderTidakTersedia, cari_tempat, geocode_alamat
 from apps.bank_sampah.serializers import (
     ApprovalDecisionSerializer,
     ApprovalLogSerializer,
     BankSampahApprovalListSerializer,
+    BankSampahDetailSerializer,
     BankSampahDirectorySerializer,
     BankSampahRegistrationSerializer,
     BankSampahSerializer,
@@ -31,6 +38,14 @@ from apps.bank_sampah.serializers import (
     TeamTransferSerializer,
 )
 from apps.bank_sampah.services import ApprovalService, BankOnboardingService, TeamService
+from apps.bank_sampah.tautan import (
+    AKURASI_VIEWPORT_M,
+    TautanTidakTersedia,
+    TautanTidakValid,
+    koordinat_dari_tautan,
+    perluas_tautan_pendek,
+)
+from shared_kernel.pagination import StandardPagination
 from shared_kernel.permissions import (
     IsActivePengelola,
     IsPengelola,
@@ -39,6 +54,28 @@ from shared_kernel.permissions import (
     is_review_superadmin,
 )
 from shared_kernel.scoping import current_bank, current_user
+
+_PRAFIKS_KOTA = ("kotamadya ", "kabupaten ", "kab. ", "kota ", "kab ")
+
+
+def normalisasi_kota(teks: str) -> str:
+    """Wujud kanonik sebuah nama wilayah untuk pencocokan teks (PIL-329, opsi A).
+
+    Lowercase, spasi dirapikan, dan awalan jalur administratif ("Kota",
+    "Kotamadya", "Kab.", "Kabupaten") dilucuti berulang, jadi "Kota Depok",
+    "KAB. DEPOK", dan "Depok" bertemu pada satu bentuk. Sisi tersimpan tetap
+    dibandingkan dengan `icontains`, jadi varian yang tersimpan ("Kota Depok")
+    tetap kena oleh bentuk yang dilucuti.
+    """
+    bentuk = re.sub(r"\s+", " ", teks.strip().lower())
+    sebelum = None
+    while sebelum != bentuk:
+        sebelum = bentuk
+        for prafiks in _PRAFIKS_KOTA:
+            if bentuk.startswith(prafiks):
+                bentuk = bentuk[len(prafiks) :]
+                break
+    return bentuk.strip()
 
 
 @require_GET  # S3752: media is read-only; other methods are caller error.
@@ -58,6 +95,125 @@ def bank_sampah_activity_media(request: HttpRequest, token: str) -> FileResponse
         raise Http404 from None
     content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
     return FileResponse(media_file, content_type=content_type)
+
+
+class ResolveKoordinatSerializer(serializers.Serializer):  # type: ignore[type-arg]  # stubs are generic, runtime is not
+    """Exactly one of an address or a pasted Maps link, per `sumber`."""
+
+    sumber = serializers.ChoiceField(
+        choices=["alamat", "tautan"],
+        error_messages={
+            "required": "Sumber wajib diisi",
+            "invalid_choice": "Sumber harus 'alamat' atau 'tautan'",
+        },
+    )
+    alamat = serializers.CharField(required=False, allow_blank=True)
+    kota = serializers.CharField(required=False, allow_blank=True)
+    tautan = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if attrs["sumber"] == "alamat" and not attrs.get("alamat", "").strip():
+            raise serializers.ValidationError({"alamat": "Alamat wajib diisi"})
+        if attrs["sumber"] == "tautan" and not attrs.get("tautan", "").strip():
+            raise serializers.ValidationError({"tautan": "Tautan wajib diisi"})
+        return attrs
+
+
+class ResolveKoordinatView(APIView):
+    """Resolve a bank-sampah coordinate so the app never calls a geocoder itself."""
+
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "resolve_koordinat"
+    serializer_class = ResolveKoordinatSerializer
+
+    def post(self, request: Request) -> Response:
+        serializer = ResolveKoordinatSerializer(data=request.data)
+        # The shared handler turns validation errors into 422; this endpoint's
+        # contract fixes malformed input at 400.
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+        data = serializer.validated_data
+        if data["sumber"] == "alamat":
+            return self._dari_alamat(data)
+        return self._dari_tautan(data)
+
+    def _dari_alamat(self, data: dict[str, Any]) -> Response:
+        query = " ".join(
+            bagian
+            for bagian in (data.get("alamat", "").strip(), data.get("kota", "").strip())
+            if bagian
+        )
+        try:
+            hasil = geocode_alamat(query)
+        except GeocoderTidakTersedia:
+            return Response({"detail": "Layanan geocoder tidak dapat dihubungi"}, status=503)
+        if hasil is None:
+            return Response({"detail": "Alamat tidak ditemukan"}, status=404)
+        return Response(
+            {
+                "latitude": hasil.latitude,
+                "longitude": hasil.longitude,
+                "sumber": "geocode",
+                "alamat_hasil": hasil.alamat_hasil,
+                "akurasi_m": hasil.akurasi_m,
+            }
+        )
+
+    def _dari_tautan(self, data: dict[str, Any]) -> Response:
+        try:
+            koordinat = koordinat_dari_tautan(perluas_tautan_pendek(data["tautan"].strip()))
+        except TautanTidakValid as exc:
+            return Response({"detail": exc.alasan.value}, status=400)
+        except TautanTidakTersedia:
+            return Response({"detail": "Tautan tidak dapat diperluas"}, status=503)
+        if koordinat is None:
+            return Response({"detail": "Tautan tidak memuat koordinat"}, status=400)
+        latitude, longitude, jenis = koordinat
+        return Response(
+            {
+                "latitude": latitude,
+                "longitude": longitude,
+                "sumber": "tautan",
+                "alamat_hasil": None,
+                # A viewport centre is a guess; the app shows it as one.
+                "akurasi_m": None if jenis == "pin" else AKURASI_VIEWPORT_M,
+            }
+        )
+
+
+class CariTempatView(APIView):
+    """Address search for the map picker, kept behind our own geocoder cache.
+
+    The app can't set User-Agent in a browser and cross-origin calls to
+    Nominatim are blocked; the backend also owns the provider's shared
+    request limit (apps.bank_sampah.geocoding).
+    """
+
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "cari_tempat"
+
+    def get(self, request: Request) -> Response:
+        kueri = request.query_params.get("q", "").strip()
+        if len(kueri) < 3:
+            return Response({"detail": "Kata kunci minimal 3 karakter"}, status=400)
+        try:
+            hasil = cari_tempat(kueri)
+        except GeocoderTidakTersedia:
+            return Response({"detail": "Layanan geocoder tidak dapat dihubungi"}, status=503)
+        return Response(
+            {
+                "hasil": [
+                    {
+                        "nama": h.alamat_hasil or f"{h.latitude}, {h.longitude}",
+                        "latitude": h.latitude,
+                        "longitude": h.longitude,
+                    }
+                    for h in hasil
+                ]
+            }
+        )
 
 
 class BankSampahMeView(APIView):
@@ -260,21 +416,169 @@ class GenerateInviteView(APIView):
         }
 
 
-class BankSampahDirectoryView(APIView):
+def _joinable_banks() -> QuerySet[BankSampah]:
+    """Banks calon nasabah may join, shared by the directory list and detail."""
+    return (
+        BankSampah.objects.filter(status=BankSampah.Status.ACTIVE, is_active=True)
+        .exclude(jenis_organisasi=BankSampah.OrganizationType.INDUK)
+        .order_by("nama")
+    )
+
+
+JARAK_MAKSIMAL_KM = 100  # Radius cap: the directory is join-distance, not intercity freight.
+
+
+class BankSampahLokasiQuerySerializer(serializers.Serializer):  # type: ignore[type-arg]  # stubs are generic, runtime is not
+    """Validates the coordinate trio of the directory list (PIL-314).
+
+    All-or-nothing: half a coordinate pair pinpoints nothing, so any
+    incomplete combination is rejected rather than silently reduced to a
+    keyword search.
+    """
+
+    latitude = serializers.FloatField(required=False)
+    longitude = serializers.FloatField(required=False)
+    radius_km = serializers.FloatField(required=False)
+    sort = serializers.CharField(required=False)
+
+    _WILAYAH = {"latitude": (-90, 90), "longitude": (-180, 180)}
+
+    def validate_latitude(self, value: float) -> float:
+        if not math.isfinite(value) or not -90 <= value <= 90:
+            raise serializers.ValidationError("Lintang harus di antara -90 dan 90")
+        return value
+
+    def validate_longitude(self, value: float) -> float:
+        if not math.isfinite(value) or not -180 <= value <= 180:
+            raise serializers.ValidationError("Bujur harus di antara -180 dan 180")
+        return value
+
+    def validate_radius_km(self, value: float) -> float:
+        # NaN lolos semua perbandingan, jadi tolak nilai tak hingga lebih dulu.
+        if not math.isfinite(value) or value <= 0 or value > JARAK_MAKSIMAL_KM:
+            raise serializers.ValidationError(
+                f"Radius harus lebih dari 0 dan maksimal {JARAK_MAKSIMAL_KM} km"
+            )
+        return value
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        hadir = [k for k in ("latitude", "longitude", "radius_km") if k in attrs]
+        if hadir and len(hadir) != 3:
+            raise serializers.ValidationError(
+                "latitude, longitude, dan radius_km dikirim bersamaan atau tidak sama sekali"
+            )
+        if attrs.get("sort") == "distance" and "radius_km" not in attrs:
+            raise serializers.ValidationError("sort=distance membutuhkan koordinat lengkap")
+        return attrs
+
+
+class BankSampahDirectoryView(ListAPIView[BankSampah]):
     """Lists bank sampah a calon nasabah can apply to join.
 
     Excludes `induk` organizations — they are administrative parents with no
     direct membership of their own; a nasabah joins one of their `unit`
     branches, or a standalone `mandiri` bank sampah, instead.
+
+    `q` searches nama/alamat/kota (PIL-308); `kota` matches the normalized
+    region text (PIL-329 option A): prefix variants "Kota"/"Kab." collapse,
+    so a stored "Kota Depok" answers both "depok" and "Kota Depok".
+
+    The coordinate trio (latitude/longitude/radius_km) turns the list into a
+    distance search (PIL-314): only banks with stored coordinates qualify,
+    rows leave the radius circle are dropped, and every row gains a
+    `jarak_km` string. Sorting and pagination then happen in Python — the
+    full filtered set is sorted once (jarak asc with nama as tie-break, or
+    plain nama), and standard page slicing follows, so page 2 is always ranks
+    3+ of the full ordering, never a fresh sort of the current page.
     """
 
     permission_classes = [IsAuthenticated]
-    serializer_class = BankSampahDirectorySerializer
+    serializer_class = BankSampahDirectorySerializer  # type: ignore[assignment]  # DRF stubs type serializer_class too narrowly
+    pagination_class = StandardPagination
 
-    def get(self, request: Request) -> Response:
-        banks = (
-            BankSampah.objects.filter(status=BankSampah.Status.ACTIVE, is_active=True)
-            .exclude(jenis_organisasi=BankSampah.OrganizationType.INDUK)
-            .order_by("nama")
+    def get_queryset(self) -> QuerySet[BankSampah]:
+        qs = _joinable_banks()
+        q = (self.request.query_params.get("q") or "").strip()
+        # Threshold mirrors JenisSampahViewSet: a single character is noise.
+        if len(q) >= 2:
+            qs = qs.filter(Q(nama__icontains=q) | Q(alamat__icontains=q) | Q(kota__icontains=q))
+        kota = (self.request.query_params.get("kota") or "").strip()
+        if kota:
+            # Bandingkan bentuk normal dan asli: normalisasi merapatkan spasi,
+            # sedangkan kota tersimpan bisa memuat spasi ganda ("Jakarta  Selatan").
+            qs = qs.filter(Q(kota__icontains=normalisasi_kota(kota)) | Q(kota__icontains=kota))
+        return qs
+
+    def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        lokasi = BankSampahLokasiQuerySerializer(data=request.query_params)
+        # Issue contract wants 422 for bad filter input, not DRF's default 400.
+        try:
+            lokasi.is_valid(raise_exception=True)
+        except serializers.ValidationError as exc:
+            return Response({"errors": exc.detail}, status=422)
+        params = lokasi.validated_data
+        if params.get("sort") == "distance" or "radius_km" in params:
+            return self._list_dengan_jarak(params)
+        # Aplikasi terpasang yang lama membaca daftar polos; amplop hanya
+        # dikirim saat klien benar-benar meminta halaman.
+        if not ({"page", "page_size"} & request.query_params.keys()):
+            queryset = self.filter_queryset(self.get_queryset())
+            return Response(self.get_serializer(queryset, many=True).data)
+        return super().list(request, *args, **kwargs)
+
+    def _list_dengan_jarak(self, params: dict[str, Any]) -> Response:
+        """Distance mode (PIL-314): radius filter, optional distance sort.
+
+        The whole filtered set is scored and sorted once, then paginated, so
+        page 2 is always ranks page_size+1.. of the full ordering — never a
+        re-sort of just the current page.
+        """
+        lat, lng = params["latitude"], params["longitude"]
+        kunci = (
+            (lambda item: (item[1], item[0].nama))
+            if params.get("sort") == "distance"
+            else (lambda item: item[0].nama)  # location mode without sort stays nama-ordered
         )
-        return Response(BankSampahDirectorySerializer(banks, many=True).data)
+        kandidat = sorted(
+            (
+                (
+                    bank,
+                    haversine_km(lat, lng, float(str(bank.latitude)), float(str(bank.longitude))),
+                )
+                for bank in self.get_queryset().filter(
+                    latitude__isnull=False, longitude__isnull=False
+                )
+            ),
+            key=kunci,
+        )
+        if "radius_km" in params:
+            kandidat = [(bank, jarak) for bank, jarak in kandidat if jarak <= params["radius_km"]]
+        paginator = StandardPagination()
+        # Potong dulu, baru serialisasi: halaman 2 tidak mengulang kerja halaman 1.
+        # StandardPagination selalu aktif di view ini, jadi hasilnya list;
+        # `or []` hanya memuaskan tipe stub.
+        page = paginator.paginate_queryset(kandidat, self.request, view=self) or []
+        konteks = self.get_serializer_context()
+        rows = [
+            {
+                **BankSampahDirectorySerializer(bank, context=konteks).data,
+                "jarak_km": f"{jarak:.2f}",
+            }
+            for bank, jarak in page
+        ]
+        return paginator.get_paginated_response(rows)
+
+
+class BankSampahDetailView(RetrieveAPIView[BankSampah]):
+    """Detail of one joinable bank: profile, status, layanan, and coordinates.
+
+    The lookup goes through the same joinable filter as the directory, so a
+    pending/rejected/induk bank returns 404 instead of leaking its data.
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = BankSampahDetailSerializer  # type: ignore[assignment]  # DRF stubs type serializer_class too narrowly
+
+    def get_queryset(self) -> QuerySet[BankSampah]:
+        # Prefetch riwayat harga layanan: tanpa ini serialisasi detail query per layanan.
+        return _joinable_banks().prefetch_related("jenis_sampah__riwayat_harga")

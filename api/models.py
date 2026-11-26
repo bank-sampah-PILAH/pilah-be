@@ -6,6 +6,7 @@ from apps.authentication.models import User, UserManager, UserRoleChangeLog  # n
 from apps.bank_sampah.models import (  # noqa: F401
     BankSampah,
     BankSampahApprovalLog,
+    GeocodingRequestSlot,
     PengurusDikeluarkan,
 )
 from apps.jadwal.models import JadwalKegiatan  # noqa: F401
@@ -30,9 +31,10 @@ __all__ = [
     "BankSampahApprovalLog",
     "DetailTransaksi",
     "DeviceToken",
-    "HargaSampah",
     "DraftPencairan",
     "DraftPencairanItem",
+    "GeocodingRequestSlot",
+    "HargaSampah",
     "JenisSampah",
     "JadwalKegiatan",
     "Nasabah",

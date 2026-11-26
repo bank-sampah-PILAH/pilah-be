@@ -10,7 +10,8 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from rest_framework import serializers
 from rest_framework.test import APITestCase
 
-from api.models import BankSampah, User
+from api.models import BankSampah, JenisSampah, User
+from apps.bank_sampah.geo import haversine_km
 from apps.bank_sampah.serializers import (
     BankSampahApprovalListSerializer,
     BankSampahDirectorySerializer,
@@ -18,6 +19,8 @@ from apps.bank_sampah.serializers import (
     BankSampahSerializer,
 )
 from apps.bank_sampah.services import BankOnboardingService
+from apps.bank_sampah.views import normalisasi_kota
+from apps.waste_catalog.api import buat_jenis_sampah
 
 REGISTRATION = {
     "nama": "Bank Sampah Baru",
@@ -233,9 +236,14 @@ class BankDirectoryCoordinateTests(APITestCase):
         )
         BankSampah.objects.create(nama="Bank Kosong", alamat="Jl. Kosong No. 2", kota="Depok")
 
-    def _data(self, nama: str) -> Mapping[str, Any]:
-        response = self.client.get(self.url)
-        return {item["nama"]: item for item in response.data}[nama]  # type: ignore[no-any-return]
+    def _results(self, **query: str) -> list[Mapping[str, Any]]:
+        response = self.client.get(self.url, query or None)
+        data = response.data
+        # Tanpa parameter halaman endpoint mempertahankan daftar polos lama.
+        return data["results"] if isinstance(data, dict) else data  # type: ignore[no-any-return]
+
+    def _data(self, nama: str, **query: str) -> Mapping[str, Any]:
+        return {item["nama"]: item for item in self._results(**query)}[nama]
 
     def test_directory_exposes_coordinates(self) -> None:
         item = self._data("Bank Garis")
@@ -252,6 +260,385 @@ class BankDirectoryCoordinateTests(APITestCase):
         data = BankSampahDirectorySerializer(self.mandiri).data
         self.assertEqual(data["latitude"], "-6.362829")
         self.assertEqual(data["longitude"], "106.828655")
+
+
+class BankDirectorySearchTests(APITestCase):
+    """Directory keyword/kota filtering and pagination (PIL-308)."""
+
+    url = "/api/v1/bank-sampah"
+
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(email="cari@example.test", nama="Pencari")
+        self.client.force_authenticate(self.user)
+        self.garis = BankSampah.objects.create(
+            nama="Bank Garis Dua",
+            alamat="Jl. Garis No. 1",
+            kota="Depok",
+            latitude=Decimal("-6.362829"),
+            longitude=Decimal("106.828655"),
+        )
+        self.kosong = BankSampah.objects.create(
+            nama="Bank Kosong", alamat="Jl. Kosong No. 2", kota="Depok"
+        )
+
+    def _names(self, query: Mapping[str, str] | None = None) -> list[str]:
+        data = self.client.get(self.url, query).data
+        results = data["results"] if isinstance(data, dict) else data
+        return sorted(item["nama"] for item in results)
+
+    def test_q_searches_nama_alamat_and_kota(self) -> None:
+        cases = [
+            ("q", "Garis", ["Bank Garis Dua"]),  # nama
+            ("q", "Jl. Kosong", ["Bank Kosong"]),  # alamat
+            ("q", "Depok", ["Bank Garis Dua", "Bank Kosong"]),  # kota
+        ]
+        for param, word, expected in cases:
+            with self.subTest(word=word):
+                self.assertEqual(self._names({param: word}), expected)
+
+    def test_short_or_missing_q_returns_all_bank_sampah(self) -> None:
+        self.assertEqual(
+            self._names({"q": "J"}),
+            ["Bank Garis Dua", "Bank Kosong"],  # 1 char is noise, not a filter
+        )
+        self.assertEqual(self._names({}), ["Bank Garis Dua", "Bank Kosong"])
+
+    def test_kota_filter_is_insensitive_to_case_and_spaces(self) -> None:
+        for kota in ("depok", "  DEPOK  "):
+            with self.subTest(kota=kota):
+                self.assertEqual(self._names({"kota": kota}), ["Bank Garis Dua", "Bank Kosong"])
+        self.assertEqual(self._names({"kota": "Bandung"}), [])
+
+    def test_kota_and_q_combine(self) -> None:
+        self.assertEqual(self._names({"kota": "Depok", "q": "Garis"}), ["Bank Garis Dua"])
+
+    def test_kota_filter_collapses_administrative_prefix_variants(self) -> None:
+        # PIL-329 option A: "Kota"/"Kab." prefixes on either side collapse.
+        for kota in ("Depok", "Kota Depok", "KAB. DEPOK", "Kabupaten Depok", "kota  depok"):
+            with self.subTest(kota=kota):
+                self.assertEqual(self._names({"kota": kota}), ["Bank Garis Dua", "Bank Kosong"])
+
+    def test_kota_prefix_strip_does_not_widen_the_match(self) -> None:
+        # Stripping the prefix must not turn one city into another.
+        self.assertEqual(self._names({"kota": "Kab. Bandung"}), [])
+
+    def test_kota_filter_never_matches_a_bank_with_empty_kota(self) -> None:
+        BankSampah.objects.create(nama="Bank Tanpa Kota", alamat="Jl. Itu", kota="")
+        self.assertEqual(self._names({"kota": "Kota "}), [])
+        self.assertEqual(self._names({"kota": "Depok"}), ["Bank Garis Dua", "Bank Kosong"])
+
+    def test_q_still_matches_a_stored_kota_with_prefix(self) -> None:
+        # `q` stays raw text search: only the `kota` param is normalized.
+        self.assertEqual(self._names({"q": "Kabupaten Depok"}), [])
+
+    def test_pagination_envelope_and_second_page(self) -> None:
+        response = self.client.get(self.url, {"page_size": 1, "page": 1})
+        self.assertEqual(response.data["count"], 2)
+        self.assertIn("page=2", response.data["next"])
+        self.assertIsNone(response.data["previous"])
+        self.assertEqual([b["nama"] for b in response.data["results"]], ["Bank Garis Dua"])
+        response = self.client.get(self.url, {"page_size": 1, "page": 2})
+        self.assertIsNone(response.data["next"])
+        # DRF omits `page=1` from the previous link.
+        self.assertIn("page_size=1", response.data["previous"])
+        self.assertNotIn("page=2", response.data["previous"])
+
+    def test_no_pagination_param_keeps_the_legacy_bare_list(self) -> None:
+        # Aplikasi lama membaca array polos, bukan amplop {count, results}.
+        response = self.client.get(self.url)
+        self.assertIsInstance(response.data, list)
+        self.assertEqual(
+            sorted(item["nama"] for item in response.data), ["Bank Garis Dua", "Bank Kosong"]
+        )
+        # Filter tanpa parameter halaman juga tetap berbentuk daftar.
+        self.assertIsInstance(self.client.get(self.url, {"kota": "Depok"}).data, list)
+
+    def test_kota_with_repeated_spaces_matches_its_own_query(self) -> None:
+        # Normalisasi merapatkan spasi kueri; kota tersimpan menyimpan spasi ganda,
+        # jadi bentuk asli juga harus ikut dicocokkan.
+        BankSampah.objects.create(nama="Bank Jakarta", alamat="Jl. J", kota="Jakarta  Selatan")
+        self.assertEqual(self._names({"kota": "Jakarta  Selatan"}), ["Bank Jakarta"])
+
+    def test_page_or_page_size_alone_still_returns_the_envelope(self) -> None:
+        for query in ({"page": "1"}, {"page_size": "1"}):
+            with self.subTest(query=query):
+                data = self.client.get(self.url, query).data
+                self.assertEqual(data["count"], 2)
+                self.assertIn("results", data)
+
+
+class HaversineTests(SimpleTestCase):
+    def test_known_pair_within_tolerance(self) -> None:
+        # Depok ↔ Monas, Jakarta: ~15 km ground truth for this lat band.
+        jarak = haversine_km(-6.362829, 106.828655, -6.175110, 106.827750)
+        self.assertAlmostEqual(jarak, 20.9, delta=0.5)
+
+    def test_same_point_is_zero(self) -> None:
+        self.assertEqual(haversine_km(-6.362829, 106.828655, -6.362829, 106.828655), 0.0)
+
+
+class BankDirectoryLocationSearchTests(APITestCase):
+    """Coordinate + radius search on the directory list (PIL-314)."""
+
+    url = "/api/v1/bank-sampah"
+
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(email="cari@example.test", nama="Pencari")
+        self.client.force_authenticate(self.user)
+        # All in Depok, spread so distances differ: Dekat < Menengah < Jauh.
+        self.dekat = BankSampah.objects.create(
+            nama="Bank Dekat",
+            alamat="Jl. A No. 1",
+            kota="Depok",
+            latitude=Decimal("-6.362829"),
+            longitude=Decimal("106.828655"),
+        )
+        self.menengah = BankSampah.objects.create(
+            nama="Bank Menengah",
+            alamat="Jl. B No. 2",
+            kota="Depok",
+            latitude=Decimal("-6.372000"),
+            longitude=Decimal("106.838000"),
+        )
+        self.jauh = BankSampah.objects.create(
+            nama="Bank Jauh",
+            alamat="Jl. C No. 3",
+            kota="Depok",
+            latitude=Decimal("-6.382000"),
+            longitude=Decimal("106.848000"),
+        )
+        self.tanpa_koord = BankSampah.objects.create(
+            nama="Bank Tanpa Koordinat", alamat="Jl. D No. 4", kota="Depok"
+        )
+        self.pusat = (-6.362829, 106.828655)  # = dekat's own coordinates.
+
+    def _names(self, query: Mapping[str, Any]) -> list[str]:
+        data = self.client.get(self.url, query).data
+        results = data["results"] if isinstance(data, dict) else data
+        return [item["nama"] for item in results]
+
+    def _trio(self, **overrides: Any) -> dict[str, Any]:
+        query = {
+            "latitude": str(self.pusat[0]),
+            "longitude": str(self.pusat[1]),
+            "radius_km": "5",
+        }
+        query.update({k: str(v) for k, v in overrides.items()})
+        return query
+
+    def test_radius_returns_only_in_circle_banks_with_jarak_km(self) -> None:
+        # menengah sits ~1.45 km out; radius 1 keeps only dekat (0 km).
+        data = self.client.get(self.url, self._trio(radius_km=1)).data
+        self.assertEqual(data["count"], 1)
+        hasil = data["results"][0]
+        self.assertEqual(hasil["nama"], "Bank Dekat")
+        self.assertIn("jarak_km", hasil)
+        self.assertEqual(float(hasil["jarak_km"]), 0.0)
+
+    def test_radius_hides_null_coordinate_banks(self) -> None:
+        self.assertIn("Bank Tanpa Koordinat", self._names({"kota": "Depok"}))
+        self.assertNotIn("Bank Tanpa Koordinat", self._names(self._trio(radius_km=100)))
+
+    def test_boundary_bank_exactly_at_radius_is_included(self) -> None:
+        # tanpa_koord sits at ~0 km on the same point if given coords; instead
+        # use menengah and ask for exactly its distance from pusat.
+        jarak = haversine_km(
+            self.pusat[0],
+            self.pusat[1],
+            float(str(self.menengah.latitude)),
+            float(str(self.menengah.longitude)),
+        )
+        nama = self._names(self._trio(radius_km=f"{jarak:.6f}"))
+        self.assertIn("Bank Menengah", nama)
+
+    def test_partial_location_trio_is_422(self) -> None:
+        for partial in (
+            {"latitude": "-6.36"},
+            {"longitude": "106.82"},
+            {"radius_km": "5"},
+            {"latitude": "-6.36", "longitude": "106.82"},
+        ):
+            with self.subTest(params=sorted(partial)):
+                response = self.client.get(self.url, partial)
+                self.assertEqual(response.status_code, 422)
+
+    def test_invalid_ranges_and_radius_bounds_are_422(self) -> None:
+        for query in (
+            {"latitude": "95", "longitude": "106", "radius_km": "5"},  # lat out of range
+            {"latitude": "abc", "longitude": "106", "radius_km": "5"},
+            {"latitude": "-6.36", "longitude": "200", "radius_km": "5"},  # lng out of range
+            {"latitude": "-6.36", "longitude": "106", "radius_km": "0"},
+            {"latitude": "-6.36", "longitude": "106", "radius_km": "-1"},
+            {"latitude": "-6.36", "longitude": "106", "radius_km": "101"},  # over cap
+            {"latitude": "-6.36", "longitude": "106", "radius_km": "nol"},
+        ):
+            with self.subTest(query=str(query)):
+                response = self.client.get(self.url, query)
+                self.assertEqual(response.status_code, 422)
+
+    def test_sort_distance_orders_nearest_first_with_jarak_values(self) -> None:
+        data = self.client.get(self.url, self._trio(radius_km=5, sort="distance")).data
+        hasil = data["results"]
+        self.assertEqual([b["nama"] for b in hasil], ["Bank Dekat", "Bank Menengah", "Bank Jauh"])
+        jarak = [float(b["jarak_km"]) for b in hasil]
+        self.assertEqual(jarak, sorted(jarak))
+        self.assertTrue(jarak[0] < jarak[1] < jarak[2])
+
+    def test_sort_distance_without_location_is_422(self) -> None:
+        response = self.client.get(self.url, {"sort": "distance"})
+        self.assertEqual(response.status_code, 422)
+
+    def test_location_sort_defaults_to_nama_not_distance(self) -> None:
+        # No sort param: nama ordering still applies despite distance mode.
+        self.assertEqual(
+            self._names(self._trio(radius_km=5)), ["Bank Dekat", "Bank Jauh", "Bank Menengah"]
+        )
+
+    def test_sort_and_pagination_page_two_is_ranks_three_four_of_full_set(self) -> None:
+        # 5 banks at growing distances; page_size=2 → page 1 = ranks 1-2,
+        # page 2 = ranks 3-4 of the FULL sorted set, never a per-page re-sort.
+        for i in range(3, 6):
+            BankSampah.objects.create(
+                nama=f"Bank K{i}",
+                alamat="Jl. K",
+                kota="Depok",
+                latitude=Decimal(f"-6.40{i}"),  # each ~111 m further south
+                longitude=Decimal("106.828655"),
+            )
+        data = self.client.get(
+            self.url, self._trio(radius_km=10, sort="distance", page_size=2, page=2)
+        ).data
+        self.assertEqual(data["count"], 6)  # dekat + menengah + jauh + 3 new (tanpa_koord hidden)
+        ranks = [b["nama"] for b in data["results"]]
+        # Page 1 would be [Dekat, Menengah]; page 2 must skip to ranks 3-4.
+        self.assertEqual(ranks, ["Bank Jauh", "Bank K3"])
+        jarak = [float(b["jarak_km"]) for b in data["results"]]
+        self.assertLess(jarak[0], jarak[1])
+
+    def test_non_finite_coordinate_and_radius_values_are_422(self) -> None:
+        # float() menerima NaN/Infinity; NaN lolos semua perbandingan rentang.
+        for query in (
+            {"latitude": "NaN", "longitude": "106.82", "radius_km": "5"},
+            {"latitude": "-6.36", "longitude": "Infinity", "radius_km": "5"},
+            {"latitude": "-6.36", "longitude": "106.82", "radius_km": "NaN"},
+            {"latitude": "-6.36", "longitude": "106.82", "radius_km": "Infinity"},
+            {"latitude": "-6.36", "longitude": "106.82", "radius_km": "-Infinity"},
+        ):
+            with self.subTest(query=str(query)):
+                self.assertEqual(self.client.get(self.url, query).status_code, 422)
+
+    def test_page_serializes_only_the_requested_slice(self) -> None:
+        original = BankSampahDirectorySerializer.to_representation
+        with patch.object(
+            BankSampahDirectorySerializer,
+            "to_representation",
+            autospec=True,
+            side_effect=original,
+        ) as to_representation:
+            data = self.client.get(
+                self.url,
+                self._trio(radius_km=10, sort="distance", page_size=1, page=1),
+            ).data
+        self.assertEqual(len(data["results"]), 1)
+        # Hanya satu bank halaman ini yang diserialisasi, bukan seluruh kandidat.
+        self.assertEqual(to_representation.call_count, 1)
+
+    def test_q_and_kota_combine_with_radius(self) -> None:
+        self.assertEqual(self._names(self._trio(radius_km=5, q="Menengah")), ["Bank Menengah"])
+        self.assertEqual(
+            self._names(self._trio(radius_km=5, kota="Depok", q="Dekat")), ["Bank Dekat"]
+        )
+
+    def test_non_joinable_banks_excluded_in_radius_mode(self) -> None:
+        induk = BankSampah.objects.create(
+            nama="Induk BTH",
+            jenis_organisasi=BankSampah.OrganizationType.INDUK,
+            latitude=Decimal("-6.362829"),
+            longitude=Decimal("106.828655"),
+            no_hp_pic="081",
+        )
+        pending = BankSampah.objects.create(
+            nama="Bank Pending",
+            status=BankSampah.Status.PENDING,
+            latitude=Decimal("-6.362829"),
+            longitude=Decimal("106.828655"),
+            no_hp_pic="081",
+        )
+        nonaktif = BankSampah.objects.create(
+            nama="Bank Nonaktif",
+            is_active=False,
+            latitude=Decimal("-6.362829"),
+            longitude=Decimal("106.828655"),
+            no_hp_pic="081",
+        )
+        nama_hadir = self._names(self._trio(radius_km=5, sort="distance"))
+        for bank, why in [(induk, "induk"), (pending, "pending"), (nonaktif, "nonaktif")]:
+            with self.subTest(why):
+                self.assertNotIn(bank.nama, nama_hadir)
+
+
+class BankDetailTests(APITestCase):
+    url = "/api/v1/bank-sampah"
+
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(email="cari@example.test", nama="Pencari")
+        self.client.force_authenticate(self.user)
+        self.bank = BankSampah.objects.create(
+            nama="Bank Garis Dua",
+            alamat="Jl. Garis No. 1",
+            kota="Depok",
+            latitude=Decimal("-6.362829"),
+            longitude=Decimal("106.828655"),
+        )
+        for nomor, nama_sampah, kategori, harga, aktif in [
+            ("K-1", "Kardus", "kertas", 1500, True),
+            ("P-2", "Botol", "plastik", 2000, True),
+            ("X-9", "Nonaktif", "dll", 500, False),
+        ]:
+            buat_jenis_sampah(
+                self.bank,
+                harga_per_kg=harga,
+                nomor=nomor,
+                nama_sampah=nama_sampah,
+                kategori=kategori,
+                is_active=aktif,
+            )
+
+    def _detail(self, bank: BankSampah | None = None) -> Mapping[str, Any]:
+        url = f"{self.url}/{(bank or self.bank).id}"
+        return self.client.get(url).data  # type: ignore[no-any-return]
+
+    def test_detail_returns_profile_status_coords_and_active_layanan(self) -> None:
+        data = self._detail()
+        self.assertEqual(data["nama"], "Bank Garis Dua")
+        self.assertEqual(data["status"], "active")
+        self.assertEqual(data["latitude"], "-6.362829")
+        # `nomor`-ordered, and exactly the jenis sampah a member would be paid at.
+        self.assertEqual([item["kode"] for item in data["layanan"]], ["K-1", "P-2"])
+        lain = data["layanan"][1]
+        self.assertEqual(lain["nama_sampah"], "Botol")
+        self.assertEqual(lain["harga_per_kg"], "2000.00")
+        self.assertEqual(lain["satuan"], "kg")
+        self.assertNotIn("is_active", lain)
+
+    def test_detail_serialization_uses_a_constant_number_of_queries(self) -> None:
+        # Layanan dan riwayat harganya di-prefetch: jumlah query tetap walau
+        # bank punya tiga layanan (sebelumnya satu query per layanan).
+        with self.assertNumQueries(3):
+            self._detail()
+
+    def test_detail_hides_non_joinable_banks(self) -> None:
+        induk = BankSampah.objects.create(
+            nama="Induk BTH", jenis_organisasi=BankSampah.OrganizationType.INDUK, no_hp_pic="081"
+        )
+        pending = BankSampah.objects.create(
+            nama="Bank Pending", status=BankSampah.Status.PENDING, no_hp_pic="081"
+        )
+        for bank, why in [(induk, "induk"), (pending, "pending")]:
+            with self.subTest(why):
+                response = self.client.get(f"{self.url}/{bank.id}")
+                self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.client.get(f"{self.url}/not-a-uuid").status_code, 404)
 
 
 class BankSampahCoordinateIndexTests(TestCase):
@@ -336,3 +723,126 @@ class BankHierarchyModelTests(TestCase):
             mandiri.save()
 
         self.assertIn("parent", caught.exception.message_dict)
+
+
+class BankDirectoryCoverageGapsTests(APITestCase):
+    """Branch/condition completeness for the directory endpoints.
+
+    Not new behavior: closes boundary and empty-state branches that earlier
+    PIL-314/326/308 tests left uncovered so new-code coverage stays above 99%.
+    """
+
+    url = "/api/v1/bank-sampah"
+
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(email="cari@example.test", nama="Pencari")
+        self.client.force_authenticate(self.user)
+        self.bank = BankSampah.objects.create(
+            nama="Bank Satu",
+            alamat="Jl. A No. 1",
+            kota="Depok",
+            latitude=Decimal("-6.362829"),
+            longitude=Decimal("106.828655"),
+        )
+
+    def _trio(self, **overrides: Any) -> dict[str, Any]:
+        query = {
+            "latitude": "-6.362829",
+            "longitude": "106.828655",
+            "radius_km": "5",
+            **overrides,
+        }
+        return {k: v for k, v in query.items() if v is not None}
+
+    def test_radius_cap_of_one_hundred_km_is_accepted(self) -> None:
+        # Radius at exactly the cap is valid; only strictly-above is 422.
+        response = self.client.get(self.url, self._trio(radius_km="100"))
+        self.assertEqual(response.status_code, 200)
+
+    def test_coordinate_limits_are_inclusive(self) -> None:
+        # ±90 / ±180 are accepted: the range check is a closed interval.
+        for query in (
+            self._trio(latitude="-90"),
+            self._trio(latitude="90"),
+            self._trio(longitude="-180"),
+            self._trio(longitude="180"),
+        ):
+            with self.subTest(query=str(query)):
+                response = self.client.get(self.url, query)
+                self.assertEqual(response.status_code, 200)
+
+    def test_distance_search_with_no_bank_in_radius_is_empty_envelope(self) -> None:
+        # Nothing within 1 km: count 0, empty results, no crash.
+        response = self.client.get(
+            self.url,
+            self._trio(latitude="-3.0", longitude="105.0", radius_km="1", sort="distance"),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 0)
+        self.assertEqual(response.data["results"], [])
+
+    def test_keyword_search_with_no_match_is_empty_envelope(self) -> None:
+        response = self.client.get(self.url, {"q": "kata-tak-ada", "page_size": "5"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 0)
+        self.assertEqual(response.data["results"], [])
+
+
+class BankDetailCoverageGapsTests(APITestCase):
+    """Detail-endpoint branch completeness (PIL-308/326/351).
+
+    Unauthenticated access, zero-layanan banks, null coordinates, and an
+    active jenis that has never had a price version.
+    """
+
+    url = "/api/v1/bank-sampah"
+
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(email="cari@example.test", nama="Pencari")
+        self.bank = BankSampah.objects.create(
+            nama="Bank Sederhana", alamat="Jl. B No. 2", kota="Depok"
+        )
+
+    def _detail(self, bank: BankSampah | None = None) -> Any:
+        url = f"{self.url}/{(bank or self.bank).id}"
+        return self.client.get(url)
+
+    def test_detail_unauthenticated_is_401(self) -> None:
+        response = self._detail()
+        self.assertEqual(response.status_code, 401)
+
+    def test_detail_of_bank_without_layanan_or_coordinates(self) -> None:
+        self.client.force_authenticate(self.user)
+        data = self._detail().data
+        self.assertEqual(data["layanan"], [])
+        self.assertIsNone(data["latitude"])
+        self.assertIsNone(data["longitude"])
+
+    def test_active_layanan_without_any_price_version_has_null_harga(self) -> None:
+        # An active jenis with no HargaSampah version at all: the row is
+        # listed but prices as null rather than disappearing.
+        self.client.force_authenticate(self.user)
+        JenisSampah.objects.create(
+            bank_sampah=self.bank,
+            nomor="K-1",
+            nama_sampah="Kardus",
+            kategori=JenisSampah.Kategori.KERTAS,
+            is_active=True,
+        )
+        data = self._detail().data
+        self.assertEqual(len(data["layanan"]), 1)
+        self.assertIsNone(data["layanan"][0]["harga_per_kg"])
+        self.assertIsNone(data["layanan"][0]["harga_berlaku_mulai"])
+
+
+class KotaNormalisasiTests(SimpleTestCase):
+    """normalisasi_kota stack-loop behavior (PIL-329 option A)."""
+
+    def test_double_prefix_collapses_through_a_second_loop_pass(self) -> None:
+        # "Kabupaten Kota X": the first pass strips "kabupaten ", the second
+        # loop pass strips "kota " from what is now the head of the string.
+        self.assertEqual(normalisasi_kota("Kabupaten Kota Depok"), "depok")
+        self.assertEqual(normalisasi_kota("Kotamadya Kab. Cimahi"), "cimahi")
+
+    def test_plain_name_is_already_stable(self) -> None:
+        self.assertEqual(normalisasi_kota("  Depok  "), "depok")

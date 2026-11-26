@@ -7,6 +7,9 @@ from api.models import BankSampah, User
 
 BEFORE = [("api", "0039_user_role_change_log")]
 AFTER = [("api", "0040_one_primary_pengelola_per_bank")]
+# Rolling back the team constraint leaves the independent coordinate fields
+# applied. Include them in the historical model state used to write fixtures.
+FIXTURE_STATE = [*BEFORE, ("api", "0041_banksampah_koordinat_sumber_akurasi")]
 
 
 def _migrate(target: list[tuple[str, str]]) -> MigrationExecutor:
@@ -55,15 +58,17 @@ class OnePrimaryMigrationTests(TransactionTestCase):
         # the final migrate (and later tests) start from valid data.
         _migrate(BEFORE)
         executor = MigrationExecutor(connection)
-        User = executor.loader.project_state(BEFORE).apps.get_model("api", "User")
+        User = executor.loader.project_state(FIXTURE_STATE).apps.get_model("api", "User")
         User.objects.all().delete()
-        BankSampah = executor.loader.project_state(BEFORE).apps.get_model("api", "BankSampah")
+        BankSampah = executor.loader.project_state(FIXTURE_STATE).apps.get_model(
+            "api", "BankSampah"
+        )
         BankSampah.objects.all().delete()
         call_command("migrate", verbosity=0)
 
     def _seed(self, primaries: int) -> str:
         executor = _migrate(BEFORE)
-        apps = executor.loader.project_state(BEFORE).apps
+        apps = executor.loader.project_state(FIXTURE_STATE).apps
         bank = apps.get_model("api", "BankSampah").objects.create(
             nama="Bank Ganda", alamat="Depok", kota="Depok", no_hp_pic="+628111111111"
         )
@@ -89,7 +94,7 @@ class OnePrimaryMigrationTests(TransactionTestCase):
         self.assertIn("lebih dari satu Pengurus Utama", str(ctx.exception))
 
     def _add_primary(self, bank_id: str, email: str) -> None:
-        apps = MigrationExecutor(connection).loader.project_state(BEFORE).apps
+        apps = MigrationExecutor(connection).loader.project_state(FIXTURE_STATE).apps
         apps.get_model("api", "User").objects.create(
             email=email,
             nama=email,
@@ -132,7 +137,7 @@ class OnePrimaryMigrationTests(TransactionTestCase):
 
     def test_sole_reviewer_primary_in_its_own_bank_is_untouched(self) -> None:
         executor = _migrate(BEFORE)
-        apps = executor.loader.project_state(BEFORE).apps
+        apps = executor.loader.project_state(FIXTURE_STATE).apps
         bank = apps.get_model("api", "BankSampah").objects.create(
             nama="Bank Review", alamat="Depok", kota="Depok", no_hp_pic="+628111111111"
         )

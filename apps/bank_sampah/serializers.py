@@ -8,6 +8,8 @@ from django.urls import reverse
 from rest_framework import serializers
 
 from api.models import BankSampah, BankSampahApprovalLog, User
+from apps.bank_sampah.models import SUMBER_KOORDINAT
+from apps.waste_catalog.serializers import DirectoryLayananSerializer
 from shared_kernel.validators import normalize_indonesian_phone
 
 
@@ -48,6 +50,8 @@ class BankSampahSerializer(serializers.ModelSerializer[Model]):
             "wa_gateway_token",
             "latitude",
             "longitude",
+            "koordinat_sumber",
+            "koordinat_akurasi_m",
             "foto_logo",
             "status",
             "is_active",
@@ -94,6 +98,19 @@ class BankSampahRegistrationSerializer(serializers.Serializer[Any]):
     )
     longitude = serializers.DecimalField(
         required=False, allow_null=True, max_digits=9, decimal_places=6
+    )
+    koordinat_sumber = serializers.ChoiceField(
+        choices=SUMBER_KOORDINAT,
+        required=False,
+        allow_blank=True,
+        error_messages={"invalid_choice": "Sumber koordinat tidak dikenal"},
+    )
+    koordinat_akurasi_m = serializers.DecimalField(
+        required=False,
+        allow_null=True,
+        max_digits=8,
+        decimal_places=2,
+        min_value=0,
     )
 
     def validate_latitude(self, value: Any) -> Any:
@@ -222,6 +239,38 @@ class BankSampahDirectorySerializer(serializers.ModelSerializer[Model]):
     class Meta:
         model = BankSampah
         fields = ["id", "nama", "alamat", "kota", "latitude", "longitude", "foto_logo"]
+
+
+class BankSampahDetailSerializer(serializers.ModelSerializer[Model]):
+    """Directory entry plus what a detail page needs: status and layanan.
+
+    Layanan comes from the bank's active jenis sampah (waste_catalog context
+    via its public DTO, PIL-308).
+    """
+
+    layanan = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BankSampah
+        fields = [
+            "id",
+            "nama",
+            "alamat",
+            "kota",
+            "status",
+            "latitude",
+            "longitude",
+            "foto_logo",
+            "layanan",
+        ]
+
+    def get_layanan(self, obj: BankSampah) -> Any:
+        # .all() memakai cache prefetch; .filter() justru memicu query baru.
+        active = sorted(
+            (jenis for jenis in obj.jenis_sampah.all() if jenis.is_active),
+            key=lambda jenis: jenis.nomor,
+        )
+        return DirectoryLayananSerializer(active, many=True).data
 
 
 class TeamTransferSerializer(serializers.Serializer[Any]):

@@ -96,6 +96,61 @@ class JenisSampahSerializer(serializers.ModelSerializer[Model]):
         return data
 
 
+class DirectoryLayananSerializer(serializers.ModelSerializer[Model]):
+    """Compact public read of one layanan (jenis sampah) for directory detail.
+
+    Write-side stays in `JenisSampahSerializer`; this one is for the bank
+    sampah directory detail view (PIL-308), so no admin fields like
+    `is_active`/`updated_at`.
+    """
+
+    satuan = serializers.SerializerMethodField()
+    kode = serializers.CharField(source="nomor")
+    harga_per_kg = serializers.SerializerMethodField()
+    harga_berlaku_mulai = serializers.SerializerMethodField()
+    harga_terjadwal = serializers.SerializerMethodField()
+
+    class Meta:
+        model = JenisSampah
+        fields = [
+            "id",
+            "kode",
+            "nama_sampah",
+            "kategori",
+            "deskripsi",
+            "satuan",
+            "harga_per_kg",
+            "harga_berlaku_mulai",
+            "harga_terjadwal",
+        ]
+
+    def get_satuan(self, obj: Any) -> Any:
+        return SATUAN_HARGA
+
+    def get_harga_per_kg(self, obj: Any) -> Any:
+        berlaku, _ = self._harga_ringkas(obj)
+        return _HARGA.to_representation(berlaku.harga_per_kg) if berlaku else None
+
+    def get_harga_berlaku_mulai(self, obj: Any) -> Any:
+        berlaku, _ = self._harga_ringkas(obj)
+        return _WAKTU.to_representation(berlaku.berlaku_mulai) if berlaku else None
+
+    def get_harga_terjadwal(self, obj: Any) -> Any:
+        _, terjadwal = self._harga_ringkas(obj)
+        return (
+            {
+                "harga_per_kg": _HARGA.to_representation(terjadwal.harga_per_kg),
+                "berlaku_mulai": _WAKTU.to_representation(terjadwal.berlaku_mulai),
+            }
+            if terjadwal
+            else None
+        )
+
+    @staticmethod
+    def _harga_ringkas(instance: Any) -> tuple[Any, Any]:
+        return ringkas_harga(instance.riwayat_harga.all(), timezone.now())
+
+
 _HARGA = serializers.DecimalField(max_digits=11, decimal_places=2)
 _WAKTU = serializers.DateTimeField()
 
