@@ -1,5 +1,30 @@
 # Staging concurrency checks for PIL-443, PIL-444 and PIL-445
 
+## PIL-529 scope and blockers
+
+`journeys.js` now includes isolated synthetic-data checks for operational period
+reports and Excel export, Nasabah statement PDF, setoran correction/void,
+pencairan draft/batch/confirmation/history, and Pengurus team management. Team
+management is included because CPBI-36 (PIL-508) is Done. Nasabah registration
+and role-change write journeys remain intentionally absent until CPBI-02 and
+CPBI-12 are Done.
+
+PIL-528 is still Todo. Do not run production load tests or production writes;
+PIL-529 smoke/load execution against its production synthetic dataset remains
+blocked until PIL-528 prepares that dataset and target-speed agreement. This
+change was validated with local tests only. No production endpoint was probed
+and no remote fixture, account, draft, payout, setoran, or team record was
+created. Run the one-user smoke only against the approved synthetic data after
+PIL-528; never use a real customer or bank.
+
+The source has no create action on `PencairanViewSet`, so direct `POST
+/pencairan` is not implemented. The supported create flow in this checkout is
+`POST /draft-pencairan` or `/draft-pencairan/batch`, then
+`POST /draft-pencairan/{id}/konfirmasi`; the journey checks those routes and
+reads bank-scoped payout history. Whether a deployed production instance
+accepts any older/direct pencairan write remains unconfirmed. Confirm only
+with the PIL-528 synthetic setup; do not test by creating a real payout.
+
 Subissues: [PIL-443](https://linear.app/pilah-2/issue/PIL-443) (baseline),
 [PIL-444](https://linear.app/pilah-2/issue/PIL-444) (realistic load),
 [PIL-445](https://linear.app/pilah-2/issue/PIL-445) (bursts),
@@ -98,10 +123,16 @@ threshold failure still permits those bounded repetitions at the same level; it
 blocks higher levels. Script, HTTP/business or integrity faults stop immediately. Actual
 release offsets are recorded; this does not promise perfectly simultaneous arrivals.
 
-Each trial resets only the fixture's transactions/balances, retaining users and
-sessions. Output folders must be new, preventing accidental result overwrites.
-Use `--users 10` (or 20/30) to repeat an investigated level in a new output directory.
-No notification delivery endpoint is called. HTTP redirects are disabled.
+Each trial resets only the owned fixture: transactions, payouts, drafts, revisions,
+team-removal audit rows and balances; it retains users/sessions and restores the 21
+fixture Pengurus plus the original primary role. The extra report/export requests run
+once per applicable VU per trial; payout drafts (single and batch), one Rp 1
+confirmation, setoran correction/void run once per Pengurus VU, and the transfer,
+removal/rejoin team choreography runs once per trial. The fixture audit reconciles
+setoran writes, draft counts, payout counts and balances separately. Output folders
+must be new, preventing accidental result overwrites. Use `--users 10` (or 20/30) to
+repeat an investigated level in a new output directory. No notification delivery
+endpoint is called. HTTP redirects are disabled.
 
 Thresholds apply per action to the steady period: reads p95 ≤1 second; setoran and
 login p95 ≤2 seconds; unexpected failures <1%; integrity faults zero. All HTTP or
@@ -110,9 +141,11 @@ escalating. A failed or untested level must never be reported as passing. Baseli
 and burst percentiles with few samples are diagnostic, not strong statistical claims.
 
 The post-run audit verifies persisted write counts against acknowledged creates,
-item totals, balances, scope, and idempotency. Never reset after an integrity failure
-until its evidence has been preserved. The audit fails closed; no result is a pass
-without a successful audit. Reset/cleanup refuse unexpected users or memberships.
+item totals, payout drafts and payouts, balances after voids/withdrawals, fixture
+scope, and idempotency. Never reset after an integrity failure until its evidence has
+been preserved. The audit fails closed; no result is a pass without a successful
+audit. Reset/cleanup refuse unexpected users or memberships and reset refuses
+foreign payout/draft/revision data.
 
 Each folder contains raw tagged samples, k6 summary/exit status, reconciliation,
 runner source checksums, deployment snapshots, and CPU/memory/DB telemetry. The
@@ -175,9 +208,9 @@ python tests/load/run.py audit --accounts /tmp/pil393-private/accounts.json --ru
 python tests/load/run.py cleanup --accounts /tmp/pil393-private/accounts.json --run-id example-run --output /tmp/pil393-results
 ```
 
-Cleanup removes the run's synthetic accounts, memberships, schedules, transactions
-and balances, but preserves its immutable inactive fixture bank, waste types and price
-history. This is intentional fixture-safety behavior: these reference/history records
+Cleanup removes the run's synthetic accounts, memberships, schedules, transactions,
+payouts/drafts and balances, but preserves its immutable inactive fixture bank, waste
+types and price history. This is intentional fixture-safety behavior: these reference/history records
 are not recycled or deleted by cleanup. An archived run cannot be reset; use a fresh
 run ID for another trial. Remove the private manifests and test browser/device sessions
 after cleanup. Do not commit credentials, raw artifacts, local databases, or temporary
