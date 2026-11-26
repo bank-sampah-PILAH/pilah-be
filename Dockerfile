@@ -30,7 +30,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # stripped too: python:3.12-slim ships an old pip (CVE-carrying) that Trivy
 # would flag on the final image — the app venv is the only Python env here.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libpq5 curl \
+    && apt-get install -y --no-install-recommends libpq5 curl zlib1g \
     && rm -rf /usr/local/lib/python3.12/site-packages/pip* \
         /usr/local/lib/python3.12/site-packages/setuptools* \
         /usr/local/lib/python3.12/site-packages/wheel* \
@@ -44,7 +44,7 @@ RUN adduser --disabled-password --gecos "" --home /app appuser
 WORKDIR /app
 
 COPY --chown=appuser:appuser . .
-RUN chmod +x /app/docker/entrypoint.sh \
+RUN chmod +x /app/docker/entrypoint.sh /app/docker/push-entrypoint.sh \
     && mkdir -p /app/staticfiles /app/media \
     && chown -R appuser:appuser /app
 

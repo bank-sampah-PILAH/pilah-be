@@ -13,6 +13,7 @@ from apps.announcement.views import (
 from apps.authentication.views import (
     AuthMeView,
     CompleteProfileView,
+    DiscardRegistrationView,
     GoogleAuthView,
     GoogleOAuthCallbackView,
     GoogleOAuthStartView,
@@ -20,6 +21,7 @@ from apps.authentication.views import (
     LogoutView,
     PasswordLoginView,
     RefreshTokenView,
+    RoleChangeView,
 )
 from apps.bank_sampah.views import (
     AcceptInviteView,
@@ -28,6 +30,8 @@ from apps.bank_sampah.views import (
     GenerateInviteView,
     RegisterBankSampahView,
     SuperAdminBankSampahViewSet,
+    TeamMemberView,
+    TeamTransferView,
     TeamView,
 )
 from apps.jadwal.views import JadwalKegiatanViewSet
@@ -50,7 +54,13 @@ from apps.nasabah.home import (
 )
 from apps.nasabah.profile import NasabahProfileView
 from apps.nasabah.views import NasabahSelfView, NasabahViewSet, RegisterNasabahView, SaldoView
-from apps.notification.views import WATemplateView
+from apps.notification.views import (
+    DeviceTokenView,
+    NotificationClearView,
+    NotificationReadView,
+    NotificationView,
+    WATemplateView,
+)
 from apps.reporting.views import (
     DashboardOperationalTrendsView,
     DashboardRecentTransactionsView,
@@ -72,6 +82,10 @@ router.register(
 )
 
 urlpatterns = [
+    path("notifications/", NotificationView.as_view(), name="notifications"),
+    path("notifications/clear/", NotificationClearView.as_view(), name="notifications-clear"),
+    path("notifications/<int:pk>/read/", NotificationReadView.as_view(), name="notification-read"),
+    path("device-tokens/", DeviceTokenView.as_view(), name="device-tokens"),
     path("aktivitas", ActivityHistoryView.as_view(), name="activity-history"),
     path("nasabah/me/beranda", NasabahHomeView.as_view(), name="nasabah-home"),
     path("nasabah/me/saldo", NasabahBalanceView.as_view(), name="nasabah-own-balance"),
@@ -113,6 +127,12 @@ urlpatterns = [
     path("auth/logout", LogoutView.as_view(), name="auth-logout"),
     path("auth/me", AuthMeView.as_view(), name="auth-me"),
     path("onboarding/profile", CompleteProfileView.as_view(), name="onboarding-profile"),
+    path("onboarding/role", RoleChangeView.as_view(), name="onboarding-role"),
+    path(
+        "onboarding/discard-registration",
+        DiscardRegistrationView.as_view(),
+        name="onboarding-discard-registration",
+    ),
     path("onboarding/bank-sampah", RegisterBankSampahView.as_view(), name="onboarding-bank-sampah"),
     path("onboarding/nasabah", RegisterNasabahView.as_view(), name="onboarding-nasabah"),
     path("invites/accept", AcceptInviteView.as_view(), name="invite-accept"),
@@ -120,6 +140,8 @@ urlpatterns = [
     path("bank-sampah/me", BankSampahMeView.as_view(), name="bank-sampah-me"),
     path("bank-sampah", BankSampahDirectoryView.as_view(), name="bank-sampah-directory"),
     path("team", TeamView.as_view(), name="team"),
+    path("team/<uuid:pk>", TeamMemberView.as_view(), name="team-member"),
+    path("team/transfer", TeamTransferView.as_view(), name="team-transfer"),
     path("team/invite", GenerateInviteView.as_view(), name="team-invite"),
     path("nasabah/me", NasabahSelfView.as_view(), name="nasabah-me"),
     path("nasabah/<uuid:pk>/saldo", SaldoView.as_view(), name="nasabah-saldo"),

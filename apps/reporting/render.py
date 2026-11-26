@@ -290,10 +290,12 @@ def _page_chrome(canvas: Canvas, data: StatementData, theme: Theme) -> None:
         canvas.roundRect(x, strip_top - strip_h, cell_w - 2, strip_h, _RADIUS, stroke=1, fill=0)
         canvas.setFillColor(colors.HexColor("#6B7280"))
         canvas.setFont("Inter", 8)
-        canvas.drawString(x + 8, strip_top - strip_h + 6, caption)
+        canvas.drawCentredString(x + cell_w / 2, strip_top - strip_h / 2 + 4, caption)
         canvas.setFillColor(colors.HexColor("#111827"))
         canvas.setFont("Inter-Bold", 9)
-        canvas.drawString(x + 8, strip_top - 6, "Rp " + format_ribuan(amount))
+        canvas.drawCentredString(
+            x + cell_w / 2, strip_top - strip_h / 2 - 6, "Rp " + format_ribuan(amount)
+        )
     canvas.restoreState()
 
     canvas.saveState()

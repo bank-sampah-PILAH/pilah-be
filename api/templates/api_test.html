@@ -372,10 +372,10 @@
     async function completeGoogleRegistration(data) {
       if (!data.registration_required) return data;
       const role = window.prompt(
-        "Pilih role: pengelola, pengelola_induk, atau nasabah",
+        "Pilih role: pengelola atau nasabah",
         "pengelola",
       );
-      if (!['pengelola', 'pengelola_induk', 'nasabah'].includes(role)) {
+      if (!['pengelola', 'nasabah'].includes(role)) {
         throw new Error('Role pendaftaran Google tidak valid atau dibatalkan');
       }
       const response = await fetch(`${normalizeBaseUrl()}/auth/google/register`, {

@@ -188,3 +188,7 @@ class BankSampahDirectorySerializer(serializers.ModelSerializer[Model]):
     class Meta:
         model = BankSampah
         fields = ["id", "nama", "alamat", "kota", "foto_logo"]
+
+
+class TeamTransferSerializer(serializers.Serializer[Any]):
+    id = serializers.UUIDField()

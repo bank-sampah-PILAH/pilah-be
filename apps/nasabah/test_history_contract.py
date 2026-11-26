@@ -64,7 +64,7 @@ class NasabahHistoryContractTests(APITestCase):
             [row["id"] for row in rows], [str(item.id) for item in reversed(transactions)]
         )
         self.assertEqual(rows[0]["total_nilai"], "12500.50")
-        self.assertEqual(set(rows[0]), {"id", "tanggal", "tipe", "total_nilai"})
+        self.assertEqual(set(rows[0]), {"id", "tanggal", "tipe", "total_nilai", "status"})
         self.assertIsNone(response.data["next"])
 
     def test_customer_cannot_override_owner_with_query_parameters(self) -> None:
@@ -151,6 +151,7 @@ class NasabahHistoryContractTests(APITestCase):
                 "catatan",
                 "items",
                 "saldo_setelah_transaksi",
+                "status",
             },
         )
         self.assertEqual(response.data["tipe"], "setoran")

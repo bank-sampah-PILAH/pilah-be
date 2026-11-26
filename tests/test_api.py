@@ -2508,16 +2508,6 @@ class APISpecTests(APITransactionTestCase):
             ],
         )
 
-    def test_pengelola_induk_can_sign_in(self) -> None:
-        response = self.client.post(
-            "/api/v1/auth/google",
-            {"id_token": "dev-pengelola-induk:induk@example.com:Pengelola Induk"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(response.data["user"]["role"], "pengelola_induk")
-
     def test_nasabah_can_sign_in(self) -> None:
         response = self.client.post(
             "/api/v1/auth/google",
@@ -2580,7 +2570,7 @@ class APISpecTests(APITransactionTestCase):
 
     def test_new_role_logins_return_role_specific_states(self) -> None:
         expected_states = {
-            "dev-pengelola-induk": "complete_profile",
+            "dev-pengelola": "complete_profile",
             "dev-nasabah": "complete_profile",
         }
         for index, (token_prefix, state) in enumerate(expected_states.items(), start=1):
@@ -2665,7 +2655,7 @@ class APISpecTests(APITransactionTestCase):
 
     @override_settings(PILAH_ALLOW_FAKE_GOOGLE_TOKEN=True)
     def test_google_login_uses_role_assigned_to_existing_account(self) -> None:
-        for role in (User.Role.PENGELOLA_INDUK, User.Role.NASABAH):
+        for role in (User.Role.PENGELOLA, User.Role.NASABAH):
             with self.subTest(role=role):
                 email = f"{role}@example.com"
                 User.objects.create_user(email=email, nama=role, role=role)
@@ -2681,8 +2671,8 @@ class APISpecTests(APITransactionTestCase):
                 self.assertEqual(AccessToken(response.data["access_token"])["role"], role)
                 self.assertEqual(response.data["next_step"], "complete_profile")
 
-    def test_new_roles_do_not_inherit_pengelola_endpoint_access(self) -> None:
-        for role in (User.Role.PENGELOLA_INDUK, User.Role.NASABAH):
+    def test_nasabah_does_not_inherit_pengelola_endpoint_access(self) -> None:
+        for role in (User.Role.NASABAH,):
             with self.subTest(role=role):
                 user = User.objects.create_user(
                     email=f"{role}@example.com",
@@ -3565,10 +3555,55 @@ class APISpecTests(APITransactionTestCase):
         entry = response.data[0]
         self.assertEqual(entry["id"], str(membership.id))
         self.assertEqual(entry["status"], "pending")
+        self.assertEqual(entry["total_saldo"], "0.00")
         self.assertEqual(entry["bank_sampah"]["id"], str(self.bank.id))
         self.assertEqual(entry["bank_sampah"]["nama"], self.bank.nama)
         self.assertEqual(entry["bank_sampah"]["alamat"], self.bank.alamat)
         self.assertIsNone(entry["alasan_penolakan"])
+
+    def test_nasabah_self_view_returns_each_membership_balance(self) -> None:
+        customer = User.objects.create_user(
+            email="membership-balances@example.com",
+            nama="Nasabah Dua Bank",
+            role=User.Role.NASABAH,
+            is_profile_complete=True,
+        )
+        other_bank = BankSampah.objects.create(
+            nama="Bank Sampah Lain", alamat="Depok", kota="Depok", no_hp_pic="+628111222445"
+        )
+        approved = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=self.bank,
+            nomor="NAS-0708",
+            nama=customer.nama,
+            alamat="Jl. Melati",
+            no_hp="+628555555040",
+            status=Nasabah.Status.APPROVED,
+            is_active=True,
+        )
+        rejected = Nasabah.objects.create(
+            user=customer,
+            bank_sampah=other_bank,
+            nomor="NAS-0002",
+            nama=customer.nama,
+            alamat="Jl. Melati",
+            no_hp="+628555555041",
+            status=Nasabah.Status.REJECTED,
+            is_active=False,
+        )
+        Saldo.objects.create(nasabah=approved, total_saldo=Decimal("12345.67"))
+        Saldo.objects.create(nasabah=rejected, total_saldo=Decimal("890.10"))
+        refresh = RefreshToken.for_user(customer)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        response = self.client.get("/api/v1/nasabah/me")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIsInstance(response.json(), list)
+        by_id = {entry["id"]: entry for entry in response.json()}
+        self.assertEqual(set(by_id), {str(approved.id), str(rejected.id)})
+        self.assertEqual(by_id[str(approved.id)]["total_saldo"], "12345.67")
+        self.assertEqual(by_id[str(rejected.id)]["total_saldo"], "890.10")
 
     def test_nasabah_self_view_accessible_before_profile_is_complete(self) -> None:
         """PIL-204's redesign lets a pengurus-entered record auto-link on

@@ -47,9 +47,10 @@ class JenisSampahSerializerGuardTests(APITestCase):
     def test_blank_code_and_nine_digit_price_cap_are_enforced_by_the_validators(self) -> None:
         # Field-level blank and max_digits checks fire first over HTTP; these
         # validators remain the backstop for values that reach them directly.
+        # Kode is different since UAT 2026-11: blank means "auto-assign", so
+        # the validator trims and accepts it; the view numbers the row.
         serializer = JenisSampahSerializer()
 
-        with self.assertRaisesRegex(serializers.ValidationError, "Kode sampah wajib diisi"):
-            serializer.validate_kode("  ")
+        self.assertEqual(serializer.validate_kode("  "), "")
         with self.assertRaisesRegex(serializers.ValidationError, "Harga maksimal 9 digit"):
             serializer.validate_harga_per_kg(Decimal(1000000000))

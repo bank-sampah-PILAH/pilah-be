@@ -12,9 +12,10 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
-from api.models import BankSampah, Nasabah, Pencairan, Transaksi, User
+from api.models import BankSampah, Nasabah, Pencairan, Transaksi, TransaksiQuerySet, User
 from apps.ledger.api import activity_query, apply_period
 from apps.ledger.serializers import TransactionDetailSerializer
+from apps.nasabah.keanggotaan import filter_dapat_dibuka
 from apps.reporting.api import StatementPeriodError, export_statement_pdf
 from shared_kernel.http_headers import CONTENT_DISPOSITION
 from shared_kernel.pagination import StandardPagination
@@ -44,6 +45,8 @@ class ActivitySerializer(serializers.Serializer[Any]):
     tanggal = serializers.DateTimeField()
     tipe = serializers.CharField()
     total_nilai = serializers.DecimalField(max_digits=14, decimal_places=2)
+    # "dibatalkan" only reaches the detail of a voided setoran (PIL-428); the lists leave it out (PIL-481).
+    status = serializers.CharField()
 
 
 class NasabahTransactionDetailSerializer(TransactionDetailSerializer):
@@ -56,6 +59,7 @@ class NasabahTransactionDetailSerializer(TransactionDetailSerializer):
             "catatan",
             "items",
             "saldo_setelah_transaksi",
+            "status",
         ]
 
 
@@ -102,7 +106,7 @@ class MembershipService:
         except (ValueError, TypeError, AttributeError) as exc:
             raise ValidationError({"keanggotaan_id": "UUID tidak valid."}) from exc
         selected = memberships.filter(pk=member_id)
-        member = MembershipService._eligible_memberships(selected).first()
+        member = filter_dapat_dibuka(selected).first()
         if member is not None:
             return member
         if selected.exists():
@@ -110,17 +114,8 @@ class MembershipService:
         raise NotFound()
 
     @staticmethod
-    def _eligible_memberships(memberships: QuerySet[Nasabah]) -> QuerySet[Nasabah]:
-        return memberships.filter(
-            status=Nasabah.Status.APPROVED,
-            is_active=True,
-            bank_sampah__is_active=True,
-            bank_sampah__status=BankSampah.Status.ACTIVE,
-        )
-
-    @staticmethod
     def _get_default_membership(memberships: QuerySet[Nasabah]) -> Nasabah:
-        eligible = list(MembershipService._eligible_memberships(memberships))
+        eligible = list(filter_dapat_dibuka(memberships))
         if not eligible:
             raise PermissionDenied("Keanggotaan aktif diperlukan.")
         if len(eligible) > 1:
@@ -144,7 +139,11 @@ def balance_data(member: Nasabah) -> dict[str, Any]:
     }
 
 
-def activities(member: Nasabah) -> QuerySet[Transaksi]:
+def activities(member: Nasabah) -> TransaksiQuerySet:
+    """Every setoran of the member, voided ones included: the detail lookup needs them.
+
+    The lists read ``activities(member).tercatat()`` instead (PIL-481).
+    """
     return Transaksi.objects.filter(nasabah=member, bank_sampah=member.bank_sampah).order_by(
         "-tanggal", "-created_at", "-id"
     )
@@ -163,7 +162,7 @@ class NasabahHomeView(GenericAPIView[Nasabah]):
                     "keanggotaan": member,
                     "bank_sampah": member.bank_sampah,
                     "saldo": balance_data(member),
-                    "aktivitas_terbaru": activities(member)[:5],
+                    "aktivitas_terbaru": activities(member).tercatat()[:5],
                 }
             ).data
         )
@@ -225,23 +224,25 @@ class NasabahHistoryView(ListAPIView[Transaksi]):
                 )
             }
             for row in page:
-                value = (
-                    deposits[row["id"]].total_nilai
-                    if row["tipe_aktivitas"] == "setoran"
-                    else payouts[row["id"]].nominal
-                )
+                if row["tipe_aktivitas"] == "setoran":
+                    setoran = deposits[row["id"]]
+                    value, status = setoran.total_nilai, setoran.status
+                else:
+                    pencairan = payouts[row["id"]]
+                    value, status = pencairan.nominal, pencairan.status
                 payloads.append(
                     {
                         "id": row["id"],
                         "tanggal": row["tanggal"],
                         "tipe": row["tipe_aktivitas"],
                         "total_nilai": value,
+                        "status": status,
                     }
                 )
             return self.get_paginated_response(self.get_serializer(payloads, many=True).data)
         try:
             queryset = apply_period(
-                activities(MembershipService.get_active_membership(request)),
+                activities(MembershipService.get_active_membership(request)).tercatat(),
                 request,
                 default=None,
             )

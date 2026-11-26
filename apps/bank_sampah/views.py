@@ -1,4 +1,6 @@
 import mimetypes
+import uuid
+from typing import Any
 
 from django.conf import settings
 from django.core.files.storage import default_storage
@@ -26,6 +28,7 @@ from apps.bank_sampah.serializers import (
     BankSampahSerializer,
     InviteAcceptSerializer,
     TeamMemberSerializer,
+    TeamTransferSerializer,
 )
 from apps.bank_sampah.services import ApprovalService, BankOnboardingService, TeamService
 from shared_kernel.permissions import (
@@ -103,9 +106,12 @@ class SuperAdminBankSampahViewSet(viewsets.GenericViewSet):  # type: ignore[type
         bank = self.get_object()
         serializer = ApprovalDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        log = ApprovalService.approve(
-            bank, current_user(request), serializer.validated_data.get("catatan", "")
-        )
+        try:
+            log = ApprovalService.approve(
+                bank, current_user(request), serializer.validated_data.get("catatan", "")
+            )
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
         return Response(
             {
                 "bank_sampah": self.get_serializer(bank).data,
@@ -118,9 +124,12 @@ class SuperAdminBankSampahViewSet(viewsets.GenericViewSet):  # type: ignore[type
         bank = self.get_object()
         serializer = ApprovalDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        log = ApprovalService.reject(
-            bank, current_user(request), serializer.validated_data.get("catatan", "")
-        )
+        try:
+            log = ApprovalService.reject(
+                bank, current_user(request), serializer.validated_data.get("catatan", "")
+            )
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
         return Response(
             {
                 "bank_sampah": self.get_serializer(bank).data,
@@ -182,32 +191,73 @@ class TeamView(APIView):
     serializer_class = TeamMemberSerializer
 
     def get(self, request: Request) -> Response:
-        members = User.objects.filter(
-            bank_sampah=current_bank(request), role=User.Role.PENGELOLA, is_active=True
-        ).order_by("-is_primary_pengelola", "nama")
-        return Response(
-            {"members": TeamMemberSerializer(members, many=True, context={"request": request}).data}
-        )
+        return Response(team_payload(request))
+
+
+def team_payload(request: Request) -> dict[str, Any]:
+    """The team list, shared so every team endpoint answers in the same shape."""
+    members = User.objects.filter(
+        bank_sampah=current_bank(request), role=User.Role.PENGELOLA, is_active=True
+    ).order_by("-is_primary_pengelola", "nama")
+    return {"members": TeamMemberSerializer(members, many=True, context={"request": request}).data}
+
+
+class TeamTransferView(APIView):
+    permission_classes = [IsPrimaryPengelola]
+    serializer_class = TeamTransferSerializer
+
+    def post(self, request: Request) -> Response:
+        serializer = TeamTransferSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            TeamService.transfer_primary(current_user(request), serializer.validated_data["id"])
+        except PermissionError as exc:
+            return Response({"error": str(exc)}, status=403)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
+        except LookupError as exc:
+            return Response({"error": str(exc)}, status=404)
+        return Response(team_payload(request))
+
+
+class TeamMemberView(APIView):
+    permission_classes = [IsPrimaryPengelola]
+    serializer_class = TeamMemberSerializer
+
+    def delete(self, request: Request, pk: uuid.UUID) -> Response:
+        try:
+            TeamService.remove_member(current_user(request), pk)
+        except PermissionError as exc:
+            return Response({"error": str(exc)}, status=403)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=400)
+        except LookupError as exc:
+            return Response({"error": str(exc)}, status=404)
+        return Response(status=204)
 
 
 class GenerateInviteView(APIView):
     permission_classes = [IsPrimaryPengelola]
     serializer_class = InviteAcceptSerializer
 
+    def get(self, request: Request) -> Response:
+        return Response(self._invite_data(request, current_bank(request)))
+
     def post(self, request: Request) -> Response:
         bank = current_bank(request)
-        token = TeamService.generate_invite(bank)
-        invite_path = f"/invite/{token}"
+        TeamService.generate_invite(bank)
+        return Response(self._invite_data(request, bank), status=201)
+
+    @staticmethod
+    def _invite_data(request: Request, bank: BankSampah) -> dict[str, Any]:
+        token = bank.invite_token or None
         base_url = request.build_absolute_uri("/")[:-1]
         public_base = getattr(settings, "PILAH_PUBLIC_APP_URL", "") or base_url
-        return Response(
-            {
-                "token": token,
-                "invite_url": f"{public_base}{invite_path}",
-                "expires_at": bank.invite_token_expires,
-            },
-            status=201,
-        )
+        return {
+            "token": token,
+            "invite_url": f"{public_base}/invite/{token}" if token else None,
+            "expires_at": bank.invite_token_expires if token else None,
+        }
 
 
 class BankSampahDirectoryView(APIView):

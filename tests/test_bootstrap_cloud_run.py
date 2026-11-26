@@ -230,6 +230,23 @@ class BootstrapCloudRunTests(SimpleTestCase):
         self.assertNotIn("capture_output", replace_options)
         self.assertTrue(all("never-print-me" not in " ".join(cmd) for cmd in commands))
 
+    def test_web_allowlist_requires_exact_https_origins_and_the_canonical_origin(self) -> None:
+        origin = "https://pilah.live"
+        environment = {
+            "PILAH_WEB_ORIGIN": origin,
+            "PILAH_WEB_ALLOWED_ORIGINS": f"https://web.run.app,{origin},https://www.pilah.live",
+            "PILAH_SUPERADMIN_EMAILS": "admin@example.com",
+            "PILAH_REVIEW_SUPERADMIN_EMAILS": "pilah.superadmin@pilah.com",
+            "PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS": ",".join(REVIEW_ACCOUNTS),
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            validate_configuration()
+            for invalid in ("https://web.run.app", f"{origin},https://*.pilah.live"):
+                with self.subTest(invalid=invalid):
+                    os.environ["PILAH_WEB_ALLOWED_ORIGINS"] = invalid
+                    with self.assertRaisesRegex(ValueError, "PILAH_WEB_ALLOWED_ORIGINS"):
+                        validate_configuration()
+
     def test_missing_or_invalid_origin_and_allowlist_fail_before_cloud_calls(self) -> None:
         for origin in (
             "",

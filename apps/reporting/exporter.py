@@ -12,14 +12,15 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.worksheet import Worksheet
 
-from api.models import DetailTransaksi, Pencairan, Transaksi
+from api.models import DetailTransaksi, Pencairan, Transaksi, TransaksiQuerySet
 from apps.reporting.money import sum_full_rupiah
 from apps.reporting.operational import OperationalSummary, operational_summary
 from shared_kernel.kalkulasi import bulatkan_rupiah
+from shared_kernel.pencarian import validasi_pencarian
 
 
 def export_excel(
-    queryset: QuerySet[Transaksi],
+    queryset: TransaksiQuerySet,
     request: HttpRequest | None = None,
     *,
     payouts: QuerySet[Pencairan] | None = None,
@@ -95,8 +96,8 @@ def _fill_raw_export_sheet(
     payouts: QuerySet[Pencairan] | None = None,
 ) -> None:
     ws.title = "Riwayat Transaksi"
-    ws.merge_cells("A1:N1")
-    ws.merge_cells("A2:N2")
+    ws.merge_cells("A1:M1")
+    ws.merge_cells("A2:M2")
     ws["A1"] = "PILAH - Riwayat Transaksi"
     ws["A2"] = _export_filter_label(queryset, request)
     ws.append([])
@@ -115,7 +116,6 @@ def _fill_raw_export_sheet(
             "Tipe",
             "Nilai Setoran (Rp)",
             "Pencairan (Rp)",
-            "ID Aktivitas",
         ]
     )
 
@@ -157,7 +157,6 @@ def _fill_raw_export_sheet(
                     "pencairan",
                     0,
                     int(event.nominal),
-                    str(event.id),
                 ]
             )
             continue
@@ -176,7 +175,6 @@ def _fill_raw_export_sheet(
                     "setoran",
                     int(event.total_nilai),
                     0,
-                    str(event.id),
                 ]
             )
         for index, item in enumerate(items):
@@ -193,7 +191,6 @@ def _fill_raw_export_sheet(
                     "setoran",
                     int(event.total_nilai) if index == 0 else 0,
                     0,
-                    str(event.id),
                 ]
             )
 
@@ -213,7 +210,8 @@ def _saldo_after_by_transaction(queryset: QuerySet[Transaksi]) -> dict[UUID, Dec
     saldo_after = {}
 
     transactions = (
-        Transaksi.objects.filter(
+        Transaksi.objects.tercatat()
+        .filter(
             bank_sampah=bank_sampah,
             nasabah_id__in=nasabah_ids,
             tanggal__lte=latest_transaction.tanggal,
@@ -258,7 +256,7 @@ def _export_filter_label(queryset: QuerySet[Transaksi], request: HttpRequest | N
     if request:
         periode_text = period_label(request, default="semua")
     kind = request.GET.get("tipe", "semua") if request else "semua"
-    search = request.GET.get("search", "").strip() if request else ""
+    search = validasi_pencarian(request.GET.get("search", "")).strip() if request else ""
     user_bank = getattr(getattr(request, "user", None), "bank_sampah", None)
     if not first_transaction and user_bank is not None:
         bank_name = user_bank.nama
@@ -329,7 +327,6 @@ def _style_raw_export_sheet(ws: Worksheet) -> None:
         "K": 16,
         "L": 24,
         "M": 24,
-        "N": 38,
     }
     for column, width in widths.items():
         ws.column_dimensions[column].width = width

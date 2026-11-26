@@ -37,6 +37,23 @@ class JenisSampah(models.Model):
     def __str__(self) -> str:
         return self.nama_sampah
 
+    @classmethod
+    def nomor_berikut(cls, bank_sampah_id: uuid.UUID | None) -> str:
+        """Kode jenis sampah baru untuk satu bank sampah: nomor terbesar + 1.
+
+        Format SM-<3 digit>. Pengurus tidak lagi mencari angka yang belum
+        terpakai secara manual (UAT 2026-11). Panggil dalam transaksi yang
+        sama dengan pembuatan barisnya agar penambahan serentak tidak
+        memakai kode kembar.
+        """
+        angka = [
+            int(str(n).split("-")[1])
+            for n in cls.objects.filter(
+                bank_sampah_id=bank_sampah_id, nomor__regex=r"^SM-\d+$"
+            ).values_list("nomor", flat=True)
+        ]
+        return f"SM-{(max(angka) if angka else 0) + 1:03d}"
+
 
 class HargaSampah(models.Model):
     """Satu versi harga per kg sebuah jenis sampah, berlaku mulai ``berlaku_mulai``.
