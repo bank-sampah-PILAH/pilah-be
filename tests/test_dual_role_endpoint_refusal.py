@@ -30,9 +30,7 @@ class DualRoleEndpointRefusalTest(TestCase):
             is_profile_complete=True,
         )
         self.customer_a = self._member(self.bank_a, "NAS-A1", "Customer A", "+628100000001")
-        self.own_b = self._member(
-            self.bank_b, "NAS-B1", "Dual", "+628100000002", user=self.user
-        )
+        self.own_b = self._member(self.bank_b, "NAS-B1", "Dual", "+628100000002", user=self.user)
         self.stranger_b = self._member(self.bank_b, "NAS-B2", "Stranger B", "+628100000003")
 
     def _member(

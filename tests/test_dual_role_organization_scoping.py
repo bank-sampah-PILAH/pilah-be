@@ -37,9 +37,7 @@ class DualRoleOrganizationScopingTest(TestCase):
 
     _next_phone = 0
 
-    def _member(
-        self, bank: BankSampah, nomor: str, nama: str, user: User | None = None
-    ) -> Nasabah:
+    def _member(self, bank: BankSampah, nomor: str, nama: str, user: User | None = None) -> Nasabah:
         # no_hp is unique per bank sampah, so each member needs its own.
         DualRoleOrganizationScopingTest._next_phone += 1
         return Nasabah.objects.create(
