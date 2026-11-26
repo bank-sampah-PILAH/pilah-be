@@ -10,7 +10,16 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from api.models import BankSampah, HargaSampah, Nasabah, Pencairan, Saldo, Transaksi, User
+from api.models import (
+    BankSampah,
+    HargaSampah,
+    JenisSampah,
+    Nasabah,
+    Pencairan,
+    Saldo,
+    Transaksi,
+    User,
+)
 from apps.ledger.services import PencairanService
 from apps.waste_catalog.api import buat_jenis_sampah
 
@@ -35,10 +44,18 @@ class SetoranEditTests(APITestCase):
             alamat="Jl. A",
         )
         self.pet = buat_jenis_sampah(
-            bank_sampah=self.bank, nomor="PET", nama_sampah="Botol PET", harga_per_kg=Decimal(3000)
+            bank_sampah=self.bank,
+            nomor="PET",
+            nama_sampah="Botol PET",
+            kategori=JenisSampah.Kategori.PLASTIK,
+            harga_per_kg=Decimal(3000),
         )
         self.kardus = buat_jenis_sampah(
-            bank_sampah=self.bank, nomor="KRT", nama_sampah="Kardus", harga_per_kg=Decimal(1000)
+            bank_sampah=self.bank,
+            nomor="KRT",
+            nama_sampah="Kardus",
+            kategori=JenisSampah.Kategori.KERTAS,
+            harga_per_kg=Decimal(1000),
         )
         self.client.force_authenticate(self.pengelola)
         response = self.client.post(
@@ -207,11 +224,12 @@ class SetoranEditTests(APITestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(self.transaksi.revisi.count(), 0)
 
-    def _cairkan(self, nominal: int, tanggal: Any) -> Pencairan:
-        saldo = Saldo.objects.get(nasabah=self.nasabah)
+    def _cairkan(self, nominal: int, tanggal: Any, nasabah: Nasabah | None = None) -> Pencairan:
+        nasabah = nasabah or self.nasabah
+        saldo = Saldo.objects.get(nasabah=nasabah)
         return PencairanService.realisasi(
             user=self.pengelola,
-            nasabah=self.nasabah,
+            nasabah=nasabah,
             saldo=saldo,
             nominal=Decimal(nominal),
             metode="tunai",
@@ -304,3 +322,122 @@ class SetoranEditTests(APITestCase):
         detail = self.client.get(f"/api/v1/transaksi/{self.transaksi.id}")
 
         self.assertEqual(detail.data["harga_pada_tanggal"], {})
+
+    # --- Celah yang ditemukan mutation testing (23 Nov 2026), lihat 09-optimizing-test-design-celah.md ---
+
+    def _nasabah_lain(self, saldo: int) -> Nasabah:
+        lain = Nasabah.objects.create(
+            bank_sampah=self.bank,
+            nomor="NAS-0002",
+            nama="Citra",
+            no_hp="+628122222222",
+            email="citra@example.test",
+            alamat="Jl. B",
+        )
+        Saldo.objects.create(nasabah=lain, total_saldo=Decimal(saldo))
+        return lain
+
+    def test_edit_leaves_the_pencairan_of_other_nasabah_alone(self) -> None:
+        # Citra paid out after Budi's setoran. Her snapshots come from her own ledger, so
+        # correcting Budi's setoran (-3.000) must neither move them nor refuse the edit
+        # because her snapshots "would go negative".
+        citra = self._nasabah_lain(saldo=2000)
+        cair = self._cairkan(1000, self.transaksi.tanggal + timedelta(hours=1), citra)
+        self.assertEqual((cair.saldo_sebelum, cair.saldo_sesudah), (Decimal(2000), Decimal(1000)))
+
+        response = self._patch(items=[{"jenis_sampah_id": str(self.pet.id), "berat": "1.000"}])
+
+        self.assertEqual(response.status_code, 200)
+        cair.refresh_from_db()
+        self.assertEqual((cair.saldo_sebelum, cair.saldo_sesudah), (Decimal(2000), Decimal(1000)))
+        self.assertEqual(Saldo.objects.get(nasabah=citra).total_saldo, Decimal(1000))
+        self.assertEqual(self._saldo(), Decimal(3000))
+
+    def test_edit_stores_the_category_of_the_new_item(self) -> None:
+        # Reports and the Excel export group setoran by kategori_snapshot.
+        response = self._patch(items=[{"jenis_sampah_id": str(self.kardus.id), "berat": "2.000"}])
+
+        self.assertEqual(response.status_code, 200)
+        item = self.transaksi.items.get()
+        self.assertEqual(item.nama_sampah_snapshot, "Kardus")
+        self.assertEqual(item.kategori_snapshot, "kertas")
+
+    def test_revision_stores_the_replaced_items_as_they_were(self) -> None:
+        self._patch(items=[{"jenis_sampah_id": str(self.kardus.id), "berat": "2.000"}])
+
+        revisi = self.transaksi.revisi.get()
+        self.assertEqual(
+            revisi.items,
+            [
+                {
+                    "nama_sampah": "Botol PET",
+                    "harga": "3000.00",
+                    "berat": "2.000",
+                    "subtotal": "6000.00",
+                }
+            ],
+        )
+
+    def test_edit_may_leave_the_saldo_and_a_later_pencairan_at_exactly_zero(self) -> None:
+        # 6.000 deposited, 3.000 paid out. Correcting the setoran to 3.000 leaves a saldo of
+        # exactly 0 and the pencairan paid from 3.000 down to 0: valid, not "negative".
+        cair = self._cairkan(3000, self.transaksi.tanggal + timedelta(hours=1))
+
+        response = self._patch(items=[{"jenis_sampah_id": str(self.pet.id), "berat": "1.000"}])
+
+        self.assertEqual(response.status_code, 200, response.data)
+        cair.refresh_from_db()
+        self.assertEqual((cair.saldo_sebelum, cair.saldo_sesudah), (Decimal(3000), Decimal(0)))
+        self.assertEqual(self._saldo(), Decimal(0))
+
+    def test_edit_to_an_item_worth_exactly_one_rupiah_is_accepted(self) -> None:
+        murah = buat_jenis_sampah(
+            bank_sampah=self.bank, nomor="MRH", nama_sampah="Murah", harga_per_kg=Decimal(1)
+        )
+        Transaksi.objects.filter(pk=self.transaksi.pk).update(tanggal=timezone.now())
+
+        response = self._patch(items=[{"jenis_sampah_id": str(murah.id), "berat": "1.000"}])
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(Decimal(response.data["total_nilai"]), Decimal(1))
+        self.assertEqual(self._saldo(), Decimal(1))
+
+    def test_unknown_waste_type_error_names_the_item_that_failed(self) -> None:
+        response = self._patch(
+            items=[
+                {"jenis_sampah_id": str(self.pet.id), "berat": "1.000"},
+                {"jenis_sampah_id": str(uuid.uuid4()), "berat": "1.000"},
+            ]
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(list(response.data["errors"]), ["items[1].jenis_sampah_id"])
+
+    def test_catatan_can_be_cleared_with_null(self) -> None:
+        response = self._patch(catatan=None)
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["catatan"], "")
+        self.transaksi.refresh_from_db()
+        self.assertEqual(self.transaksi.catatan, "")
+
+    def test_sending_the_same_catatan_is_not_a_change(self) -> None:
+        response = self._patch(catatan="awal")
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.data["errors"]["non_field_errors"], ["Tidak ada data yang diubah"]
+        )
+        self.assertEqual(self.transaksi.revisi.count(), 0)
+
+    def test_edit_that_overdraws_the_saldo_says_why(self) -> None:
+        Saldo.objects.filter(nasabah=self.nasabah).update(total_saldo=Decimal(1000))
+
+        response = self._patch(items=[{"jenis_sampah_id": str(self.pet.id), "berat": "0.500"}])
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.data["error"],
+            "Perubahan ini membuat saldo nasabah menjadi negatif, "
+            "karena sebagian saldo sudah dicairkan",
+        )

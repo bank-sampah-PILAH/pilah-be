@@ -179,13 +179,53 @@ class BatchPencairanTests(DraftTestBase):
             },
         )
 
+    def test_saldo_satu_rupiah_tidak_dilewati(self) -> None:
+        receh = self._nasabah("NAS-0010", "Dewi Receh", "1")
+
+        response = self._batch(nasabah_ids=[str(receh.id)], metode="tunai")
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["dilewati"], [])
+
+    def test_potongan_sama_dengan_nominal_tidak_dilewati(self) -> None:
+        pas = self._nasabah("NAS-0010", "Dewi Pas", "5000")
+
+        response = self._batch(
+            nasabah_ids=[str(pas.id)],
+            metode="tunai",
+            potongan_jenis="rupiah",
+            potongan_nilai="5000",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["dilewati"], [])
+
+    def test_potongan_persen_dihitung_dari_nominal_bukan_sebagai_rupiah(self) -> None:
+        kecil = self._nasabah("NAS-0010", "Dewi Kecil", "40")
+
+        response = self._batch(
+            nasabah_ids=[str(kecil.id)],
+            metode="tunai",
+            potongan_jenis="persen",
+            potongan_nilai="50",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["items"][0]["potongan"], "20.00")
+
     def test_batch_tanpa_nasabah_yang_layak_ditolak(self) -> None:
         kosong = self._nasabah("NAS-0005", "Eka Kosong", "0")
 
         response = self._batch(nasabah_ids=[str(kosong.id)])
 
         self.assertEqual(response.status_code, 422, response.data)
-        self.assertIn("nasabah_ids", response.data["errors"])
+        self.assertEqual(
+            response.data["errors"]["nasabah_ids"], ["Tidak ada nasabah yang dapat dicairkan"]
+        )
+        self.assertEqual(
+            response.data["errors"]["dilewati"],
+            [{"nasabah_id": str(kosong.id), "alasan": "Saldo nasabah kosong"}],
+        )
         self.assertFalse(DraftPencairan.objects.exists())
 
     def test_batch_harus_memilih_semua_atau_daftar_nasabah_tepat_satu(self) -> None:
@@ -205,8 +245,20 @@ class BatchPencairanTests(DraftTestBase):
         for response, kunci in ((semua, "semua"), (daftar, "nasabah_ids")):
             self.assertEqual(response.status_code, 422, response.data)
             self.assertEqual(list(response.data["errors"]), [kunci])
-            self.assertIn("2", str(response.data["errors"][kunci]))
+            self.assertEqual(
+                response.data["errors"][kunci],
+                [
+                    "Satu draft paling banyak 2 nasabah. "
+                    "Pilih lebih sedikit atau bagi menjadi beberapa draft."
+                ],
+            )
         self.assertFalse(DraftPencairan.objects.exists())
+
+    def test_batch_sebanyak_batas_item_diterima(self) -> None:
+        with mock.patch.object(DraftPencairan, "MAKSIMAL_ITEM", 2):
+            response = self._batch(nasabah_ids=[str(n.id) for n in (self.budi, self.citra)])
+
+        self.assertEqual(response.status_code, 201, response.data)
 
     def test_batch_besar_tidak_menambah_select_per_nasabah(self) -> None:
         def jumlah_select(jumlah: int, *, semua: bool) -> int:

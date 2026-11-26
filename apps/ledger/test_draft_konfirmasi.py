@@ -130,7 +130,9 @@ class KonfirmasiDraftTests(DraftTestBase):
         response = self._konfirmasi(draft["id"])
 
         self.assertEqual(response.status_code, 422, response.data)
-        self.assertEqual(list(response.data["errors"]), ["items[1].nominal"])
+        self.assertEqual(
+            response.data["errors"], {"items[1].nominal": ["Saldo nasabah tidak mencukupi"]}
+        )
         self.assertEqual(self._saldo(self.nasabah), Decimal(465600))
         self.assertFalse(Pencairan.objects.exists())
         self.assertEqual(DraftPencairan.objects.get().status, "draft")
@@ -142,7 +144,10 @@ class KonfirmasiDraftTests(DraftTestBase):
         response = self._konfirmasi(draft["id"])
 
         self.assertEqual(response.status_code, 422, response.data)
-        self.assertIn("items[1].nasabah_id", response.data["errors"])
+        self.assertEqual(
+            response.data["errors"],
+            {"items[1].nasabah_id": ["Nasabah tidak ditemukan atau tidak aktif"]},
+        )
         self.assertFalse(Pencairan.objects.exists())
 
     def test_kegagalan_di_tengah_proses_tidak_meninggalkan_saldo_atau_riwayat(self) -> None:

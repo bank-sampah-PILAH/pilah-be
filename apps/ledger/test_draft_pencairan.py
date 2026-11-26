@@ -5,6 +5,7 @@ from typing import Any
 from unittest import mock
 
 from django.db import connection
+from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 
 from api.models import BankSampah, DraftPencairan, Nasabah, Pencairan, Saldo, User
@@ -30,6 +31,12 @@ class DraftPencairanTests(DraftTestBase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["items"][0]["nominal"], "100000.00")
 
+    def test_nominal_satu_rupiah_diterima(self) -> None:
+        response = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "1"}])
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["items"][0]["nominal"], "1.00")
+
     def test_nominal_melebihi_saldo_ditolak_dan_tidak_membuat_draft(self) -> None:
         response = self._buat([{"nasabah_id": str(self.nasabah.id), "nominal": "465601"}])
 
@@ -50,7 +57,7 @@ class DraftPencairanTests(DraftTestBase):
         response = self._buat([{"nasabah_id": str(kosong.id)}])
 
         self.assertEqual(response.status_code, 422, response.data)
-        self.assertIn("items[0].nominal", response.data["errors"])
+        self.assertEqual(response.data["errors"]["items[0].nominal"], ["Saldo nasabah kosong"])
 
     def test_nasabah_tanpa_baris_saldo_dianggap_kosong(self) -> None:
         belum_transaksi = self._nasabah("NAS-0009", "Belum Transaksi", "0")
@@ -167,8 +174,21 @@ class DraftPencairanTests(DraftTestBase):
         )
 
         self.assertEqual(response.status_code, 422, response.data)
-        self.assertIn("items[1].potongan_nilai", response.data["errors"])
+        self.assertEqual(
+            response.data["errors"]["items[1].potongan_nilai"],
+            ["Potongan melebihi nominal pencairan"],
+        )
         self.assertFalse(DraftPencairan.objects.exists())
+
+    def test_potongan_sama_dengan_nominal_diterima(self) -> None:
+        response = self._buat(
+            [{"nasabah_id": str(self.nasabah.id), "nominal": "100000"}],
+            potongan_jenis="rupiah",
+            potongan_nilai="100000",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["items"][0]["dibayar"], "0.00")
 
     def test_default_potongan_tidak_valid_ditolak(self) -> None:
         response = self._buat(
@@ -266,6 +286,19 @@ class DraftPencairanTests(DraftTestBase):
         self.assertEqual(otomatis.data["nama"], "Pencairan 8 Okt 2026, 05:35")
         self.assertEqual(bernama.data["nama"], "Cair Lebaran")
 
+    def test_nama_default_memakai_wib_walau_zona_waktu_server_berubah(self) -> None:
+        # The name follows the pengurus' clock (WIB), not whatever TIME_ZONE the server uses.
+        item = [{"nasabah_id": str(self.nasabah.id)}]
+        sekarang = datetime(2026, 10, 7, 22, 35, 12, tzinfo=UTC)
+
+        with (
+            override_settings(TIME_ZONE="UTC"),
+            mock.patch("django.utils.timezone.now", return_value=sekarang),
+        ):
+            otomatis = self._buat(item)
+
+        self.assertEqual(otomatis.data["nama"], "Pencairan 8 Okt 2026, 05:35")
+
     def test_draft_memuat_pembuat_dan_waktu(self) -> None:
         response = self._buat([{"nasabah_id": str(self.nasabah.id)}])
 
@@ -324,6 +357,7 @@ class DraftPencairanTests(DraftTestBase):
                 {
                     "nasabah_id": str(self.nasabah.id),
                     "nominal": "100000",
+                    "metode": "transfer",
                     "potongan_jenis": "persen",
                     "potongan_nilai": "5",
                 }
@@ -341,6 +375,7 @@ class DraftPencairanTests(DraftTestBase):
         )
 
         self.assertEqual(tetap.data["items"][0]["nominal"], "100000.00")
+        self.assertEqual(tetap.data["items"][0]["metode"], "transfer")
         self.assertEqual(tetap.data["items"][0]["potongan"], "5000.00")
         self.assertEqual(reset.data["items"][0]["potongan_jenis"], "")
         self.assertEqual(reset.data["items"][0]["potongan"], "1000.00")
@@ -401,6 +436,7 @@ class DraftPencairanTests(DraftTestBase):
 
                 self.assertEqual(ubah.status_code, 409, ubah.data)
                 self.assertEqual(batal.status_code, 409, batal.data)
+                self.assertEqual(batal.data, {"error": f"Draft sudah {status}"})
                 self.assertEqual(DraftPencairan.objects.get(id=draft["id"]).status, status)
 
     def test_batalkan_draft_bank_lain_ditolak(self) -> None:
