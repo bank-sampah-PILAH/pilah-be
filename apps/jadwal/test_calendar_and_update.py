@@ -1,13 +1,17 @@
-from datetime import timedelta
+from collections.abc import Iterable
+from datetime import datetime, timedelta
 from types import SimpleNamespace
+from typing import cast
 
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework import serializers
+from rest_framework.request import Request
 from rest_framework.test import APITestCase
 
 from api.models import BankSampah, JadwalKegiatan, Nasabah, User
 from apps.jadwal.serializers import JadwalKegiatanSerializer
+from apps.jadwal.views import JadwalKegiatanViewSet
 
 
 def _bank_with_pengelola(nama: str = "Bank Jadwal") -> tuple[BankSampah, User]:
@@ -24,7 +28,12 @@ def _bank_with_pengelola(nama: str = "Bank Jadwal") -> tuple[BankSampah, User]:
 
 def _nasabah(bank: BankSampah, nomor: str, no_hp: str) -> Nasabah:
     return Nasabah.objects.create(
-        bank_sampah=bank, nomor=nomor, nama=f"Nasabah {nomor}", no_hp=no_hp, alamat="Jl. A"
+        bank_sampah=bank,
+        nomor=nomor,
+        nama=f"Nasabah {nomor}",
+        email=f"{nomor.lower()}@example.test",
+        no_hp=no_hp,
+        alamat="Jl. A",
     )
 
 
@@ -47,6 +56,185 @@ class JadwalCalendarDatesTests(APITestCase):
         self.assertEqual(
             str(response.data["errors"]["date_range"]), "Rentang kalender maksimal 63 hari"
         )
+
+
+class JadwalNasabahListTests(APITestCase):
+    def setUp(self) -> None:
+        self.bank, self.manager = _bank_with_pengelola("Bank Jadwal Satu")
+        self.other_bank, self.other_manager = _bank_with_pengelola("Bank Jadwal Dua")
+        self.user = User.objects.create_user(
+            email="nasabah@example.test", nama="Nasabah", role=User.Role.NASABAH
+        )
+        self.member = _nasabah(self.bank, "NAS-1001", "+628111111111")
+        self.member.user = self.user
+        self.member.status = Nasabah.Status.APPROVED
+        self.member.save()
+        self.other_member = _nasabah(self.other_bank, "NAS-2001", "+628222222222")
+        self.other_member.user = self.user
+        self.other_member.status = Nasabah.Status.APPROVED
+        self.other_member.save()
+        self.unselected_member = _nasabah(self.bank, "NAS-1002", "+628333333333")
+        self.unselected_member.status = Nasabah.Status.APPROVED
+        self.unselected_member.save()
+        self.client.force_authenticate(self.user)
+        starts_at = timezone.now() + timedelta(days=2)
+        self.own_schedule = self._schedule(
+            self.bank, self.manager, starts_at, JadwalKegiatan.CakupanPenerima.SEMUA_NASABAH
+        )
+        self.targeted_schedule = self._schedule(
+            self.bank,
+            self.manager,
+            starts_at + timedelta(days=1),
+            JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH,
+            [self.member],
+        )
+        self.other_targeted_schedule = self._schedule(
+            self.bank,
+            self.manager,
+            starts_at + timedelta(days=2),
+            JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH,
+            [self.unselected_member],
+        )
+        self.other_schedule = self._schedule(
+            self.other_bank,
+            self.other_manager,
+            starts_at + timedelta(days=4),
+            JadwalKegiatan.CakupanPenerima.SEMUA_NASABAH,
+        )
+
+    @staticmethod
+    def _schedule(
+        bank: BankSampah,
+        manager: User,
+        starts_at: datetime,
+        coverage: str,
+        recipients: Iterable[Nasabah] = (),
+    ) -> JadwalKegiatan:
+        schedule = JadwalKegiatan.objects.create(
+            bank_sampah=bank,
+            dibuat_oleh=manager,
+            jenis_kegiatan=JadwalKegiatan.JenisKegiatan.PENIMBANGAN,
+            mulai_pada=starts_at,
+            selesai_pada=starts_at + timedelta(hours=1),
+            lokasi="Balai Warga",
+            cakupan_penerima=coverage,
+            status=JadwalKegiatan.Status.DITERBITKAN,
+        )
+        schedule.penerima.set(recipients)
+        return schedule
+
+    def test_list_is_scoped_to_selected_membership_bank_and_exact_recipients(self) -> None:
+        response = self.client.get("/api/v1/jadwal", {"keanggotaan_id": str(self.member.id)})
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            {item["id"] for item in response.data["results"]},
+            {str(self.own_schedule.id), str(self.targeted_schedule.id)},
+        )
+
+    def test_retrieve_is_scoped_to_selected_membership(self) -> None:
+        own = self.client.get(
+            f"/api/v1/jadwal/{self.own_schedule.id}",
+            {"keanggotaan_id": str(self.member.id)},
+        )
+        other = self.client.get(
+            f"/api/v1/jadwal/{self.other_schedule.id}",
+            {"keanggotaan_id": str(self.member.id)},
+        )
+        missing_selection = self.client.get(f"/api/v1/jadwal/{self.other_schedule.id}")
+
+        self.assertEqual(own.status_code, 200)
+        self.assertEqual(other.status_code, 404)
+        self.assertEqual(missing_selection.status_code, 422)
+
+    def test_nasabah_non_read_queryset_is_empty(self) -> None:
+        viewset = JadwalKegiatanViewSet()
+        viewset.action = "update"
+        viewset.request = cast(Request, SimpleNamespace(user=self.user, query_params={}))
+
+        self.assertFalse(viewset.get_queryset().exists())
+
+    def test_membership_selection_errors_follow_nasabah_contract(self) -> None:
+        for query, expected in (({}, 422), ({"keanggotaan_id": "bad"}, 422)):
+            with self.subTest(query=query):
+                response = self.client.get("/api/v1/jadwal", query)
+                self.assertEqual(response.status_code, expected)
+                if not query:
+                    self.assertEqual(
+                        response.data["errors"]["pilihan"],
+                        [
+                            {"id": str(self.member.id), "bank_sampah_nama": self.bank.nama},
+                            {
+                                "id": str(self.other_member.id),
+                                "bank_sampah_nama": self.other_bank.nama,
+                            },
+                        ],
+                    )
+        foreign = _nasabah(self.bank, "NAS-1003", "+628444444444")
+        response = self.client.get("/api/v1/jadwal", {"keanggotaan_id": str(foreign.id)})
+        self.assertEqual(response.status_code, 404)
+
+    def test_ineligible_selected_membership_is_forbidden(self) -> None:
+        for update in (
+            {"is_active": False},
+            {"is_active": True, "status": Nasabah.Status.PENDING},
+        ):
+            with self.subTest(update=update):
+                Nasabah.objects.filter(pk=self.member.pk).update(**update)
+                response = self.client.get(
+                    "/api/v1/jadwal", {"keanggotaan_id": str(self.member.id)}
+                )
+                self.assertEqual(response.status_code, 403)
+
+        self.member.refresh_from_db()
+        self.bank.is_active = False
+        self.bank.save(update_fields=["is_active"])
+        response = self.client.get("/api/v1/jadwal", {"keanggotaan_id": str(self.member.id)})
+        self.assertEqual(response.status_code, 403)
+
+    def test_no_eligible_membership_is_forbidden(self) -> None:
+        Nasabah.objects.filter(pk__in=[self.member.pk, self.other_member.pk]).update(
+            status=Nasabah.Status.PENDING
+        )
+
+        response = self.client.get("/api/v1/jadwal")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_calendar_dates_are_scoped_to_selected_membership_bank_and_recipients(self) -> None:
+        # The endpoint groups by calendar day in TIME_ZONE, so the expected
+        # dates have to be read in that zone too: taken from the UTC instant
+        # instead, this assertion is a day out whenever Jakarta is already on
+        # the next date, i.e. every run between 00:00 and 07:00 local.
+        start = timezone.localtime(timezone.now() + timedelta(days=2)).date()
+        response = self.client.get(
+            "/api/v1/jadwal/calendar-dates",
+            {
+                "start_date": start.isoformat(),
+                "end_date": (start + timedelta(days=5)).isoformat(),
+                "keanggotaan_id": str(self.member.id),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            response.data["dates"],
+            [start.isoformat(), (start + timedelta(days=1)).isoformat()],
+        )
+        for query, expected in (
+            ({}, 422),
+            ({"keanggotaan_id": "bad"}, 422),
+        ):
+            with self.subTest(query=query):
+                response = self.client.get(
+                    "/api/v1/jadwal/calendar-dates",
+                    {
+                        "start_date": start.isoformat(),
+                        "end_date": (start + timedelta(days=5)).isoformat(),
+                        **query,
+                    },
+                )
+                self.assertEqual(response.status_code, expected)
 
 
 class JadwalUpdateTests(APITestCase):

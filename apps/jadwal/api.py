@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 from django.db import transaction
 from django.utils import timezone
 
-from api.models import BankSampah, JadwalKegiatan, Nasabah, User
+from api.models import JadwalKegiatan, Nasabah, User
+from apps.nasabah.api import filter_dapat_dibuka
 from apps.notification.api import queue_push_bulk
 
 
@@ -13,13 +14,12 @@ def schedule_recipients(jadwal: JadwalKegiatan, now: datetime | None = None) -> 
     now = now or timezone.now()
     if jadwal.selesai_pada < now:
         return set()
-    members = Nasabah.objects.filter(
-        bank_sampah=jadwal.bank_sampah,
-        bank_sampah__status=BankSampah.Status.ACTIVE,
-        bank_sampah__is_active=True,
-        status=Nasabah.Status.APPROVED,
-        is_active=True,
-        user__is_active=True,
+    # Same rule as the "dapat dibuka" marker and every nasabah-facing
+    # endpoint, so a bank that stopped being openable also stops being
+    # notified. `user__is_active` is this path's own extra condition: a
+    # disabled account has nowhere to receive a push.
+    members = filter_dapat_dibuka(Nasabah.objects.filter(bank_sampah=jadwal.bank_sampah)).filter(
+        user__is_active=True
     )
     if jadwal.cakupan_penerima == JadwalKegiatan.CakupanPenerima.NASABAH_TERPILIH:
         members = members.filter(jadwal_kegiatan=jadwal)
