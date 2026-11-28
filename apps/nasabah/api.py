@@ -14,14 +14,23 @@ from django.db.models.functions import Coalesce
 from rest_framework.request import Request
 
 from api.models import BankSampah, Nasabah
+from apps.nasabah.keanggotaan import filter_dapat_dibuka as _filter_dapat_dibuka
 
-# Re-exported so another bounded context can ask the "dapat dibuka" question
-# without importing apps.nasabah.keanggotaan directly, which
-# tests/test_architecture.py forbids: a cross-context import must name
-# apps.<bc>.api or its serializers. The one caller is apps/jadwal (PIL-235).
-# The redundant alias is what marks it an explicit re-export, which mypy
-# strict requires and ruff accepts in place of a noqa.
-from apps.nasabah.keanggotaan import filter_dapat_dibuka as filter_dapat_dibuka
+
+def filter_dapat_dibuka(keanggotaan: QuerySet[Nasabah]) -> QuerySet[Nasabah]:
+    """Narrow a Nasabah queryset to the memberships their owner may open.
+
+    Exposed here so another bounded context can ask the "dapat dibuka"
+    question without importing apps.nasabah.keanggotaan directly, which
+    tests/test_architecture.py forbids: a cross-context import must name
+    apps.<bc>.api or its serializers. The one caller is apps/jadwal (PIL-235).
+
+    The rule itself still lives once, in apps.nasabah.keanggotaan; this
+    delegates rather than restating it. It is a function rather than an
+    aliased import because an import that nothing in this module calls reads
+    as dead to a static analyser, however the alias is spelled.
+    """
+    return _filter_dapat_dibuka(keanggotaan)
 
 
 def _eligible_in(bank: BankSampah) -> QuerySet[Nasabah]:
