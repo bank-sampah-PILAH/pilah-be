@@ -51,6 +51,24 @@ class CORSRegressionTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("idempotency-key", response["Access-Control-Allow-Headers"].lower())
 
+    def test_preflight_allows_the_request_id_header(self) -> None:
+        # The mobile app sends X-Request-Id on every call so a failure a user
+        # saw can be found in the server log. A browser only sends it when the
+        # preflight lists it; otherwise every web API call fails.
+        with override_settings(
+            CORS_ALLOW_ALL_ORIGINS=False,
+            CORS_ALLOWED_ORIGINS=["http://localhost:7357"],
+        ):
+            response = self.client.options(
+                "/api/v1/dashboard/stats",
+                HTTP_ORIGIN="http://localhost:7357",
+                HTTP_ACCESS_CONTROL_REQUEST_METHOD="GET",
+                HTTP_ACCESS_CONTROL_REQUEST_HEADERS="authorization,x-request-id",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("x-request-id", response["Access-Control-Allow-Headers"].lower())
+
     def test_response_exposes_content_disposition_to_the_browser(self) -> None:
         # Report exports send the file name in Content-Disposition. A browser
         # hides every response header from JavaScript unless it is listed in

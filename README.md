@@ -164,6 +164,9 @@ PILAH_REVIEW_SUPERADMIN_EMAILS=pilah.superadmin@pilah.com
 PILAH_EMAIL_VERIFICATION_EXEMPT_EMAILS=pilah.pengelola@pilah.com,pilah.pengurus@pilah.com,pilah.nasabah@pilah.com,pilah.superadmin@pilah.com
 ```
 
+Local Docker Compose defaults `PILAH_WEB_ORIGIN` to `http://localhost:7357`.
+Set it in your Compose environment if Flutter web runs at a different origin.
+
 `CORS_ALLOWED_ORIGINS` is a comma-separated list of browser origins (scheme,
 host, and optional port; no path). For web Google login, set backend
 `GOOGLE_CLIENT_ID` to the same Web OAuth client ID used by mobile's

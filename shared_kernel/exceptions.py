@@ -17,6 +17,11 @@ def api_exception_handler(exc: Exception, context: dict[str, Any]) -> Response |
     elif response.status_code == 403:
         detail = response.data.get("detail") if isinstance(response.data, dict) else None
         response.data = {"error": str(detail or "Akses ditolak")}
+        # Only a deliberate machine code travels; DRF's own default stays hidden
+        # so ordinary 403s keep their {"error"} shape.
+        code = getattr(detail, "code", None)
+        if code and code != "permission_denied":
+            response.data["code"] = code
     elif response.status_code == 404:
         response.data = {"error": "Resource tidak ditemukan"}
     return response

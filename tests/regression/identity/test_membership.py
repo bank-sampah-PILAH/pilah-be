@@ -127,11 +127,14 @@ class MembershipRegressionTests(RegressionTestCase):
         )
 
     @override_settings(PILAH_WEB_ORIGIN="")
-    def test_invite_redirect_errors_without_web_origin(self) -> None:
-        response = self.client.get("/invite/synthetic-token_123")
+    def test_invite_redirect_is_unavailable_without_web_origin(self) -> None:
+        for path in ("/invite", "/invite/synthetic-token_123"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
 
-        self.assertEqual(response.status_code, 500)
-        self.assertEqual(response.content, b"PILAH_WEB_ORIGIN is not configured.")
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.content, b"Tautan undangan sementara tidak tersedia.")
+                self.assertEqual(response["Content-Type"], "text/plain; charset=utf-8")
 
     @override_settings(
         PILAH_WEB_ORIGIN="https://web.example.test",
